@@ -1,9 +1,18 @@
-import { getJsDelivrBundles, AsyncDuckDB, AsyncDuckDBConnection, ConsoleLogger } from '@duckdb/duckdb-wasm';
+import {
+  getJsDelivrBundles,
+  selectBundle,
+  AsyncDuckDB,
+  AsyncDuckDBConnection,
+  ConsoleLogger,
+} from '@duckdb/duckdb-wasm';
 import { CUSTOMERS_CSV } from './sample-customers';
 
 let db: AsyncDuckDB | null = null;
 let conn: AsyncDuckDBConnection | null = null;
+let initPromise: Promise<AsyncDuckDBConnection> | null = null;
+let sampleDataPromise: Promise<void> | null = null;
 let stageSequence = 0;
+const SAMPLE_FILE_NAME = 'sample-customers.csv';
 
 export interface PipelineMetrics {
   rowsIn: number;
@@ -18,27 +27,69 @@ export interface PipelineMetrics {
 
 export async function initDuckDB(): Promise<AsyncDuckDBConnection> {
   if (conn) return conn;
+  if (initPromise) return initPromise;
 
-  const bundles = getJsDelivrBundles();
-  const bundle = bundles.mvp;
-  const logger = new ConsoleLogger();
-  const worker = new Worker(bundle.mainWorker);
+  initPromise = (async () => {
+    const bundle = await selectBundle(getJsDelivrBundles());
+    if (!bundle.mainWorker) {
+      throw new Error('DuckDB worker is unavailable for this browser');
+    }
 
-  db = new AsyncDuckDB(logger, worker);
-  await db.instantiate(bundle.mainModule);
-  conn = await db.connect();
-  return conn;
+    const workerUrl = URL.createObjectURL(
+      new Blob([`importScripts(${JSON.stringify(bundle.mainWorker)});`], {
+        type: 'text/javascript',
+      })
+    );
+    const worker = new Worker(workerUrl);
+    const database = new AsyncDuckDB(new ConsoleLogger(), worker);
+
+    try {
+      await database.instantiate(bundle.mainModule, bundle.pthreadWorker);
+      const connection = await database.connect();
+      db = database;
+      conn = connection;
+      return connection;
+    } catch (error) {
+      worker.terminate();
+      throw error;
+    } finally {
+      URL.revokeObjectURL(workerUrl);
+    }
+  })();
+
+  try {
+    return await initPromise;
+  } catch (error) {
+    initPromise = null;
+    throw error;
+  }
 }
 
 export async function loadSampleData(): Promise<void> {
-  const c = await initDuckDB();
-  const blob = new Blob([CUSTOMERS_CSV], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
+  if (sampleDataPromise) return sampleDataPromise;
+
+  sampleDataPromise = (async () => {
+    const c = await initDuckDB();
+    if (!db) throw new Error('DuckDB did not finish initializing');
+
+    await db.registerFileText(SAMPLE_FILE_NAME, CUSTOMERS_CSV);
+    await c.query(
+      `CREATE OR REPLACE TABLE raw_customers AS SELECT * FROM read_csv_auto('${SAMPLE_FILE_NAME}')`
+    );
+  })();
+
   try {
-    await c.query(`CREATE OR REPLACE TABLE raw_customers AS SELECT * FROM read_csv_auto('${url}')`);
-  } finally {
-    URL.revokeObjectURL(url);
+    await sampleDataPromise;
+  } catch (error) {
+    sampleDataPromise = null;
+    throw error;
   }
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'bigint') return Number(value);
+  const converted = Number(value ?? 0);
+  return Number.isFinite(converted) ? converted : 0;
 }
 
 export interface NodeExecution {
@@ -124,12 +175,20 @@ export async function runPipelineNode(
 
   await c.query(sql);
 
-  const rowsIn = (await c.query(`SELECT count(*) AS cnt FROM ${prevTable}`)).toArray()[0]?.cnt ?? 0;
-  const rowsOut = (await c.query(`SELECT count(*) AS cnt FROM ${tableName}`)).toArray()[0]?.cnt ?? 0;
-  const hasNull = (await c.query(`
-    SELECT count(*) AS cnt FROM ${tableName}
-    WHERE name IS NULL OR email IS NULL OR amount IS NULL OR status IS NULL
-  `)).toArray()[0]?.cnt ?? 0;
+  const rowsIn = toNumber(
+    (await c.query(`SELECT count(*) AS cnt FROM ${prevTable}`)).toArray()[0]?.cnt
+  );
+  const rowsOut = toNumber(
+    (await c.query(`SELECT count(*) AS cnt FROM ${tableName}`)).toArray()[0]?.cnt
+  );
+  const hasNull = toNumber(
+    (
+      await c.query(`
+        SELECT count(*) AS cnt FROM ${tableName}
+        WHERE name IS NULL OR email IS NULL OR amount IS NULL OR status IS NULL
+      `)
+    ).toArray()[0]?.cnt
+  );
   const totalRows = rowsOut > 0 ? rowsOut : 1;
   const missing = Math.round((hasNull / totalRows) * 1000) / 10;
   const nullCols = (
@@ -140,7 +199,11 @@ export async function runPipelineNode(
       sum(CASE WHEN status IS NULL OR trim(status)='' THEN 1 ELSE 0 END) AS ns
     FROM ${tableName}`)
   ).toArray()[0];
-  const nullCount = (nullCols?.nn ?? 0) + (nullCols?.ne ?? 0) + (nullCols?.na ?? 0) + (nullCols?.ns ?? 0);
+  const nullCount =
+    toNumber(nullCols?.nn) +
+    toNumber(nullCols?.ne) +
+    toNumber(nullCols?.na) +
+    toNumber(nullCols?.ns);
   const qualityScore = Math.max(0, Math.min(100, Math.round(100 - (nullCount / (totalRows * 4)) * 100)));
 
   const endTime = performance.now();
