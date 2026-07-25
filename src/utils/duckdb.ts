@@ -1,53 +1,18 @@
-import {
-  getJsDelivrBundles,
-  AsyncDuckDB,
-  AsyncDuckDBConnection,
-  ConsoleLogger,
-} from '@duckdb/duckdb-wasm';
+import { getJsDelivrBundles, AsyncDuckDB, AsyncDuckDBConnection, ConsoleLogger } from '@duckdb/duckdb-wasm';
 import { CUSTOMERS_CSV } from './sample-customers';
-import type {
-  DataPreviewResult,
-  PipelineMetrics,
-  PipelineNodeConfig,
-  PreviewColumn,
-} from '../types';
 
 let db: AsyncDuckDB | null = null;
 let conn: AsyncDuckDBConnection | null = null;
-let stageSequence = 0;
-const runtimeTables = new Set<string>();
 
-const SOURCE_TABLE = 'raw_customers';
-
-function quoteIdentifier(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-function toNumber(value: unknown): number {
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'number') return value;
-  return Number(value ?? 0);
-}
-
-function toSerializable(value: unknown): unknown {
-  if (typeof value === 'bigint') return Number(value);
-  if (value instanceof Date) return value.toISOString();
-  return value;
-}
-
-function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(row).map(([key, value]) => [key, toSerializable(value)])
-  );
-}
-
-function safeFileName(name: string): string {
-  const normalized = name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return normalized.toLowerCase().endsWith('.csv') ? normalized : `${normalized}.csv`;
-}
-
-async function getConnection(): Promise<AsyncDuckDBConnection> {
-  return initDuckDB();
+export interface PipelineMetrics {
+  rowsIn: number;
+  rowsOut: number;
+  duplicates: number;
+  missing: number;
+  nullColumns: number;
+  qualityScore: number;
+  duration: number;
+  memory: number;
 }
 
 export async function initDuckDB(): Promise<AsyncDuckDBConnection> {
@@ -64,78 +29,12 @@ export async function initDuckDB(): Promise<AsyncDuckDBConnection> {
   return conn;
 }
 
-export async function loadCsvData(name: string, contents: string): Promise<DataPreviewResult> {
-  const c = await getConnection();
-  if (!db) throw new Error('DuckDB did not initialize.');
-
-  const registeredName = `${Date.now()}-${safeFileName(name)}`;
-  await db.registerFileText(registeredName, contents);
-  await c.query(
-    `CREATE OR REPLACE TABLE ${quoteIdentifier(SOURCE_TABLE)} AS
-     SELECT * FROM read_csv_auto('${registeredName.replace(/'/g, "''")}', header = true)`
-  );
-
-  return getTablePreview(SOURCE_TABLE);
-}
-
-export async function loadSampleData(): Promise<DataPreviewResult> {
-  return loadCsvData('sample-customers.csv', CUSTOMERS_CSV);
-}
-
-export async function resetRuntimeTables(): Promise<void> {
-  if (runtimeTables.size === 0) {
-    stageSequence = 0;
-    return;
-  }
-
-  const c = await getConnection();
-  for (const tableName of runtimeTables) {
-    await c.query(`DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`);
-  }
-  runtimeTables.clear();
-  stageSequence = 0;
-}
-
-async function getColumns(tableName: string): Promise<{ name: string; type: string }[]> {
-  const c = await getConnection();
-  const result = await c.query(`DESCRIBE SELECT * FROM ${quoteIdentifier(tableName)}`);
-  return result.toArray().map((row) => ({
-    name: String(row.column_name),
-    type: String(row.column_type),
-  }));
-}
-
-export async function getTablePreview(
-  tableName: string,
-  limit = 100
-): Promise<DataPreviewResult> {
-  const c = await getConnection();
-  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
-  const table = quoteIdentifier(tableName);
-  const schema = await getColumns(tableName);
-  const totalRowsResult = await c.query(`SELECT count(*) AS count FROM ${table}`);
-  const totalRows = toNumber(totalRowsResult.toArray()[0]?.count);
-  const rowsResult = await c.query(`SELECT * FROM ${table} LIMIT ${safeLimit}`);
-  const rows = rowsResult.toArray().map((row) => normalizeRow(row));
-
-  const columns: PreviewColumn[] = [];
-  for (const column of schema) {
-    const identifier = quoteIdentifier(column.name);
-    const profile = await c.query(
-      `SELECT
-        count(*) - count(${identifier}) AS null_count,
-        count(DISTINCT ${identifier}) AS distinct_count
-       FROM ${table}`
-    );
-    const values = profile.toArray()[0];
-    columns.push({
-      ...column,
-      nullCount: toNumber(values?.null_count),
-      distinctCount: toNumber(values?.distinct_count),
-    });
-  }
-
-  return { tableName, columns, rows, totalRows };
+export async function loadSampleData(): Promise<void> {
+  const c = await initDuckDB();
+  const blob = new Blob([CUSTOMERS_CSV], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  await c.query(`CREATE TABLE raw_customers AS SELECT * FROM read_csv_auto('${url}')`);
+  URL.revokeObjectURL(url);
 }
 
 export interface NodeExecution {
@@ -148,96 +47,102 @@ export interface NodeExecution {
 export async function runPipelineNode(
   nodeType: string,
   prevTable: string,
-  config?: PipelineNodeConfig
+  config?: Record<string, string>
 ): Promise<NodeExecution> {
-  const c = await getConnection();
+  const c = await initDuckDB();
   const startTime = performance.now();
-  const inputTable = quoteIdentifier(prevTable);
-  const tableName = `stage_${String(++stageSequence).padStart(4, '0')}_${nodeType}`;
-  const outputTable = quoteIdentifier(tableName);
-  const availableColumns = await getColumns(prevTable);
-  const fallbackColumn = availableColumns[0]?.name;
-  const requestedColumn = config?.column || fallbackColumn;
 
-  if (!requestedColumn || !availableColumns.some((column) => column.name === requestedColumn)) {
-    throw new Error(
-      `Column "${requestedColumn || 'unknown'}" does not exist in ${prevTable}.`
-    );
-  }
-
-  const column = quoteIdentifier(requestedColumn);
+  const tableName = `stg_${nodeType}_${Date.now()}`;
   let sql = '';
 
   switch (nodeType) {
-    case 'source':
-      sql = `CREATE OR REPLACE TABLE ${outputTable} AS SELECT * FROM ${inputTable}`;
-      break;
-    case 'filter':
-      sql = `CREATE OR REPLACE TABLE ${outputTable} AS
-        SELECT * FROM ${inputTable}
-        WHERE ${column} IS NOT NULL AND trim(CAST(${column} AS VARCHAR)) != ''`;
-      break;
-    case 'deduplicate': {
-      const strategy = config?.strategy || 'Keep first';
-      const nullHandling = config?.nullHandling || 'Ignore';
-      const order = strategy === 'Keep last' ? 'DESC' : 'ASC';
-      const nullFilter =
-        nullHandling === 'Remove null rows'
-          ? `WHERE ${column} IS NOT NULL AND trim(CAST(${column} AS VARCHAR)) != ''`
-          : '';
-      sql = `CREATE OR REPLACE TABLE ${outputTable} AS
-        SELECT * EXCLUDE (_stillflow_row_number)
-        FROM (
-          SELECT *,
-            row_number() OVER (
-              PARTITION BY ${column}
-              ORDER BY rowid ${order}
-            ) AS _stillflow_row_number
-          FROM ${inputTable}
-          ${nullFilter}
-        )
-        WHERE _stillflow_row_number = 1`;
+    case 'source': {
+      sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT * FROM raw_customers`;
       break;
     }
-    case 'normalize':
-      sql = `CREATE OR REPLACE TABLE ${outputTable} AS
-        SELECT * REPLACE (
-          CASE
-            WHEN ${column} IS NULL THEN ${column}
-            ELSE trim(CAST(${column} AS VARCHAR))
-          END AS ${column}
-        )
-        FROM ${inputTable}`;
+    case 'filter': {
+      const col = config?.column || 'status';
+      sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT * FROM ${prevTable} WHERE ${col} IS NOT NULL AND ${col} != ''`;
       break;
-    case 'export':
-      sql = `CREATE OR REPLACE TABLE ${outputTable} AS SELECT * FROM ${inputTable}`;
+    }
+    case 'deduplicate': {
+      const col = config?.column || 'customer_id';
+      const strat = config?.strategy || 'Keep first';
+      const nullHandling = config?.nullHandling || 'Ignore';
+      let baseWhere = '';
+      if (nullHandling === 'Remove null rows') {
+        baseWhere = ` WHERE ${col} IS NOT NULL AND ${col} != '' `;
+      } else if (nullHandling === 'Treat as duplicate') {
+        baseWhere = '';
+      }
+      if (strat === 'Merge records') {
+        sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT
+          ${col},
+          string_agg(DISTINCT name, ' | ') AS name,
+          string_agg(DISTINCT email, ' | ') AS email,
+          max(amount) AS amount,
+          max(category) AS category,
+          max(status) AS status,
+          min(created_at) AS created_at,
+          max(margin_pct) AS margin_pct
+        FROM (SELECT * FROM ${prevTable}${baseWhere}) t
+        GROUP BY ${col}`;
+      } else {
+        const order = strat === 'Keep last' ? 'DESC' : 'ASC';
+        sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT
+          customer_id, name, email, amount, category, status, created_at, margin_pct
+        FROM (
+          SELECT *, row_number() OVER (PARTITION BY ${col} ORDER BY created_at ${order}) AS _rn
+          FROM (SELECT * FROM ${prevTable}${baseWhere}) src
+        ) WHERE _rn = 1`;
+      }
       break;
+    }
+    case 'normalize': {
+      const nullHandling = config?.nullHandling || 'Ignore';
+      sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT
+        customer_id,
+        ${nullHandling === 'Remove null rows'
+          ? `CASE WHEN name IS NULL OR trim(name) = '' THEN 'Unknown' ELSE trim(name) END`
+          : `CASE WHEN trim(coalesce(name, '')) = '' THEN name ELSE trim(name) END`} AS name,
+        CASE WHEN email IS NULL OR trim(email) = '' THEN email ELSE lower(trim(email)) END AS email,
+        amount, category, status, created_at, margin_pct
+      FROM ${prevTable}`;
+      break;
+    }
+    case 'export': {
+      sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT * FROM ${prevTable}`;
+      break;
+    }
     default:
       throw new Error(`Unknown node type: ${nodeType}`);
   }
 
   await c.query(sql);
-  runtimeTables.add(tableName);
 
-  const rowsInResult = await c.query(`SELECT count(*) AS count FROM ${inputTable}`);
-  const rowsOutResult = await c.query(`SELECT count(*) AS count FROM ${outputTable}`);
-  const rowsIn = toNumber(rowsInResult.toArray()[0]?.count);
-  const rowsOut = toNumber(rowsOutResult.toArray()[0]?.count);
-  const outputColumns = await getColumns(tableName);
-  const nullTerms = outputColumns.map(
-    ({ name }) => `sum(CASE WHEN ${quoteIdentifier(name)} IS NULL THEN 1 ELSE 0 END)`
-  );
-  const nullResult = await c.query(
-    `SELECT ${nullTerms.length ? nullTerms.join(' + ') : '0'} AS count FROM ${outputTable}`
-  );
-  const nullCount = toNumber(nullResult.toArray()[0]?.count);
-  const possibleValues = Math.max(1, rowsOut * Math.max(1, outputColumns.length));
-  const missing = Math.round((nullCount / possibleValues) * 1000) / 10;
-  const qualityScore = Math.max(0, Math.round(100 - (nullCount / possibleValues) * 100));
-  const duplicates =
-    nodeType === 'deduplicate' && rowsIn > 0
-      ? Math.round(((rowsIn - rowsOut) / rowsIn) * 1000) / 10
-      : 0;
+  const rowsIn = (await c.query(`SELECT count(*) AS cnt FROM ${prevTable}`)).toArray()[0]?.cnt ?? 0;
+  const rowsOut = (await c.query(`SELECT count(*) AS cnt FROM ${tableName}`)).toArray()[0]?.cnt ?? 0;
+  const hasNull = (await c.query(`
+    SELECT count(*) AS cnt FROM ${tableName}
+    WHERE name IS NULL OR email IS NULL OR amount IS NULL OR status IS NULL
+  `)).toArray()[0]?.cnt ?? 0;
+  const totalRows = rowsOut > 0 ? rowsOut : 1;
+  const missing = Math.round((hasNull / totalRows) * 1000) / 10;
+  const nullCols = (
+    await c.query(`SELECT
+      sum(CASE WHEN name IS NULL OR trim(name)='' THEN 1 ELSE 0 END) AS nn,
+      sum(CASE WHEN email IS NULL THEN 1 ELSE 0 END) AS ne,
+      sum(CASE WHEN amount IS NULL THEN 1 ELSE 0 END) AS na,
+      sum(CASE WHEN status IS NULL OR trim(status)='' THEN 1 ELSE 0 END) AS ns
+    FROM ${tableName}`)
+  ).toArray()[0];
+  const nullCount = (nullCols?.nn ?? 0) + (nullCols?.ne ?? 0) + (nullCols?.na ?? 0) + (nullCols?.ns ?? 0);
+  const qualityScore = Math.max(0, Math.min(100, Math.round(100 - (nullCount / (totalRows * 4)) * 100)));
+
+  const endTime = performance.now();
+  const duplicates = nodeType === 'deduplicate' && rowsIn > 0
+    ? Math.round(((rowsIn - rowsOut) / rowsIn) * 1000) / 10
+    : (rowsIn > 0 ? Math.round(((rowsIn - rowsOut) / rowsIn) * 1000) / 10 : 0);
 
   return {
     nodeType,
@@ -250,8 +155,9 @@ export async function runPipelineNode(
       missing,
       nullColumns: nullCount,
       qualityScore,
-      duration: Math.round((performance.now() - startTime) * 10) / 10,
-      memory: Math.round((32 + (rowsOut * Math.max(1, outputColumns.length) * 16) / 1_048_576) * 10) / 10,
+      duration: Math.round((endTime - startTime) * 10) / 10,
+      // Deterministic memory estimate (avoid Math.random) — scales with rowsOut
+      memory: Math.round(96 + (rowsOut / 100) * 12),
     },
   };
 }
@@ -263,45 +169,30 @@ export function formatRows(n: number): string {
 }
 
 export interface FullPipelineResult {
-  executions: {
-    nodeId: string;
-    nodeType: string;
-    metrics: PipelineMetrics;
-    tableName: string;
-  }[];
+  executions: { nodeId: string; nodeType: string; metrics: PipelineMetrics; tableName: string }[];
   totalDuration: number;
-  outputTable: string;
 }
 
+/**
+ * Run every node in a pipeline sequentially and return metrics for EVERY stage.
+ * nodes: ordered list, latest config per node is sourced from `node.config` (caller controls ordering).
+ */
 export async function runFullPipeline(
-  nodes: { id: string; type: string; config?: PipelineNodeConfig }[],
-  options?: {
-    prevTable?: string;
-    onStageStart?: (nodeId: string, index: number) => void;
-    onStageComplete?: (nodeId: string, index: number, metrics: PipelineMetrics) => void;
-  }
+  nodes: { id: string; type: string; config?: Record<string, string> }[],
+  prevTableFallback = 'raw_customers'
 ): Promise<FullPipelineResult> {
-  await resetRuntimeTables();
-  let prevTable = options?.prevTable ?? SOURCE_TABLE;
+  let prevTable = prevTableFallback;
   const executions: FullPipelineResult['executions'] = [];
-  const startedAt = performance.now();
-
-  for (const [index, node] of nodes.entries()) {
-    options?.onStageStart?.(node.id, index);
-    const result = await runPipelineNode(node.type, prevTable, node.config);
+  const t0 = performance.now();
+  for (const n of nodes) {
+    const result = await runPipelineNode(n.type, prevTable, n.config);
     executions.push({
-      nodeId: node.id,
-      nodeType: node.type,
+      nodeId: n.id,
+      nodeType: n.type,
       metrics: result.metrics,
       tableName: result.tableName,
     });
     prevTable = result.tableName;
-    options?.onStageComplete?.(node.id, index, result.metrics);
   }
-
-  return {
-    executions,
-    totalDuration: Math.round(performance.now() - startedAt),
-    outputTable: prevTable,
-  };
+  return { executions, totalDuration: Math.round(performance.now() - t0) };
 }

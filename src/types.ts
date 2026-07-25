@@ -4,14 +4,10 @@ export interface Dataset {
   type: 'csv' | 'parquet' | 'excel' | 's3' | 'table';
   category: 'source' | 'interim' | 'output';
   size: string;
-  source?: 'sample' | 'local' | 'connected';
-  tableName?: string;
   icon?: string;
 }
 
 export type NodeType = 'source' | 'filter' | 'deduplicate' | 'normalize' | 'export';
-export type NodeStatus = 'completed' | 'running' | 'pending' | 'failed' | 'disabled';
-export type WorkspaceView = 'graph' | 'data';
 
 export interface PipelineNodeConfig {
   column: string;
@@ -37,39 +33,9 @@ export interface PipelineNode {
   name: string;
   description: string;
   rows: string;
-  status: NodeStatus;
+  status: 'completed' | 'running' | 'pending';
   metrics?: PipelineMetrics;
-  error?: string;
   config: PipelineNodeConfig;
-}
-
-export interface PreviewColumn {
-  name: string;
-  type: string;
-  nullCount: number;
-  distinctCount: number;
-}
-
-export interface DataPreviewResult {
-  tableName: string;
-  columns: PreviewColumn[];
-  rows: Record<string, unknown>[];
-  totalRows: number;
-}
-
-export type PreviewLimit = 100 | 500;
-
-export type EventLevel = 'info' | 'success' | 'error';
-
-export interface WorkspaceEvent {
-  id: string;
-  objectId: string;
-  objectName: string;
-  action: string;
-  detail: string;
-  actor: 'User' | 'Engine' | 'System';
-  level: EventLevel;
-  timestamp: string;
 }
 
 export interface TransformObject {
@@ -78,5 +44,4 @@ export interface TransformObject {
   description: string;
   category: 'source' | 'transform' | 'output' | 'ai';
   icon: string;
-  available: boolean;
 }
