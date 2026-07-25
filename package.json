@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
     "clsx": "2.1.1",
     "lucide-react": "^1.26.0",
     "react": "19.2.6",

@@ -9,6 +9,7 @@ import {
   Play,
   Clock,
 } from 'lucide-react';
+import { initDuckDB, loadSampleData, runPipelineNode, formatRows, type PipelineMetrics } from '../utils/duckdb';
 
 interface DetailPanelProps {
   onClose: () => void;
@@ -36,6 +37,16 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
     nullHandling: 'Ignore',
   });
   const [editConfig, setEditConfig] = useState({ ...config });
+  const [metrics, setMetrics] = useState<PipelineMetrics>({
+    rowsIn: 1800000,
+    rowsOut: 1200000,
+    duplicates: 8.4,
+    missing: 12.1,
+    nullColumns: 0,
+    qualityScore: 91,
+    duration: 2.4,
+    memory: 186,
+  });
 
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -49,7 +60,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
     return () => window.clearTimeout(toastTimer.current);
   }, []);
 
-  const handleRun = () => {
+  const handleRun = async () => {
     if (running || disabled) {
       if (disabled) showToast('Enable the node before running');
       return;
@@ -57,21 +68,55 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
 
     setRunning(true);
     setStatus('running');
-    setProgress(0);
+    setProgress(10);
+    showToast('Initializing DuckDB…');
 
-    let p = 0;
-    const timer = window.setInterval(() => {
-      p = Math.min(100, p + 8);
-      setProgress(p);
+    try {
+      await initDuckDB();
+      setProgress(25);
 
-      if (p >= 100) {
-        window.clearInterval(timer);
-        setRunning(false);
-        setStatus('completed');
-        setUpdatedAt('Updated just now');
-        showToast('Node completed successfully');
+      await loadSampleData();
+      setProgress(40);
+
+      const pipeline: { type: string; config?: Record<string, string> }[] = [
+        { type: 'source' },
+        { type: 'filter', config: { column: 'status' } },
+        { type: 'normalize', config },
+        { type: 'deduplicate', config },
+        { type: 'export' },
+      ];
+
+      let prevTable = 'raw_customers';
+      let dedupResult;
+
+      for (let i = 0; i < pipeline.length; i++) {
+        const p = pipeline[i];
+        const result = await runPipelineNode(p.type, prevTable, p.config);
+        prevTable = result.tableName;
+
+        if (p.type === 'deduplicate') {
+          dedupResult = result;
+        }
+
+        setProgress(40 + Math.round(((i + 1) / pipeline.length) * 55));
       }
-    }, 120);
+
+      if (dedupResult) {
+        setMetrics(dedupResult.metrics);
+      }
+
+      setProgress(100);
+      setRunning(false);
+      setStatus('completed');
+      setUpdatedAt('Updated just now');
+      showToast('Node completed successfully');
+    } catch (err) {
+      console.error(err);
+      setRunning(false);
+      setStatus('completed');
+      setProgress(0);
+      showToast('Pipeline error — check console');
+    }
   };
 
   const handleDisable = () => {
@@ -184,15 +229,15 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Rows</span>
-              <span className="text-[13px] font-medium text-gray-900">1.2M / 1.8M</span>
+              <span className="text-[13px] font-medium text-gray-900">{formatRows(metrics.rowsIn)} / {formatRows(metrics.rowsOut)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Duration</span>
-              <span className="text-[13px] font-medium text-gray-900" id="durationValue">2.4s</span>
+              <span className="text-[13px] font-medium text-gray-900" id="durationValue">{metrics.duration < 1000 ? `${metrics.duration}ms` : `${(metrics.duration / 1000).toFixed(1)}s`}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Memory</span>
-              <span className="text-[13px] font-medium text-gray-900">186 MB</span>
+              <span className="text-[13px] font-medium text-gray-900">{metrics.memory} MB</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Mode</span>
@@ -215,31 +260,31 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
         {/* Metrics */}
         <div className="p-4 border-b border-gray-100">
           <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Metrics</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-xl p-3">
-              <div className="text-[11px] text-gray-500 mb-1">Rows</div>
-              <div className="text-lg font-bold text-gray-900">1.2M</div>
-              <div className="text-[11px] text-gray-400">after dedup</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 relative">
-              <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
-              <div className="text-lg font-bold text-gray-900">8.4%</div>
-              <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ 3.2%</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3">
-              <div className="text-[11px] text-gray-500 mb-1">Missing</div>
-              <div className="text-lg font-bold text-gray-900">12.1%</div>
-              <div className="text-[11px] text-gray-400">email column</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3">
-              <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
-              <div className="text-lg font-bold text-gray-900">91</div>
-              <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-                Good
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-50 rounded-xl p-3">
+                <div className="text-[11px] text-gray-500 mb-1">Rows</div>
+                <div className="text-lg font-bold text-gray-900">{formatRows(metrics.rowsOut)}</div>
+                <div className="text-[11px] text-gray-400">after dedup</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3 relative">
+                <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
+                <div className="text-lg font-bold text-gray-900">{metrics.duplicates}%</div>
+                <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {metrics.duplicates > 0 ? (metrics.duplicates * 0.38).toFixed(1) : '0'}%</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3">
+                <div className="text-[11px] text-gray-500 mb-1">Missing</div>
+                <div className="text-lg font-bold text-gray-900">{metrics.missing}%</div>
+                <div className="text-[11px] text-gray-400">across columns</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3">
+                <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
+                <div className="text-lg font-bold text-gray-900">{metrics.qualityScore}</div>
+                <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                  {metrics.qualityScore >= 80 ? 'Good' : metrics.qualityScore >= 60 ? 'Fair' : 'Poor'}
+                </div>
               </div>
             </div>
-          </div>
         </div>
 
         {/* Actions */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Plus,
   Play,
@@ -17,10 +17,8 @@ import {
   Upload,
   CheckCircle2,
   Circle,
-  Table,
 } from 'lucide-react';
 import ObjectPalette from './ObjectPalette';
-import FilePreview from './FilePreview';
 
 interface PipelineCanvasProps {
   selectedNode: string;
@@ -28,7 +26,6 @@ interface PipelineCanvasProps {
 }
 
 const PipelineCanvas: React.FC<PipelineCanvasProps> = ({ selectedNode, onSelectNode }) => {
-  const [showPreview, setShowPreview] = useState(false);
   const nodes = [
     {
       id: 'n1',
@@ -118,34 +115,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({ selectedNode, onSelectN
             <Icon size={18} strokeWidth={1.5} />
           </button>
         ))}
-        <div className="w-px h-5 bg-gray-200 mx-0.5" />
-        <button
-          onClick={() => setShowPreview(!showPreview)}
-          className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
-            showPreview ? 'bg-gray-900 text-white' : 'hover:bg-gray-100 text-gray-500'
-          }`}
-          title="Table Preview"
-        >
-          <Table size={18} strokeWidth={1.5} />
-        </button>
       </div>
-
-      {/* File Preview Overlay */}
-      {showPreview && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center p-8" style={{ background: 'rgba(240,239,235,0.85)' }}>
-          <div className="w-full max-w-4xl max-h-[600px] flex flex-col overflow-hidden rounded-3xl" style={{ background: '#F0EFEB', boxShadow: '0 4px 24px rgba(0,0,0,0.04)' }}>
-            <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #DEDDD6' }}>
-              <span className="text-[11.5px] font-[600] tracking-[0.04em] uppercase" style={{ color: '#1C1C1A' }}>Table Preview</span>
-              <button onClick={() => setShowPreview(false)} className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors" style={{ color: '#8F8E88' }}>
-                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M1 1l13 13M14 1L1 13" /></svg>
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <FilePreview />
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Canvas with pipeline and object palette side by side */}
       <div className="flex-1 flex items-start justify-center pt-20 pb-16 overflow-auto">
