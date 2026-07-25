@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Search, MoreHorizontal, ChevronDown, ChevronRight, FileText, Database, HardDrive } from '../icons/hero';
 import { datasets } from '../data';
 
@@ -38,13 +38,19 @@ const typeLabel: Record<string, string> = {
   table: 'Table',
 };
 
-const DatasetPanel: React.FC = () => {
+interface DatasetPanelProps {
+  onSelectDataset?: (name: string) => void;
+}
+
+const DatasetPanel: React.FC<DatasetPanelProps> = ({ onSelectDataset }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'source' | 'interim' | 'output'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [expandedSections, setExpandedSections] = useState({
     source: true,
     interim: true,
     output: true,
   });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const tabs = [
     { key: 'all' as const, label: 'All' },
@@ -57,7 +63,17 @@ const DatasetPanel: React.FC = () => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const filteredDatasets = activeTab === 'all' ? datasets : datasets.filter(d => d.category === activeTab);
+  const filteredDatasets = useMemo(() => {
+    const inTab = activeTab === 'all' ? datasets : datasets.filter(d => d.category === activeTab);
+    if (searchQuery.trim() === '') return inTab;
+    const q = searchQuery.toLowerCase();
+    return inTab.filter(
+      d =>
+        d.name.toLowerCase().includes(q) ||
+        d.size.toLowerCase().includes(q) ||
+        d.type.toLowerCase().includes(q)
+    );
+  }, [activeTab, searchQuery]);
 
   const sourceDatasets = filteredDatasets.filter(d => d.category === 'source');
   const interimDatasets = filteredDatasets.filter(d => d.category === 'interim');
@@ -66,7 +82,6 @@ const DatasetPanel: React.FC = () => {
   const renderSection = (
     title: string,
     items: typeof datasets,
-    count: number,
     key: 'source' | 'interim' | 'output'
   ) => {
     if (items.length === 0) return null;
@@ -81,14 +96,22 @@ const DatasetPanel: React.FC = () => {
             {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             <span className="uppercase tracking-wider">{title}</span>
           </div>
-          <span className="text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">{count}</span>
+          <span className="text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">{items.length}</span>
         </button>
         {isExpanded && (
           <div className="mt-0.5">
             {items.map(dataset => (
               <div
                 key={dataset.id}
-                className="group flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors mx-1"
+                onClick={() => {
+                  setSelectedId(dataset.id);
+                  onSelectDataset?.(dataset.name);
+                }}
+                className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors mx-1 ${
+                  selectedId === dataset.id
+                    ? 'bg-gray-100 ring-1 ring-gray-300'
+                    : 'hover:bg-gray-50'
+                }`}
               >
                 {typeIconMap[dataset.type]}
                 <div className="flex-1 min-w-0">
@@ -114,10 +137,14 @@ const DatasetPanel: React.FC = () => {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-[15px] font-semibold text-gray-900">Datasets</h2>
           <div className="flex items-center gap-1">
-            <button className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-md transition-colors text-lg font-light">
+            <button
+              className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-md transition-colors text-lg font-light"
+              title="Connect dataset"
+              onClick={() => setSearchQuery('')}
+            >
               +
             </button>
-            <button className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
+            <button className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-md transition-colors" title="Grid view">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="1" y="1" width="5" height="5" rx="1" />
                 <rect x="8" y="1" width="5" height="5" rx="1" />
@@ -132,6 +159,8 @@ const DatasetPanel: React.FC = () => {
           <input
             type="text"
             placeholder="Search datasets"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full h-8 pl-8 pr-10 text-[13px] border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-gray-300 focus:outline-none transition-colors placeholder:text-gray-400"
           />
           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
@@ -155,9 +184,17 @@ const DatasetPanel: React.FC = () => {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-1 pb-3">
-        {renderSection('Source', sourceDatasets, 8, 'source')}
-        {renderSection('Interim', interimDatasets, 6, 'interim')}
-        {renderSection('Output', outputDatasets, 4, 'output')}
+        {filteredDatasets.length === 0 ? (
+          <div className="px-3 py-6 text-center text-[12px] text-gray-400">
+            No datasets match “{searchQuery}”.
+          </div>
+        ) : (
+          <>
+            {renderSection('Source', sourceDatasets, 'source')}
+            {renderSection('Interim', interimDatasets, 'interim')}
+            {renderSection('Output', outputDatasets, 'output')}
+          </>
+        )}
       </div>
     </div>
   );

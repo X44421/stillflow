@@ -9,11 +9,32 @@ import {
   Play,
   Clock,
 } from '../icons/hero';
-import { initDuckDB, loadSampleData, runPipelineNode, formatRows, type PipelineMetrics } from '../utils/duckdb';
+import { formatRows } from '../utils/duckdb';
+import type { PipelineNode, NodeType, PipelineMetrics } from '../types';
 
-interface DetailPanelProps {
-  onClose: () => void;
-}
+const TYPE_ICON: Record<NodeType, React.ReactNode> = {
+  deduplicate: <Copy size={20} />,
+  normalize: <Type size={20} />,
+  filter: <Filter size={20} />,
+  source: <Copy size={20} />,
+  export: <Copy size={20} />,
+};
+
+const TYPE_BG: Record<NodeType, string> = {
+  deduplicate: 'bg-violet-50 text-violet-600',
+  normalize: 'bg-orange-50 text-orange-600',
+  filter: 'bg-purple-50 text-purple-600',
+  source: 'bg-green-50 text-green-600',
+  export: 'bg-amber-50 text-amber-600',
+};
+
+const TYPE_LABEL: Record<NodeType, string> = {
+  source: 'Source Node',
+  filter: 'Transform Node',
+  deduplicate: 'Process Node',
+  normalize: 'Transform Node',
+  export: 'Output Node',
+};
 
 const CONFIG_OPTIONS: Record<string, string[]> = {
   strategy: ['Keep first', 'Keep last', 'Merge records'],
@@ -21,122 +42,101 @@ const CONFIG_OPTIONS: Record<string, string[]> = {
   nullHandling: ['Ignore', 'Treat as duplicate', 'Remove null rows'],
 };
 
-const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
-  const [running, setRunning] = useState(false);
-  const [disabled, setDisabled] = useState(false);
+interface DetailPanelProps {
+  node: PipelineNode;
+  nodes: PipelineNode[];
+  onClose: () => void;
+  onRun: (nodeId: string) => void | Promise<void>;
+  onUpdate: (nodeId: string, patch: Partial<PipelineNode>) => void;
+  onDelete: (nodeId: string) => void;
+}
+
+const DetailPanel: React.FC<DetailPanelProps> = ({
+  node,
+  nodes,
+  onClose,
+  onRun,
+  onUpdate,
+  onDelete,
+}) => {
+  // The currently-running status comes from `node` (App-owned).
+  const running = node.status === 'running';
+  const [disabledLocal, setDisabledLocal] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [status, setStatus] = useState<'running' | 'completed'>('running');
-  const [updatedAt, setUpdatedAt] = useState('Updated 2m ago');
-  const [config, setConfig] = useState({
-    column: 'customer_id',
-    strategy: 'Keep first',
-    scope: 'Current dataset',
-    nullHandling: 'Ignore',
-  });
-  const [editConfig, setEditConfig] = useState({ ...config });
-  const [metrics, setMetrics] = useState<PipelineMetrics>({
-    rowsIn: 1800000,
-    rowsOut: 1200000,
-    duplicates: 8.4,
-    missing: 12.1,
-    nullColumns: 0,
-    qualityScore: 91,
-    duration: 2.4,
-    memory: 186,
-  });
+
+  const [editConfig, setEditConfig] = useState({ ...node.config });
+  useEffect(() => {
+    setEditConfig({ ...node.config });
+  }, [node.id, node.config]);
 
   const toastTimer = useRef<number | undefined>(undefined);
-
   const showToast = useCallback((message: string) => {
     setToast(message);
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 1600);
   }, []);
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
-  useEffect(() => {
-    return () => window.clearTimeout(toastTimer.current);
-  }, []);
+  // Determine Input / Output context from the nodes list, relative to the selected
+  const idx = nodes.findIndex((n) => n.id === node.id);
+  const prevNode = idx > 0 ? nodes[idx - 1] : null;
+  const nextNode = idx >= 0 && idx < nodes.length - 1 ? nodes[idx + 1] : null;
+
+  // Loaded metrics are whatever the App recorded for this node.
+  const metrics: PipelineMetrics = node.metrics ?? {
+    rowsIn: 0,
+    rowsOut: parseFloat((node.rows || '').replace(/[A-Za-z]/g, '')) || 0,
+    duplicates: 0,
+    missing: 0,
+    nullColumns: 0,
+    qualityScore: 0,
+    duration: 0,
+    memory: 0,
+  };
+
+  const hasRun = Boolean(node.metrics);
 
   const handleRun = async () => {
-    if (running || disabled) {
-      if (disabled) showToast('Enable the node before running');
+    if (running) return;
+    if (disabledLocal) {
+      showToast('Enable the node before running');
       return;
     }
-
-    setRunning(true);
-    setStatus('running');
-    setProgress(10);
-    showToast('Initializing DuckDB…');
-
-    try {
-      await initDuckDB();
-      setProgress(25);
-
-      await loadSampleData();
-      setProgress(40);
-
-      const pipeline: { type: string; config?: Record<string, string> }[] = [
-        { type: 'source' },
-        { type: 'filter', config: { column: 'status' } },
-        { type: 'normalize', config },
-        { type: 'deduplicate', config },
-        { type: 'export' },
-      ];
-
-      let prevTable = 'raw_customers';
-      let dedupResult;
-
-      for (let i = 0; i < pipeline.length; i++) {
-        const p = pipeline[i];
-        const result = await runPipelineNode(p.type, prevTable, p.config);
-        prevTable = result.tableName;
-
-        if (p.type === 'deduplicate') {
-          dedupResult = result;
-        }
-
-        setProgress(40 + Math.round(((i + 1) / pipeline.length) * 55));
-      }
-
-      if (dedupResult) {
-        setMetrics(dedupResult.metrics);
-      }
-
-      setProgress(100);
-      setRunning(false);
-      setStatus('completed');
-      setUpdatedAt('Updated just now');
-      showToast('Node completed successfully');
-    } catch (err) {
-      console.error(err);
-      setRunning(false);
-      setStatus('completed');
-      setProgress(0);
-      showToast('Pipeline error — check console');
-    }
+    await onRun(node.id);
+    showToast('Run finished');
   };
 
   const handleDisable = () => {
-    const next = !disabled;
-    setDisabled(next);
+    const next = !disabledLocal;
+    setDisabledLocal(next);
     showToast(next ? 'Node disabled' : 'Node enabled');
   };
 
   const handleEdit = () => {
     if (editing) {
-      setConfig({ ...editConfig });
+      onUpdate(node.id, { config: { ...editConfig } });
       showToast('Configuration saved');
     }
     setEditing((e) => !e);
   };
 
-  const handleMenuAction = (message: string) => {
-    showToast(message);
+  const handleMenuAction = (item: { label: string; delete?: boolean }) => {
     setShowMenu(false);
+    if (item.delete) {
+      onDelete(node.id);
+      showToast('Node deleted');
+      return;
+    }
+    showToast(item.label);
   };
+
+  // Progress driven by App's node status — for visual continuity show 0% when pending,
+  // 100% when completed, indeterminate-ish for running.
+  const progressPct = node.status === 'completed' ? 100 : node.status === 'running' ? 67 : 0;
+
+  const rowsOutDisplay = formatRows(metrics.rowsOut);
 
   return (
     <div className="w-[356px] bg-white border-l border-gray-200 flex flex-col flex-shrink-0 overflow-hidden relative shadow-[-12px_0_32px_rgba(16,24,40,0.05)]">
@@ -145,27 +145,19 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
         <div className="p-4 pb-3 border-b border-gray-100">
           <div className="flex items-start justify-between mb-1">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-violet-50 rounded-xl flex items-center justify-center text-violet-600">
-                <Copy size={20} />
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${TYPE_BG[node.type]}`}>
+                {TYPE_ICON[node.type]}
               </div>
               <div>
-                <h3 className="text-[15px] font-semibold text-gray-900">Deduplicate</h3>
-                <p className="text-[12px] text-gray-500">Process Node</p>
+                <h3 className="text-[15px] font-semibold text-gray-900">{node.name}</h3>
+                <p className="text-[12px] text-gray-500">{TYPE_LABEL[node.type]}</p>
               </div>
             </div>
             <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => setShowMenu((m) => !m)}
-                className="p-1.5 hover:bg-gray-100 rounded-md transition-colors"
-                aria-label="More actions"
-              >
+              <button onClick={() => setShowMenu((m) => !m)} className="p-1.5 hover:bg-gray-100 rounded-md transition-colors" aria-label="More actions">
                 <MoreHorizontal size={16} className="text-gray-500" />
               </button>
-              <button
-                onClick={onClose}
-                className="p-1.5 hover:bg-gray-100 rounded-md transition-colors"
-                aria-label="Close Inspector"
-              >
+              <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-md transition-colors" aria-label="Close Inspector">
                 <X size={16} className="text-gray-500" />
               </button>
             </div>
@@ -173,21 +165,25 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
           <div className="flex items-center gap-3 mt-3">
             <span
               className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
-                status === 'completed'
+                node.status === 'completed'
                   ? 'text-green-700 bg-green-50'
-                  : 'text-white bg-gray-900'
+                  : node.status === 'running'
+                  ? 'text-white bg-gray-900'
+                  : 'text-gray-600 bg-gray-100'
               }`}
             >
-              {status === 'completed' ? (
+              {node.status === 'completed' ? (
                 <span className="w-1.5 h-1.5 bg-green-600 rounded-full" />
-              ) : (
+              ) : node.status === 'running' ? (
                 <span className="w-1.5 h-1.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+              ) : (
+                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
               )}
-              {status === 'completed' ? 'Completed' : 'Running'}
+              {node.status === 'completed' ? 'Completed' : node.status === 'running' ? 'Running' : 'Pending'}
             </span>
             <span className="text-[11px] text-gray-400 flex items-center gap-1">
               <Clock size={12} />
-              {updatedAt}
+              {hasRun ? 'Updated just now' : 'Not run yet'}
             </span>
           </div>
         </div>
@@ -198,20 +194,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Input</span>
-              <span className="flex items-center gap-1.5 text-[13px] font-medium text-gray-900">
-                <div className="w-4 h-4 bg-green-50 rounded flex items-center justify-center text-green-600">
-                  <Filter size={10} />
-                </div>
-                Filter
+              <span className="text-[13px] font-medium text-gray-900">
+                {prevNode ? prevNode.name : '—'}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Output</span>
-              <span className="flex items-center gap-1.5 text-[13px] font-medium text-gray-900">
-                <div className="w-4 h-4 bg-blue-50 rounded flex items-center justify-center text-blue-600">
-                  <Type size={10} />
-                </div>
-                Normalize Text
+              <span className="text-[13px] font-medium text-gray-900">
+                {nextNode ? nextNode.name : '—'}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -229,15 +219,21 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Rows</span>
-              <span className="text-[13px] font-medium text-gray-900">{formatRows(metrics.rowsIn)} / {formatRows(metrics.rowsOut)}</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {hasRun ? `${formatRows(metrics.rowsIn)} / ${formatRows(metrics.rowsOut)}` : '—'}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Duration</span>
-              <span className="text-[13px] font-medium text-gray-900" id="durationValue">{metrics.duration < 1000 ? `${metrics.duration}ms` : `${(metrics.duration / 1000).toFixed(1)}s`}</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {hasRun ? (metrics.duration < 1000 ? `${metrics.duration}ms` : `${(metrics.duration / 1000).toFixed(1)}s`) : '—'}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Memory</span>
-              <span className="text-[13px] font-medium text-gray-900">{metrics.memory} MB</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {hasRun ? `${metrics.memory} MB` : '—'}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-gray-500">Mode</span>
@@ -249,10 +245,10 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
               <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gray-900 rounded-full transition-[width] duration-150 ease-out"
-                  style={{ width: `${progress || 67}%` }}
+                  style={{ width: `${progressPct}%` }}
                 />
               </div>
-              <span className="text-[11px] text-gray-500 ml-2 font-medium">{progress || 67}%</span>
+              <span className="text-[11px] text-gray-500 ml-2 font-medium">{progressPct}%</span>
             </div>
           </div>
         </div>
@@ -260,31 +256,35 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
         {/* Metrics */}
         <div className="p-4 border-b border-gray-100">
           <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Metrics</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 rounded-xl p-3">
-                <div className="text-[11px] text-gray-500 mb-1">Rows</div>
-                <div className="text-lg font-bold text-gray-900">{formatRows(metrics.rowsOut)}</div>
-                <div className="text-[11px] text-gray-400">after dedup</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 relative">
-                <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
-                <div className="text-lg font-bold text-gray-900">{metrics.duplicates}%</div>
-                <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {metrics.duplicates > 0 ? (metrics.duplicates * 0.38).toFixed(1) : '0'}%</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <div className="text-[11px] text-gray-500 mb-1">Missing</div>
-                <div className="text-lg font-bold text-gray-900">{metrics.missing}%</div>
-                <div className="text-[11px] text-gray-400">across columns</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3">
-                <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
-                <div className="text-lg font-bold text-gray-900">{metrics.qualityScore}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-xl p-3">
+              <div className="text-[11px] text-gray-500 mb-1">Rows</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? rowsOutDisplay : '—'}</div>
+              <div className="text-[11px] text-gray-400">output rows</div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 relative">
+              <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.duplicates}%` : '—'}</div>
+              {hasRun && metrics.duplicates > 0 && (
+                <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
+              )}
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <div className="text-[11px] text-gray-500 mb-1">Missing</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.missing}%` : '—'}</div>
+              <div className="text-[11px] text-gray-400">across columns</div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? metrics.qualityScore : '—'}</div>
+              {hasRun && (
                 <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
                   {metrics.qualityScore >= 80 ? 'Good' : metrics.qualityScore >= 60 ? 'Fair' : 'Poor'}
                 </div>
-              </div>
+              )}
             </div>
+          </div>
         </div>
 
         {/* Actions */}
@@ -309,16 +309,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
             <button
               onClick={handleDisable}
               className={`flex items-center justify-center gap-1.5 text-[12px] font-medium py-2 rounded-lg transition-colors ${
-                disabled
-                  ? 'bg-gray-900 text-white hover:bg-gray-800'
-                  : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+                disabledLocal ? 'bg-gray-900 text-white hover:bg-gray-800' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
               }`}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="6" y="4" width="12" height="16" rx="2" />
                 <path d="M10 8h4m-4 4h4m-4 4h4" />
               </svg>
-              <span>{disabled ? 'Enable' : 'Disable'}</span>
+              <span>{disabledLocal ? 'Enable' : 'Disable'}</span>
             </button>
           </div>
         </div>
@@ -356,7 +354,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
                     </select>
                   )
                 ) : (
-                  <span className="text-[13px] font-medium text-gray-900">{config[field]}</span>
+                  <span className="text-[13px] font-medium text-gray-900">{node.config[field]}</span>
                 )}
               </div>
             ))}
@@ -370,14 +368,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ onClose }) => {
           <div className="fixed inset-0 z-20" onClick={() => setShowMenu(false)} />
           <div className="absolute top-14 right-4 w-[156px] p-[6px] border border-gray-200 rounded-lg bg-white shadow-xl z-30">
             {[
-              { label: 'Duplicate node', message: 'Node duplicated' },
-              { label: 'Copy node', message: 'Node copied' },
-              { label: 'Delete node', message: 'Delete action requested', danger: true },
+              { label: 'Duplicate node' },
+              { label: 'Copy node' },
+              { label: 'Delete node', delete: true },
             ].map((item) => (
               <button
                 key={item.label}
-                onClick={() => handleMenuAction(item.message)}
-                className={`w-full h-[34px] px-[9px] border-0 rounded-md bg-transparent text-left text-[11.5px] cursor-pointer hover:bg-gray-100 ${item.danger ? 'text-red-600' : ''}`}
+                onClick={() => handleMenuAction(item)}
+                className={`w-full h-[34px] px-[9px] border-0 rounded-md bg-transparent text-left text-[11.5px] cursor-pointer hover:bg-gray-100 ${item.delete ? 'text-red-600' : ''}`}
               >
                 {item.label}
               </button>

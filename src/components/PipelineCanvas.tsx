@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Plus,
   Play,
@@ -19,98 +19,119 @@ import {
   Circle,
 } from '../icons/hero';
 import ObjectPalette from './ObjectPalette';
+import type { PipelineNode, NodeType } from '../types';
 
 interface PipelineCanvasProps {
+  nodes: PipelineNode[];
   selectedNode: string;
   onSelectNode: (nodeId: string) => void;
+  onAddNode: (node: PipelineNode) => void;
 }
 
-const PipelineCanvas: React.FC<PipelineCanvasProps> = ({ selectedNode, onSelectNode }) => {
-  const nodes = [
-    {
-      id: 'n1',
-      icon: (
-        <div className="w-9 h-9 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
-          <FileText size={18} className="text-green-600" />
-        </div>
-      ),
-      name: 'raw_customers.csv',
-      description: 'CSV File · 2.4M rows',
-      status: 'completed' as const,
-    },
-    {
-      id: 'n2',
-      icon: (
-        <div className="w-9 h-9 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0">
-          <Filter size={18} className="text-purple-600" />
-        </div>
-      ),
-      name: 'Filter',
-      description: 'Keep valid customers',
-      rows: '1.8M rows',
-      status: 'completed' as const,
-    },
-    {
-      id: 'n3',
-      icon: (
-        <div className="w-9 h-9 bg-teal-50 rounded-lg flex items-center justify-center flex-shrink-0">
-          <Copy size={18} className="text-teal-600" />
-        </div>
-      ),
-      name: 'Deduplicate',
-      description: 'Remove repeated records',
-      rows: '1.2M rows',
-      status: 'running' as const,
-    },
-    {
-      id: 'n4',
-      icon: (
-        <div className="w-9 h-9 bg-orange-50 rounded-lg flex items-center justify-center flex-shrink-0">
-          <Type size={18} className="text-orange-600" />
-        </div>
-      ),
-      name: 'Normalize Text',
-      description: 'Standardize name & email',
-      rows: '1.2M rows',
-      status: 'pending' as const,
-    },
-    {
-      id: 'n5',
-      icon: (
-        <div className="w-9 h-9 bg-amber-50 rounded-lg flex items-center justify-center flex-shrink-0">
-          <Upload size={18} className="text-amber-600" />
-        </div>
-      ),
-      name: 'Export CSV',
-      description: 'Write cleaned data',
-      rows: '1.2M rows',
-      status: 'pending' as const,
-    },
-  ];
+const NODE_ICON: Record<NodeType, React.ReactNode> = {
+  source: (
+    <div className="w-9 h-9 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
+      <FileText size={18} className="text-green-600" />
+    </div>
+  ),
+  filter: (
+    <div className="w-9 h-9 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0">
+      <Filter size={18} className="text-purple-600" />
+    </div>
+  ),
+  deduplicate: (
+    <div className="w-9 h-9 bg-teal-50 rounded-lg flex items-center justify-center flex-shrink-0">
+      <Copy size={18} className="text-teal-600" />
+    </div>
+  ),
+  normalize: (
+    <div className="w-9 h-9 bg-orange-50 rounded-lg flex items-center justify-center flex-shrink-0">
+      <Type size={18} className="text-orange-600" />
+    </div>
+  ),
+  export: (
+    <div className="w-9 h-9 bg-amber-50 rounded-lg flex items-center justify-center flex-shrink-0">
+      <Upload size={18} className="text-amber-600" />
+    </div>
+  ),
+};
+
+const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
+  nodes,
+  selectedNode,
+  onSelectNode,
+  onAddNode,
+}) => {
+  const [zoom, setZoom] = useState(100);
 
   const getStatusIcon = (status: 'completed' | 'running' | 'pending') => {
     switch (status) {
       case 'completed':
         return <CheckCircle2 size={18} className="text-green-500" />;
       case 'running':
-        return (
-          <div className="w-4 h-4 bg-gray-900 rounded-full animate-pulse-dot" />
-        );
+        return <div className="w-4 h-4 bg-gray-900 rounded-full animate-pulse-dot" />;
       case 'pending':
         return <Circle size={18} className="text-gray-300" />;
     }
+  };
+
+  const handlePaletteAdd = (obj: {
+    name: string;
+    description: string;
+    icon: string;
+  }) => {
+    let type: NodeType = 'filter';
+    if (obj.icon === 'file-text' || obj.icon === 'cloud' || obj.icon === 'database') type = 'source';
+    else if (obj.icon === 'filter') type = 'filter';
+    else if (obj.icon === 'copy') type = 'deduplicate';
+    else if (obj.icon === 'type') type = 'normalize';
+    else if (obj.icon === 'upload') type = 'export';
+
+    const id = `n${Date.now()}`;
+    onAddNode({
+      id,
+      type,
+      name: obj.name,
+      description: obj.description,
+      rows: '',
+      status: 'pending',
+      config: {
+        column: 'customer_id',
+        strategy: 'Keep first',
+        scope: 'Current dataset',
+        nullHandling: 'Ignore',
+      },
+    });
   };
 
   return (
     <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
       {/* Toolbar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
-        {[Plus, Play, Sparkles, LayoutGrid, Settings, Maximize2, Undo2, Redo2].map((Icon, i) => (
+        <button
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-700 transition-colors"
+          title="Add"
+          onClick={() =>
+            handlePaletteAdd({
+              name: 'New Transform',
+              description: 'Transform node',
+              icon: 'filter',
+            })
+          }
+        >
+          <Plus size={18} strokeWidth={1.5} />
+        </button>
+        <button
+          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+          title="Layout"
+          onClick={() => setZoom(100)}
+        >
+          <Play size={18} strokeWidth={1.5} />
+        </button>
+        {[Sparkles, LayoutGrid, Settings, Maximize2, Undo2, Redo2].map((Icon, i) => (
           <button
             key={i}
-            className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
-              i === 0 ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-gray-100 text-gray-500'
-            }`}
+            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
           >
             <Icon size={18} strokeWidth={1.5} />
           </button>
@@ -118,10 +139,13 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({ selectedNode, onSelectN
       </div>
 
       {/* Canvas with pipeline and object palette side by side */}
-      <div className="flex-1 flex items-start justify-center pt-20 pb-16 overflow-auto">
+      <div
+        className="flex-1 flex items-start justify-center pt-20 pb-16 overflow-auto"
+        style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
+      >
         {/* Object Palette */}
         <div className="mt-4 mr-6 flex-shrink-0">
-          <ObjectPalette />
+          <ObjectPalette onAdd={handlePaletteAdd} />
         </div>
 
         {/* Pipeline Nodes */}
@@ -136,12 +160,12 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({ selectedNode, onSelectN
                     : 'border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300'
                 }`}
               >
-                {node.icon}
+                {NODE_ICON[node.type]}
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-semibold text-gray-900">{node.name}</div>
                   <div className="text-[11px] text-gray-500">{node.description}</div>
                   {node.rows && (
-                    <div className="text-[11px] text-gray-400 mt-0.5">{node.rows}</div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">{node.rows} rows</div>
                   )}
                 </div>
                 {getStatusIcon(node.status)}
@@ -161,15 +185,25 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({ selectedNode, onSelectN
 
       {/* Zoom Controls */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
-        <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+        <button
+          onClick={() => setZoom((z) => Math.max(40, z - 10))}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+        >
           <Minus size={16} />
         </button>
-        <span className="text-xs text-gray-600 font-medium px-2 min-w-[48px] text-center">100%</span>
-        <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+        <span className="text-xs text-gray-600 font-medium px-2 min-w-[48px] text-center">{zoom}%</span>
+        <button
+          onClick={() => setZoom((z) => Math.min(200, z + 10))}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+        >
           <Plus size={16} />
         </button>
         <div className="w-px h-5 bg-gray-200 mx-0.5" />
-        <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+        <button
+          onClick={() => setZoom(100)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+          title="Reset zoom"
+        >
           <ZoomIn size={16} />
         </button>
       </div>

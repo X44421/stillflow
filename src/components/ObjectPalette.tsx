@@ -9,6 +9,7 @@ import {
   Type,
   Upload,
   Sparkles,
+  Plus,
 } from '../icons/hero';
 import { transformObjects } from '../data';
 
@@ -55,7 +56,11 @@ const iconMap: Record<string, React.ReactNode> = {
   ),
 };
 
-const ObjectPalette: React.FC = () => {
+interface ObjectPaletteProps {
+  onAdd?: (obj: { id: string; name: string; description: string; category: string; icon: string }) => void;
+}
+
+const ObjectPalette: React.FC<ObjectPaletteProps> = ({ onAdd }) => {
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -108,13 +113,23 @@ const ObjectPalette: React.FC = () => {
         {filteredObjects.map(obj => (
           <div
             key={obj.id}
-            className="flex items-center gap-2.5 px-2 py-2.5 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
+            onClick={() => onAdd?.(obj)}
+            className="flex items-center gap-2.5 px-2 py-2.5 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors group"
+            title={`Add ${obj.name} to pipeline`}
           >
-            {iconMap[obj.icon]}
-            <div className="min-w-0">
+            {iconMap[obj.icon] ?? (
+              <div className="w-9 h-9 bg-gray-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                <FileText size={18} className="text-gray-400" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
               <div className="text-[13px] font-medium text-gray-900">{obj.name}</div>
               <div className="text-[11px] text-gray-500">{obj.description}</div>
             </div>
+            <Plus
+              size={14}
+              className="opacity-0 group-hover:opacity-100 text-gray-400 transition-opacity mr-1"
+            />
           </div>
         ))}
       </div>

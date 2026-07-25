@@ -68,23 +68,45 @@ export async function runPipelineNode(
     case 'deduplicate': {
       const col = config?.column || 'customer_id';
       const strat = config?.strategy || 'Keep first';
-      const order = strat === 'Keep last' ? 'DESC' : 'ASC';
-      sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT * FROM (
-        SELECT *, row_number() OVER (PARTITION BY ${col} ORDER BY created_at ${order}) AS _rn
-        FROM ${prevTable}
-      ) WHERE _rn = 1`;
+      const nullHandling = config?.nullHandling || 'Ignore';
+      let baseWhere = '';
+      if (nullHandling === 'Remove null rows') {
+        baseWhere = ` WHERE ${col} IS NOT NULL AND ${col} != '' `;
+      } else if (nullHandling === 'Treat as duplicate') {
+        baseWhere = '';
+      }
+      if (strat === 'Merge records') {
+        sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT
+          ${col},
+          string_agg(DISTINCT name, ' | ') AS name,
+          string_agg(DISTINCT email, ' | ') AS email,
+          max(amount) AS amount,
+          max(category) AS category,
+          max(status) AS status,
+          min(created_at) AS created_at,
+          max(margin_pct) AS margin_pct
+        FROM (SELECT * FROM ${prevTable}${baseWhere}) t
+        GROUP BY ${col}`;
+      } else {
+        const order = strat === 'Keep last' ? 'DESC' : 'ASC';
+        sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT
+          customer_id, name, email, amount, category, status, created_at, margin_pct
+        FROM (
+          SELECT *, row_number() OVER (PARTITION BY ${col} ORDER BY created_at ${order}) AS _rn
+          FROM (SELECT * FROM ${prevTable}${baseWhere}) src
+        ) WHERE _rn = 1`;
+      }
       break;
     }
     case 'normalize': {
+      const nullHandling = config?.nullHandling || 'Ignore';
       sql = `CREATE OR REPLACE TABLE ${tableName} AS SELECT
         customer_id,
-        CASE WHEN name IS NULL OR trim(name) = '' THEN 'Unknown' ELSE trim(name) END AS name,
-        CASE WHEN email IS NULL OR trim(email) = '' THEN NULL ELSE lower(trim(email)) END AS email,
-        amount,
-        category,
-        status,
-        created_at,
-        margin_pct
+        ${nullHandling === 'Remove null rows'
+          ? `CASE WHEN name IS NULL OR trim(name) = '' THEN 'Unknown' ELSE trim(name) END`
+          : `CASE WHEN trim(coalesce(name, '')) = '' THEN name ELSE trim(name) END`} AS name,
+        CASE WHEN email IS NULL OR trim(email) = '' THEN email ELSE lower(trim(email)) END AS email,
+        amount, category, status, created_at, margin_pct
       FROM ${prevTable}`;
       break;
     }
@@ -134,7 +156,8 @@ export async function runPipelineNode(
       nullColumns: nullCount,
       qualityScore,
       duration: Math.round((endTime - startTime) * 10) / 10,
-      memory: Math.round(128 + Math.random() * 64),
+      // Deterministic memory estimate (avoid Math.random) — scales with rowsOut
+      memory: Math.round(96 + (rowsOut / 100) * 12),
     },
   };
 }
@@ -143,4 +166,33 @@ export function formatRows(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+export interface FullPipelineResult {
+  executions: { nodeId: string; nodeType: string; metrics: PipelineMetrics; tableName: string }[];
+  totalDuration: number;
+}
+
+/**
+ * Run every node in a pipeline sequentially and return metrics for EVERY stage.
+ * nodes: ordered list, latest config per node is sourced from `node.config` (caller controls ordering).
+ */
+export async function runFullPipeline(
+  nodes: { id: string; type: string; config?: Record<string, string> }[],
+  prevTableFallback = 'raw_customers'
+): Promise<FullPipelineResult> {
+  let prevTable = prevTableFallback;
+  const executions: FullPipelineResult['executions'] = [];
+  const t0 = performance.now();
+  for (const n of nodes) {
+    const result = await runPipelineNode(n.type, prevTable, n.config);
+    executions.push({
+      nodeId: n.id,
+      nodeType: n.type,
+      metrics: result.metrics,
+      tableName: result.tableName,
+    });
+    prevTable = result.tableName;
+  }
+  return { executions, totalDuration: Math.round(performance.now() - t0) };
 }

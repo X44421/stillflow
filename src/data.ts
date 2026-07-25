@@ -1,4 +1,4 @@
-import { Dataset, PipelineNode, TransformObject } from './types';
+import { Dataset, PipelineNode, TransformObject, PipelineNodeConfig, NodeType } from './types';
 
 export const datasets: Dataset[] = [
   // Source
@@ -16,13 +16,44 @@ export const datasets: Dataset[] = [
   { id: '10', name: 'customer_report.csv', type: 'csv', category: 'output', size: '1.1M rows' },
 ];
 
-export const pipelineNodes: PipelineNode[] = [
-  { id: 'n1', type: 'source', name: 'raw_customers.csv', description: 'CSV File · 2.4M rows', rows: '2.4M rows', status: 'completed' },
-  { id: 'n2', type: 'filter', name: 'Filter', description: 'Keep valid customers', rows: '1.8M rows', status: 'completed' },
-  { id: 'n3', type: 'deduplicate', name: 'Deduplicate', description: 'Remove repeated records', rows: '1.2M rows', status: 'running' },
-  { id: 'n4', type: 'normalize', name: 'Normalize Text', description: 'Standardize name & email', rows: '1.2M rows', status: 'pending' },
-  { id: 'n5', type: 'export', name: 'Export CSV', description: 'Write cleaned data', rows: '1.2M rows', status: 'pending' },
+export const defaultConfig: PipelineNodeConfig = {
+  column: 'customer_id',
+  strategy: 'Keep first',
+  scope: 'Current dataset',
+  nullHandling: 'Ignore',
+};
+
+export const initialPipelineNodes: PipelineNode[] = [
+  { id: 'n1', type: 'source', name: 'raw_customers.csv', description: 'CSV File · 2.4M rows', rows: '2.4M rows', status: 'completed', config: { ...defaultConfig } },
+  { id: 'n2', type: 'filter', name: 'Filter', description: 'Keep valid customers', rows: '1.8M rows', status: 'completed', config: { ...defaultConfig, column: 'status' } },
+  { id: 'n3', type: 'deduplicate', name: 'Deduplicate', description: 'Remove repeated records', rows: '1.2M rows', status: 'running', config: { ...defaultConfig } },
+  { id: 'n4', type: 'normalize', name: 'Normalize Text', description: 'Standardize name & email', rows: '1.2M rows', status: 'pending', config: { ...defaultConfig } },
+  { id: 'n5', type: 'export', name: 'Export CSV', description: 'Write cleaned data', rows: '1.2M rows', status: 'pending', config: { ...defaultConfig } },
 ];
+
+export const transformToNodeType: Record<string, NodeType> = {
+  file: 'source',
+  filter: 'filter',
+  copy: 'deduplicate',
+  type: 'normalize',
+  upload: 'export',
+};
+
+export const nodeDefaultName: Record<string, string> = {
+  source: 'CSV Source',
+  filter: 'Filter',
+  deduplicate: 'Deduplicate',
+  normalize: 'Normalize Text',
+  export: 'Export CSV',
+};
+
+export const nodeDefaultDescription: Record<NodeType, string> = {
+  source: 'Import data',
+  filter: 'Keep matched rows',
+  deduplicate: 'Remove repeated records',
+  normalize: 'Standardize string values',
+  export: 'Write cleaned data',
+};
 
 export const transformObjects: TransformObject[] = [
   { id: 't1', name: 'CSV File', description: 'Import local CSV file', category: 'source', icon: 'file-text' },

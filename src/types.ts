@@ -7,13 +7,35 @@ export interface Dataset {
   icon?: string;
 }
 
+export type NodeType = 'source' | 'filter' | 'deduplicate' | 'normalize' | 'export';
+
+export interface PipelineNodeConfig {
+  column: string;
+  strategy: string;
+  scope: string;
+  nullHandling: string;
+}
+
+export interface PipelineMetrics {
+  rowsIn: number;
+  rowsOut: number;
+  duplicates: number;
+  missing: number;
+  nullColumns: number;
+  qualityScore: number;
+  duration: number;
+  memory: number;
+}
+
 export interface PipelineNode {
   id: string;
-  type: 'source' | 'filter' | 'deduplicate' | 'normalize' | 'export';
+  type: NodeType;
   name: string;
   description: string;
   rows: string;
   status: 'completed' | 'running' | 'pending';
+  metrics?: PipelineMetrics;
+  config: PipelineNodeConfig;
 }
 
 export interface TransformObject {
