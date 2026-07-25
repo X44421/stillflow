@@ -152,6 +152,7 @@ const App: React.FC = () => {
           selectedNode={selectedNode}
           onSelectNode={handleSelectNode}
           onAddNode={handleAddNode}
+          onDeleteNode={handleDeleteNode}
         />
         {showDetail && selected && (
           <DetailPanel

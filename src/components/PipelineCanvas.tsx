@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Play,
@@ -26,6 +26,7 @@ interface PipelineCanvasProps {
   selectedNode: string;
   onSelectNode: (nodeId: string) => void;
   onAddNode: (node: PipelineNode) => void;
+  onDeleteNode: (nodeId: string) => void;
 }
 
 const NODE_ICON: Record<NodeType, React.ReactNode> = {
@@ -61,8 +62,22 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
   selectedNode,
   onSelectNode,
   onAddNode,
+  onDeleteNode,
 }) => {
   const [zoom, setZoom] = useState(100);
+  const [showPalette, setShowPalette] = useState(false);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNode) {
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
+        e.preventDefault();
+        onDeleteNode(selectedNode);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedNode, onDeleteNode]);
 
   const getStatusIcon = (status: 'completed' | 'running' | 'pending') => {
     switch (status) {
@@ -102,54 +117,55 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
         nullHandling: 'Ignore',
       },
     });
+    setShowPalette(false);
   };
 
   return (
     <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
-      {/* Toolbar */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
-        <button
-          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-700 transition-colors"
-          title="Add"
-          onClick={() =>
-            handlePaletteAdd({
-              name: 'New Transform',
-              description: 'Transform node',
-              icon: 'filter',
-            })
-          }
-        >
-          <Plus size={18} strokeWidth={1.5} />
-        </button>
-        <button
-          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
-          title="Layout"
-          onClick={() => setZoom(100)}
-        >
-          <Play size={18} strokeWidth={1.5} />
-        </button>
-        {[Sparkles, LayoutGrid, Settings, Maximize2, Undo2, Redo2].map((Icon, i) => (
+      {/* Toolbar - top-left, vertical */}
+      <div className="absolute top-4 left-4 z-20">
+        <div className="flex flex-col bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
           <button
-            key={i}
-            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-700 transition-colors"
+            title="Add node"
+            onClick={() => setShowPalette((p) => !p)}
           >
-            <Icon size={18} strokeWidth={1.5} />
+            <Plus size={18} strokeWidth={1.5} />
           </button>
-        ))}
-      </div>
-
-      {/* Canvas with pipeline and object palette side by side */}
-      <div
-        className="flex-1 flex items-start justify-center pt-20 pb-16 overflow-auto"
-        style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
-      >
-        {/* Object Palette */}
-        <div className="mt-4 mr-6 flex-shrink-0">
-          <ObjectPalette onAdd={handlePaletteAdd} />
+          <button
+            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+            title="Run pipeline"
+          >
+            <Play size={18} strokeWidth={1.5} />
+          </button>
+          <div className="w-full h-px bg-gray-100 my-0.5" />
+          {[Sparkles, LayoutGrid, Settings, Maximize2, Undo2, Redo2].map((Icon, i) => (
+            <button
+              key={i}
+              className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+            >
+              <Icon size={18} strokeWidth={1.5} />
+            </button>
+          ))}
         </div>
 
-        {/* Pipeline Nodes */}
-        <div className="flex flex-col items-center flex-shrink-0 mt-4">
+        {/* Palette popover - opens to the right of toolbar */}
+        {showPalette && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setShowPalette(false)} />
+            <div className="absolute top-0 left-full ml-3 z-20">
+              <ObjectPalette onAdd={handlePaletteAdd} />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Pipeline nodes - centered */}
+      <div
+        className="flex-1 flex items-center justify-center overflow-auto pt-24 pb-12"
+        style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center center' }}
+      >
+        <div className="flex flex-col items-center flex-shrink-0">
           {nodes.map((node, index) => (
             <React.Fragment key={node.id}>
               <div
@@ -183,8 +199,8 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
         </div>
       </div>
 
-      {/* Zoom Controls */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
+      {/* Zoom Controls - bottom-left */}
+      <div className="absolute bottom-4 left-4 z-10 flex items-center bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
         <button
           onClick={() => setZoom((z) => Math.max(40, z - 10))}
           className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"

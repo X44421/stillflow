@@ -81,24 +81,24 @@ const ObjectPalette: React.FC<ObjectPaletteProps> = ({ onAdd }) => {
   });
 
   return (
-    <div className="w-[220px] bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col max-h-[520px] overflow-hidden">
+    <div className="w-[280px] bg-white border border-gray-200 rounded-2xl shadow-xl flex flex-col max-h-[480px] overflow-hidden">
       <div className="p-3 pb-2">
-        <div className="relative mb-3">
+        <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="Search object"
+            placeholder="Search nodes…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full h-8 pl-8 pr-3 text-[13px] border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-gray-300 focus:outline-none transition-colors placeholder:text-gray-400"
           />
         </div>
-        <div className="flex gap-1 flex-wrap">
+        <div className="flex gap-1 mt-2.5 flex-wrap">
           {tabs.map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`text-[12px] font-medium px-2.5 py-1 rounded-full transition-all ${
+              className={`text-[11px] font-medium px-2.5 py-1 rounded-full transition-all ${
                 activeTab === tab.key
                   ? 'bg-gray-900 text-white'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -109,13 +109,13 @@ const ObjectPalette: React.FC<ObjectPaletteProps> = ({ onAdd }) => {
           ))}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-2 pb-2">
+      <div className="flex-1 overflow-y-auto px-1.5 pb-2 space-y-0.5">
         {filteredObjects.map(obj => (
           <div
             key={obj.id}
             onClick={() => onAdd?.(obj)}
-            className="flex items-center gap-2.5 px-2 py-2.5 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors group"
-            title={`Add ${obj.name} to pipeline`}
+            className="flex items-center gap-2.5 px-2.5 py-2.5 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors group"
+            title={`Add ${obj.name}`}
           >
             {iconMap[obj.icon] ?? (
               <div className="w-9 h-9 bg-gray-50 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -126,10 +126,7 @@ const ObjectPalette: React.FC<ObjectPaletteProps> = ({ onAdd }) => {
               <div className="text-[13px] font-medium text-gray-900">{obj.name}</div>
               <div className="text-[11px] text-gray-500">{obj.description}</div>
             </div>
-            <Plus
-              size={14}
-              className="opacity-0 group-hover:opacity-100 text-gray-400 transition-opacity mr-1"
-            />
+            <Plus size={14} className="opacity-0 group-hover:opacity-100 text-gray-400 transition-opacity mr-1 flex-shrink-0" />
           </div>
         ))}
       </div>
