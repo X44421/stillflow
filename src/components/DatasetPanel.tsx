@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, MoreHorizontal, ChevronDown, ChevronRight, FileText, Database, HardDrive } from 'lucide-react';
+import { Search, MoreHorizontal, ChevronDown, ChevronRight, FileText, Database, HardDrive } from '../icons/hero';
 import { datasets } from '../data';
 
 const typeIconMap: Record<string, React.ReactNode> = {

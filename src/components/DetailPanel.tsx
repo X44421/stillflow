@@ -8,7 +8,7 @@ import {
   Eye,
   Play,
   Clock,
-} from 'lucide-react';
+} from '../icons/hero';
 import { initDuckDB, loadSampleData, runPipelineNode, formatRows, type PipelineMetrics } from '../utils/duckdb';
 
 interface DetailPanelProps {

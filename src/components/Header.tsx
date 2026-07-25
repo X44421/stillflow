@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, HelpCircle, Bell, ChevronDown, Check, Play } from 'lucide-react';
+import { HelpCircle, Bell, ChevronDown, Check, Play, Search } from '../icons/hero';
 
 const Header: React.FC = () => {
   return (

@@ -17,7 +17,7 @@ import {
   Upload,
   CheckCircle2,
   Circle,
-} from 'lucide-react';
+} from '../icons/hero';
 import ObjectPalette from './ObjectPalette';
 
 interface PipelineCanvasProps {

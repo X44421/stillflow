@@ -9,7 +9,7 @@ import {
   Type,
   Upload,
   Sparkles,
-} from 'lucide-react';
+} from '../icons/hero';
 import { transformObjects } from '../data';
 
 const iconMap: Record<string, React.ReactNode> = {
