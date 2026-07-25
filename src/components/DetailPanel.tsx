@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   X,
   MoreHorizontal,
@@ -7,37 +7,32 @@ import {
   Type,
   Eye,
   Play,
-  Clock,
+  FileText,
+  Upload,
+  ChevronDown,
+  ChevronRight,
 } from '../icons/hero';
 import { formatRows } from '../utils/duckdb';
-import type { PipelineNode, NodeType, PipelineMetrics } from '../types';
+import type { NodeType, PipelineNode, WorkspaceEvent } from '../types';
 
 const TYPE_ICON: Record<NodeType, React.ReactNode> = {
-  deduplicate: <Copy size={20} />,
-  normalize: <Type size={20} />,
-  filter: <Filter size={20} />,
-  source: <Copy size={20} />,
-  export: <Copy size={20} />,
-};
-
-const TYPE_BG: Record<NodeType, string> = {
-  deduplicate: 'bg-violet-50 text-violet-600',
-  normalize: 'bg-orange-50 text-orange-600',
-  filter: 'bg-purple-50 text-purple-600',
-  source: 'bg-green-50 text-green-600',
-  export: 'bg-amber-50 text-amber-600',
+  source: <FileText size={16} />,
+  filter: <Filter size={16} />,
+  deduplicate: <Copy size={16} />,
+  normalize: <Type size={16} />,
+  export: <Upload size={16} />,
 };
 
 const TYPE_LABEL: Record<NodeType, string> = {
-  source: 'Source Node',
-  filter: 'Transform Node',
-  deduplicate: 'Process Node',
-  normalize: 'Transform Node',
-  export: 'Output Node',
+  source: 'Atomic · Source',
+  filter: 'Atomic · Transform',
+  deduplicate: 'Atomic · Transform',
+  normalize: 'Atomic · Transform',
+  export: 'Atomic · Output',
 };
 
 const CONFIG_OPTIONS: Record<string, string[]> = {
-  strategy: ['Keep first', 'Keep last', 'Merge records'],
+  strategy: ['Keep first', 'Keep last'],
   scope: ['Current dataset', 'Selected branch', 'Entire pipeline'],
   nullHandling: ['Ignore', 'Treat as duplicate', 'Remove null rows'],
 };
@@ -45,357 +40,338 @@ const CONFIG_OPTIONS: Record<string, string[]> = {
 interface DetailPanelProps {
   node: PipelineNode;
   nodes: PipelineNode[];
+  events: WorkspaceEvent[];
+  availableColumns?: string[];
   onClose: () => void;
   onRun: (nodeId: string) => void | Promise<void>;
+  onPreview: () => void;
   onUpdate: (nodeId: string, patch: Partial<PipelineNode>) => void;
+  onDuplicate: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
 }
 
 const DetailPanel: React.FC<DetailPanelProps> = ({
   node,
   nodes,
+  events,
+  availableColumns = [],
   onClose,
   onRun,
+  onPreview,
   onUpdate,
+  onDuplicate,
   onDelete,
 }) => {
-  // The currently-running status comes from `node` (App-owned).
   const running = node.status === 'running';
-  const [disabledLocal, setDisabledLocal] = useState(false);
+  const disabled = node.status === 'disabled';
   const [editing, setEditing] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showInsight, setShowInsight] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
   const [editConfig, setEditConfig] = useState({ ...node.config });
+  const toastTimer = useRef<number | undefined>(undefined);
+
   useEffect(() => {
     setEditConfig({ ...node.config });
+    setEditing(false);
   }, [node.id, node.config]);
 
-  const toastTimer = useRef<number | undefined>(undefined);
   const showToast = useCallback((message: string) => {
     setToast(message);
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 1600);
   }, []);
+
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
-  // Determine Input / Output context from the nodes list, relative to the selected
-  const idx = nodes.findIndex((n) => n.id === node.id);
-  const prevNode = idx > 0 ? nodes[idx - 1] : null;
-  const nextNode = idx >= 0 && idx < nodes.length - 1 ? nodes[idx + 1] : null;
-
-  // Loaded metrics are whatever the App recorded for this node.
-  const metrics: PipelineMetrics = node.metrics ?? {
-    rowsIn: 0,
-    rowsOut: parseFloat((node.rows || '').replace(/[A-Za-z]/g, '')) || 0,
-    duplicates: 0,
-    missing: 0,
-    nullColumns: 0,
-    qualityScore: 0,
-    duration: 0,
-    memory: 0,
-  };
-
-  const hasRun = Boolean(node.metrics);
+  const index = nodes.findIndex((item) => item.id === node.id);
+  const previousNode = index > 0 ? nodes[index - 1] : null;
+  const nextNode = index >= 0 && index < nodes.length - 1 ? nodes[index + 1] : null;
+  const objectEvents = events.filter((event) => event.objectId === node.id).slice(0, 3);
+  const metrics = node.metrics;
 
   const handleRun = async () => {
-    if (running) return;
-    if (disabledLocal) {
-      showToast('Enable the node before running');
-      return;
-    }
+    if (running || disabled) return;
     await onRun(node.id);
-    showToast('Run finished');
-  };
-
-  const handleDisable = () => {
-    const next = !disabledLocal;
-    setDisabledLocal(next);
-    showToast(next ? 'Node disabled' : 'Node enabled');
   };
 
   const handleEdit = () => {
     if (editing) {
-      onUpdate(node.id, { config: { ...editConfig } });
+      if (availableColumns.length > 0 && !availableColumns.includes(editConfig.column)) {
+        showToast('Choose an available column');
+        return;
+      }
+      onUpdate(node.id, { config: { ...editConfig }, status: 'pending', error: undefined });
       showToast('Configuration saved');
     }
-    setEditing((e) => !e);
+    setEditing((value) => !value);
   };
 
-  const handleMenuAction = (item: { label: string; delete?: boolean }) => {
-    setShowMenu(false);
-    if (item.delete) {
-      onDelete(node.id);
-      showToast('Node deleted');
-      return;
-    }
-    showToast(item.label);
+  const handleToggleDisabled = () => {
+    onUpdate(node.id, {
+      status: disabled ? 'pending' : 'disabled',
+      error: undefined,
+    });
+    showToast(disabled ? 'Object enabled' : 'Object disabled');
   };
 
-  // Progress driven by App's node status — for visual continuity show 0% when pending,
-  // 100% when completed, indeterminate-ish for running.
-  const progressPct = node.status === 'completed' ? 100 : node.status === 'running' ? 67 : 0;
-
-  const rowsOutDisplay = formatRows(metrics.rowsOut);
+  const statusLabel =
+    node.status === 'completed'
+      ? 'Ready'
+      : node.status === 'running'
+        ? 'Running'
+        : node.status === 'failed'
+          ? 'Failed'
+          : node.status === 'disabled'
+            ? 'Disabled'
+            : 'Configured';
 
   return (
-    <div className="w-[356px] bg-white border-l border-gray-200 flex flex-col flex-shrink-0 overflow-hidden relative shadow-[-12px_0_32px_rgba(16,24,40,0.05)]">
-      <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d9dadd transparent' }}>
-        {/* Header */}
-        <div className="p-4 pb-3 border-b border-gray-100">
-          <div className="flex items-start justify-between mb-1">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${TYPE_BG[node.type]}`}>
-                {TYPE_ICON[node.type]}
-              </div>
-              <div>
-                <h3 className="text-[15px] font-semibold text-gray-900">{node.name}</h3>
-                <p className="text-[12px] text-gray-500">{TYPE_LABEL[node.type]}</p>
-              </div>
+    <aside className="inspector-panel w-[360px] bg-white border-l border-gray-200 flex flex-col flex-shrink-0 overflow-hidden relative">
+      <div className="flex-1 overflow-y-auto">
+        <header className="p-4 border-b border-gray-200">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 grid place-items-center rounded border border-gray-200 text-gray-600">
+              {TYPE_ICON[node.type]}
             </div>
-            <div className="flex items-center gap-0.5">
-              <button onClick={() => setShowMenu((m) => !m)} className="p-1.5 hover:bg-gray-100 rounded-md transition-colors" aria-label="More actions">
-                <MoreHorizontal size={16} className="text-gray-500" />
-              </button>
-              <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-md transition-colors" aria-label="Close Inspector">
-                <X size={16} className="text-gray-500" />
-              </button>
+            <div className="min-w-0 flex-1">
+              <h3 className="truncate text-[14px] font-semibold text-gray-900">{node.name}</h3>
+              <p className="text-[10px] uppercase text-gray-400">{TYPE_LABEL[node.type]}</p>
             </div>
-          </div>
-          <div className="flex items-center gap-3 mt-3">
-            <span
-              className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
-                node.status === 'completed'
-                  ? 'text-green-700 bg-green-50'
-                  : node.status === 'running'
-                  ? 'text-white bg-gray-900'
-                  : 'text-gray-600 bg-gray-100'
-              }`}
+            <button
+              onClick={() => setShowMenu((visible) => !visible)}
+              className="w-7 h-7 grid place-items-center rounded hover:bg-gray-100"
+              aria-label="More actions"
             >
-              {node.status === 'completed' ? (
-                <span className="w-1.5 h-1.5 bg-green-600 rounded-full" />
-              ) : node.status === 'running' ? (
-                <span className="w-1.5 h-1.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-              ) : (
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
-              )}
-              {node.status === 'completed' ? 'Completed' : node.status === 'running' ? 'Running' : 'Pending'}
+              <MoreHorizontal size={15} />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-7 h-7 grid place-items-center rounded hover:bg-gray-100"
+              aria-label="Close Inspector"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-1 rounded border border-gray-200 text-gray-700">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  node.status === 'failed'
+                    ? 'bg-gray-900'
+                    : node.status === 'running'
+                      ? 'bg-gray-700 animate-pulse-dot'
+                      : 'bg-gray-400'
+                }`}
+              />
+              {statusLabel}
             </span>
-            <span className="text-[11px] text-gray-400 flex items-center gap-1">
-              <Clock size={12} />
-              {hasRun ? 'Updated just now' : 'Not run yet'}
-            </span>
+            <span className="text-[10px] text-gray-400">Object ID · {node.id}</span>
           </div>
-        </div>
+          {node.error && (
+            <div className="mt-3 px-2.5 py-2 border border-gray-300 bg-gray-50 rounded text-[11px] leading-4 text-gray-800">
+              {node.error}
+            </div>
+          )}
+        </header>
 
-        {/* Context */}
-        <div className="p-4 border-b border-gray-100">
-          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Context</h4>
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-500">Input</span>
-              <span className="text-[13px] font-medium text-gray-900">
-                {prevNode ? prevNode.name : '—'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-500">Output</span>
-              <span className="text-[13px] font-medium text-gray-900">
-                {nextNode ? nextNode.name : '—'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-500">Relation</span>
-              <span className="inline-flex items-center min-h-[22px] px-[9px] bg-gray-100 rounded-full text-[11px] font-medium text-gray-900">
-                transforms
-              </span>
-            </div>
-          </div>
-        </div>
+        <section className="p-4 border-b border-gray-200">
+          <h4 className="section-label">Context</h4>
+          <dl className="inspector-list">
+            <div><dt>Mission</dt><dd>Customer Data Cleaning</dd></div>
+            <div><dt>Consumes</dt><dd>{previousNode?.name ?? 'Workspace source'}</dd></div>
+            <div><dt>Produces</dt><dd>{nextNode?.name ?? 'Published output'}</dd></div>
+            <div><dt>Relationship</dt><dd>{node.type === 'export' ? 'publishes' : 'transforms'}</dd></div>
+          </dl>
+        </section>
 
-        {/* Runtime */}
-        <div className="p-4 border-b border-gray-100">
-          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Runtime</h4>
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-500">Rows</span>
-              <span className="text-[13px] font-medium text-gray-900">
-                {hasRun ? `${formatRows(metrics.rowsIn)} / ${formatRows(metrics.rowsOut)}` : '—'}
-              </span>
+        <section className="p-4 border-b border-gray-200">
+          <h4 className="section-label">Runtime</h4>
+          <dl className="inspector-list">
+            <div>
+              <dt>Rows</dt>
+              <dd>{metrics ? `${formatRows(metrics.rowsIn)} → ${formatRows(metrics.rowsOut)}` : 'Not run'}</dd>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-500">Duration</span>
-              <span className="text-[13px] font-medium text-gray-900">
-                {hasRun ? (metrics.duration < 1000 ? `${metrics.duration}ms` : `${(metrics.duration / 1000).toFixed(1)}s`) : '—'}
-              </span>
+            <div>
+              <dt>Quality</dt>
+              <dd>{metrics ? `${metrics.qualityScore}/100` : 'Not measured'}</dd>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-500">Memory</span>
-              <span className="text-[13px] font-medium text-gray-900">
-                {hasRun ? `${metrics.memory} MB` : '—'}
-              </span>
+            <div>
+              <dt>Duration</dt>
+              <dd>{metrics ? `${metrics.duration} ms` : '—'}</dd>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-gray-500">Mode</span>
-              <span className="text-[13px] font-medium text-gray-900">Incremental</span>
+            <div>
+              <dt>Memory</dt>
+              <dd>{metrics ? `${metrics.memory} MB` : '—'}</dd>
             </div>
-          </div>
-          <div className="mt-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gray-900 rounded-full transition-[width] duration-150 ease-out"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <span className="text-[11px] text-gray-500 ml-2 font-medium">{progressPct}%</span>
-            </div>
-          </div>
-        </div>
+          </dl>
+        </section>
 
-        {/* Metrics */}
-        <div className="p-4 border-b border-gray-100">
-          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Metrics</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-xl p-3">
-              <div className="text-[11px] text-gray-500 mb-1">Rows</div>
-              <div className="text-lg font-bold text-gray-900">{hasRun ? rowsOutDisplay : '—'}</div>
-              <div className="text-[11px] text-gray-400">output rows</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 relative">
-              <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
-              <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.duplicates}%` : '—'}</div>
-              {hasRun && metrics.duplicates > 0 && (
-                <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
-              )}
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3">
-              <div className="text-[11px] text-gray-500 mb-1">Missing</div>
-              <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.missing}%` : '—'}</div>
-              <div className="text-[11px] text-gray-400">across columns</div>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3">
-              <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
-              <div className="text-lg font-bold text-gray-900">{hasRun ? metrics.qualityScore : '—'}</div>
-              {hasRun && (
-                <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-                  {metrics.qualityScore >= 80 ? 'Good' : metrics.qualityScore >= 60 ? 'Fair' : 'Poor'}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="p-4 border-b border-gray-100">
-          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Actions</h4>
-          <button
-            onClick={handleRun}
-            disabled={running}
-            className="w-full bg-gray-900 text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-800 transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
-          >
-            <Play size={14} fill="white" />
-            <span>{running ? 'Running…' : 'Run From Here'}</span>
-          </button>
+        <section className="p-4 border-b border-gray-200">
+          <h4 className="section-label">Actions</h4>
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => showToast('Result preview opened')}
-              className="flex items-center justify-center gap-1.5 text-[12px] font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 py-2 rounded-lg transition-colors"
+              onClick={handleRun}
+              disabled={running || disabled}
+              className="h-8 col-span-2 bg-gray-900 text-white text-[11px] font-medium rounded flex items-center justify-center gap-1.5 hover:bg-black disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              <Eye size={13} />
-              Preview Result
+              <Play size={12} />
+              {running ? 'Running' : 'Run from here'}
             </button>
             <button
-              onClick={handleDisable}
-              className={`flex items-center justify-center gap-1.5 text-[12px] font-medium py-2 rounded-lg transition-colors ${
-                disabledLocal ? 'bg-gray-900 text-white hover:bg-gray-800' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
-              }`}
+              onClick={onPreview}
+              disabled={!metrics}
+              className="h-8 border border-gray-200 text-[11px] font-medium text-gray-700 rounded flex items-center justify-center gap-1.5 hover:bg-gray-50 disabled:text-gray-300"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="6" y="4" width="12" height="16" rx="2" />
-                <path d="M10 8h4m-4 4h4m-4 4h4" />
-              </svg>
-              <span>{disabledLocal ? 'Enable' : 'Disable'}</span>
+              <Eye size={13} />
+              Preview
+            </button>
+            <button
+              onClick={handleToggleDisabled}
+              disabled={node.type === 'source'}
+              className="h-8 border border-gray-200 text-[11px] font-medium text-gray-700 rounded hover:bg-gray-50 disabled:text-gray-300 disabled:hover:bg-white"
+            >
+              {disabled ? 'Enable' : 'Disable'}
             </button>
           </div>
-        </div>
+        </section>
 
-        {/* Configuration */}
-        <div className="p-4">
+        <section className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider">Configuration</h4>
-            <button onClick={handleEdit} className="text-[12px] text-gray-900 font-medium hover:text-gray-700 transition-colors">
+            <h4 className="section-label mb-0">Configuration</h4>
+            <button onClick={handleEdit} className="text-[10px] font-semibold text-gray-700 hover:text-black">
               {editing ? 'Save' : 'Edit'}
             </button>
           </div>
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {(['column', 'strategy', 'scope', 'nullHandling'] as const).map((field) => (
-              <div key={field} className="flex items-center justify-between min-h-[28px]">
-                <span className="text-[13px] text-gray-500">
-                  {field === 'nullHandling' ? 'Null Handling' : field.charAt(0).toUpperCase() + field.slice(1)}
+              <div key={field} className="min-h-7 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-gray-500">
+                  {field === 'nullHandling'
+                    ? 'Null handling'
+                    : field.charAt(0).toUpperCase() + field.slice(1)}
                 </span>
                 {editing ? (
-                  field === 'column' ? (
-                    <input
-                      className="text-[13px] font-medium text-gray-900 text-right bg-transparent border border-gray-300 rounded-md px-2 py-0.5 w-36 outline-none focus:border-gray-400"
+                  field === 'column' && availableColumns.length > 0 ? (
+                    <select
+                      className="w-40 h-7 px-2 rounded border border-gray-300 text-[11px] outline-none focus:border-gray-500"
                       value={editConfig[field]}
-                      onChange={(e) => setEditConfig((c) => ({ ...c, [field]: e.target.value }))}
+                      onChange={(event) =>
+                        setEditConfig((current) => ({ ...current, [field]: event.target.value }))
+                      }
+                    >
+                      {availableColumns.map((column) => (
+                        <option key={column}>{column}</option>
+                      ))}
+                    </select>
+                  ) : field === 'column' ? (
+                    <input
+                      className="w-40 h-7 px-2 rounded border border-gray-300 text-right text-[11px] outline-none focus:border-gray-500"
+                      value={editConfig[field]}
+                      onChange={(event) =>
+                        setEditConfig((current) => ({ ...current, [field]: event.target.value }))
+                      }
                     />
                   ) : (
                     <select
-                      className="text-[13px] font-medium text-gray-900 text-right bg-transparent border border-gray-300 rounded-md px-2 py-0.5 w-36 outline-none focus:border-gray-400"
+                      className="w-40 h-7 px-2 rounded border border-gray-300 text-[11px] outline-none focus:border-gray-500"
                       value={editConfig[field]}
-                      onChange={(e) => setEditConfig((c) => ({ ...c, [field]: e.target.value }))}
+                      onChange={(event) =>
+                        setEditConfig((current) => ({ ...current, [field]: event.target.value }))
+                      }
                     >
-                      {CONFIG_OPTIONS[field].map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
+                      {CONFIG_OPTIONS[field].map((option) => (
+                        <option key={option}>{option}</option>
                       ))}
                     </select>
                   )
                 ) : (
-                  <span className="text-[13px] font-medium text-gray-900">{node.config[field]}</span>
+                  <span className="max-w-44 truncate text-right text-[11px] font-medium text-gray-800">
+                    {node.config[field]}
+                  </span>
                 )}
               </div>
             ))}
           </div>
-        </div>
+        </section>
+
+        <section className="border-b border-gray-200">
+          <button
+            onClick={() => setShowInsight((visible) => !visible)}
+            className="w-full h-10 px-4 flex items-center justify-between hover:bg-gray-50"
+          >
+            <span className="section-label mb-0">AI Insight</span>
+            {showInsight ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
+          {showInsight && (
+            <div className="px-4 pb-4 text-[11px] leading-5 text-gray-600">
+              {metrics
+                ? metrics.qualityScore < 90
+                  ? `Review ${metrics.nullColumns} missing values before publishing. This is a suggestion; execution remains deterministic.`
+                  : 'The current output is structurally consistent. Validate the business rules before publishing.'
+                : 'Run this object to generate a context-aware suggestion.'}
+            </div>
+          )}
+        </section>
+
+        <section className="p-4">
+          <h4 className="section-label">Recent Events</h4>
+          {objectEvents.length === 0 ? (
+            <div className="text-[11px] text-gray-400">No events for this object.</div>
+          ) : (
+            <div>
+              {objectEvents.map((event) => (
+                <div key={event.id} className="py-2 border-b border-gray-100 last:border-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-gray-700">{event.action}</span>
+                    <span className="text-[10px] text-gray-400">{event.timestamp}</span>
+                  </div>
+                  <div className="mt-0.5 truncate text-[10px] text-gray-500">{event.detail}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
 
-      {/* More Menu */}
       {showMenu && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setShowMenu(false)} />
-          <div className="absolute top-14 right-4 w-[156px] p-[6px] border border-gray-200 rounded-lg bg-white shadow-xl z-30">
-            {[
-              { label: 'Duplicate node' },
-              { label: 'Copy node' },
-              { label: 'Delete node', delete: true },
-            ].map((item) => (
-              <button
-                key={item.label}
-                onClick={() => handleMenuAction(item)}
-                className={`w-full h-[34px] px-[9px] border-0 rounded-md bg-transparent text-left text-[11.5px] cursor-pointer hover:bg-gray-100 ${item.delete ? 'text-red-600' : ''}`}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="absolute top-12 right-4 z-30 w-36 p-1 border border-gray-200 rounded bg-white">
+            <button
+              onClick={() => {
+                setShowMenu(false);
+                onDuplicate(node.id);
+              }}
+              className="w-full h-8 px-2 rounded text-left text-[11px] hover:bg-gray-100"
+            >
+              Duplicate object
+            </button>
+            <button
+              onClick={() => {
+                setShowMenu(false);
+                onDelete(node.id);
+              }}
+              disabled={node.type === 'source'}
+              className="w-full h-8 px-2 rounded text-left text-[11px] hover:bg-gray-100 disabled:text-gray-300 disabled:hover:bg-white"
+            >
+              Delete object
+            </button>
           </div>
         </>
       )}
 
-      {/* Toast */}
       <div
-        className={`fixed left-1/2 bottom-6 z-[100] px-[13px] py-[10px] rounded-lg bg-gray-900 text-white shadow-xl text-[12px] pointer-events-none transition-all duration-150 ease-out ${
-          toast ? 'opacity-100' : 'opacity-0 translate-y-4'
+        className={`fixed left-1/2 bottom-6 z-[100] px-3 py-2 rounded bg-gray-900 text-white text-[11px] pointer-events-none transition-all ${
+          toast ? 'opacity-100' : 'opacity-0 translate-y-3'
         }`}
-        style={{ transform: toast ? 'translateX(-50%)' : 'translateX(-50%) translateY(16px)' }}
+        style={{ transform: toast ? 'translateX(-50%)' : 'translateX(-50%) translateY(12px)' }}
         role="status"
         aria-live="polite"
       >
         {toast}
       </div>
-    </div>
+    </aside>
   );
 };
 
