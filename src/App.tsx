@@ -142,9 +142,8 @@ const App: React.FC = () => {
       <div className="flex flex-1 overflow-hidden">
         <IconSidebar activeIcon={activeIcon} onIconClick={setActiveIcon} />
         <DatasetPanel
-          onSelectDataset={(name) => {
-            // Set first source node's "rows" to reflect chosen dataset (demo wiring)
-            handleUpdateNode('n1', { description: name, rows: '' });
+          onSelectDataset={(dataset) => {
+            handleUpdateNode('n1', { description: typeof dataset === 'string' ? dataset : dataset.name, rows: '' });
           }}
         />
         <PipelineCanvas
