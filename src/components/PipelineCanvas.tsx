@@ -19,7 +19,7 @@ import {
   Circle,
 } from '../icons/hero';
 import ObjectPalette from './ObjectPalette';
-import type { PipelineNode, NodeType } from '../types';
+import type { PipelineNode, NodeType, NodeStatus } from '../types';
 
 interface PipelineCanvasProps {
   nodes: PipelineNode[];
@@ -62,6 +62,8 @@ const NODE_ICON: Record<NodeType, React.ReactNode> = {
 const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
   nodes,
   selectedNode,
+  running = false,
+  onRunAll,
   onSelectNode,
   onAddNode,
   onDeleteNode,
@@ -81,12 +83,14 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, [selectedNode, onDeleteNode]);
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status: NodeStatus) => {
     switch (status) {
       case 'completed':
         return <CheckCircle2 size={18} className="text-green-500" />;
       case 'running':
         return <div className="w-4 h-4 bg-gray-900 rounded-full animate-pulse-dot" />;
+      case 'failed':
+      case 'disabled':
       case 'pending':
         return <Circle size={18} className="text-gray-300" />;
     }
@@ -137,6 +141,8 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
           <button
             className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
             title="Run pipeline"
+            onClick={onRunAll}
+            disabled={running}
           >
             <Play size={18} strokeWidth={1.5} />
           </button>

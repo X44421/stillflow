@@ -51,8 +51,8 @@ interface DetailPanelProps {
   onRun: (nodeId: string) => void | Promise<void>;
   onPreview?: () => void;
   onUpdate: (nodeId: string, patch: Partial<PipelineNode>) => void;
-  onDuplicate?: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
+  onDuplicate: (nodeId: string) => void;
 }
 
 const DetailPanel: React.FC<DetailPanelProps> = ({
@@ -62,10 +62,11 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   onRun,
   onUpdate,
   onDelete,
+  onDuplicate,
 }) => {
   // The currently-running status comes from `node` (App-owned).
   const running = node.status === 'running';
-  const [disabledLocal, setDisabledLocal] = useState(false);
+  const disabled = node.status === 'disabled';
   const [editing, setEditing] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -104,7 +105,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
   const handleRun = async () => {
     if (running) return;
-    if (disabledLocal) {
+    if (disabled) {
       showToast('Enable the node before running');
       return;
     }
@@ -113,9 +114,16 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   };
 
   const handleDisable = () => {
-    const next = !disabledLocal;
-    setDisabledLocal(next);
-    showToast(next ? 'Node disabled' : 'Node enabled');
+    if (node.type === 'source') {
+      showToast('Source node is required');
+      return;
+    }
+    onUpdate(node.id, {
+      status: disabled ? 'pending' : 'disabled',
+      metrics: undefined,
+      error: undefined,
+    });
+    showToast(disabled ? 'Node enabled' : 'Node disabled');
   };
 
   const handleEdit = () => {
@@ -132,6 +140,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       onDelete(node.id);
       showToast('Node deleted');
       return;
+    }
+    if (item.label === 'Duplicate node') {
+      onDuplicate(node.id);
+      showToast('Node duplicated');
+      return;
+    }
+    if (item.label === 'Copy node') {
+      void navigator.clipboard?.writeText(node.name);
     }
     showToast(item.label);
   };
@@ -183,7 +199,15 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               ) : (
                 <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
               )}
-              {node.status === 'completed' ? 'Completed' : node.status === 'running' ? 'Running' : 'Pending'}
+              {node.status === 'completed'
+                ? 'Completed'
+                : node.status === 'running'
+                  ? 'Running'
+                  : node.status === 'disabled'
+                    ? 'Disabled'
+                    : node.status === 'failed'
+                      ? 'Failed'
+                      : 'Pending'}
             </span>
             <span className="text-[11px] text-gray-400 flex items-center gap-1">
               <Clock size={12} />
@@ -296,7 +320,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Actions</h4>
           <button
             onClick={handleRun}
-            disabled={running}
+            disabled={running || disabled}
             className="w-full bg-gray-900 text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-800 transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
           >
             <Play size={14} fill="white" />
@@ -313,14 +337,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <button
               onClick={handleDisable}
               className={`flex items-center justify-center gap-1.5 text-[12px] font-medium py-2 rounded-lg transition-colors ${
-                disabledLocal ? 'bg-gray-900 text-white hover:bg-gray-800' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+                disabled ? 'bg-gray-900 text-white hover:bg-gray-800' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
               }`}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="6" y="4" width="12" height="16" rx="2" />
                 <path d="M10 8h4m-4 4h4m-4 4h4" />
               </svg>
-              <span>{disabledLocal ? 'Enable' : 'Disable'}</span>
+              <span>{disabled ? 'Enable' : 'Disable'}</span>
             </button>
           </div>
         </div>

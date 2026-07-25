@@ -3,6 +3,7 @@ import { CUSTOMERS_CSV } from './sample-customers';
 
 let db: AsyncDuckDB | null = null;
 let conn: AsyncDuckDBConnection | null = null;
+let stageSequence = 0;
 
 export interface PipelineMetrics {
   rowsIn: number;
@@ -33,8 +34,11 @@ export async function loadSampleData(): Promise<void> {
   const c = await initDuckDB();
   const blob = new Blob([CUSTOMERS_CSV], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
-  await c.query(`CREATE TABLE raw_customers AS SELECT * FROM read_csv_auto('${url}')`);
-  URL.revokeObjectURL(url);
+  try {
+    await c.query(`CREATE OR REPLACE TABLE raw_customers AS SELECT * FROM read_csv_auto('${url}')`);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export interface NodeExecution {
@@ -52,7 +56,7 @@ export async function runPipelineNode(
   const c = await initDuckDB();
   const startTime = performance.now();
 
-  const tableName = `stg_${nodeType}_${Date.now()}`;
+  const tableName = `stg_${nodeType}_${Date.now()}_${++stageSequence}`;
   let sql = '';
 
   switch (nodeType) {
@@ -179,12 +183,17 @@ export interface FullPipelineResult {
  */
 export async function runFullPipeline(
   nodes: { id: string; type: string; config?: Record<string, string> }[],
-  prevTableFallback = 'raw_customers'
+  prevTableFallback = 'raw_customers',
+  options?: {
+    onStageStart?: (nodeId: string, index: number) => void;
+    onStageComplete?: (nodeId: string, index: number, metrics: PipelineMetrics) => void;
+  }
 ): Promise<FullPipelineResult> {
   let prevTable = prevTableFallback;
   const executions: FullPipelineResult['executions'] = [];
   const t0 = performance.now();
-  for (const n of nodes) {
+  for (const [index, n] of nodes.entries()) {
+    options?.onStageStart?.(n.id, index);
     const result = await runPipelineNode(n.type, prevTable, n.config);
     executions.push({
       nodeId: n.id,
@@ -192,6 +201,7 @@ export async function runFullPipeline(
       metrics: result.metrics,
       tableName: result.tableName,
     });
+    options?.onStageComplete?.(n.id, index, result.metrics);
     prevTable = result.tableName;
   }
   return { executions, totalDuration: Math.round(performance.now() - t0) };
