@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Search, MoreHorizontal, ChevronDown, ChevronRight, FileText, Database, HardDrive } from '../icons/hero';
 import type { Dataset } from '../types';
 import { datasets as fallbackDatasets } from '../data';
@@ -47,7 +47,13 @@ interface DatasetPanelProps {
   onImportCsv?: (file: File) => Promise<void>;
 }
 
-const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets, selectedId: _selectedId, importing: _importing, onSelectDataset, onImportCsv: _onImportCsv }) => {
+const DatasetPanel: React.FC<DatasetPanelProps> = ({
+  datasets: externalDatasets,
+  selectedId: controlledSelectedId,
+  importing = false,
+  onSelectDataset,
+  onImportCsv,
+}) => {
   const datasets = externalDatasets ?? fallbackDatasets;
   const [activeTab, setActiveTab] = useState<'all' | 'source' | 'interim' | 'output'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -56,7 +62,10 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets,
     interim: true,
     output: true,
   });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectedId =
+    controlledSelectedId === undefined ? localSelectedId : controlledSelectedId;
 
   const tabs = [
     { key: 'all' as const, label: 'All' },
@@ -79,7 +88,7 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets,
         d.size.toLowerCase().includes(q) ||
         d.type.toLowerCase().includes(q)
     );
-  }, [activeTab, searchQuery]);
+  }, [activeTab, datasets, searchQuery]);
 
   const sourceDatasets = filteredDatasets.filter(d => d.category === 'source');
   const interimDatasets = filteredDatasets.filter(d => d.category === 'interim');
@@ -110,7 +119,7 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets,
               <div
                 key={dataset.id}
                 onClick={() => {
-                  setSelectedId(dataset.id);
+                  setLocalSelectedId(dataset.id);
                   onSelectDataset?.(dataset);
                 }}
                 className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors mx-1 ${
@@ -145,11 +154,29 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets,
           <div className="flex items-center gap-1">
             <button
               className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-md transition-colors text-lg font-light"
-              title="Connect dataset"
-              onClick={() => setSearchQuery('')}
+              title={importing ? 'Importing CSV' : 'Import CSV'}
+              disabled={importing}
+              onClick={() => {
+                if (onImportCsv) {
+                  fileInputRef.current?.click();
+                } else {
+                  setSearchQuery('');
+                }
+              }}
             >
               +
             </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file && onImportCsv) void onImportCsv(file);
+              }}
+            />
             <button className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-md transition-colors" title="Grid view">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="1" y="1" width="5" height="5" rx="1" />

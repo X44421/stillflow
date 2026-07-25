@@ -60,6 +60,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   nodes,
   onClose,
   onRun,
+  onPreview,
   onUpdate,
   onDelete,
   onDuplicate,
@@ -328,7 +329,10 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           </button>
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => showToast('Result preview opened')}
+              onClick={() => {
+                onPreview?.();
+                showToast('Result preview opened');
+              }}
               className="flex items-center justify-center gap-1.5 text-[12px] font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 py-2 rounded-lg transition-colors"
             >
               <Eye size={13} />

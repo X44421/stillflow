@@ -4,9 +4,16 @@ import IconSidebar from './components/IconSidebar';
 import DatasetPanel from './components/DatasetPanel';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
-import { initialPipelineNodes } from './data';
-import type { PipelineNode } from './types';
+import { datasets as fallbackDatasets, initialPipelineNodes } from './data';
+import type { Dataset, PipelineNode } from './types';
 import { initDuckDB, loadSampleData, runFullPipeline, type PipelineMetrics } from './utils/duckdb';
+import {
+  getExportUrl,
+  importCsvDataset,
+  listBackendDatasets,
+  runBackendPipeline,
+  type BackendPipelineResult,
+} from './utils/api';
 
 function resetNodeRuntime(node: PipelineNode): PipelineNode {
   return {
@@ -18,14 +25,90 @@ function resetNodeRuntime(node: PipelineNode): PipelineNode {
   };
 }
 
+function findColumn(columns: string[], preferred: string[]): string {
+  for (const candidate of preferred) {
+    const match = columns.find(
+      (column) => column.toLowerCase() === candidate.toLowerCase()
+    );
+    if (match) return match;
+  }
+  return columns[0] ?? '';
+}
+
+function bindDatasetToNodes(nodes: PipelineNode[], dataset: Dataset): PipelineNode[] {
+  const columns = dataset.columns ?? [];
+  const identityColumn = findColumn(columns, ['customer_id', 'customerId', 'id']);
+  const filterColumn = findColumn(columns, ['status', identityColumn]);
+  const sourceRows =
+    dataset.rowCount === undefined
+      ? dataset.size.replace(/\s+rows$/i, '')
+      : String(dataset.rowCount);
+
+  return nodes.map((node) => {
+    const reset = resetNodeRuntime(node);
+    if (node.type === 'source') {
+      return {
+        ...reset,
+        name: dataset.name,
+        description: `${dataset.type.toUpperCase()} File · ${dataset.size}`,
+        rows: sourceRows,
+        status: 'completed',
+      };
+    }
+    if (columns.length === 0) return reset;
+
+    if (node.type === 'filter') {
+      return { ...reset, config: { ...reset.config, column: filterColumn } };
+    }
+    if (node.type === 'deduplicate' || node.type === 'normalize') {
+      return { ...reset, config: { ...reset.config, column: identityColumn } };
+    }
+    return reset;
+  });
+}
+
 const App: React.FC = () => {
   const [activeIcon, setActiveIcon] = useState(0);
   const [nodes, setNodes] = useState<PipelineNode[]>(initialPipelineNodes);
+  const [workspaceDatasets, setWorkspaceDatasets] =
+    useState<Dataset[]>(fallbackDatasets);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [latestOutputId, setLatestOutputId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState('n3');
   const [showDetail, setShowDetail] = useState(true);
   const [globalRunning, setGlobalRunning] = useState(false);
   const [globalProgress, setGlobalProgress] = useState(0);
   const [workspaceMessage, setWorkspaceMessage] = useState('Ready');
+  const activeDataset =
+    workspaceDatasets.find(
+      (dataset) =>
+        dataset.id === selectedDatasetId &&
+        dataset.category === 'source' &&
+        dataset.source === 'local'
+    ) ?? null;
+
+  useEffect(() => {
+    let active = true;
+    void listBackendDatasets()
+      .then((backendDatasets) => {
+        if (!active || backendDatasets.length === 0) return;
+        setWorkspaceDatasets((current) => [
+          ...backendDatasets,
+          ...current.filter(
+            (dataset) =>
+              dataset.source !== 'local' && dataset.source !== 'generated'
+          ),
+        ]);
+      })
+      .catch(() => {
+        // The static sample pipeline remains available when the backend is offline.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSelectNode = useCallback((nodeId: string) => {
     setSelectedNode(nodeId);
@@ -56,11 +139,17 @@ const App: React.FC = () => {
     []
   );
 
-  const invalidateFromIndex = useCallback((index: number) => {
-    setNodes((prev) =>
-      prev.map((node, nodeIndex) => (nodeIndex >= index ? resetNodeRuntime(node) : node))
-    );
-  }, []);
+  const applyBackendResult = useCallback(
+    (result: BackendPipelineResult) => {
+      applyNodeMetrics(result.executions);
+      setLatestOutputId(result.dataset.id);
+      setWorkspaceDatasets((current) => [
+        result.dataset,
+        ...current.filter((dataset) => dataset.id !== result.dataset.id),
+      ]);
+    },
+    [applyNodeMetrics]
+  );
 
   const executableNodes = useCallback((chain: PipelineNode[]) => {
     return chain.filter((node) => node.status !== 'disabled');
@@ -86,6 +175,58 @@ const App: React.FC = () => {
     return () => window.removeEventListener('opencode:search-nodes', handleSearch);
   }, [nodes]);
 
+  const handleImportCsv = useCallback(async (file: File) => {
+    setImporting(true);
+    setWorkspaceMessage('Importing CSV');
+    try {
+      const dataset = await importCsvDataset(file);
+      setWorkspaceDatasets((current) => [
+        dataset,
+        ...current.filter((item) => item.id !== dataset.id),
+      ]);
+      setSelectedDatasetId(dataset.id);
+      setLatestOutputId(null);
+      setNodes((current) => bindDatasetToNodes(current, dataset));
+      setWorkspaceMessage(`Imported ${dataset.rowCount ?? 0} rows`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Import failed';
+      setWorkspaceMessage(`Import failed: ${message}`);
+    } finally {
+      setImporting(false);
+    }
+  }, []);
+
+  const handleSelectDataset = useCallback((dataset: Dataset) => {
+    if (dataset.category === 'output' && dataset.source === 'generated') {
+      window.open(getExportUrl(dataset.id, false), '_blank', 'noopener,noreferrer');
+      setWorkspaceMessage('Opened cleaned output');
+      return;
+    }
+    if (dataset.category !== 'source') {
+      setSelectedDatasetId(dataset.id);
+      setWorkspaceMessage('Dataset selected');
+      return;
+    }
+
+    setSelectedDatasetId(dataset.id);
+    setLatestOutputId(null);
+    setNodes((current) => bindDatasetToNodes(current, dataset));
+    setWorkspaceMessage('Dataset selected');
+  }, []);
+
+  const handlePreviewResult = useCallback(() => {
+    if (!latestOutputId) {
+      setWorkspaceMessage('Run the pipeline to create a result');
+      return;
+    }
+    window.open(
+      getExportUrl(latestOutputId, false),
+      '_blank',
+      'noopener,noreferrer'
+    );
+    setWorkspaceMessage('Opened cleaned output');
+  }, [latestOutputId]);
+
   /** Header "Run All" runs every node, updating status + progress along the way. */
   const handleRunAll = useCallback(async () => {
     if (globalRunning) return;
@@ -108,58 +249,73 @@ const App: React.FC = () => {
     );
 
     try {
-      await initDuckDB();
-      setGlobalProgress(10);
-      await loadSampleData();
-      setGlobalProgress(25);
+      if (activeDataset) {
+        setGlobalProgress(20);
+        setNodes((prev) =>
+          prev.map((node) =>
+            node.id === executable[0].id
+              ? { ...node, status: 'running' as const, error: undefined }
+              : node
+          )
+        );
+        const result = await runBackendPipeline(activeDataset.id, executable);
+        setGlobalProgress(90);
+        applyBackendResult(result);
+        setWorkspaceMessage(`Cleaned ${result.dataset.rowCount ?? 0} rows`);
+      } else {
+        await initDuckDB();
+        setGlobalProgress(10);
+        await loadSampleData();
+        setGlobalProgress(25);
 
-      const result = await runFullPipeline(
-        executable.map((n) => ({
-          id: n.id,
-          type: n.type,
-          config: {
-            column: n.config.column,
-            strategy: n.config.strategy,
-            scope: n.config.scope,
-            nullHandling: n.config.nullHandling,
-          },
-        })),
-        'raw_customers',
-        {
-          onStageStart: (nodeId, index) => {
-            setGlobalProgress(25 + Math.round((index / executable.length) * 65));
-            setNodes((prev) =>
-              prev.map((node) =>
-                node.id === nodeId ? { ...node, status: 'running' as const, error: undefined } : node
-              )
-            );
-          },
-          onStageComplete: (nodeId, index, metrics) => {
-            setGlobalProgress(25 + Math.round(((index + 1) / executable.length) * 65));
-            setNodes((prev) =>
-              prev.map((node) =>
-                node.id === nodeId
-                  ? {
-                      ...node,
-                      status: 'completed' as const,
-                      rows: metrics.rowsOut > 0 ? String(metrics.rowsOut) : node.rows,
-                      metrics,
-                      error: undefined,
-                    }
-                  : node
-              )
-            );
-          },
-        }
-      );
+        const result = await runFullPipeline(
+          executable.map((n) => ({
+            id: n.id,
+            type: n.type,
+            config: {
+              column: n.config.column,
+              strategy: n.config.strategy,
+              scope: n.config.scope,
+              nullHandling: n.config.nullHandling,
+            },
+          })),
+          'raw_customers',
+          {
+            onStageStart: (nodeId, index) => {
+              setGlobalProgress(25 + Math.round((index / executable.length) * 65));
+              setNodes((prev) =>
+                prev.map((node) =>
+                  node.id === nodeId ? { ...node, status: 'running' as const, error: undefined } : node
+                )
+              );
+            },
+            onStageComplete: (nodeId, index, metrics) => {
+              setGlobalProgress(25 + Math.round(((index + 1) / executable.length) * 65));
+              setNodes((prev) =>
+                prev.map((node) =>
+                  node.id === nodeId
+                    ? {
+                        ...node,
+                        status: 'completed' as const,
+                        rows: metrics.rowsOut > 0 ? String(metrics.rowsOut) : node.rows,
+                        metrics,
+                        error: undefined,
+                      }
+                    : node
+                )
+              );
+            },
+          }
+        );
 
-      applyNodeMetrics(result.executions);
+        applyNodeMetrics(result.executions);
+        setWorkspaceMessage('Run completed');
+      }
       setGlobalProgress(100);
-      setWorkspaceMessage('Run completed');
     } catch (err) {
       console.error('Run All failed', err);
       const message = err instanceof Error ? err.message : 'Run failed';
-      setWorkspaceMessage('Run failed');
+      setWorkspaceMessage(`Run failed: ${message}`);
       setNodes((prev) =>
         prev.map((node) =>
           node.status === 'running' ? { ...node, status: 'failed' as const, error: message } : node
@@ -169,7 +325,14 @@ const App: React.FC = () => {
       setGlobalRunning(false);
       setTimeout(() => setGlobalProgress(0), 800);
     }
-  }, [applyNodeMetrics, executableNodes, globalRunning, nodes]);
+  }, [
+    activeDataset,
+    applyBackendResult,
+    applyNodeMetrics,
+    executableNodes,
+    globalRunning,
+    nodes,
+  ]);
 
   /** "Run From Here" in DetailPanel: runs node + every node upstream of it. */
   const handleRunFromHere = useCallback(
@@ -195,54 +358,69 @@ const App: React.FC = () => {
       );
 
       try {
-        await initDuckDB();
-        await loadSampleData();
-        const result = await runFullPipeline(
-          chain.map((n) => ({
-            id: n.id,
-            type: n.type,
-            config: {
-              column: n.config.column,
-              strategy: n.config.strategy,
-              scope: n.config.scope,
-              nullHandling: n.config.nullHandling,
-            },
-          })),
-          'raw_customers',
-          {
-            onStageStart: (stageNodeId, index) => {
-              setGlobalProgress(Math.round((index / chain.length) * 90));
-              setNodes((prev) =>
-                prev.map((node) =>
-                  node.id === stageNodeId ? { ...node, status: 'running' as const } : node
-                )
-              );
-            },
-            onStageComplete: (stageNodeId, index, metrics) => {
-              setGlobalProgress(Math.round(((index + 1) / chain.length) * 90));
-              setNodes((prev) =>
-                prev.map((node) =>
-                  node.id === stageNodeId
-                    ? {
-                        ...node,
-                        status: 'completed' as const,
-                        rows: metrics.rowsOut > 0 ? String(metrics.rowsOut) : node.rows,
-                        metrics,
-                        error: undefined,
-                      }
-                    : node
-                )
-              );
-            },
-          }
-        );
-        applyNodeMetrics(result.executions);
+        if (activeDataset) {
+          setGlobalProgress(20);
+          setNodes((prev) =>
+            prev.map((node) =>
+              node.id === chain[0].id
+                ? { ...node, status: 'running' as const, error: undefined }
+                : node
+            )
+          );
+          const result = await runBackendPipeline(activeDataset.id, chain);
+          setGlobalProgress(90);
+          applyBackendResult(result);
+          setWorkspaceMessage(`Cleaned ${result.dataset.rowCount ?? 0} rows`);
+        } else {
+          await initDuckDB();
+          await loadSampleData();
+          const result = await runFullPipeline(
+            chain.map((n) => ({
+              id: n.id,
+              type: n.type,
+              config: {
+                column: n.config.column,
+                strategy: n.config.strategy,
+                scope: n.config.scope,
+                nullHandling: n.config.nullHandling,
+              },
+            })),
+            'raw_customers',
+            {
+              onStageStart: (stageNodeId, index) => {
+                setGlobalProgress(Math.round((index / chain.length) * 90));
+                setNodes((prev) =>
+                  prev.map((node) =>
+                    node.id === stageNodeId ? { ...node, status: 'running' as const } : node
+                  )
+                );
+              },
+              onStageComplete: (stageNodeId, index, metrics) => {
+                setGlobalProgress(Math.round(((index + 1) / chain.length) * 90));
+                setNodes((prev) =>
+                  prev.map((node) =>
+                    node.id === stageNodeId
+                      ? {
+                          ...node,
+                          status: 'completed' as const,
+                          rows: metrics.rowsOut > 0 ? String(metrics.rowsOut) : node.rows,
+                          metrics,
+                          error: undefined,
+                        }
+                      : node
+                  )
+                );
+              },
+            }
+          );
+          applyNodeMetrics(result.executions);
+          setWorkspaceMessage('Run completed');
+        }
         setGlobalProgress(100);
-        setWorkspaceMessage('Run completed');
       } catch (err) {
         console.error('Run from here failed', err);
         const message = err instanceof Error ? err.message : 'Run failed';
-        setWorkspaceMessage('Run failed');
+        setWorkspaceMessage(`Run failed: ${message}`);
         setNodes((prev) =>
           prev.map((node) =>
             node.status === 'running' ? { ...node, status: 'failed' as const, error: message } : node
@@ -253,7 +431,13 @@ const App: React.FC = () => {
         setTimeout(() => setGlobalProgress(0), 800);
       }
     },
-    [applyNodeMetrics, executableNodes, nodes]
+    [
+      activeDataset,
+      applyBackendResult,
+      applyNodeMetrics,
+      executableNodes,
+      nodes,
+    ]
   );
 
   const handleUpdateNode = useCallback((nodeId: string, patch: Partial<PipelineNode>) => {
@@ -350,11 +534,11 @@ const App: React.FC = () => {
       <div className="flex flex-1 overflow-hidden">
         <IconSidebar activeIcon={activeIcon} onIconClick={setActiveIcon} />
         <DatasetPanel
-          onSelectDataset={(dataset) => {
-            const datasetName = typeof dataset === 'string' ? dataset : dataset.name;
-            handleUpdateNode('n1', { name: datasetName, description: 'Selected dataset', rows: '' });
-            invalidateFromIndex(0);
-          }}
+          datasets={workspaceDatasets}
+          selectedId={selectedDatasetId}
+          importing={importing}
+          onSelectDataset={handleSelectDataset}
+          onImportCsv={handleImportCsv}
         />
         <PipelineCanvas
           nodes={nodes}
@@ -373,6 +557,7 @@ const App: React.FC = () => {
             onDelete={handleDeleteNode}
             onDuplicate={handleDuplicateNode}
             onRun={handleRunFromHere}
+            onPreview={handlePreviewResult}
             onUpdate={handleUpdateNode}
           />
         )}

@@ -1,5 +1,7 @@
 node_modules
 dist
 *.local
+backend/data
+backend/target
 
 .codex/
