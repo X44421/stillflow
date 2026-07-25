@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Search, MoreHorizontal, ChevronDown, ChevronRight, FileText, Database, HardDrive } from '../icons/hero';
-import { datasets } from '../data';
+import type { Dataset } from '../types';
+import { datasets as fallbackDatasets } from '../data';
 
 const typeIconMap: Record<string, React.ReactNode> = {
   csv: (
@@ -39,10 +40,15 @@ const typeLabel: Record<string, string> = {
 };
 
 interface DatasetPanelProps {
-  onSelectDataset?: (name: string) => void;
+  datasets?: Dataset[];
+  selectedId?: string | null;
+  importing?: boolean;
+  onSelectDataset?: (dataset: Dataset) => void;
+  onImportCsv?: (file: File) => Promise<void>;
 }
 
-const DatasetPanel: React.FC<DatasetPanelProps> = ({ onSelectDataset }) => {
+const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets, selectedId: _selectedId, importing: _importing, onSelectDataset, onImportCsv: _onImportCsv }) => {
+  const datasets = externalDatasets ?? fallbackDatasets;
   const [activeTab, setActiveTab] = useState<'all' | 'source' | 'interim' | 'output'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSections, setExpandedSections] = useState({
@@ -105,7 +111,7 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({ onSelectDataset }) => {
                 key={dataset.id}
                 onClick={() => {
                   setSelectedId(dataset.id);
-                  onSelectDataset?.(dataset.name);
+                  onSelectDataset?.(dataset);
                 }}
                 className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors mx-1 ${
                   selectedId === dataset.id

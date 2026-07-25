@@ -10,7 +10,7 @@ import {
   Clock,
 } from '../icons/hero';
 import { formatRows } from '../utils/duckdb';
-import type { PipelineNode, NodeType, PipelineMetrics } from '../types';
+import type { PipelineNode, NodeType, PipelineMetrics, WorkspaceEvent } from '../types';
 
 const TYPE_ICON: Record<NodeType, React.ReactNode> = {
   deduplicate: <Copy size={20} />,
@@ -45,9 +45,13 @@ const CONFIG_OPTIONS: Record<string, string[]> = {
 interface DetailPanelProps {
   node: PipelineNode;
   nodes: PipelineNode[];
+  events?: WorkspaceEvent[];
+  availableColumns?: string[];
   onClose: () => void;
   onRun: (nodeId: string) => void | Promise<void>;
+  onPreview?: () => void;
   onUpdate: (nodeId: string, patch: Partial<PipelineNode>) => void;
+  onDuplicate?: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
 }
 

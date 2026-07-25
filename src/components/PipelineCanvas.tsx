@@ -24,6 +24,8 @@ import type { PipelineNode, NodeType } from '../types';
 interface PipelineCanvasProps {
   nodes: PipelineNode[];
   selectedNode: string;
+  running?: boolean;
+  onRunAll?: () => void;
   onSelectNode: (nodeId: string) => void;
   onAddNode: (node: PipelineNode) => void;
   onDeleteNode: (nodeId: string) => void;
@@ -79,7 +81,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, [selectedNode, onDeleteNode]);
 
-  const getStatusIcon = (status: 'completed' | 'running' | 'pending') => {
+  const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
         return <CheckCircle2 size={18} className="text-green-500" />;

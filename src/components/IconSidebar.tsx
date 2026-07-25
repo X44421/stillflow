@@ -11,8 +11,12 @@ import {
 import { CollapseButton } from '../icons';
 
 interface IconSidebarProps {
-  activeIcon: number;
-  onIconClick: (index: number) => void;
+  activeIcon?: number;
+  onIconClick?: (index: number) => void;
+  activeView?: 'graph' | 'data';
+  assetsVisible?: boolean;
+  onViewChange?: (view: 'graph' | 'data') => void;
+  onToggleAssets?: () => void;
 }
 
 const icons = [
@@ -25,7 +29,7 @@ const icons = [
   { icon: Grid3X3, label: 'Components' },
 ];
 
-const IconSidebar: React.FC<IconSidebarProps> = ({ activeIcon, onIconClick }) => {
+const IconSidebar: React.FC<IconSidebarProps> = ({ activeIcon = 0, onIconClick = () => {} }) => {
   return (
     <div className="w-12 bg-white border-r border-gray-200 flex flex-col items-center py-2 flex-shrink-0">
       {icons.map((item, index) => {

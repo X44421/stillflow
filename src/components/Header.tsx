@@ -5,16 +5,20 @@ interface HeaderProps {
   running?: boolean;
   progress?: number;
   onRunAll?: () => void;
+  onSearch?: (query: string) => void;
   savedLabel?: string;
   statusLabel?: string;
+  error?: string | null;
 }
 
 const Header: React.FC<HeaderProps> = ({
   running = false,
   progress = 0,
   onRunAll,
+  onSearch: _onSearch,
   savedLabel = 'Saved 2m ago',
   statusLabel = 'Published',
+  error: _error,
 }) => {
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">

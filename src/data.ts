@@ -56,12 +56,12 @@ export const nodeDefaultDescription: Record<NodeType, string> = {
 };
 
 export const transformObjects: TransformObject[] = [
-  { id: 't1', name: 'CSV File', description: 'Import local CSV file', category: 'source', icon: 'file-text' },
-  { id: 't2', name: 'S3 Storage', description: 'Read data from S3', category: 'source', icon: 'cloud' },
-  { id: 't3', name: 'Database', description: 'Connect to SQL database', category: 'source', icon: 'database' },
-  { id: 't4', name: 'Filter', description: 'Keep matched rows', category: 'transform', icon: 'filter' },
-  { id: 't5', name: 'Deduplicate', description: 'Remove repeated records', category: 'transform', icon: 'copy' },
-  { id: 't6', name: 'Normalize Text', description: 'Clean string values', category: 'transform', icon: 'type' },
-  { id: 't7', name: 'Export CSV', description: 'Write to CSV file', category: 'output', icon: 'upload' },
-  { id: 't8', name: 'Vector Index', description: 'Publish to vector store', category: 'ai', icon: 'sparkles' },
+  { id: 't1', name: 'CSV File', description: 'Import local CSV file', category: 'source', icon: 'file-text', available: true },
+  { id: 't2', name: 'S3 Storage', description: 'Read data from S3', category: 'source', icon: 'cloud', available: true },
+  { id: 't3', name: 'Database', description: 'Connect to SQL database', category: 'source', icon: 'database', available: true },
+  { id: 't4', name: 'Filter', description: 'Keep matched rows', category: 'transform', icon: 'filter', available: true },
+  { id: 't5', name: 'Deduplicate', description: 'Remove repeated records', category: 'transform', icon: 'copy', available: true },
+  { id: 't6', name: 'Normalize Text', description: 'Clean string values', category: 'transform', icon: 'type', available: true },
+  { id: 't7', name: 'Export CSV', description: 'Write to CSV file', category: 'output', icon: 'upload', available: true },
+  { id: 't8', name: 'Vector Index', description: 'Publish to vector store', category: 'ai', icon: 'sparkles', available: true },
 ];
