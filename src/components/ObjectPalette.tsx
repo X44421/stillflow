@@ -2,33 +2,15 @@ import React, { useState } from 'react';
 import {
   Search,
   FileText,
-  HardDrive,
-  Database,
   Filter,
   Copy,
   Type,
   Upload,
-  Sparkles,
   Plus,
 } from '../icons/hero';
 import { transformObjects } from '../data';
 
 const iconMap: Record<string, React.ReactNode> = {
-  'file-text': (
-    <div className="w-9 h-9 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <FileText size={18} className="text-green-600" />
-    </div>
-  ),
-  'cloud': (
-    <div className="w-9 h-9 bg-red-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <HardDrive size={18} className="text-red-500" />
-    </div>
-  ),
-  'database': (
-    <div className="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Database size={18} className="text-blue-600" />
-    </div>
-  ),
   'filter': (
     <div className="w-9 h-9 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0">
       <Filter size={18} className="text-purple-600" />
@@ -49,11 +31,6 @@ const iconMap: Record<string, React.ReactNode> = {
       <Upload size={18} className="text-amber-600" />
     </div>
   ),
-  'sparkles': (
-    <div className="w-9 h-9 bg-violet-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Sparkles size={18} className="text-violet-600" />
-    </div>
-  ),
 };
 
 interface ObjectPaletteProps {
@@ -66,10 +43,8 @@ const ObjectPalette: React.FC<ObjectPaletteProps> = ({ onAdd }) => {
 
   const tabs = [
     { key: 'all', label: 'All' },
-    { key: 'source', label: 'Source' },
     { key: 'transform', label: 'Transform' },
     { key: 'output', label: 'Output' },
-    { key: 'ai', label: 'AI' },
   ];
 
   const filteredObjects = transformObjects.filter(obj => {

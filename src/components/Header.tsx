@@ -10,7 +10,7 @@ interface HeaderProps {
   onRunAll?: () => void;
   onSelectProject?: (projectId: string) => void | Promise<void>;
   onCreateProject?: () => void | Promise<void>;
-  onRenameProject?: () => void | Promise<void>;
+  onConfigureProject?: () => void | Promise<void>;
   onDeleteProject?: () => void | Promise<void>;
   onSearch?: (query: string) => void;
   savedLabel?: string;
@@ -26,7 +26,7 @@ const Header: React.FC<HeaderProps> = ({
   onRunAll,
   onSelectProject,
   onCreateProject,
-  onRenameProject,
+  onConfigureProject,
   onDeleteProject,
   onSearch: _onSearch,
   savedLabel = 'Saved 2m ago',
@@ -56,7 +56,7 @@ const Header: React.FC<HeaderProps> = ({
             onClick={() => setShowProjectMenu((open) => !open)}
           >
             <h1 className="text-[15px] font-semibold text-gray-900">
-              {activeProject?.name ?? 'Customer Data Cleaning'}
+              {activeProject?.name ?? 'Untitled project'}
             </h1>
             <ChevronDown size={16} className="text-gray-500" />
           </button>
@@ -105,10 +105,10 @@ const Header: React.FC<HeaderProps> = ({
                   disabled={!activeProject}
                   onClick={() => {
                     setShowProjectMenu(false);
-                    void onRenameProject?.();
+                    void onConfigureProject?.();
                   }}
                 >
-                  Rename project
+                  Project settings
                 </button>
                 <button
                   type="button"

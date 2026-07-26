@@ -4,9 +4,11 @@ import IconSidebar from './components/IconSidebar';
 import DatasetPanel from './components/DatasetPanel';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
-import { datasets as fallbackDatasets, initialPipelineNodes } from './data';
-import type { Dataset, PipelineNode, Project } from './types';
-import { initDuckDB, loadSampleData, runFullPipeline, type PipelineMetrics } from './utils/duckdb';
+import ProjectConfigCard, {
+  type ProjectConfigValues,
+} from './components/ProjectConfigCard';
+import { defaultConfig } from './data';
+import type { Dataset, PipelineMetrics, PipelineNode, Project } from './types';
 import {
   createProject,
   deleteBackendDataset,
@@ -42,6 +44,42 @@ function findColumn(columns: string[], preferred: string[]): string {
   return columns[0] ?? '';
 }
 
+function isLegacyDemoNode(node: PipelineNode): boolean {
+  if (
+    node.id === 'n1' &&
+    node.type === 'source' &&
+    node.name === 'raw_customers.csv'
+  ) {
+    return true;
+  }
+  if (
+    node.id === 'n2' &&
+    node.type === 'filter' &&
+    node.description === 'Keep valid customers'
+  ) {
+    return true;
+  }
+  if (
+    node.id === 'n3' &&
+    node.type === 'deduplicate' &&
+    node.description === 'Remove repeated records'
+  ) {
+    return true;
+  }
+  if (
+    node.id === 'n4' &&
+    node.type === 'normalize' &&
+    node.description === 'Standardize name & email'
+  ) {
+    return true;
+  }
+  return (
+    node.id === 'n5' &&
+    node.type === 'export' &&
+    node.description === 'Write cleaned data'
+  );
+}
+
 function bindDatasetToNodes(nodes: PipelineNode[], dataset: Dataset): PipelineNode[] {
   const columns = dataset.columns ?? [];
   const identityColumn = findColumn(columns, ['customer_id', 'customerId', 'id']);
@@ -50,8 +88,23 @@ function bindDatasetToNodes(nodes: PipelineNode[], dataset: Dataset): PipelineNo
     dataset.rowCount === undefined
       ? dataset.size.replace(/\s+rows$/i, '')
       : String(dataset.rowCount);
+  const existingSource = nodes.find((node) => node.type === 'source');
+  const sourceNode: PipelineNode =
+    existingSource ?? {
+      id: `source-${dataset.id}`,
+      type: 'source',
+      name: dataset.name,
+      description: `${dataset.type.toUpperCase()} File`,
+      rows: sourceRows,
+      status: 'completed',
+      config: { ...defaultConfig, column: identityColumn },
+    };
+  const pipeline = [
+    sourceNode,
+    ...nodes.filter((node) => node.type !== 'source'),
+  ];
 
-  return nodes.map((node) => {
+  return pipeline.map((node) => {
     const reset = resetNodeRuntime(node);
     if (node.type === 'source') {
       return {
@@ -84,7 +137,7 @@ function clonePipelineNodes(nodes: PipelineNode[]): PipelineNode[] {
 
 function nodesForProject(project: Project): PipelineNode[] {
   return clonePipelineNodes(
-    project.nodes.length > 0 ? project.nodes : initialPipelineNodes
+    project.nodes.filter((node) => !isLegacyDemoNode(node))
   );
 }
 
@@ -101,17 +154,23 @@ function persistedPipelineNodes(nodes: PipelineNode[]): PipelineNode[] {
 
 const App: React.FC = () => {
   const [activeIcon, setActiveIcon] = useState(0);
-  const [nodes, setNodes] = useState<PipelineNode[]>(initialPipelineNodes);
+  const [nodes, setNodes] = useState<PipelineNode[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [projectReady, setProjectReady] = useState(false);
-  const [workspaceDatasets, setWorkspaceDatasets] =
-    useState<Dataset[]>(fallbackDatasets);
+  const [workspaceDatasets, setWorkspaceDatasets] = useState<Dataset[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [latestOutputId, setLatestOutputId] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState('n3');
-  const [showDetail, setShowDetail] = useState(true);
+  const [selectedNode, setSelectedNode] = useState('');
+  const [showDetail, setShowDetail] = useState(false);
+  const [projectConfigMode, setProjectConfigMode] = useState<
+    'create' | 'edit' | null
+  >(null);
+  const [projectConfigBusy, setProjectConfigBusy] = useState(false);
+  const [projectConfigError, setProjectConfigError] = useState<string | null>(
+    null
+  );
   const [globalRunning, setGlobalRunning] = useState(false);
   const [globalProgress, setGlobalProgress] = useState(0);
   const [workspaceMessage, setWorkspaceMessage] = useState('Ready');
@@ -125,23 +184,30 @@ const App: React.FC = () => {
         dataset.source === 'local'
     ) ?? null;
 
-  const hydrateProject = useCallback((project: Project) => {
-    const projectNodes = nodesForProject(project);
-    setActiveProjectId(project.id);
-    setNodes(projectNodes);
-    setSelectedDatasetId(project.selectedDatasetId);
-    setLatestOutputId(project.latestOutputId);
-    setSelectedNode(
-      projectNodes.find((node) => node.id === 'n3')?.id ??
-        projectNodes[0]?.id ??
-        ''
-    );
-    try {
-      window.localStorage.setItem('stillflow.activeProjectId', project.id);
-    } catch {
-      // Project selection still works when browser storage is unavailable.
-    }
-  }, []);
+  const hydrateProject = useCallback(
+    (project: Project, datasets: Dataset[] = []) => {
+      const selectedDataset = datasets.find(
+        (dataset) =>
+          dataset.id === project.selectedDatasetId &&
+          dataset.category === 'source'
+      );
+      const projectNodes = selectedDataset
+        ? bindDatasetToNodes(nodesForProject(project), selectedDataset)
+        : nodesForProject(project);
+      setActiveProjectId(project.id);
+      setNodes(projectNodes);
+      setSelectedDatasetId(project.selectedDatasetId);
+      setLatestOutputId(project.latestOutputId);
+      setSelectedNode(projectNodes[0]?.id ?? '');
+      setShowDetail(projectNodes.length > 0);
+      try {
+        window.localStorage.setItem('stillflow.activeProjectId', project.id);
+      } catch {
+        // Project selection still works when browser storage is unavailable.
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     let active = true;
@@ -149,12 +215,24 @@ const App: React.FC = () => {
       try {
         let loadedProjects = await listProjects();
         if (loadedProjects.length === 0) {
-          const created = await createProject(
-            'Customer Data Cleaning',
-            persistedPipelineNodes(initialPipelineNodes)
-          );
+          const created = await createProject('Untitled project', []);
           loadedProjects = [created];
         }
+        loadedProjects = await Promise.all(
+          loadedProjects.map(async (project) => {
+            const cleanedNodes = nodesForProject(project);
+            if (cleanedNodes.length === project.nodes.length) return project;
+            try {
+              return await saveProjectWorkspace(project.id, {
+                selectedDatasetId: project.selectedDatasetId,
+                latestOutputId: project.latestOutputId,
+                nodes: persistedPipelineNodes(cleanedNodes),
+              });
+            } catch {
+              return { ...project, nodes: cleanedNodes };
+            }
+          })
+        );
         if (!active) return;
 
         let rememberedProjectId: string | null = null;
@@ -163,7 +241,7 @@ const App: React.FC = () => {
             'stillflow.activeProjectId'
           );
         } catch {
-          // The most recently updated project is the fallback selection.
+          // The most recently updated project remains the default selection.
         }
         const project =
           loadedProjects.find((item) => item.id === rememberedProjectId) ??
@@ -174,12 +252,16 @@ const App: React.FC = () => {
         const backendDatasets = await listBackendDatasets(project.id);
         if (!active) return;
         setWorkspaceDatasets(backendDatasets);
+        hydrateProject(project, backendDatasets);
         setProjectReady(true);
         setWorkspaceMessage('Ready');
       } catch {
         if (!active) return;
+        setNodes([]);
+        setWorkspaceDatasets([]);
+        setSelectedNode('');
+        setShowDetail(false);
         setWorkspaceMessage('Backend offline');
-        // The static sample pipeline remains available when the backend is offline.
       }
     };
     void initializeProjects();
@@ -259,6 +341,7 @@ const App: React.FC = () => {
       try {
         const backendDatasets = await listBackendDatasets(project.id);
         setWorkspaceDatasets(backendDatasets);
+        hydrateProject(project, backendDatasets);
         setProjectReady(true);
         setWorkspaceMessage('Ready');
       } catch (error) {
@@ -292,50 +375,91 @@ const App: React.FC = () => {
     ]
   );
 
-  const handleCreateProject = useCallback(async () => {
+  const handleCreateProject = useCallback(() => {
     if (globalRunning) {
       setWorkspaceMessage('Wait for the current run to finish');
       return;
     }
-    const name = window.prompt('Project name', 'Untitled project')?.trim();
-    if (!name) return;
-    if (!(await saveCurrentProject())) return;
+    setProjectConfigError(null);
+    setProjectConfigMode('create');
+  }, [globalRunning]);
 
-    setWorkspaceMessage('Creating project');
-    try {
-      const project = await createProject(
-        name,
-        persistedPipelineNodes(initialPipelineNodes)
-      );
-      setProjects((current) => [project, ...current]);
-      await activateProject(project);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Project creation failed';
-      setWorkspaceMessage(`Create failed: ${message}`);
-    }
-  }, [activateProject, globalRunning, saveCurrentProject]);
-
-  const handleRenameProject = useCallback(async () => {
+  const handleConfigureProject = useCallback(() => {
     if (!activeProject) return;
-    const name = window.prompt('Project name', activeProject.name)?.trim();
-    if (!name || name === activeProject.name) return;
-
-    setWorkspaceMessage('Renaming project');
-    try {
-      const updated = await updateProject(activeProject.id, { name });
-      setProjects((current) =>
-        current.map((project) =>
-          project.id === updated.id ? updated : project
-        )
-      );
-      setWorkspaceMessage('Saved just now');
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Project rename failed';
-      setWorkspaceMessage(`Rename failed: ${message}`);
-    }
+    setProjectConfigError(null);
+    setProjectConfigMode('edit');
   }, [activeProject]);
+
+  const handleSubmitProjectConfig = useCallback(
+    async (values: ProjectConfigValues) => {
+      if (!projectConfigMode || projectConfigBusy) return;
+      setProjectConfigBusy(true);
+      setProjectConfigError(null);
+
+      if (projectConfigMode === 'create') {
+        if (!(await saveCurrentProject())) {
+          setProjectConfigError('The current project could not be saved.');
+          setProjectConfigBusy(false);
+          return;
+        }
+        setWorkspaceMessage('Creating project');
+        try {
+          const project = await createProject(
+            values.name,
+            [],
+            values.description
+          );
+          setProjects((current) => [project, ...current]);
+          setProjectConfigMode(null);
+          await activateProject(project);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : 'Project creation failed';
+          setProjectConfigError(message);
+          setWorkspaceMessage(`Create failed: ${message}`);
+        } finally {
+          setProjectConfigBusy(false);
+        }
+        return;
+      }
+
+      if (!activeProject) {
+        setProjectConfigBusy(false);
+        return;
+      }
+      setWorkspaceMessage('Saving project settings');
+      try {
+        const updated = await updateProject(activeProject.id, values);
+        setProjects((current) =>
+          current.map((project) =>
+            project.id === updated.id ? updated : project
+          )
+        );
+        setProjectConfigMode(null);
+        setWorkspaceMessage('Saved just now');
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Project update failed';
+        setProjectConfigError(message);
+        setWorkspaceMessage(`Save failed: ${message}`);
+      } finally {
+        setProjectConfigBusy(false);
+      }
+    },
+    [
+      activeProject,
+      activateProject,
+      projectConfigBusy,
+      projectConfigMode,
+      saveCurrentProject,
+    ]
+  );
+
+  const handleCloseProjectConfig = useCallback(() => {
+    if (projectConfigBusy) return;
+    setProjectConfigError(null);
+    setProjectConfigMode(null);
+  }, [projectConfigBusy]);
 
   const handleDeleteProject = useCallback(async () => {
     if (!activeProject) return;
@@ -459,6 +583,8 @@ const App: React.FC = () => {
       setSelectedDatasetId(dataset.id);
       setLatestOutputId(null);
       setNodes(boundNodes);
+      setSelectedNode(boundNodes[0]?.id ?? '');
+      setShowDetail(boundNodes.length > 0);
       try {
         const updated = await saveProjectWorkspace(activeProjectId, {
           selectedDatasetId: dataset.id,
@@ -477,6 +603,15 @@ const App: React.FC = () => {
         setWorkspaceMessage(
           `Imported ${dataset.rowCount ?? 0} rows; save failed: ${message}`
         );
+      }
+      try {
+        const refreshedDatasets = await listBackendDatasets(activeProjectId);
+        setWorkspaceDatasets([
+          dataset,
+          ...refreshedDatasets.filter((item) => item.id !== dataset.id),
+        ]);
+      } catch {
+        // Keep the imported dataset already inserted into local state.
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Import failed';
@@ -504,9 +639,12 @@ const App: React.FC = () => {
 
     setSelectedDatasetId(dataset.id);
     setLatestOutputId(null);
-    setNodes((current) => bindDatasetToNodes(current, dataset));
+    const boundNodes = bindDatasetToNodes(nodes, dataset);
+    setNodes(boundNodes);
+    setSelectedNode(boundNodes[0]?.id ?? '');
+    setShowDetail(boundNodes.length > 0);
     setWorkspaceMessage('Dataset selected');
-  }, [globalRunning]);
+  }, [globalRunning, nodes]);
 
   const handleRenameDataset = useCallback(
     async (dataset: Dataset) => {
@@ -515,7 +653,7 @@ const App: React.FC = () => {
         return;
       }
       if (!dataset.projectId) {
-        setWorkspaceMessage('Sample datasets cannot be renamed');
+        setWorkspaceMessage('Dataset is not attached to a project');
         return;
       }
       const name = window.prompt('Dataset name', dataset.name)?.trim();
@@ -551,7 +689,7 @@ const App: React.FC = () => {
         return;
       }
       if (!dataset.projectId) {
-        setWorkspaceMessage('Sample datasets cannot be deleted');
+        setWorkspaceMessage('Dataset is not attached to a project');
         return;
       }
       if (!window.confirm(`Delete "${dataset.name}"?`)) return;
@@ -565,16 +703,12 @@ const App: React.FC = () => {
         if (selectedDatasetId === dataset.id) {
           setSelectedDatasetId(null);
           if (dataset.category === 'source') {
-            const initialSource = clonePipelineNodes(initialPipelineNodes).find(
-              (node) => node.type === 'source'
-            );
-            setNodes((current) =>
-              current.map((node) =>
-                node.type === 'source' && initialSource
-                  ? initialSource
-                  : resetNodeRuntime(node)
-              )
-            );
+            const remainingNodes = nodes
+              .filter((node) => node.type !== 'source')
+              .map(resetNodeRuntime);
+            setNodes(remainingNodes);
+            setSelectedNode(remainingNodes[0]?.id ?? '');
+            setShowDetail(remainingNodes.length > 0);
           }
         }
         if (latestOutputId === dataset.id) {
@@ -587,7 +721,7 @@ const App: React.FC = () => {
         setWorkspaceMessage(`Delete failed: ${message}`);
       }
     },
-    [globalRunning, latestOutputId, selectedDatasetId]
+    [globalRunning, latestOutputId, nodes, selectedDatasetId]
   );
 
   const handlePreviewResult = useCallback(() => {
@@ -610,6 +744,10 @@ const App: React.FC = () => {
       setWorkspaceMessage('Wait for the project to finish loading');
       return;
     }
+    if (!activeDataset) {
+      setWorkspaceMessage('Import and select a CSV before running');
+      return;
+    }
     const executable = executableNodes(nodes);
     if (executable.length === 0) {
       setWorkspaceMessage('No enabled nodes');
@@ -629,68 +767,18 @@ const App: React.FC = () => {
     );
 
     try {
-      if (activeDataset) {
-        setGlobalProgress(20);
-        setNodes((prev) =>
-          prev.map((node) =>
-            node.id === executable[0].id
-              ? { ...node, status: 'running' as const, error: undefined }
-              : node
-          )
-        );
-        const result = await runBackendPipeline(activeDataset.id, executable);
-        setGlobalProgress(90);
-        applyBackendResult(result);
-        setWorkspaceMessage(`Cleaned ${result.dataset.rowCount ?? 0} rows`);
-      } else {
-        await initDuckDB();
-        setGlobalProgress(10);
-        await loadSampleData();
-        setGlobalProgress(25);
-
-        const result = await runFullPipeline(
-          executable.map((n) => ({
-            id: n.id,
-            type: n.type,
-            config: {
-              column: n.config.column,
-              strategy: n.config.strategy,
-              scope: n.config.scope,
-              nullHandling: n.config.nullHandling,
-            },
-          })),
-          'raw_customers',
-          {
-            onStageStart: (nodeId, index) => {
-              setGlobalProgress(25 + Math.round((index / executable.length) * 65));
-              setNodes((prev) =>
-                prev.map((node) =>
-                  node.id === nodeId ? { ...node, status: 'running' as const, error: undefined } : node
-                )
-              );
-            },
-            onStageComplete: (nodeId, index, metrics) => {
-              setGlobalProgress(25 + Math.round(((index + 1) / executable.length) * 65));
-              setNodes((prev) =>
-                prev.map((node) =>
-                  node.id === nodeId
-                    ? {
-                        ...node,
-                        status: 'completed' as const,
-                        rows: metrics.rowsOut > 0 ? String(metrics.rowsOut) : node.rows,
-                        metrics,
-                        error: undefined,
-                      }
-                    : node
-                )
-              );
-            },
-          }
-        );
-
-        applyNodeMetrics(result.executions);
-        setWorkspaceMessage('Run completed');
-      }
+      setGlobalProgress(20);
+      setNodes((prev) =>
+        prev.map((node) =>
+          node.id === executable[0].id
+            ? { ...node, status: 'running' as const, error: undefined }
+            : node
+        )
+      );
+      const result = await runBackendPipeline(activeDataset.id, executable);
+      setGlobalProgress(90);
+      applyBackendResult(result);
+      setWorkspaceMessage(`Cleaned ${result.dataset.rowCount ?? 0} rows`);
       setGlobalProgress(100);
     } catch (err) {
       console.error('Run All failed', err);
@@ -709,7 +797,6 @@ const App: React.FC = () => {
     activeDataset,
     activeProjectId,
     applyBackendResult,
-    applyNodeMetrics,
     executableNodes,
     globalRunning,
     nodes,
@@ -721,6 +808,10 @@ const App: React.FC = () => {
     async (nodeId: string) => {
       if (activeProjectId && !projectReady) {
         setWorkspaceMessage('Wait for the project to finish loading');
+        return;
+      }
+      if (!activeDataset) {
+        setWorkspaceMessage('Import and select a CSV before running');
         return;
       }
       const idx = nodes.findIndex((n) => n.id === nodeId);
@@ -744,64 +835,18 @@ const App: React.FC = () => {
       );
 
       try {
-        if (activeDataset) {
-          setGlobalProgress(20);
-          setNodes((prev) =>
-            prev.map((node) =>
-              node.id === chain[0].id
-                ? { ...node, status: 'running' as const, error: undefined }
-                : node
-            )
-          );
-          const result = await runBackendPipeline(activeDataset.id, chain);
-          setGlobalProgress(90);
-          applyBackendResult(result);
-          setWorkspaceMessage(`Cleaned ${result.dataset.rowCount ?? 0} rows`);
-        } else {
-          await initDuckDB();
-          await loadSampleData();
-          const result = await runFullPipeline(
-            chain.map((n) => ({
-              id: n.id,
-              type: n.type,
-              config: {
-                column: n.config.column,
-                strategy: n.config.strategy,
-                scope: n.config.scope,
-                nullHandling: n.config.nullHandling,
-              },
-            })),
-            'raw_customers',
-            {
-              onStageStart: (stageNodeId, index) => {
-                setGlobalProgress(Math.round((index / chain.length) * 90));
-                setNodes((prev) =>
-                  prev.map((node) =>
-                    node.id === stageNodeId ? { ...node, status: 'running' as const } : node
-                  )
-                );
-              },
-              onStageComplete: (stageNodeId, index, metrics) => {
-                setGlobalProgress(Math.round(((index + 1) / chain.length) * 90));
-                setNodes((prev) =>
-                  prev.map((node) =>
-                    node.id === stageNodeId
-                      ? {
-                          ...node,
-                          status: 'completed' as const,
-                          rows: metrics.rowsOut > 0 ? String(metrics.rowsOut) : node.rows,
-                          metrics,
-                          error: undefined,
-                        }
-                      : node
-                  )
-                );
-              },
-            }
-          );
-          applyNodeMetrics(result.executions);
-          setWorkspaceMessage('Run completed');
-        }
+        setGlobalProgress(20);
+        setNodes((prev) =>
+          prev.map((node) =>
+            node.id === chain[0].id
+              ? { ...node, status: 'running' as const, error: undefined }
+              : node
+          )
+        );
+        const result = await runBackendPipeline(activeDataset.id, chain);
+        setGlobalProgress(90);
+        applyBackendResult(result);
+        setWorkspaceMessage(`Cleaned ${result.dataset.rowCount ?? 0} rows`);
         setGlobalProgress(100);
       } catch (err) {
         console.error('Run from here failed', err);
@@ -821,7 +866,6 @@ const App: React.FC = () => {
       activeDataset,
       activeProjectId,
       applyBackendResult,
-      applyNodeMetrics,
       executableNodes,
       nodes,
       projectReady,
@@ -861,7 +905,10 @@ const App: React.FC = () => {
           .filter((item) => item.id !== nodeId)
           .map((item, itemIndex) => (itemIndex >= index ? resetNodeRuntime(item) : item))
       );
-      setSelectedNode(nodes[index - 1]?.id ?? nodes[index + 1]?.id ?? 'n1');
+      const nextSelectedId =
+        nodes[index - 1]?.id ?? nodes[index + 1]?.id ?? '';
+      setSelectedNode(nextSelectedId);
+      setShowDetail(Boolean(nextSelectedId));
     },
     [nodes]
   );
@@ -920,7 +967,7 @@ const App: React.FC = () => {
         onRunAll={handleRunAll}
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
-        onRenameProject={handleRenameProject}
+        onConfigureProject={handleConfigureProject}
         onDeleteProject={handleDeleteProject}
         savedLabel={workspaceMessage}
         statusLabel={globalRunning ? 'Running' : 'Published'}
@@ -958,6 +1005,23 @@ const App: React.FC = () => {
           />
         )}
       </div>
+      {projectConfigMode && (
+        <ProjectConfigCard
+          mode={projectConfigMode}
+          initialName={
+            projectConfigMode === 'edit' ? activeProject?.name ?? '' : ''
+          }
+          initialDescription={
+            projectConfigMode === 'edit'
+              ? activeProject?.description ?? ''
+              : ''
+          }
+          busy={projectConfigBusy}
+          error={projectConfigError}
+          onCancel={handleCloseProjectConfig}
+          onSubmit={handleSubmitProjectConfig}
+        />
+      )}
     </div>
   );
 };

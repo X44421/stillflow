@@ -43,7 +43,7 @@ impl Storage {
             let now = Utc::now();
             let project = StoredProject {
                 id: Uuid::new_v4(),
-                name: "Customer Data Cleaning".to_owned(),
+                name: "Untitled project".to_owned(),
                 description: String::new(),
                 selected_dataset_id: None,
                 latest_output_id: None,
@@ -361,7 +361,7 @@ mod tests {
                 .expect("open storage");
             let projects = storage.list_projects().await;
             assert_eq!(projects.len(), 1);
-            assert_eq!(projects[0].name, "Customer Data Cleaning");
+            assert_eq!(projects[0].name, "Untitled project");
             projects[0].id
         };
 

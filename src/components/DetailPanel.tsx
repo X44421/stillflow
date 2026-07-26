@@ -9,7 +9,7 @@ import {
   Play,
   Clock,
 } from '../icons/hero';
-import { formatRows } from '../utils/duckdb';
+import { formatRows } from '../utils/format';
 import type { PipelineNode, NodeType, PipelineMetrics, WorkspaceEvent } from '../types';
 
 const TYPE_ICON: Record<NodeType, React.ReactNode> = {

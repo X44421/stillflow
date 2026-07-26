@@ -19,6 +19,7 @@ import {
   Circle,
 } from '../icons/hero';
 import ObjectPalette from './ObjectPalette';
+import { defaultConfig } from '../data';
 import type { PipelineNode, NodeType, NodeStatus } from '../types';
 
 interface PipelineCanvasProps {
@@ -116,12 +117,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
       description: obj.description,
       rows: '',
       status: 'pending',
-      config: {
-        column: 'customer_id',
-        strategy: 'Keep first',
-        scope: 'Current dataset',
-        nullHandling: 'Ignore',
-      },
+      config: { ...defaultConfig },
     });
     setShowPalette(false);
   };

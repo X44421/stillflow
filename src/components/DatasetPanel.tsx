@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Search, MoreHorizontal, ChevronDown, ChevronRight, FileText, Database, HardDrive } from '../icons/hero';
 import type { Dataset } from '../types';
-import { datasets as fallbackDatasets } from '../data';
+
+const EMPTY_DATASETS: Dataset[] = [];
 
 const typeIconMap: Record<string, React.ReactNode> = {
   csv: (
@@ -58,7 +59,7 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
   onRenameDataset,
   onDeleteDataset,
 }) => {
-  const datasets = externalDatasets ?? fallbackDatasets;
+  const datasets = externalDatasets ?? EMPTY_DATASETS;
   const [activeTab, setActiveTab] = useState<'all' | 'source' | 'interim' | 'output'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedSections, setExpandedSections] = useState({
@@ -227,7 +228,15 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
-                if (file && onImportCsv) void onImportCsv(file);
+                if (file && onImportCsv) {
+                  setActiveTab('all');
+                  setSearchQuery('');
+                  setExpandedSections((current) => ({
+                    ...current,
+                    source: true,
+                  }));
+                  void onImportCsv(file);
+                }
               }}
             />
             <button className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-md transition-colors" title="Grid view">

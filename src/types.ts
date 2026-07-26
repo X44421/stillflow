@@ -5,7 +5,7 @@ export interface Dataset {
   type: 'csv' | 'parquet' | 'excel' | 's3' | 'table';
   category: 'source' | 'interim' | 'output';
   size: string;
-  source?: 'sample' | 'local' | 'connected' | 'generated';
+  source?: 'local' | 'connected' | 'generated';
   tableName?: string;
   icon?: string;
   rowCount?: number;

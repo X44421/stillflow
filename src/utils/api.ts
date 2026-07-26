@@ -58,7 +58,10 @@ export async function listBackendDatasets(projectId?: string): Promise<Dataset[]
   const query = projectId
     ? `?projectId=${encodeURIComponent(projectId)}`
     : '';
-  const response = await apiRequest<DatasetListResponse>(`/api/datasets${query}`);
+  const response = await apiRequest<DatasetListResponse>(
+    `/api/datasets${query}`,
+    { cache: 'no-store' }
+  );
   return response.datasets;
 }
 
