@@ -1061,7 +1061,7 @@ const App: React.FC = () => {
           custom={Boolean(previewDataset)}
         />
         <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden p-3">
-          <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-[#e3e6e8] bg-white">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#e3e6e8] bg-white">
             <PipelineCanvas
               graphKey={activeProjectId ?? 'unassigned'}
               nodes={nodes}
