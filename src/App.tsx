@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import Header from './components/Header';
 import { DataExplorer } from './components/DataExplorer';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
@@ -1042,27 +1041,8 @@ const App: React.FC = () => {
   const selected = nodes.find((n) => n.id === selectedNode) ?? null;
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-white">
-      <Header
-        projects={projects}
-        activeProjectId={activeProjectId}
-        running={globalRunning}
-        progress={globalProgress}
-        onRunAll={handleRunAll}
-        onSelectProject={handleSelectProject}
-        onCreateProject={handleCreateProject}
-        onConfigureProject={handleConfigureProject}
-        onDeleteProject={handleDeleteProject}
-        savedLabel={workspaceMessage}
-        statusLabel={
-          globalRunning
-            ? 'Running'
-            : workspaceMessage === 'Backend offline'
-              ? 'Offline'
-              : 'Ready'
-        }
-      />
-      <div className="flex flex-1 overflow-hidden">
+    <div className="h-screen w-screen overflow-hidden bg-[#f5f7f8]">
+      <div className="flex h-full overflow-hidden">
         <DataExplorer
           fileName={previewDataset?.name ?? FILE_META.name}
           sizeLabel={previewDataset?.size ?? FILE_META.sizeLabel}
