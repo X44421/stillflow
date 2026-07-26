@@ -1070,6 +1070,7 @@ const App: React.FC = () => {
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <PipelineCanvas
+            graphKey={activeProjectId ?? 'unassigned'}
             nodes={nodes}
             selectedNode={selectedNode}
             running={globalRunning}
