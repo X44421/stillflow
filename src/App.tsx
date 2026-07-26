@@ -1,10 +1,11 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import Header from './components/Header';
-import IconSidebar from './components/IconSidebar';
 import DatasetPanel from './components/DatasetPanel';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
-import CsvPreviewCard from './components/CsvPreviewCard';
+import { DataTable } from './components/DataTable';
+import { CSV_COLUMNS, FILE_META, buildRows } from './data/kaggleDatasets';
+import { profileAll, toCSV, type Row } from './lib/csv';
 import ProjectConfigCard, {
   type ProjectConfigValues,
 } from './components/ProjectConfigCard';
@@ -153,13 +154,25 @@ function persistedPipelineNodes(nodes: PipelineNode[]): PipelineNode[] {
 }
 
 const App: React.FC = () => {
-  const [activeIcon, setActiveIcon] = useState(0);
   const [nodes, setNodes] = useState<PipelineNode[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [projectReady, setProjectReady] = useState(false);
   const [workspaceDatasets, setWorkspaceDatasets] = useState<Dataset[]>([]);
   const [previewDataset, setPreviewDataset] = useState<Dataset | null>(null);
+
+  /* ── Kaggle DataTable source ─────────────────────────────── */
+  const tableRows = useMemo<Row[]>(() => buildRows(1000), []);
+  const tableStats = useMemo(() => profileAll(CSV_COLUMNS, tableRows), [tableRows]);
+  const tableDownload = useCallback(() => {
+    const blob = new Blob([toCSV(CSV_COLUMNS, tableRows)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = FILE_META.name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [tableRows]);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [latestOutputId, setLatestOutputId] = useState<string | null>(null);
@@ -997,21 +1010,6 @@ const App: React.FC = () => {
     setShowDetail(true);
   }, [selectedNode]);
 
-  const handleCreatePreviewNode = useCallback((node: PipelineNode) => {
-    setNodes((current) => {
-      const exportIndex = current.findIndex((item) => item.type === 'export');
-      const insertIndex = exportIndex >= 0 ? exportIndex : current.length;
-      return [
-        ...current.slice(0, insertIndex),
-        node,
-        ...current.slice(insertIndex).map(resetNodeRuntime),
-      ];
-    });
-    setSelectedNode(node.id);
-    setShowDetail(true);
-    setWorkspaceMessage(`${node.name} added from preview`);
-  }, []);
-
   const handleDuplicateNode = useCallback((nodeId: string) => {
     const index = nodes.findIndex((node) => node.id === nodeId);
     const node = nodes[index];
@@ -1055,10 +1053,15 @@ const App: React.FC = () => {
         onConfigureProject={handleConfigureProject}
         onDeleteProject={handleDeleteProject}
         savedLabel={workspaceMessage}
-        statusLabel={globalRunning ? 'Running' : 'Published'}
+        statusLabel={
+          globalRunning
+            ? 'Running'
+            : workspaceMessage === 'Backend offline'
+              ? 'Offline'
+              : 'Ready'
+        }
       />
       <div className="flex flex-1 overflow-hidden">
-        <IconSidebar activeIcon={activeIcon} onIconClick={setActiveIcon} />
         <DatasetPanel
           datasets={workspaceDatasets}
           selectedId={selectedDatasetId}
@@ -1080,16 +1083,16 @@ const App: React.FC = () => {
             onDeleteNode={handleDeleteNode}
           />
           {previewDataset && (
-            <CsvPreviewCard
-              dataset={previewDataset}
-              onClose={() => setPreviewDataset(null)}
-              onCreateNode={
-                previewDataset.category === 'source' &&
-                previewDataset.id === selectedDatasetId
-                  ? handleCreatePreviewNode
-                  : undefined
-              }
-            />
+            <div className="flex-shrink-0 overflow-hidden rounded-t-xl border border-[#e3e6e8] bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.04)]">
+              <DataTable
+                columns={CSV_COLUMNS}
+                rows={tableRows}
+                stats={tableStats}
+                fileName={FILE_META.name}
+                sizeLabel={FILE_META.sizeLabel}
+                onDownload={tableDownload}
+              />
+            </div>
           )}
         </div>
         {showDetail && selected && (

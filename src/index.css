@@ -1,14 +1,32 @@
 @import "tailwindcss";
 @import "@xyflow/react/dist/style.css";
 
+/* ── Mono design tokens (lieflat-charts mono-tokens.js) ─────────
+   纸灰 #F0EFEB + 炭黑 #1C1C1A 两极,中间 7 级灰阶 ladder。
+   明度即数据:最重要 = 最黑。一律实心,无渐变无发光。          */
+@theme {
+  --color-paper: #f0efeb;
+  --color-ink: #1c1c1a;
+  --color-ink-2: #4a4944;
+  --color-ink-3: #6a6963;
+  --color-ink-4: #8f8e88;
+  --color-ink-5: #b0afa9;
+  --color-ink-6: #c6c5bf;
+  --color-ink-7: #d8d7d1;
+  --color-grid: #deddd6;
+
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
 @layer base {
   * {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    @apply bg-white text-gray-900;
+    @apply bg-white font-sans text-gray-900;
   }
   ::-webkit-scrollbar {
     width: 6px;
@@ -33,213 +51,61 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  .node-card {
-    @apply bg-white rounded-xl border border-gray-200 px-4 py-3 shadow-sm flex items-center gap-3 min-w-[220px] relative transition-all duration-200;
-  }
-  .node-card:hover {
-    @apply shadow-md border-gray-300;
-  }
-  .node-card.selected {
-    @apply border-gray-900 shadow-lg ring-1 ring-gray-900;
-  }
-  .connector-line {
-    @apply w-0.5 bg-gray-300 mx-auto;
-    height: 40px;
-  }
-  .connector-arrow {
-    @apply text-gray-300;
-  }
+}
 
-  section[aria-labelledby="csv-preview-title"] {
-    height: min(45vh, 540px) !important;
-    min-height: 320px !important;
-    background: #fff !important;
-    box-shadow: none !important;
+/* ── Mono motion (mono-tokens MOTION.css) ──────────────────────
+   快进快停,不弹跳;滚入视野才播;reduced-motion 降级。        */
+.mono-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mono-pop 0.5s cubic-bezier(0.2, 0.7, 0.3, 1.3) both;
+}
+@keyframes mono-pop {
+  from {
+    transform: scale(0);
   }
-
-  section[aria-labelledby="csv-preview-title"][role="dialog"] {
-    height: 100vh !important;
-    min-height: 0 !important;
+  to {
+    transform: none;
   }
-
-  section[aria-labelledby="csv-preview-title"][class*="h-11"] {
-    height: 48px !important;
-    min-height: 0 !important;
+}
+.mono-fade {
+  animation: mono-fade 0.9s ease both;
+}
+@keyframes mono-fade {
+  from {
+    opacity: 0;
   }
-
-  section[aria-labelledby="csv-preview-title"] > header {
-    align-items: flex-start !important;
-    padding-top: 18px !important;
-    padding-bottom: 0 !important;
+}
+.mono-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: mono-draw 1s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes mono-draw {
+  to {
+    stroke-dashoffset: 0;
   }
-
-  section[aria-labelledby="csv-preview-title"][class*="h-11"] > header {
-    align-items: center !important;
-    height: 48px !important;
-    padding-top: 0 !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mono-pop,
+  .mono-fade {
+    animation: none;
   }
-
-  section[aria-labelledby="csv-preview-title"] > header h2 {
-    color: #000 !important;
-    font-size: 18px !important;
-    line-height: 24px !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"][class*="h-11"] > header h2 {
-    font-size: 13px !important;
-    line-height: 20px !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] > header h2 + div {
-    margin-top: 6px !important;
-    line-height: 16px !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] > header h2 + div strong {
-    color: #000 !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] > header > div:last-child {
-    gap: 4px !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] > header > div:last-child button {
-    width: 36px !important;
-    height: 36px !important;
-    border-radius: 8px !important;
-    background: transparent !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] > header > div:last-child button:first-child {
-    border: 1px solid #000 !important;
-    color: #6b7280 !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] > header > div:last-child button:not(:first-child) {
-    border: 1px solid transparent !important;
-    color: #9ca3af !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] > div {
-    position: relative !important;
-    padding-bottom: 12px !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav {
-    height: 40px !important;
-    border-bottom: 1px solid #e5e7eb !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav button {
-    height: 40px !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav button:first-child {
-    padding-left: 0 !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav button::after {
-    left: 0 !important;
-    right: 12px !important;
-    height: 1px !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav + div {
-    overflow: hidden !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) {
-    display: flex !important;
-    height: 100% !important;
-    min-height: 260px !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    padding-top: 0 !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:first-child {
-    position: absolute !important;
-    top: 4px !important;
-    right: 0 !important;
-    z-index: 20 !important;
-    margin: 0 !important;
-    max-width: min(620px, calc(100% - 24px)) !important;
-    padding: 4px !important;
-    border: 1px solid #e5e7eb !important;
-    border-radius: 8px !important;
-    background: #fff !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-    transform: translateY(-4px) !important;
-    transition: opacity 120ms ease, transform 120ms ease !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"]:hover nav + div > div:has(table) > div:first-child,
-  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:first-child:focus-within {
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    transform: none !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:nth-child(2) {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    overflow: auto !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] table {
-    min-width: max-content !important;
-    font-size: 12px !important;
-    line-height: 20px !important;
-    color: #000 !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] table thead {
-    display: none !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"]:hover table thead,
-  section[aria-labelledby="csv-preview-title"] table thead:focus-within {
-    display: table-header-group !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] table th {
-    padding: 6px 8px !important;
-    border-bottom: 1px solid #e5e7eb !important;
-    background: #fff !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] table td {
-    max-width: 260px !important;
-    padding: 5px 8px !important;
-    border-bottom: 1px solid #f3f4f6 !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:last-child {
-    height: 48px !important;
-    flex-shrink: 0 !important;
-    align-items: center !important;
-    margin-top: 0 !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:last-child button {
-    height: 28px !important;
-    border-radius: 6px !important;
-  }
-
-  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:last-child button:disabled {
-    border-color: #f3f4f6 !important;
-    color: #d1d5db !important;
-    opacity: 1 !important;
+  .mono-draw {
+    animation: none;
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
   }
 }
 
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .animate-pulse-dot {
@@ -273,7 +139,9 @@
   content: "";
   opacity: 0.72;
   transform: translate(-50%, -50%);
-  transition: border-color 120ms ease, opacity 120ms ease;
+  transition:
+    border-color 120ms ease,
+    opacity 120ms ease;
 }
 
 .react-flow__node:hover .pipeline-node-handle::after,
@@ -283,11 +151,37 @@
   opacity: 1;
 }
 
-@keyframes progress-bar {
-  0% { width: 0%; }
-  100% { width: 67%; }
+/* ── Kaggle-style table utilities ─────────────────────────────── */
+.kg-scroll::-webkit-scrollbar {
+  height: 11px;
+  width: 11px;
+}
+.kg-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.kg-scroll::-webkit-scrollbar-thumb {
+  background: #cfd4d8;
+  border: 3px solid #fff;
+  border-radius: 999px;
+}
+.kg-scroll::-webkit-scrollbar-thumb:hover {
+  background: #aeb4b9;
 }
 
-.animate-progress {
-  animation: progress-bar 2s ease-out forwards;
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes kg-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.kg-fade {
+  animation: kg-fade 0.14s ease-out both;
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { HelpCircle, Bell, ChevronDown, Check, Play, Search } from '../icons/hero';
+import { ChevronDown, Check, Play, Search } from '../icons/hero';
 import type { Project } from '../types';
 
 interface HeaderProps {
@@ -125,8 +125,24 @@ const Header: React.FC<HeaderProps> = ({
             </>
           )}
         </div>
-        <span className="flex items-center gap-1.5 bg-green-50 text-green-700 text-xs font-medium px-2.5 py-1 rounded-full border border-green-200">
-          <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+        <span
+          className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
+            statusLabel === 'Running'
+              ? 'bg-gray-900 text-white border-gray-900'
+              : statusLabel === 'Offline'
+                ? 'bg-gray-50 text-gray-500 border-gray-200'
+                : 'bg-green-50 text-green-700 border-green-200'
+          }`}
+        >
+          {statusLabel === 'Running' ? (
+            <span className="w-1.5 h-1.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+          ) : (
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                statusLabel === 'Offline' ? 'bg-gray-300' : 'bg-green-500'
+              }`}
+            />
+          )}
           {statusLabel}
         </span>
         <span className="flex items-center gap-1.5 text-gray-500 text-xs ml-1">
@@ -147,12 +163,6 @@ const Header: React.FC<HeaderProps> = ({
             }}
           />
         </div>
-        <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-          <HelpCircle size={18} className="text-gray-600" />
-        </button>
-        <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative">
-          <Bell size={18} className="text-gray-600" />
-        </button>
         {running && progress > 0 && progress < 100 && (
           <span className="text-[11px] text-gray-500 font-medium mx-1">
             {progress}%

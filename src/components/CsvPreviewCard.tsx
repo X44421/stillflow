@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   Filter,
   Maximize2,
@@ -54,6 +55,18 @@ interface QualityIssue {
   detail: string;
   affected: number;
   column?: string;
+}
+
+/* ── Mono tokens (lieflat-charts mono-tokens.js) ─────────────── */
+const INK = '#1C1C1A';
+const PAPER = '#F0EFEB';
+const MUTED = '#8F8E88';
+const FAINT = '#C6C5BF';
+const GRID = '#DEDDD6';
+
+/** Deterministic pseudo-random — refreshes must look identical. */
+function rnd(i: number, k: number): number {
+  return Math.abs(((i * 73856093) ^ (k * 19349663)) % 1000) / 1000;
 }
 
 function isMissing(value: unknown): boolean {
@@ -307,7 +320,133 @@ function relationStrength(correlation: number): string {
   return 'Weak';
 }
 
-const ScatterPlot: React.FC<{ relation: NumericRelation }> = ({
+function truncateLabel(label: string, max = 14): string {
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
+}
+
+/** Mono source line: uppercase, letterspaced, faint. */
+const MonoSrc: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <p className="mt-2 text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
+    {children}
+  </p>
+);
+
+/* ════ F5 · Tick Rows ════
+   横向条形:Lupi 语法——一行 = 一个分布桶,长度 ∝ 行数,
+   tick 密度来自单位分解(1 tick ≈ K rows,K 写进副标题)。 */
+const TickRows: React.FC<{ bars: DistributionBar[]; sampleNote: string }> = ({
+  bars,
+  sampleNote,
+}) => {
+  const maximum = Math.max(...bars.map((bar) => bar.count), 1);
+  const unit = Math.max(1, Math.ceil(maximum / 34));
+  const rowHeight = 26;
+  const top = 10;
+  const height = top + bars.length * rowHeight + 24;
+  const X0 = 108;
+  const PX = 6.6;
+  const maxTicks = Math.ceil(maximum / unit);
+
+  return (
+    <svg
+      viewBox={`0 0 400 ${height}`}
+      className="h-auto w-full"
+      role="img"
+      aria-label="Sample distribution"
+    >
+      {bars.map((bar, i) => {
+        const y = top + i * rowHeight;
+        const ticks = Math.max(1, Math.round(bar.count / unit));
+        return (
+          <g key={`${bar.label}-${i}`}>
+            <text
+              x={98}
+              y={y + 3}
+              fontSize={8}
+              fontWeight={700}
+              fill="#6A6963"
+              textAnchor="end"
+              letterSpacing="0.06em"
+              className="mono-fade"
+              style={{ animationDelay: `${i * 0.08}s` }}
+            >
+              {truncateLabel(bar.label)}
+            </text>
+            <line
+              x1={X0}
+              y1={y + 9}
+              x2={X0 + maxTicks * PX}
+              y2={y + 9}
+              stroke={GRID}
+              strokeWidth={0.6}
+              className="mono-fade"
+              style={{ animationDelay: `${i * 0.08}s` }}
+            />
+            {Array.from({ length: ticks }, (_, k) => {
+              const x = X0 + k * PX + PX / 2;
+              const h = 9 + rnd(k + 1, i + 2) * 6;
+              return (
+                <g key={k}>
+                  <line
+                    x1={x}
+                    y1={y + 9}
+                    x2={x}
+                    y2={y + 9 - h}
+                    stroke={INK}
+                    strokeWidth={0.9}
+                    opacity={0.55 + rnd(k + 3, i + 5) * 0.45}
+                    className="mono-fade"
+                    style={{ animationDelay: `${i * 0.08 + k * 0.012}s` }}
+                  />
+                  {k % 5 === 4 && (
+                    <circle
+                      cx={x}
+                      cy={y + 13}
+                      r={0.8}
+                      fill={FAINT}
+                      className="mono-fade"
+                      style={{ animationDelay: `${i * 0.08 + k * 0.012}s` }}
+                    />
+                  )}
+                </g>
+              );
+            })}
+            <text
+              x={X0 + ticks * PX + 8}
+              y={y + 4}
+              fontSize={11}
+              fontWeight={800}
+              fill={INK}
+              className="mono-fade"
+              style={{ animationDelay: `${0.4 + i * 0.08}s` }}
+            >
+              {formatCount(bar.count)}
+              <title>{`${bar.label} — ${formatCount(bar.count)} rows`}</title>
+            </text>
+          </g>
+        );
+      })}
+      <text
+        x={200}
+        y={height - 6}
+        fontSize={7}
+        fontWeight={600}
+        fill="#B0AFA9"
+        textAnchor="middle"
+        letterSpacing="0.12em"
+        className="mono-fade"
+        style={{ animationDelay: '0.9s' }}
+      >
+        {`ONE TICK ≈ ${formatCount(unit)} ROWS · DOT MARKS EVERY FIFTH · ${sampleNote}`}
+      </text>
+    </svg>
+  );
+};
+
+/* ════ F8 · Plumb Scatter ════
+   散点:每个点垂一根发丝铅垂线到 barcode 地板,
+   x 读线脚、y 读高度;最高/最低两个点放大标值。 */
+const PlumbScatter: React.FC<{ relation: NumericRelation }> = ({
   relation,
 }) => {
   const points = relation.points.slice(0, 160);
@@ -319,26 +458,271 @@ const ScatterPlot: React.FC<{ relation: NumericRelation }> = ({
   const maximumY = Math.max(...yValues);
   const widthX = maximumX - minimumX || 1;
   const widthY = maximumY - minimumY || 1;
+  const X0 = 52;
+  const X1 = 500;
+  const base = 200;
+  const mapX = (x: number) => X0 + ((x - minimumX) / widthX) * (X1 - X0);
+  const mapY = (y: number) => base - ((y - minimumY) / widthY) * 168;
+  const heroHigh = points.reduce((a, b) => (b[1] > a[1] ? b : a), points[0]);
+  const heroLow = points.reduce((a, b) => (b[1] < a[1] ? b : a), points[0]);
 
   return (
     <svg
-      viewBox="0 0 520 180"
-      className="h-[180px] w-full"
+      viewBox="0 0 520 252"
+      className="h-auto w-full"
       role="img"
       aria-label={`${relation.left} and ${relation.right} scatter plot`}
     >
-      <line x1="18" y1="160" x2="506" y2="160" stroke="#dedede" />
-      <line x1="18" y1="12" x2="18" y2="160" stroke="#dedede" />
-      {points.map(([x, y], index) => (
-        <circle
-          key={`${x}-${y}-${index}`}
-          cx={18 + ((x - minimumX) / widthX) * 488}
-          cy={160 - ((y - minimumY) / widthY) * 148}
-          r="2.25"
-          fill="#1c1c1a"
-          opacity="0.55"
-        />
-      ))}
+      {Array.from({ length: 21 }, (_, g) => {
+        const x = X0 + (g / 20) * (X1 - X0);
+        return (
+          <line
+            key={g}
+            x1={x}
+            y1={base}
+            x2={x}
+            y2={base - (g % 5 === 0 ? 7 : 4)}
+            stroke="#CFCEC7"
+            strokeWidth={0.6}
+            className="mono-fade"
+            style={{ animationDelay: `${g * 0.01}s` }}
+          />
+        );
+      })}
+      <line
+        x1={X0 - 6}
+        y1={base}
+        x2={X1 + 6}
+        y2={base}
+        stroke={GRID}
+        strokeWidth={0.8}
+        className="mono-fade"
+      />
+      <text
+        x={X0}
+        y={base + 16}
+        fontSize={7}
+        fontWeight={600}
+        fill={FAINT}
+        className="mono-fade"
+      >
+        {formatMetric(minimumX)}
+      </text>
+      <text
+        x={X1}
+        y={base + 16}
+        fontSize={7}
+        fontWeight={600}
+        fill={FAINT}
+        textAnchor="end"
+        className="mono-fade"
+      >
+        {formatMetric(maximumX)}
+      </text>
+      <text
+        x={18}
+        y={mapY(maximumY)}
+        fontSize={7}
+        fontWeight={600}
+        fill={FAINT}
+        textAnchor="end"
+        letterSpacing="0.08em"
+        transform={`rotate(-90 18 ${mapY(maximumY)})`}
+        className="mono-fade"
+      >
+        {`${relation.right.toUpperCase()} ↑`}
+      </text>
+      {points.map(([x, y], index) => {
+        const px = mapX(x);
+        const py = mapY(y);
+        const hero =
+          (x === heroHigh[0] && y === heroHigh[1]) ||
+          (x === heroLow[0] && y === heroLow[1]);
+        return (
+          <g key={`${x}-${y}-${index}`}>
+            <line
+              x1={px}
+              y1={base}
+              x2={px}
+              y2={py}
+              stroke="#B0AFA9"
+              strokeWidth={0.55}
+              opacity={0.6}
+              className="mono-fade"
+              style={{ animationDelay: `${0.2 + Math.min(index, 40) * 0.02}s` }}
+            />
+            <circle
+              cx={px}
+              cy={py}
+              r={hero ? 4.2 : 2.2}
+              fill={hero ? INK : '#55554F'}
+              className="mono-pop"
+              style={{ animationDelay: `${0.25 + Math.min(index, 40) * 0.02}s` }}
+            >
+              <title>{`${relation.left} ${formatMetric(x)} · ${relation.right} ${formatMetric(y)}`}</title>
+            </circle>
+            {hero && (
+              <text
+                x={px}
+                y={py - 9}
+                fontSize={8.5}
+                fontWeight={800}
+                fill={INK}
+                textAnchor="middle"
+                className="mono-fade"
+                style={{
+                  animationDelay: '0.8s',
+                  paintOrder: 'stroke',
+                  stroke: PAPER,
+                  strokeWidth: 3,
+                }}
+              >
+                {formatMetric(y)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      <text
+        x={260}
+        y={246}
+        fontSize={7}
+        fontWeight={600}
+        fill="#B0AFA9"
+        textAnchor="middle"
+        letterSpacing="0.12em"
+        className="mono-fade"
+        style={{ animationDelay: '1s' }}
+      >
+        EVERY DOT HANGS A PLUMB LINE · ONE DOT = ONE SAMPLED ROW
+      </text>
+    </svg>
+  );
+};
+
+/* ════ F11 · Tick Gauge ════
+   单值进度:100 根 tick 弯成 210° 表盘,1 tick = 1%,
+   上墨 = 已得;里程碑 25/50/75/100 点标 + 小字。 */
+const TickGauge: React.FC<{ score: number }> = ({ score }) => {
+  const goal = Math.max(0, Math.min(100, Math.round(score)));
+  const cx = 110;
+  const cy = 112;
+  const R0 = 78;
+  const A0 = -195;
+  const SW = 210;
+  const D2R = Math.PI / 180;
+  const pol = (r: number, deg: number): [number, number] => [
+    cx + r * Math.cos(deg * D2R),
+    cy + r * Math.sin(deg * D2R),
+  ];
+
+  return (
+    <svg
+      viewBox="0 0 220 150"
+      className="h-auto w-full"
+      role="img"
+      aria-label={`Quality score ${formatMetric(score)}`}
+    >
+      {Array.from({ length: 100 }, (_, k) => {
+        const angle = A0 + (k / 100) * SW;
+        const inked = k < goal;
+        const length = inked ? 11 + rnd(k + 1, 3) * 5 : 4 + rnd(k + 1, 7) * 2.5;
+        const [x1, y1] = pol(R0, angle);
+        const [x2, y2] = pol(R0 + length, angle);
+        return (
+          <line
+            key={k}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke={inked ? INK : '#CFCEC7'}
+            strokeWidth={inked ? 1 : 0.6}
+            className="mono-fade"
+            style={{ animationDelay: `${k * 0.012}s` }}
+          />
+        );
+      })}
+      {[25, 50, 75, 100].map((milestone) => {
+        const angle = A0 + (milestone / 100) * SW;
+        const [dx, dy] = pol(R0 - 6, angle);
+        const [tx, ty] = pol(R0 - 16, angle);
+        return (
+          <g key={milestone}>
+            <circle
+              cx={dx}
+              cy={dy}
+              r={1}
+              fill="#B0AFA9"
+              className="mono-fade"
+              style={{ animationDelay: '0.8s' }}
+            />
+            <text
+              x={tx}
+              y={ty + 2.5}
+              fontSize={7}
+              fontWeight={600}
+              fill={FAINT}
+              textAnchor="middle"
+              className="mono-fade"
+              style={{ animationDelay: '0.85s' }}
+            >
+              {milestone}
+            </text>
+          </g>
+        );
+      })}
+      {(() => {
+        const [ex, ey] = pol(R0 + 17, A0 + (goal / 100) * SW);
+        return (
+          <circle
+            cx={ex}
+            cy={ey}
+            r={2.4}
+            fill={INK}
+            className="mono-pop"
+            style={{ animationDelay: '1.1s' }}
+          />
+        );
+      })()}
+      <text
+        x={cx}
+        y={cy - 2}
+        fontSize={28}
+        fontWeight={800}
+        fill={INK}
+        textAnchor="middle"
+        className="mono-fade"
+        style={{ animationDelay: '1s' }}
+      >
+        {formatMetric(score)}
+      </text>
+      <text
+        x={cx}
+        y={cy + 15}
+        fontSize={7}
+        fontWeight={600}
+        fill={MUTED}
+        textAnchor="middle"
+        letterSpacing="0.1em"
+        className="mono-fade"
+        style={{ animationDelay: '1.05s' }}
+      >
+        {`${100 - goal} TICKS TO GO`}
+      </text>
+      <text
+        x={cx}
+        y={146}
+        fontSize={7}
+        fontWeight={600}
+        fill="#B0AFA9"
+        textAnchor="middle"
+        letterSpacing="0.12em"
+        className="mono-fade"
+        style={{ animationDelay: '1.2s' }}
+      >
+        ONE TICK = 1% · INKED = EARNED
+      </text>
     </svg>
   );
 };
@@ -506,6 +890,10 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
   const selectedRelationIndex = selectedRelation
     ? relations.indexOf(selectedRelation)
     : 0;
+  const peakBin =
+    selectedDistribution.length > 0
+      ? selectedDistribution.reduce((a, b) => (b.count > a.count ? b : a))
+      : null;
 
   const tabs: Array<{ key: PreviewTab; label: string; count?: number }> = [
     {
@@ -534,6 +922,44 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
     setCreatedIssues((current) => new Set(current).add(issue.id));
   };
 
+  const headerButtonClass =
+    'rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700';
+
+  /* ── Vertical resize ─────────────────────────────────────── */
+  const [panelHeight, setPanelHeight] = useState(420);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragRef.current = { startY: e.clientY, startH: panelHeight };
+
+      const handleMove = (ev: MouseEvent) => {
+        if (!dragRef.current) return;
+        const delta = dragRef.current.startY - ev.clientY;
+        const newH = Math.max(
+          200,
+          Math.min(window.innerHeight * 0.85, dragRef.current.startH + delta)
+        );
+        setPanelHeight(newH);
+      };
+
+      const handleUp = () => {
+        dragRef.current = null;
+        document.removeEventListener('mousemove', handleMove);
+        document.removeEventListener('mouseup', handleUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', handleMove);
+      document.addEventListener('mouseup', handleUp);
+    },
+    [panelHeight]
+  );
+
   return (
     <section
       role={fullscreen ? 'dialog' : 'region'}
@@ -543,68 +969,67 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
         fullscreen
           ? 'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-white'
           : minimized
-            ? 'h-11 flex-shrink-0 overflow-hidden border-t border-gray-200 bg-white shadow-[0_-8px_24px_rgba(16,24,40,0.04)]'
-            : 'flex h-[min(44vh,520px)] min-h-[280px] flex-shrink-0 flex-col overflow-hidden border-t border-gray-200 bg-white shadow-[0_-8px_24px_rgba(16,24,40,0.04)]'
+            ? 'h-12 flex-shrink-0 overflow-hidden rounded-t-xl border border-zinc-200 bg-white'
+            : 'flex min-h-[200px] flex-shrink-0 flex-col overflow-hidden rounded-t-xl border border-zinc-200 bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.04)]'
+      }
+      style={
+        !fullscreen && !minimized ? { height: panelHeight } : undefined
       }
     >
+      {/* Resize handle */}
+      {!fullscreen && !minimized && (
+        <div
+          className="group flex h-2.5 flex-shrink-0 cursor-row-resize items-center justify-center"
+          onMouseDown={handleResizeStart}
+        >
+          <div className="h-1 w-8 rounded-full bg-zinc-200 transition-colors group-hover:bg-zinc-400" />
+        </div>
+      )}
       <header
-        className={`flex flex-shrink-0 items-center justify-between gap-4 px-5 sm:px-7 ${
-          minimized ? 'h-11' : 'pb-3 pt-4'
+        className={`flex flex-shrink-0 items-center justify-between border-b border-zinc-200 px-4 ${
+          minimized ? 'h-12' : 'py-2.5'
         }`}
       >
-        <div className="min-w-0">
-          <h2
-            id="csv-preview-title"
-            className={`truncate font-bold text-[#1c1c1a] ${
-              minimized ? 'text-[13px] leading-5' : 'text-[18px] leading-6'
-            }`}
-          >
-            {dataset.name}
-          </h2>
+        <h2
+          id="csv-preview-title"
+          className={`truncate font-semibold text-zinc-900 ${
+            minimized ? 'text-[13px]' : 'text-sm'
+          }`}
+        >
+          {dataset.name}
+        </h2>
+        <div className="flex items-center gap-2">
           {!minimized && (
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
-              <span>
-                <strong className="font-semibold text-gray-800">
-                  {preview ? formatCount(preview.totalRows) : '--'}
-                </strong>{' '}
-                rows
-              </span>
-              <span>
-                <strong className="font-semibold text-gray-800">
-                  {preview ? preview.columns.length : '--'}
-                </strong>{' '}
-                columns
-              </span>
-              <span>{dataset.type.toUpperCase()}</span>
-              {updating && <span>Updating...</span>}
-            </div>
+            <span className="text-[13px] text-zinc-500">
+              {preview ? formatCount(preview.totalRows) : '--'} rows ·{' '}
+              {preview ? preview.columns.length : '--'} columns
+              {updating ? ' · Updating…' : ''}
+            </span>
           )}
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-0.5">
           {minimized ? (
             <button
               type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+              className={headerButtonClass}
               aria-label="Expand CSV preview"
               title="Expand preview"
               onClick={() => setDisplayMode('docked')}
             >
-              <ChevronDown size={16} className="rotate-180" />
+              <ChevronDown size={14} className="rotate-180" />
             </button>
           ) : (
             <button
               type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+              className={headerButtonClass}
               aria-label="Minimize CSV preview"
               title="Minimize preview"
               onClick={() => setDisplayMode('minimized')}
             >
-              <Minus size={16} />
+              <Minus size={14} />
             </button>
           )}
           <button
             type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            className={headerButtonClass}
             aria-label={fullscreen ? 'Restore CSV preview' : 'Fullscreen CSV preview'}
             title={fullscreen ? 'Restore preview' : 'Fullscreen preview'}
             onClick={() =>
@@ -613,40 +1038,40 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
               )
             }
           >
-            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
           <button
             type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            className={headerButtonClass}
             aria-label="Close CSV preview"
             title="Close preview"
             onClick={onClose}
           >
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
       </header>
 
       {!minimized && (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 sm:px-7">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <nav
-            className="flex flex-shrink-0 overflow-x-auto border-b border-gray-200"
+            className="flex h-10 flex-shrink-0 overflow-x-auto border-b border-zinc-200 px-4"
             aria-label="CSV preview views"
           >
             {tabs.map((tab) => (
               <button
                 key={tab.key}
                 type="button"
-                className={`relative h-9 flex-shrink-0 rounded-t-md px-3 text-[12px] transition-colors ${
+                className={`relative h-10 flex-shrink-0 px-3 text-[13px] transition-colors first:pl-0 ${
                   activeTab === tab.key
-                    ? 'font-semibold text-[#1c1c1a] after:absolute after:bottom-[-1px] after:left-1 after:right-1 after:h-0.5 after:bg-[#1c1c1a]'
-                    : 'font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                    ? 'font-semibold text-zinc-900 after:absolute after:bottom-[-1px] after:left-0 after:right-3 after:h-0.5 after:bg-zinc-900 first:after:left-0'
+                    : 'font-medium text-zinc-500 hover:text-zinc-700'
                 }`}
                 onClick={() => setActiveTab(tab.key)}
               >
                 {tab.label}
                 {tab.count !== undefined && (
-                  <span className="ml-1 text-[9px] font-normal text-gray-400">
+                  <span className="ml-1 text-[10px] font-normal text-zinc-400">
                     {formatCount(tab.count)}
                   </span>
                 )}
@@ -656,17 +1081,17 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {loading && (
-              <div className="flex min-h-[260px] items-center justify-center text-[13px] text-gray-500">
+              <div className="flex min-h-[260px] items-center justify-center text-[13px] text-zinc-400">
                 Loading CSV preview...
               </div>
             )}
 
             {!loading && error && (
               <div className="flex min-h-[260px] flex-col items-center justify-center gap-3 text-center">
-                <p className="text-[13px] text-red-600">{error}</p>
+                <p className="text-[13px] text-zinc-600">{error}</p>
                 <button
                   type="button"
-                  className="h-8 rounded-md border border-gray-200 px-3 text-[12px] font-medium text-gray-700 hover:bg-gray-50"
+                  className="h-8 rounded-md border border-zinc-300 px-3 text-[12px] font-medium text-zinc-600 transition-colors hover:bg-zinc-50"
                   onClick={() => setReloadToken((current) => current + 1)}
                 >
                   Retry
@@ -675,24 +1100,25 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
             )}
 
             {!loading && !error && preview && activeTab === 'data' && (
-              <div className="min-h-[260px] pt-4">
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <label className="relative min-w-[220px] flex-1">
+              <div className="flex h-full min-h-[260px] flex-col">
+                {/* Toolbar */}
+                <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100 px-4 py-2">
+                  <label className="relative min-w-[200px] flex-1">
                     <Search
                       size={14}
-                      className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                      className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400"
                     />
                     <input
                       type="search"
                       value={searchInput}
                       placeholder="Search all columns"
-                      className="h-8 w-full rounded-md border border-gray-200 bg-white pl-8 pr-8 text-[12px] text-gray-800 outline-none transition-colors placeholder:text-gray-400 focus:border-gray-400"
+                      className="h-7 w-full rounded-md border border-zinc-200 bg-white pl-8 pr-8 text-[13px] text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-400"
                       onChange={(event) => setSearchInput(event.target.value)}
                     />
                     {searchInput && (
                       <button
                         type="button"
-                        className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                        className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
                         aria-label="Clear search"
                         onClick={() => setSearchInput('')}
                       >
@@ -702,7 +1128,7 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                   </label>
                   <select
                     value={pageSize}
-                    className="h-8 rounded-md border border-gray-200 bg-white px-2 text-[11px] text-gray-600 outline-none focus:border-gray-400"
+                    className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[12px] text-zinc-600 outline-none focus:border-zinc-400"
                     aria-label="Rows per page"
                     onChange={(event) => {
                       setPage(0);
@@ -715,31 +1141,32 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                       </option>
                     ))}
                   </select>
-                  <span className="text-[11px] text-gray-400">
-                    {preview.filteredRows === preview.totalRows
-                      ? `${formatCount(preview.totalRows)} total`
-                      : `${formatCount(preview.filteredRows)} of ${formatCount(preview.totalRows)}`}
-                  </span>
                 </div>
 
-                <div className="max-h-[360px] overflow-auto">
-                  <table className="w-full min-w-max border-collapse whitespace-nowrap text-[12px]">
-                    <thead className="sticky top-0 z-10 bg-white">
-                      <tr>
+                {/* Table */}
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <table className="w-full border-collapse text-[13px]">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-zinc-50 text-left">
+                        <th className="w-10 border-b border-r border-zinc-200 px-3 py-2 font-medium text-zinc-500">
+                          #
+                        </th>
                         {preview.columns.map((column) => {
                           const isSorted = sortColumn === column.name;
                           return (
                             <th
                               key={column.name}
-                              className="border-b border-gray-200 px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.06em] text-gray-500"
+                              className="border-b border-r border-zinc-200 px-3 py-1.5"
                             >
                               <button
                                 type="button"
-                                className="flex w-full items-center gap-1 hover:text-gray-900"
+                                className="flex w-full items-center gap-1.5 hover:text-zinc-900"
                                 onClick={() => handleSort(column)}
                               >
-                                {column.name}
-                                <span className="rounded bg-gray-100 px-1 text-[8px] font-medium normal-case tracking-normal text-gray-400">
+                                <span className="font-semibold text-zinc-800">
+                                  {column.name}
+                                </span>
+                                <span className="text-[11px] font-normal text-zinc-400">
                                   {column.type}
                                 </span>
                                 {isSorted && (
@@ -747,8 +1174,8 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                                     size={11}
                                     className={
                                       sortDirection === 'asc'
-                                        ? 'ml-auto rotate-180 text-gray-800'
-                                        : 'ml-auto text-gray-800'
+                                        ? 'ml-auto rotate-180 text-zinc-700'
+                                        : 'ml-auto text-zinc-700'
                                     }
                                   />
                                 )}
@@ -762,14 +1189,17 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                       {preview.rows.map((row, rowIndex) => (
                         <tr
                           key={preview.offset + rowIndex}
-                          className="group"
+                          className="hover:bg-zinc-50"
                         >
+                          <td className="border-b border-r border-zinc-100 px-3 py-2 text-zinc-400">
+                            {preview.offset + rowIndex + 1}
+                          </td>
                           {preview.columns.map((column) => {
                             const value = row[column.name];
                             return (
                               <td
                                 key={column.name}
-                                className={`max-w-[240px] truncate border-b border-gray-100 px-2 py-1.5 group-hover:bg-gray-50 ${
+                                className={`max-w-[240px] truncate border-b border-r border-zinc-100 px-3 py-2 text-zinc-800 ${
                                   column.type === 'number'
                                     ? 'text-right font-medium tabular-nums'
                                     : 'text-left'
@@ -777,7 +1207,7 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                                 title={isMissing(value) ? 'Empty' : String(value)}
                               >
                                 {isMissing(value) ? (
-                                  <span className="text-gray-300">--</span>
+                                  <span className="text-zinc-300">--</span>
                                 ) : (
                                   String(value)
                                 )}
@@ -789,7 +1219,7 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                     </tbody>
                   </table>
                   {preview.rows.length === 0 && (
-                    <div className="py-14 text-center text-[12px] text-gray-400">
+                    <div className="py-14 text-center text-[13px] text-zinc-400">
                       {searchQuery
                         ? 'No rows match this search.'
                         : 'This CSV contains no data rows.'}
@@ -797,38 +1227,61 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                   )}
                 </div>
 
-                <div className="mt-3 flex items-center gap-2 text-[11px] text-gray-500">
-                  <button
-                    type="button"
-                    className="h-7 rounded-md border border-gray-200 px-2.5 font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-default disabled:opacity-30"
-                    disabled={page === 0 || updating}
-                    onClick={() => setPage((current) => Math.max(0, current - 1))}
-                  >
-                    Prev
-                  </button>
-                  <span>
-                    {preview.filteredRows === 0 ? 0 : page + 1} /{' '}
-                    {preview.filteredRows === 0 ? 0 : pageCount}
-                  </span>
-                  <button
-                    type="button"
-                    className="h-7 rounded-md border border-gray-200 px-2.5 font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-default disabled:opacity-30"
-                    disabled={
-                      page >= pageCount - 1 ||
-                      preview.filteredRows === 0 ||
-                      updating
-                    }
-                    onClick={() =>
-                      setPage((current) => Math.min(pageCount - 1, current + 1))
-                    }
-                  >
-                    Next
-                  </button>
-                  <span className="ml-auto">
+                {/* Pagination */}
+                <div className="flex shrink-0 items-center justify-between border-t border-zinc-200 px-4 py-2">
+                  <span className="text-[13px] text-zinc-500">
                     {preview.rows.length > 0
-                      ? `${preview.offset + 1}-${preview.offset + preview.rows.length} of ${formatCount(preview.filteredRows)}`
+                      ? `Showing ${preview.offset + 1} to ${preview.offset + preview.rows.length} of ${formatCount(preview.filteredRows)} rows`
                       : '0 rows'}
                   </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 disabled:opacity-40"
+                      disabled={page === 0 || updating}
+                      onClick={() => setPage((current) => Math.max(0, current - 1))}
+                    >
+                      <ChevronRight size={14} className="rotate-180" />
+                    </button>
+                    {Array.from({ length: Math.min(pageCount, 3) }, (_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className={`h-7 min-w-7 rounded-md px-1.5 text-[13px] ${
+                          page === i
+                            ? 'bg-zinc-900 font-medium text-white'
+                            : 'text-zinc-600 hover:bg-zinc-100'
+                        }`}
+                        onClick={() => setPage(i)}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+                    {pageCount > 3 && (
+                      <span className="px-1 text-[13px] text-zinc-400">…</span>
+                    )}
+                    {pageCount > 3 && (
+                      <button
+                        type="button"
+                        className={`h-7 min-w-7 rounded-md px-1.5 text-[13px] ${
+                          page === pageCount - 1
+                            ? 'bg-zinc-900 font-medium text-white'
+                            : 'text-zinc-600 hover:bg-zinc-100'
+                        }`}
+                        onClick={() => setPage(pageCount - 1)}
+                      >
+                        {pageCount}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 disabled:opacity-40"
+                      disabled={page >= pageCount - 1 || preview.filteredRows === 0 || updating}
+                      onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+                    >
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -842,40 +1295,40 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                     [formatPercent(completeness), 'complete'],
                     [formatMetric(qualityScore), 'quality score'],
                   ].map(([value, label]) => (
-                    <div key={label} className="rounded-lg bg-gray-50 px-3.5 py-3">
-                      <span className="block text-[20px] font-extrabold leading-6 text-[#1c1c1a]">
+                    <div key={label} className="rounded-2xl bg-white px-4 py-3">
+                      <span className="block text-[20px] font-extrabold leading-6 text-ink">
                         {value}
                       </span>
-                      <span className="mt-1 block text-[10px] text-gray-500">
+                      <span className="mt-1 block text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
                         {label}
                       </span>
                     </div>
                   ))}
                 </div>
 
-                <div className="mt-4 grid overflow-hidden rounded-lg border border-gray-200 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="max-h-[300px] overflow-y-auto border-b border-gray-200 md:border-b-0 md:border-r">
+                <div className="mt-4 grid overflow-hidden rounded-2xl bg-white md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="max-h-[300px] overflow-y-auto border-b border-[#e8e7e2] md:border-b-0 md:border-r">
                     {preview.columns.map((column) => (
                       <button
                         key={column.name}
                         type="button"
-                        className={`flex w-full items-center justify-between gap-3 border-b border-gray-100 px-3 py-2.5 text-left last:border-b-0 ${
+                        className={`flex w-full items-center justify-between gap-3 border-b border-[#efeee9] px-3 py-2.5 text-left last:border-b-0 ${
                           selectedProfile?.name === column.name
-                            ? 'bg-gray-100'
-                            : 'hover:bg-gray-50'
+                            ? 'bg-paper'
+                            : 'hover:bg-paper/60'
                         }`}
                         onClick={() => setSelectedColumn(column.name)}
                       >
                         <span className="min-w-0">
-                          <span className="block truncate text-[11px] font-semibold text-gray-800">
+                          <span className="block truncate text-[11px] font-semibold text-ink">
                             {column.name}
                           </span>
-                          <span className="block text-[9px] text-gray-400">
+                          <span className="block text-[9px] text-ink-5">
                             {column.type}
                           </span>
                         </span>
                         {column.nullCount > 0 && (
-                          <span className="text-[9px] tabular-nums text-gray-400">
+                          <span className="text-[9px] tabular-nums text-ink-5">
                             {formatCount(column.nullCount)} empty
                           </span>
                         )}
@@ -884,104 +1337,100 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                   </div>
 
                   {selectedProfile && (
-                    <div className="min-w-0 p-4">
+                    <div className="min-w-0 p-5">
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
-                          <h3 className="truncate text-[13px] font-bold text-[#1c1c1a]">
+                          <h3 className="truncate text-[13px] font-bold text-ink">
                             {selectedProfile.name}
                           </h3>
-                          <p className="mt-0.5 text-[10px] text-gray-400">
+                          <p className="mt-0.5 text-[10px] text-ink-5">
                             {selectedProfile.type} field
                           </p>
                         </div>
                         <button
                           type="button"
-                          className="text-[10px] font-medium text-gray-500 hover:text-gray-900"
+                          className="text-[10px] font-medium text-ink-4 hover:text-ink"
                           onClick={() => setActiveTab('issues')}
                         >
                           View issues
                         </button>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-3 gap-3 text-[10px]">
+                      <div className="mt-3 grid grid-cols-3 gap-3">
                         <div>
-                          <span className="block text-gray-400">Distinct</span>
-                          <strong className="mt-0.5 block font-semibold text-gray-800">
+                          <span className="block text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
+                            Distinct
+                          </span>
+                          <strong className="mt-0.5 block text-[13px] font-extrabold text-ink">
                             {formatCount(selectedProfile.distinctCount)}
                           </strong>
                         </div>
                         <div>
-                          <span className="block text-gray-400">Missing</span>
-                          <strong className="mt-0.5 block font-semibold text-gray-800">
+                          <span className="block text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
+                            Missing
+                          </span>
+                          <strong className="mt-0.5 block text-[13px] font-extrabold text-ink">
                             {formatCount(selectedProfile.nullCount)}
                           </strong>
                         </div>
                         <div>
-                          <span className="block text-gray-400">Whitespace</span>
-                          <strong className="mt-0.5 block font-semibold text-gray-800">
+                          <span className="block text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
+                            Whitespace
+                          </span>
+                          <strong className="mt-0.5 block text-[13px] font-extrabold text-ink">
                             {formatCount(selectedProfile.whitespaceCount)}
                           </strong>
                         </div>
                       </div>
 
                       {selectedProfile.type === 'number' && (
-                        <div className="mt-3 grid grid-cols-3 gap-3 border-t border-gray-100 pt-3 text-[10px]">
+                        <div className="mt-3 grid grid-cols-3 gap-3 border-t border-[#efeee9] pt-3">
                           <div>
-                            <span className="block text-gray-400">Minimum</span>
-                            <strong className="mt-0.5 block font-semibold text-gray-800">
+                            <span className="block text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
+                              Minimum
+                            </span>
+                            <strong className="mt-0.5 block text-[13px] font-extrabold text-ink">
                               {formatMetric(selectedProfile.minimum)}
                             </strong>
                           </div>
                           <div>
-                            <span className="block text-gray-400">Average</span>
-                            <strong className="mt-0.5 block font-semibold text-gray-800">
+                            <span className="block text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
+                              Average
+                            </span>
+                            <strong className="mt-0.5 block text-[13px] font-extrabold text-ink">
                               {formatMetric(selectedProfile.average)}
                             </strong>
                           </div>
                           <div>
-                            <span className="block text-gray-400">Maximum</span>
-                            <strong className="mt-0.5 block font-semibold text-gray-800">
+                            <span className="block text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
+                              Maximum
+                            </span>
+                            <strong className="mt-0.5 block text-[13px] font-extrabold text-ink">
                               {formatMetric(selectedProfile.maximum)}
                             </strong>
                           </div>
                         </div>
                       )}
 
-                      <div className="mt-4">
-                        <p className="mb-2 text-[9px] font-semibold uppercase tracking-[0.06em] text-gray-400">
-                          Sample distribution
-                        </p>
-                        {selectedDistribution.length > 0 ? (
-                          <div className="space-y-1.5">
-                            {selectedDistribution.map((bar, index) => {
-                              const maximum = Math.max(
-                                ...selectedDistribution.map((item) => item.count)
-                              );
-                              return (
-                                <div
-                                  key={`${bar.label}-${index}`}
-                                  className="grid grid-cols-[72px_minmax(0,1fr)_36px] items-center gap-2 text-[9px]"
-                                >
-                                  <span className="truncate text-gray-500" title={bar.label}>
-                                    {bar.label}
-                                  </span>
-                                  <span className="h-1.5 overflow-hidden rounded-full bg-gray-100">
-                                    <span
-                                      className="block h-full rounded-full bg-gray-500"
-                                      style={{
-                                        width: `${(bar.count / Math.max(1, maximum)) * 100}%`,
-                                      }}
-                                    />
-                                  </span>
-                                  <span className="text-right tabular-nums text-gray-400">
-                                    {formatCount(bar.count)}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
+                      <div className="mt-5">
+                        {selectedDistribution.length > 0 && peakBin ? (
+                          <>
+                            <h4 className="text-[12.5px] font-bold tracking-[-0.01em] text-ink">
+                              {`“${truncateLabel(peakBin.label, 20)}” leads with ${formatCount(peakBin.count)} rows`}
+                            </h4>
+                            <p className="mb-1 mt-0.5 text-[10px] text-ink-4">
+                              sample distribution · bar length ∝ rows in bin
+                            </p>
+                            <TickRows
+                              bars={selectedDistribution}
+                              sampleNote={`${formatCount(sampleRows.length)} SAMPLED ROWS`}
+                            />
+                            <MonoSrc>
+                              {`tick rows · mono-basic · ${dataset.name}`}
+                            </MonoSrc>
+                          </>
                         ) : (
-                          <p className="text-[10px] text-gray-400">
+                          <p className="text-[10px] text-ink-5">
                             No non-empty values to profile.
                           </p>
                         )}
@@ -999,7 +1448,7 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <select
                         value={selectedRelationIndex}
-                        className="h-8 min-w-[220px] rounded-md border border-gray-200 bg-white px-2 text-[11px] text-gray-700 outline-none focus:border-gray-400"
+                        className="h-8 min-w-[220px] rounded-md border border-grid bg-white px-2 text-[11px] text-ink-2 outline-none focus:border-ink-4"
                         aria-label="Numeric field pair"
                         onChange={(event) =>
                           setRelationIndex(Number(event.target.value))
@@ -1014,55 +1463,50 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                           </option>
                         ))}
                       </select>
-                      <span className="text-[10px] text-gray-400">
+                      <span className="text-[10px] text-ink-5">
                         Based on {formatCount(sampleRows.length)} sampled rows
                       </span>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-                      <div className="min-w-0 rounded-lg bg-gray-50 p-4">
+                      <div className="min-w-0 rounded-2xl bg-white p-5">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
-                            <h3 className="truncate text-[12px] font-bold text-[#1c1c1a]">
-                              {selectedRelation.left} / {selectedRelation.right}
+                            <h3 className="truncate text-[13px] font-bold tracking-[-0.01em] text-ink">
+                              {`${relationStrength(selectedRelation.correlation)} ${selectedRelation.correlation >= 0 ? 'positive' : 'negative'}: ${selectedRelation.left} × ${selectedRelation.right}`}
                             </h3>
-                            <p className="mt-1 text-[10px] text-gray-500">
-                              {relationStrength(selectedRelation.correlation)}{' '}
-                              {selectedRelation.correlation >= 0
-                                ? 'positive'
-                                : 'negative'}{' '}
-                              relationship
+                            <p className="mt-0.5 text-[10px] text-ink-4">
+                              every dot hangs a plumb line · one dot = one
+                              sampled row
                             </p>
                           </div>
                           <div className="text-right">
-                            <strong className="block text-[20px] font-extrabold text-[#1c1c1a]">
+                            <strong className="block text-[20px] font-extrabold leading-6 text-ink">
                               {selectedRelation.correlation.toFixed(2)}
                             </strong>
-                            <span className="text-[9px] text-gray-400">
+                            <span className="text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
                               Pearson r
                             </span>
                           </div>
                         </div>
-                        <ScatterPlot relation={selectedRelation} />
-                        <p className="text-[9px] text-gray-400">
-                          {formatCount(selectedRelation.points.length)} paired
-                          values, R2{' '}
-                          {(selectedRelation.correlation ** 2).toFixed(2)}
-                        </p>
+                        <PlumbScatter relation={selectedRelation} />
+                        <MonoSrc>
+                          {`plumb scatter · mono-basic · ${formatCount(selectedRelation.points.length)} paired values · R2 ${(selectedRelation.correlation ** 2).toFixed(2)}`}
+                        </MonoSrc>
                       </div>
 
                       <div>
-                        <p className="mb-2 text-[9px] font-semibold uppercase tracking-[0.06em] text-gray-400">
+                        <p className="mb-2 text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-6">
                           Strongest pairs
                         </p>
                         {relations.slice(0, 6).map((relation, index) => (
                           <button
                             key={`${relation.left}:${relation.right}`}
                             type="button"
-                            className={`flex w-full items-center justify-between gap-3 border-b border-gray-100 py-2 text-left ${
+                            className={`flex w-full items-center justify-between gap-3 border-b border-[#e8e7e2] py-2 text-left ${
                               index === selectedRelationIndex
-                                ? 'text-gray-900'
-                                : 'text-gray-500 hover:text-gray-900'
+                                ? 'text-ink'
+                                : 'text-ink-4 hover:text-ink'
                             }`}
                             onClick={() => setRelationIndex(index)}
                           >
@@ -1078,7 +1522,7 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                     </div>
                   </>
                 ) : (
-                  <div className="flex min-h-[220px] items-center justify-center text-center text-[12px] text-gray-400">
+                  <div className="flex min-h-[220px] items-center justify-center text-center text-[12px] text-ink-5">
                     Relations require at least two populated numeric columns.
                   </div>
                 )}
@@ -1087,20 +1531,31 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
 
             {!loading && !error && preview && activeTab === 'issues' && (
               <div className="min-h-[260px] pt-4">
-                <div className="mb-3 flex items-end justify-between gap-4">
-                  <div>
-                    <strong className="block text-[24px] font-extrabold leading-7 text-[#1c1c1a]">
-                      {formatMetric(qualityScore)}
-                    </strong>
-                    <span className="text-[10px] text-gray-400">
-                      deterministic quality score
-                    </span>
+                <div className="mb-2 grid items-center gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="rounded-2xl bg-white p-4">
+                    <h3 className="text-[12.5px] font-bold tracking-[-0.01em] text-ink">
+                      Data quality
+                    </h3>
+                    <p className="mt-0.5 text-[10px] text-ink-4">
+                      one tick = 1% · inked = earned
+                    </p>
+                    <TickGauge score={qualityScore} />
+                    <MonoSrc>
+                      {`tick gauge · mono-basic · deterministic score`}
+                    </MonoSrc>
                   </div>
-                  <span className="text-[11px] text-gray-500">
-                    {issues.length === 0
-                      ? 'No actionable issues'
-                      : `${issues.length} actionable issue${issues.length === 1 ? '' : 's'}`}
-                  </span>
+                  <div>
+                    <strong className="block text-[15px] font-bold text-ink">
+                      {issues.length === 0
+                        ? 'No actionable issues'
+                        : `${issues.length} actionable issue${issues.length === 1 ? '' : 's'}`}
+                    </strong>
+                    <p className="mt-1 text-[11px] leading-5 text-ink-4">
+                      Missing values, exact duplicates, and surrounding
+                      whitespace were checked deterministically across{' '}
+                      {formatCount(preview.totalRows)} rows.
+                    </p>
+                  </div>
                 </div>
 
                 {issues.length > 0 ? (
@@ -1116,28 +1571,28 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                       return (
                         <article
                           key={issue.id}
-                          className="flex flex-wrap items-center gap-3 border-b border-gray-100 py-3 last:border-b-0"
+                          className="flex flex-wrap items-center gap-3 border-b border-[#e8e7e2] py-3 last:border-b-0"
                         >
-                          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-600">
+                          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-white text-ink-3">
                             <IssueIcon size={15} />
                           </span>
                           <div className="min-w-[220px] flex-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="text-[12px] font-semibold text-[#1c1c1a]">
+                              <h3 className="text-[12px] font-semibold text-ink">
                                 {issue.title}
                               </h3>
-                              <span className="text-[9px] font-medium uppercase text-gray-400">
+                              <span className="text-[9px] font-medium uppercase tracking-[0.08em] text-ink-5">
                                 {issue.severity}
                               </span>
                             </div>
-                            <p className="mt-0.5 text-[10px] text-gray-500">
+                            <p className="mt-0.5 text-[10px] text-ink-4">
                               {issue.detail}
                             </p>
                           </div>
                           {issue.column && (
                             <button
                               type="button"
-                              className="h-7 px-2 text-[10px] font-medium text-gray-500 hover:text-gray-900"
+                              className="h-7 px-2 text-[10px] font-medium text-ink-4 hover:text-ink"
                               onClick={() => {
                                 setSelectedColumn(issue.column ?? '');
                                 setActiveTab('profile');
@@ -1148,7 +1603,7 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                           )}
                           <button
                             type="button"
-                            className="flex h-7 items-center gap-1.5 rounded-md border border-gray-200 px-2.5 text-[10px] font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-default disabled:bg-gray-50 disabled:text-gray-400"
+                            className="flex h-7 items-center gap-1.5 rounded-md border border-grid px-2.5 text-[10px] font-medium text-ink-2 transition-colors hover:bg-white disabled:cursor-default disabled:border-[#e8e7e2] disabled:text-ink-5"
                             disabled={!onCreateNode || created}
                             title={
                               onCreateNode
@@ -1166,11 +1621,11 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
                   </div>
                 ) : (
                   <div className="flex min-h-[180px] flex-col items-center justify-center text-center">
-                    <Check size={20} className="text-gray-500" />
-                    <p className="mt-2 text-[12px] font-medium text-gray-700">
+                    <Check size={20} className="text-ink-3" />
+                    <p className="mt-2 text-[12px] font-medium text-ink">
                       No deterministic cleaning issues found.
                     </p>
-                    <p className="mt-1 text-[10px] text-gray-400">
+                    <p className="mt-1 text-[10px] text-ink-5">
                       Missing values, exact duplicates, and surrounding
                       whitespace were checked.
                     </p>
