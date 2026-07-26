@@ -1,4 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Plus,
   Play,
@@ -30,6 +36,123 @@ interface PipelineCanvasProps {
   onSelectNode: (nodeId: string) => void;
   onAddNode: (node: PipelineNode) => void;
   onDeleteNode: (nodeId: string) => void;
+}
+
+interface NodePosition {
+  x: number;
+  y: number;
+}
+
+interface CanvasEdge {
+  d: string;
+  start: NodePosition;
+  end: NodePosition;
+}
+
+const NODE_WIDTH = 260;
+const NODE_HEIGHT = 78;
+const NODE_WITH_ROWS_HEIGHT = 96;
+const NODE_GAP = 40;
+const CANVAS_PADDING = 160;
+const DEFAULT_X = 420;
+const DEFAULT_Y = 120;
+
+function getNodeHeight(node: PipelineNode): number {
+  return node.rows ? NODE_WITH_ROWS_HEIGHT : NODE_HEIGHT;
+}
+
+function buildDefaultPositions(
+  nodes: PipelineNode[]
+): Record<string, NodePosition> {
+  const positions: Record<string, NodePosition> = {};
+  let y = DEFAULT_Y;
+
+  for (const node of nodes) {
+    positions[node.id] = { x: DEFAULT_X, y };
+    y += getNodeHeight(node) + NODE_GAP;
+  }
+
+  return positions;
+}
+
+function roundedPath(points: NodePosition[], radius = 10): string {
+  if (points.length < 2) return '';
+  let path = `M ${points[0].x} ${points[0].y}`;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const point = points[index];
+    const previous = points[index - 1];
+    const next = points[index + 1];
+    const incomingLength = Math.hypot(
+      point.x - previous.x,
+      point.y - previous.y
+    );
+    const outgoingLength = Math.hypot(next.x - point.x, next.y - point.y);
+
+    if (incomingLength === 0 || outgoingLength === 0) {
+      path += ` L ${point.x} ${point.y}`;
+      continue;
+    }
+
+    const adjustedRadius = Math.min(
+      radius,
+      incomingLength / 2,
+      outgoingLength / 2
+    );
+    const incomingX =
+      point.x - ((point.x - previous.x) / incomingLength) * adjustedRadius;
+    const incomingY =
+      point.y - ((point.y - previous.y) / incomingLength) * adjustedRadius;
+    const outgoingX =
+      point.x + ((next.x - point.x) / outgoingLength) * adjustedRadius;
+    const outgoingY =
+      point.y + ((next.y - point.y) / outgoingLength) * adjustedRadius;
+    path +=
+      ` L ${incomingX} ${incomingY}` +
+      ` Q ${point.x} ${point.y} ${outgoingX} ${outgoingY}`;
+  }
+
+  const last = points[points.length - 1];
+  return `${path} L ${last.x} ${last.y}`;
+}
+
+function buildEdge(
+  source: PipelineNode,
+  sourcePosition: NodePosition,
+  targetPosition: NodePosition
+): CanvasEdge {
+  const start = {
+    x: sourcePosition.x + NODE_WIDTH / 2,
+    y: sourcePosition.y + getNodeHeight(source),
+  };
+  const end = {
+    x: targetPosition.x + NODE_WIDTH / 2,
+    y: targetPosition.y,
+  };
+  const aligned = Math.abs(start.x - end.x) < 8;
+
+  if (aligned) {
+    return {
+      d: `M ${start.x} ${start.y} L ${end.x} ${end.y}`,
+      start,
+      end,
+    };
+  }
+
+  const midpointY = start.y + (end.y - start.y) / 2;
+  return {
+    d: roundedPath(
+      [
+        start,
+        { x: start.x, y: midpointY },
+        { x: end.x, y: midpointY },
+        end,
+      ],
+      12
+    ),
+    start,
+    end,
+  };
 }
 
 const NODE_ICON: Record<NodeType, React.ReactNode> = {
@@ -71,6 +194,35 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
 }) => {
   const [zoom, setZoom] = useState(100);
   const [showPalette, setShowPalette] = useState(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  const scale = zoom / 100;
+
+  const defaultPositions = useMemo(() => buildDefaultPositions(nodes), [nodes]);
+  const nodeOrderKey = useMemo(
+    () => nodes.map((node) => node.id).join('|'),
+    [nodes]
+  );
+  const nodeOrderRef = useRef(nodeOrderKey);
+  const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>(
+    () => defaultPositions
+  );
+
+  useEffect(() => {
+    setNodePositions((current) => {
+      if (nodeOrderRef.current !== nodeOrderKey) {
+        nodeOrderRef.current = nodeOrderKey;
+        return defaultPositions;
+      }
+
+      const next: Record<string, NodePosition> = {};
+      for (const node of nodes) {
+        next[node.id] = current[node.id] ?? defaultPositions[node.id];
+      }
+      return next;
+    });
+  }, [defaultPositions, nodeOrderKey, nodes]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNode) {
@@ -83,6 +235,96 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [selectedNode, onDeleteNode]);
+
+  const getPointerPosition = useCallback(
+    (event: React.PointerEvent): NodePosition => {
+      const viewport = viewportRef.current;
+      if (!viewport) return { x: 0, y: 0 };
+      const bounds = viewport.getBoundingClientRect();
+      return {
+        x: (event.clientX - bounds.left + viewport.scrollLeft) / scale,
+        y: (event.clientY - bounds.top + viewport.scrollTop) / scale,
+      };
+    },
+    [scale]
+  );
+
+  const handleNodePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>, node: PipelineNode) => {
+      event.stopPropagation();
+      onSelectNode(node.id);
+      const pointer = getPointerPosition(event);
+      const position = nodePositions[node.id] ?? defaultPositions[node.id];
+      dragRef.current = {
+        id: node.id,
+        dx: pointer.x - position.x,
+        dy: pointer.y - position.y,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [defaultPositions, getPointerPosition, nodePositions, onSelectNode]
+  );
+
+  const handleNodePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const dragging = dragRef.current;
+      if (!dragging) return;
+      const pointer = getPointerPosition(event);
+      setNodePositions((current) => ({
+        ...current,
+        [dragging.id]: {
+          x: Math.max(0, pointer.x - dragging.dx),
+          y: Math.max(0, pointer.y - dragging.dy),
+        },
+      }));
+    },
+    [getPointerPosition]
+  );
+
+  const handleNodePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      dragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    []
+  );
+
+  const graphBounds = useMemo(() => {
+    const positions = nodes.map(
+      (node) => nodePositions[node.id] ?? defaultPositions[node.id]
+    );
+    const right =
+      Math.max(...positions.map((position) => position.x + NODE_WIDTH), NODE_WIDTH) +
+      CANVAS_PADDING;
+    const bottom =
+      Math.max(
+        ...nodes.map((node) => {
+          const position = nodePositions[node.id] ?? defaultPositions[node.id];
+          return position.y + getNodeHeight(node);
+        }),
+        NODE_HEIGHT
+      ) + CANVAS_PADDING;
+
+    return {
+      width: Math.max(900, right),
+      height: Math.max(520, bottom),
+    };
+  }, [defaultPositions, nodePositions, nodes]);
+
+  const edges = useMemo(
+    () =>
+      nodes.slice(0, -1).map((node, index) => {
+        const next = nodes[index + 1];
+        return buildEdge(
+          node,
+          nodePositions[node.id] ?? defaultPositions[node.id],
+          nodePositions[next.id] ?? defaultPositions[next.id]
+        );
+      }),
+    [defaultPositions, nodePositions, nodes]
+  );
 
   const getStatusIcon = (status: NodeStatus) => {
     switch (status) {
@@ -166,40 +408,101 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
 
       {/* Pipeline nodes - centered */}
       <div
-        className="flex-1 flex items-center justify-center overflow-auto pt-24 pb-12"
-        style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center center' }}
+        ref={viewportRef}
+        className="flex-1 overflow-auto pt-24 pb-12"
+        onClick={() => onSelectNode('')}
       >
-        <div className="flex flex-col items-center flex-shrink-0">
-          {nodes.map((node, index) => (
-            <React.Fragment key={node.id}>
-              <div
-                onClick={() => onSelectNode(node.id)}
-                className={`bg-white rounded-xl border px-4 py-3 flex items-center gap-3 min-w-[240px] max-w-[280px] cursor-pointer transition-all duration-150 ${
-                  selectedNode === node.id
-                    ? 'border-gray-900 shadow-lg ring-1 ring-gray-900'
-                    : 'border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300'
-                }`}
-              >
-                {NODE_ICON[node.type]}
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-semibold text-gray-900">{node.name}</div>
-                  <div className="text-[11px] text-gray-500">{node.description}</div>
-                  {node.rows && (
-                    <div className="text-[11px] text-gray-400 mt-0.5">{node.rows} rows</div>
-                  )}
+        <div
+          className="relative mx-auto flex-shrink-0"
+          style={{
+            width: graphBounds.width * scale,
+            height: graphBounds.height * scale,
+          }}
+        >
+          <div
+            className="absolute left-0 top-0"
+            style={{
+              width: graphBounds.width,
+              height: graphBounds.height,
+              transform: `scale(${scale})`,
+              transformOrigin: '0 0',
+            }}
+          >
+            <svg
+              className="pointer-events-none absolute inset-0 overflow-visible"
+              width={graphBounds.width}
+              height={graphBounds.height}
+            >
+              {edges.map((edge, index) => (
+                <g key={`${index}-${edge.d}`}>
+                  <path
+                    d={edge.d}
+                    fill="none"
+                    stroke="#d1d5db"
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle
+                    cx={edge.start.x}
+                    cy={edge.start.y}
+                    r={3}
+                    fill="#fff"
+                    stroke="#d1d5db"
+                    strokeWidth={1.5}
+                  />
+                  <path
+                    d={
+                      `M ${edge.end.x - 4.5} ${edge.end.y - 7}` +
+                      ` L ${edge.end.x} ${edge.end.y - 1.5}` +
+                      ` L ${edge.end.x + 4.5} ${edge.end.y - 7}`
+                    }
+                    fill="none"
+                    stroke="#d1d5db"
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </g>
+              ))}
+            </svg>
+
+            {nodes.map((node) => {
+              const position = nodePositions[node.id] ?? defaultPositions[node.id];
+              return (
+                <div
+                  onPointerDown={(event) => handleNodePointerDown(event, node)}
+                  onPointerMove={handleNodePointerMove}
+                  onPointerUp={handleNodePointerUp}
+                  onPointerCancel={handleNodePointerUp}
+                  onClick={(event) => event.stopPropagation()}
+                  style={{
+                    left: position.x,
+                    top: position.y,
+                    width: NODE_WIDTH,
+                    minHeight: getNodeHeight(node),
+                  }}
+                  className={`bg-white rounded-xl border px-4 py-3 flex items-center gap-3 min-w-[240px] max-w-[280px] cursor-pointer transition-all duration-150 ${
+                    selectedNode === node.id
+                      ? 'border-gray-900 shadow-lg ring-1 ring-gray-900'
+                      : 'border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300'
+                  } absolute cursor-grab select-none active:cursor-grabbing`}
+                >
+                  {NODE_ICON[node.type]}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold text-gray-900">{node.name}</div>
+                    <div className="text-[11px] text-gray-500">{node.description}</div>
+                    {node.rows && (
+                      <div className="text-[11px] text-gray-400 mt-0.5">
+                        {node.rows} rows
+                      </div>
+                    )}
+                  </div>
+                  {getStatusIcon(node.status)}
                 </div>
-                {getStatusIcon(node.status)}
-              </div>
-              {index < nodes.length - 1 && (
-                <div className="flex flex-col items-center">
-                  <div className="w-0.5 h-8 bg-gray-300" />
-                  <svg width="10" height="8" viewBox="0 0 10 8" className="text-gray-300 -mt-px">
-                    <path d="M5 8L0 0h10z" fill="currentColor" />
-                  </svg>
-                </div>
-              )}
-            </React.Fragment>
-          ))}
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -233,7 +536,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
         className="absolute inset-0 pointer-events-none opacity-[0.03]"
         style={{
           backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)',
-          backgroundSize: '24px 24px',
+          backgroundSize: `${24 * scale}px ${24 * scale}px`,
         }}
       />
     </div>
