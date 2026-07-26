@@ -344,11 +344,13 @@ const App: React.FC = () => {
         hydrateProject(project, backendDatasets);
         setProjectReady(true);
         setWorkspaceMessage('Ready');
+        return true;
       } catch (error) {
         setWorkspaceDatasets([]);
         const message =
           error instanceof Error ? error.message : 'Project load failed';
         setWorkspaceMessage(`Load failed: ${message}`);
+        return false;
       }
     },
     [hydrateProject]
@@ -403,23 +405,71 @@ const App: React.FC = () => {
           return;
         }
         setWorkspaceMessage('Creating project');
+        let project: Project;
         try {
-          const project = await createProject(
+          project = await createProject(
             values.name,
             [],
             values.description
           );
           setProjects((current) => [project, ...current]);
-          setProjectConfigMode(null);
-          await activateProject(project);
         } catch (error) {
           const message =
             error instanceof Error ? error.message : 'Project creation failed';
           setProjectConfigError(message);
           setWorkspaceMessage(`Create failed: ${message}`);
-        } finally {
           setProjectConfigBusy(false);
+          return;
         }
+
+        let projectToActivate = project;
+        let completionMessage: string | null = null;
+        if (values.datasetFile) {
+          setWorkspaceMessage('Importing CSV');
+          try {
+            const dataset = await importCsvDataset(
+              values.datasetFile,
+              project.id
+            );
+            const importedNodes = bindDatasetToNodes([], dataset);
+            projectToActivate = {
+              ...project,
+              selectedDatasetId: dataset.id,
+              latestOutputId: null,
+              nodes: persistedPipelineNodes(importedNodes),
+            };
+            try {
+              projectToActivate = await saveProjectWorkspace(project.id, {
+                selectedDatasetId: dataset.id,
+                latestOutputId: null,
+                nodes: persistedPipelineNodes(importedNodes),
+              });
+              completionMessage = `Imported ${dataset.rowCount ?? 0} rows`;
+            } catch (error) {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : 'Workspace save failed';
+              completionMessage = `Imported ${dataset.rowCount ?? 0} rows; save failed: ${message}`;
+            }
+            setProjects((current) =>
+              current.map((item) =>
+                item.id === project.id ? projectToActivate : item
+              )
+            );
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : 'CSV import failed';
+            completionMessage = `Project created; import failed: ${message}`;
+          }
+        }
+
+        setProjectConfigMode(null);
+        const loaded = await activateProject(projectToActivate);
+        if (loaded && completionMessage) {
+          setWorkspaceMessage(completionMessage);
+        }
+        setProjectConfigBusy(false);
         return;
       }
 
@@ -429,7 +479,10 @@ const App: React.FC = () => {
       }
       setWorkspaceMessage('Saving project settings');
       try {
-        const updated = await updateProject(activeProject.id, values);
+        const updated = await updateProject(activeProject.id, {
+          name: values.name,
+          description: values.description,
+        });
         setProjects((current) =>
           current.map((project) =>
             project.id === updated.id ? updated : project
