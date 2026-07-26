@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import Header from './components/Header';
-import DatasetPanel from './components/DatasetPanel';
+import { DataExplorer } from './components/DataExplorer';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
 import { DataTable } from './components/DataTable';
@@ -160,6 +160,7 @@ const App: React.FC = () => {
   const [projectReady, setProjectReady] = useState(false);
   const [workspaceDatasets, setWorkspaceDatasets] = useState<Dataset[]>([]);
   const [previewDataset, setPreviewDataset] = useState<Dataset | null>(null);
+  const [focusedColumn, setFocusedColumn] = useState<string | null>(null);
 
   /* ── Kaggle DataTable source ─────────────────────────────── */
   const tableRows = useMemo<Row[]>(() => buildRows(1000), []);
@@ -1062,14 +1063,16 @@ const App: React.FC = () => {
         }
       />
       <div className="flex flex-1 overflow-hidden">
-        <DatasetPanel
-          datasets={workspaceDatasets}
-          selectedId={selectedDatasetId}
-          importing={importing}
-          onSelectDataset={handleSelectDataset}
-          onImportCsv={handleImportCsv}
-          onRenameDataset={handleRenameDataset}
-          onDeleteDataset={handleDeleteDataset}
+        <DataExplorer
+          fileName={previewDataset?.name ?? FILE_META.name}
+          sizeLabel={previewDataset?.size ?? FILE_META.sizeLabel}
+          rowCount={previewDataset?.rowCount ?? tableRows.length}
+          stats={tableStats}
+          selected={focusedColumn}
+          onSelect={setFocusedColumn}
+          onUpload={(file) => void handleImportCsv(file)}
+          onReset={() => setFocusedColumn(null)}
+          custom={Boolean(previewDataset)}
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <PipelineCanvas
@@ -1088,8 +1091,9 @@ const App: React.FC = () => {
                 columns={CSV_COLUMNS}
                 rows={tableRows}
                 stats={tableStats}
-                fileName={FILE_META.name}
-                sizeLabel={FILE_META.sizeLabel}
+                fileName={previewDataset?.name ?? FILE_META.name}
+                sizeLabel={previewDataset?.size ?? FILE_META.sizeLabel}
+                focusColumn={focusedColumn}
                 onDownload={tableDownload}
               />
             </div>
