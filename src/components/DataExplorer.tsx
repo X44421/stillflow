@@ -22,6 +22,7 @@ export function DataExplorer({
   stats,
   selected,
   onSelect,
+  onOpenPreview,
   onUpload,
   onReset,
   custom,
@@ -32,6 +33,7 @@ export function DataExplorer({
   stats: ColumnStats[];
   selected: string | null;
   onSelect: (column: string | null) => void;
+  onOpenPreview: () => void;
   onUpload: (file: File) => void;
   onReset: () => void;
   custom: boolean;
@@ -44,7 +46,7 @@ export function DataExplorer({
   return (
     <aside className="flex h-full w-[272px] shrink-0 flex-col overflow-hidden bg-[#f5f7f8]">
       <div className="overflow-hidden border-b border-[#e3e6e8] bg-transparent">
-        <div className="flex h-14 items-center justify-between border-b border-[#e3e6e8] px-3">
+        <div className="flex items-center justify-between border-b border-[#e3e6e8] px-3 py-2.5">
           <h2 className="text-[14px] font-semibold text-[#202124]">Data Explorer</h2>
           <Maximize2 className="h-3.5 w-3.5 text-[#5f6368]" />
         </div>
@@ -64,7 +66,10 @@ export function DataExplorer({
           </button>
           {openTree && (
             <button
-              onClick={() => onSelect(null)}
+              onClick={() => {
+                onSelect(null);
+                onOpenPreview();
+              }}
               className="ml-5 flex w-[calc(100%-1.25rem)] items-center gap-1.5 rounded bg-[#e8f7fe] px-2 py-1.5 text-left text-[13px] font-medium text-[#0b6c96]"
             >
               <FileSpreadsheet className="h-4 w-4 shrink-0" />

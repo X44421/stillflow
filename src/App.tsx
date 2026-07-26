@@ -163,7 +163,7 @@ const App: React.FC = () => {
   const [focusedColumn, setFocusedColumn] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<
     'expanded' | 'minimized' | 'closed'
-  >('expanded');
+  >('closed');
 
   /* ── Kaggle DataTable source ─────────────────────────────── */
   const tableRows = useMemo<Row[]>(() => buildRows(1000), []);
@@ -1056,11 +1056,12 @@ const App: React.FC = () => {
           stats={tableStats}
           selected={focusedColumn}
           onSelect={setFocusedColumn}
+          onOpenPreview={() => setPreviewState('expanded')}
           onUpload={(file) => void handleImportCsv(file)}
           onReset={() => setFocusedColumn(null)}
           custom={Boolean(previewDataset)}
         />
-        <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden p-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden px-3 pb-3 pt-14">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#e3e6e8] bg-white">
             <PipelineCanvas
               graphKey={activeProjectId ?? 'unassigned'}
@@ -1073,20 +1074,19 @@ const App: React.FC = () => {
               onDeleteNode={handleDeleteNode}
             />
           </div>
-          {previewDataset && (
-            <div
-              className={`overflow-hidden rounded-xl border border-[#e3e6e8] bg-white ${
-                previewState === 'closed'
-                  ? 'hidden'
-                  : previewState === 'minimized'
-                    ? 'flex-none'
-                    : 'min-h-0 flex-[0_1_46%]'
-              }`}
-            >
+          <div
+            className={`overflow-hidden rounded-xl border border-[#e3e6e8] bg-white ${
+              previewState === 'closed'
+                ? 'hidden'
+                : previewState === 'minimized'
+                  ? 'flex-none'
+                  : 'min-h-0 flex-[0_1_46%]'
+            }`}
+          >
               {previewState === 'minimized' && (
                 <div className="flex h-11 items-center border-b border-[#e3e6e8] px-3">
                   <span className="truncate text-[13px] font-semibold text-[#202124]">
-                    Data Preview · {previewDataset.name}
+                    Data Preview · {previewDataset?.name ?? FILE_META.name}
                   </span>
                   <div className="ml-auto flex items-center gap-1">
                     <button
@@ -1123,8 +1123,7 @@ const App: React.FC = () => {
                   onClose={() => setPreviewState('closed')}
                 />
               </div>
-            </div>
-          )}
+          </div>
         </div>
         {showDetail && selected && (
           <DetailPanel
