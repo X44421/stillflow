@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { ChevronUp, Minus, X } from 'lucide-react';
+import { ChevronUp, Minus } from 'lucide-react';
 import { DataExplorer } from './components/DataExplorer';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
@@ -1098,15 +1098,7 @@ const App: React.FC = () => {
                     >
                       <ChevronUp className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      title="Close preview"
-                      aria-label="Close preview"
-                      onClick={() => setPreviewState('closed')}
-                      className="grid h-7 w-7 place-items-center rounded-full text-[#5f6368] hover:bg-[#f1f3f4]"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
+
                   </div>
                 </div>
               )}
@@ -1120,7 +1112,6 @@ const App: React.FC = () => {
                   focusColumn={focusedColumn}
                   onDownload={tableDownload}
                   onMinimize={() => setPreviewState('minimized')}
-                  onClose={() => setPreviewState('closed')}
                 />
               </div>
           </div>

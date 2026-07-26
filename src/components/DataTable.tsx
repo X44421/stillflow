@@ -7,6 +7,7 @@ import {
   Columns3,
   Download,
   Expand,
+  Minimize2,
   Info,
   LayoutGrid,
   Minus,
@@ -41,7 +42,6 @@ export function DataTable({
   focusColumn,
   onDownload,
   onMinimize,
-  onClose,
 }: {
   columns: string[];
   rows: Row[];
@@ -51,7 +51,6 @@ export function DataTable({
   focusColumn?: string | null;
   onDownload: () => void;
   onMinimize?: () => void;
-  onClose?: () => void;
 }) {
   const [view, setView] = useState<View>("detail");
   const [query, setQuery] = useState("");
@@ -61,8 +60,28 @@ export function DataTable({
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [showCols, setShowCols] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const statMap = useMemo(() => Object.fromEntries(stats.map((s) => [s.name, s])), [stats]);
+
+  useEffect(() => {
+    const handleChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", handleChange);
+    return () => document.removeEventListener("fullscreenchange", handleChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await sectionRef.current?.requestFullscreen();
+      }
+    } catch {
+      // ignore unsupported/error
+    }
+  };
 
   const visible = columns.filter((c) => !hidden.has(c));
 
@@ -104,7 +123,7 @@ export function DataTable({
     setSort((s) => (s?.col !== c ? { col: c, dir: "asc" } : s.dir === "asc" ? { col: c, dir: "desc" } : null));
 
   return (
-    <section className="overflow-hidden rounded-xl border border-[#e3e6e8] bg-white">
+    <section ref={sectionRef} className="overflow-hidden rounded-xl border border-[#e3e6e8] bg-white">
       {/* ---------------------------- toolbar ---------------------------- */}
       <div className="flex flex-wrap items-center gap-2 border-b border-[#e3e6e8] px-4 py-2.5">
         <div className="mr-1 flex min-w-0 items-center gap-2">
@@ -199,10 +218,15 @@ export function DataTable({
           <Download className="h-3.5 w-3.5" />
         </button>
         <button
-          title="Fullscreen"
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
           className="grid h-8 w-8 place-items-center rounded-full border border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]"
         >
-          <Expand className="h-3.5 w-3.5" />
+          {isFullscreen ? (
+            <Minimize2 className="h-3.5 w-3.5" />
+          ) : (
+            <Expand className="h-3.5 w-3.5" />
+          )}
         </button>
         {onMinimize && (
           <button
@@ -213,15 +237,7 @@ export function DataTable({
             <Minus className="h-3.5 w-3.5" />
           </button>
         )}
-        {onClose && (
-          <button
-            onClick={onClose}
-            title="Close preview"
-            className="grid h-8 w-8 place-items-center rounded-full border border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
+
       </div>
 
       {/* ------------------------- column view --------------------------- */}
