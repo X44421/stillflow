@@ -123,7 +123,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
   };
 
   return (
-    <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
+    <div className="min-h-0 flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
       {/* Toolbar - top-left, vertical */}
       <div className="absolute top-4 left-4 z-20">
         <div className="flex flex-col bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">

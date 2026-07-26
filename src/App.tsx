@@ -1053,15 +1053,23 @@ const App: React.FC = () => {
           onRenameDataset={handleRenameDataset}
           onDeleteDataset={handleDeleteDataset}
         />
-        <PipelineCanvas
-          nodes={nodes}
-          selectedNode={selectedNode}
-          running={globalRunning}
-          onRunAll={handleRunAll}
-          onSelectNode={handleSelectNode}
-          onAddNode={handleAddNode}
-          onDeleteNode={handleDeleteNode}
-        />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <PipelineCanvas
+            nodes={nodes}
+            selectedNode={selectedNode}
+            running={globalRunning}
+            onRunAll={handleRunAll}
+            onSelectNode={handleSelectNode}
+            onAddNode={handleAddNode}
+            onDeleteNode={handleDeleteNode}
+          />
+          {previewDataset && (
+            <CsvPreviewCard
+              dataset={previewDataset}
+              onClose={() => setPreviewDataset(null)}
+            />
+          )}
+        </div>
         {showDetail && selected && (
           <DetailPanel
             node={selected}
@@ -1090,12 +1098,6 @@ const App: React.FC = () => {
           error={projectConfigError}
           onCancel={handleCloseProjectConfig}
           onSubmit={handleSubmitProjectConfig}
-        />
-      )}
-      {previewDataset && (
-        <CsvPreviewCard
-          dataset={previewDataset}
-          onClose={() => setPreviewDataset(null)}
         />
       )}
     </div>

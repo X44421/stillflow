@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, X } from '../icons/hero';
+import {
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+  Minus,
+  X,
+} from '../icons/hero';
 import type {
   DataPreviewResult,
   Dataset,
@@ -11,6 +17,7 @@ const PAGE_SIZE = 12;
 
 type PreviewTab = 'summary' | 'preview' | 'schema' | 'relations' | 'report';
 type SortDirection = 'asc' | 'desc';
+type PreviewDisplayMode = 'docked' | 'minimized' | 'fullscreen';
 
 interface CsvPreviewCardProps {
   dataset: Dataset;
@@ -284,6 +291,8 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] =
     useState<SortDirection>('asc');
+  const [displayMode, setDisplayMode] =
+    useState<PreviewDisplayMode>('docked');
 
   useEffect(() => {
     let current = true;
@@ -317,11 +326,16 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      if (displayMode === 'fullscreen') {
+        setDisplayMode('docked');
+        return;
+      }
+      onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [displayMode, onClose]);
 
   const relations = useMemo(
     () => (preview ? buildRelations(preview.columns, preview.rows) : []),
@@ -388,27 +402,37 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
     { key: 'relations', label: 'Relations' },
     { key: 'report', label: 'Report' },
   ];
+  const minimized = displayMode === 'minimized';
+  const fullscreen = displayMode === 'fullscreen';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
-      onMouseDown={onClose}
+    <section
+      role={fullscreen ? 'dialog' : 'region'}
+      aria-modal={fullscreen ? true : undefined}
+      aria-labelledby="csv-preview-title"
+      className={
+        fullscreen
+          ? 'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-white'
+          : minimized
+            ? 'h-11 flex-shrink-0 overflow-hidden border-t border-gray-200 bg-white shadow-[0_-8px_24px_rgba(16,24,40,0.04)]'
+            : 'flex h-[min(44vh,520px)] min-h-[280px] flex-shrink-0 flex-col overflow-hidden border-t border-gray-200 bg-white shadow-[0_-8px_24px_rgba(16,24,40,0.04)]'
+      }
     >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="csv-preview-title"
-        className="max-h-[calc(100vh-32px)] w-full max-w-[960px] overflow-y-auto rounded-lg border border-gray-200 bg-white px-5 pb-5 pt-6 shadow-xl sm:px-7"
-        onMouseDown={(event) => event.stopPropagation()}
+      <header
+        className={`flex flex-shrink-0 items-center justify-between gap-4 px-5 sm:px-7 ${
+          minimized ? 'h-11' : 'pb-3 pt-4'
+        }`}
       >
-        <header className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h2
-              id="csv-preview-title"
-              className="truncate text-[18px] font-bold leading-6 text-[#1c1c1a]"
-            >
-              {dataset.name}
-            </h2>
+        <div className="min-w-0">
+          <h2
+            id="csv-preview-title"
+            className={`truncate font-bold text-[#1c1c1a] ${
+              minimized ? 'text-[13px] leading-5' : 'text-[18px] leading-6'
+            }`}
+          >
+            {dataset.name}
+          </h2>
+          {!minimized && (
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
               <span>
                 <strong className="font-semibold text-gray-800">
@@ -428,19 +452,59 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
               )}
               <span className="capitalize">{dataset.category} dataset</span>
             </div>
-          </div>
+          )}
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-0.5">
+          {minimized ? (
+            <button
+              type="button"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Expand CSV preview"
+              title="Expand preview"
+              onClick={() => setDisplayMode('docked')}
+            >
+              <ChevronDown size={16} className="rotate-180" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Minimize CSV preview"
+              title="Minimize preview"
+              onClick={() => setDisplayMode('minimized')}
+            >
+              <Minus size={16} />
+            </button>
+          )}
           <button
             type="button"
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            aria-label={fullscreen ? 'Restore CSV preview' : 'Fullscreen CSV preview'}
+            title={fullscreen ? 'Restore preview' : 'Fullscreen preview'}
+            onClick={() =>
+              setDisplayMode((current) =>
+                current === 'fullscreen' ? 'docked' : 'fullscreen'
+              )
+            }
+          >
+            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+          <button
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
             aria-label="Close CSV preview"
+            title="Close preview"
             onClick={onClose}
           >
             <X size={16} />
           </button>
-        </header>
+        </div>
+      </header>
 
+      {!minimized && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 sm:px-7">
         <nav
-          className="mt-4 flex overflow-x-auto border-b border-gray-200"
+          className="flex flex-shrink-0 overflow-x-auto border-b border-gray-200"
           aria-label="CSV preview views"
         >
           {tabs.map((tab) => (
@@ -467,6 +531,7 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
           ))}
         </nav>
 
+        <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && (
           <div className="flex min-h-[320px] items-center justify-center text-[13px] text-gray-500">
             Loading CSV preview...
@@ -848,8 +913,10 @@ const CsvPreviewCard: React.FC<CsvPreviewCardProps> = ({
             </p>
           </div>
         )}
-      </section>
-    </div>
+        </div>
+        </div>
+      )}
+    </section>
   );
 };
 
