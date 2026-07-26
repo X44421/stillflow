@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:frontend": "vite",
     "dev:backend": "cargo run --manifest-path backend/Cargo.toml",
     "test:backend": "cargo test --manifest-path backend/Cargo.toml",
     "build": "vite build",

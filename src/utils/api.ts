@@ -39,14 +39,29 @@ export interface BackendPipelineResult {
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, init);
+  } catch {
+    throw new Error(
+      'Backend unavailable. Start the full app with npm run dev.'
+    );
+  }
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
+    let hasApiError = false;
     try {
       const body = (await response.json()) as { error?: string };
-      if (body.error) message = body.error;
+      if (body.error) {
+        message = body.error;
+        hasApiError = true;
+      }
     } catch {
       // Keep the HTTP fallback when the server did not return JSON.
+    }
+    if (!hasApiError && response.status >= 500) {
+      message =
+        'Backend unavailable or returned an invalid response. Start the full app with npm run dev.';
     }
     throw new Error(message);
   }

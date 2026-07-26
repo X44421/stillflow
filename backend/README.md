@@ -13,11 +13,19 @@ This service completes the local CSV flow used by the existing StillFlow UI:
 Requirements: Rust 1.77 or newer.
 
 ```bash
-npm run dev:backend
+npm run dev
 ```
 
-The service listens on `127.0.0.1:8787` by default. Start the frontend with
-`npm run dev`; Vite proxies `/api` requests to the backend.
+This starts the Rust backend first, waits for its health endpoint, and then
+starts Vite. The backend listens on `127.0.0.1:8787`; Vite proxies `/api`
+requests to it.
+
+To run either process separately:
+
+```bash
+npm run dev:backend
+npm run dev:frontend
+```
 
 Configuration:
 
