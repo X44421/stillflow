@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-kaggle: #20beff;
+  --color-kaggle-dark: #0f9ad6;
+  --color-ink: #202124;
+  --color-ink-2: #3c4043;
+  --color-muted: #5f6368;
+  --color-line: #e3e6e8;
+  --color-valid: #46a352;
+  --color-mismatch: #e5534b;
+  --color-missing: #c9cdd1;
+  --color-surface: #f5f7f8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: #ffffff;
+  color: #202124;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Kaggle-ish thin scrollbars */
+.kg-scroll::-webkit-scrollbar {
+  height: 11px;
+  width: 11px;
+}
+.kg-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.kg-scroll::-webkit-scrollbar-thumb {
+  background: #cfd4d8;
+  border: 3px solid #fff;
+  border-radius: 999px;
+}
+.kg-scroll::-webkit-scrollbar-thumb:hover {
+  background: #aeb4b9;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes kg-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.kg-fade {
+  animation: kg-fade 0.14s ease-out both;
+}
