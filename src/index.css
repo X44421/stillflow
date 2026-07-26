@@ -252,18 +252,34 @@
 }
 
 .react-flow__handle.pipeline-node-handle {
-  width: 8px;
-  min-width: 8px;
-  height: 8px;
-  min-height: 8px;
-  border: 1.5px solid #d1d5db;
-  background: #fff;
-  opacity: 0;
-  transition: opacity 120ms ease;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  border: 0;
+  background: transparent;
 }
 
-.react-flow__node:hover .pipeline-node-handle,
-.react-flow__node:focus-visible .pipeline-node-handle {
+.react-flow__handle.pipeline-node-handle::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 999px;
+  background: #fff;
+  content: "";
+  opacity: 0.72;
+  transform: translate(-50%, -50%);
+  transition: border-color 120ms ease, opacity 120ms ease;
+}
+
+.react-flow__node:hover .pipeline-node-handle::after,
+.react-flow__node:focus-visible .pipeline-node-handle::after,
+.react-flow__handle.pipeline-node-handle.connectingfrom::after {
+  border-color: #9ca3af;
   opacity: 1;
 }
 

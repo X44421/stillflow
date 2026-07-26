@@ -1,5 +1,6 @@
 import React, {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useState,
 } from 'react';
@@ -13,6 +14,7 @@ import {
   ReactFlow,
   getSmoothStepPath,
   type Connection,
+  type ConnectionLineComponentProps,
   type EdgeProps,
   type NodeProps,
   type ReactFlowInstance,
@@ -215,6 +217,48 @@ function PipelineFlowEdgeView({
   );
 }
 
+function PipelineConnectionLine({
+  fromX,
+  fromY,
+  fromPosition,
+  toX,
+  toY,
+  toPosition,
+  connectionStatus,
+}: ConnectionLineComponentProps<PipelineFlowNode>) {
+  const [path] = getSmoothStepPath({
+    sourceX: fromX,
+    sourceY: fromY,
+    sourcePosition: fromPosition,
+    targetX: toX,
+    targetY: toY,
+    targetPosition: toPosition,
+    borderRadius: 12,
+  });
+  const stroke = connectionStatus === 'invalid' ? '#ef4444' : '#9ca3af';
+
+  return (
+    <>
+      <path
+        d={path}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx={fromX}
+        cy={fromY}
+        r={3}
+        fill="#fff"
+        stroke={stroke}
+        strokeWidth={1.5}
+      />
+    </>
+  );
+}
+
 const nodeTypes = {
   pipelineNode: PipelineFlowNodeView,
 };
@@ -235,6 +279,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
 }) => {
   const [showPalette, setShowPalette] = useState(false);
   const [layoutRunning, setLayoutRunning] = useState(false);
+  const [zoomPercent, setZoomPercent] = useState(100);
   const [flowInstance, setFlowInstance] =
     useState<ReactFlowInstance<PipelineFlowNode, PipelineFlowEdge> | null>(
       null
@@ -266,6 +311,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     (state) => state.applyGraphEdgeChanges
   );
   const connectGraph = useCanvasStore((state) => state.connectGraph);
+  const reconnectGraph = useCanvasStore((state) => state.reconnectGraph);
   const setGraphViewport = useCanvasStore(
     (state) => state.setGraphViewport
   );
@@ -274,6 +320,10 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
   useLayoutEffect(() => {
     syncGraph(graphKey, nodes, selectedNode);
   }, [graphKey, nodes, selectedNode, syncGraph]);
+
+  useEffect(() => {
+    setZoomPercent(Math.round(viewport.zoom * 100));
+  }, [graphKey, viewport.zoom]);
 
   const handlePaletteAdd = (obj: {
     name: string;
@@ -317,6 +367,13 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     [connectGraph, graphKey]
   );
 
+  const handleReconnect = useCallback(
+    (edge: PipelineFlowEdge, connection: Connection) => {
+      reconnectGraph(graphKey, edge, connection);
+    },
+    [graphKey, reconnectGraph]
+  );
+
   const handleConnectionValidation = useCallback(
     (connection: Connection | PipelineFlowEdge) =>
       'source' in connection &&
@@ -357,8 +414,9 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     (nextPercent: number) => {
       const zoom = Math.min(200, Math.max(40, nextPercent)) / 100;
       if (flowInstance) {
+        const currentViewport = flowInstance.getViewport();
         void flowInstance.setViewport(
-          { ...viewport, zoom },
+          { ...currentViewport, zoom },
           { duration: 120 }
         );
       } else {
@@ -367,8 +425,6 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     },
     [flowInstance, graphKey, setGraphViewport, viewport]
   );
-
-  const zoomPercent = Math.round(viewport.zoom * 100);
 
   return (
     <div className="min-h-0 flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
@@ -451,23 +507,30 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
       </div>
 
       <ReactFlow<PipelineFlowNode, PipelineFlowEdge>
+        key={graphKey}
         className="bg-transparent"
         style={{ backgroundColor: 'transparent' }}
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        viewport={viewport}
+        defaultViewport={viewport}
         minZoom={0.4}
         maxZoom={2}
-        defaultEdgeOptions={{ type: 'pipelineEdge' }}
+        defaultEdgeOptions={{
+          type: 'pipelineEdge',
+          reconnectable: true,
+        }}
         connectionLineType={ConnectionLineType.SmoothStep}
+        connectionLineComponent={PipelineConnectionLine}
         connectionLineStyle={{ stroke: '#d1d5db', strokeWidth: 1.5 }}
+        connectionRadius={28}
+        reconnectRadius={24}
+        connectionDragThreshold={3}
         deleteKeyCode={['Backspace', 'Delete']}
         multiSelectionKeyCode={null}
         zoomOnDoubleClick={false}
-        snapToGrid
-        snapGrid={[8, 8]}
+        onlyRenderVisibleElements
         proOptions={{ hideAttribution: true }}
         onInit={setFlowInstance}
         onNodesChange={(changes) =>
@@ -477,15 +540,17 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
           applyGraphEdgeChanges(graphKey, changes)
         }
         onConnect={handleConnection}
+        onReconnect={handleReconnect}
         isValidConnection={handleConnectionValidation}
         onNodeClick={(_, node) => onSelectNode(node.id)}
         onPaneClick={() => onSelectNode('')}
         onNodesDelete={(deletedNodes) => {
           for (const node of deletedNodes) onDeleteNode(node.id);
         }}
-        onViewportChange={(nextViewport) =>
-          setGraphViewport(graphKey, nextViewport)
-        }
+        onMoveEnd={(_, nextViewport) => {
+          setZoomPercent(Math.round(nextViewport.zoom * 100));
+          setGraphViewport(graphKey, nextViewport);
+        }}
       >
         <Background
           id={`pipeline-grid-${graphKey}`}

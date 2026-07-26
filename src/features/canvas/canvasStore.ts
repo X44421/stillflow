@@ -1,6 +1,7 @@
 import {
   applyEdgeChanges,
   applyNodeChanges,
+  reconnectEdge,
   type Connection,
   type EdgeChange,
   type NodeChange,
@@ -13,7 +14,6 @@ import { immer } from 'zustand/middleware/immer';
 import type { PipelineNode } from '../../types';
 import { isValidDagConnection } from './connectionRules';
 import {
-  defaultFlowEdges,
   toFlowNode,
   type PipelineFlowEdge,
   type PipelineFlowNode,
@@ -41,6 +41,11 @@ interface CanvasStore {
     changes: EdgeChange<PipelineFlowEdge>[]
   ) => void;
   connectGraph: (graphKey: string, connection: Connection) => void;
+  reconnectGraph: (
+    graphKey: string,
+    edge: PipelineFlowEdge,
+    connection: Connection
+  ) => void;
   setGraphViewport: (graphKey: string, viewport: Viewport) => void;
   setGraphLayout: (
     graphKey: string,
@@ -62,7 +67,6 @@ export const useCanvasStore = create<CanvasStore>()(
         const existingById = new Map(
           (current?.nodes ?? []).map((node) => [node.id, node])
         );
-        const previousIds = new Set(existingById.keys());
         const validIds = new Set(pipelineNodes.map((node) => node.id));
 
         const nextNodes = pipelineNodes.map((node, index) =>
@@ -75,27 +79,15 @@ export const useCanvasStore = create<CanvasStore>()(
         );
 
         const retainedEdges = (current?.edges ?? []).filter(
-          (edge) => validIds.has(edge.source) && validIds.has(edge.target)
+          (edge) =>
+            validIds.has(edge.source) &&
+            validIds.has(edge.target) &&
+            edge.id !== `pipeline-edge-${edge.source}-${edge.target}`
         ) as PipelineFlowEdge[];
-        const defaultEdges = defaultFlowEdges(pipelineNodes);
-        const edgesForNewNodes = current
-          ? defaultEdges.filter(
-              (edge) =>
-                !previousIds.has(edge.source) || !previousIds.has(edge.target)
-            )
-          : defaultEdges;
-        const existingPairs = new Set(
-          retainedEdges.map((edge) => `${edge.source}->${edge.target}`)
-        );
 
         state.graphs[graphKey] = {
           nodes: nextNodes,
-          edges: [
-            ...retainedEdges,
-            ...edgesForNewNodes.filter(
-              (edge) => !existingPairs.has(`${edge.source}->${edge.target}`)
-            ),
-          ],
+          edges: retainedEdges,
           viewport: current?.viewport ?? { ...DEFAULT_VIEWPORT },
         };
       });
@@ -136,7 +128,25 @@ export const useCanvasStore = create<CanvasStore>()(
           sourceHandle: connection.sourceHandle,
           targetHandle: connection.targetHandle,
           type: 'pipelineEdge',
+          reconnectable: true,
         });
+      });
+    },
+
+    reconnectGraph: (graphKey, edge, connection) => {
+      set((state) => {
+        const graph = state.graphs[graphKey];
+        if (!graph) return;
+        const otherEdges = graph.edges.filter(
+          (candidate) => candidate.id !== edge.id
+        ) as PipelineFlowEdge[];
+        if (!isValidDagConnection(connection, otherEdges)) return;
+
+        graph.edges = reconnectEdge(
+          edge,
+          connection,
+          graph.edges as PipelineFlowEdge[]
+        );
       });
     },
 

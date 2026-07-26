@@ -55,14 +55,3 @@ export function toFlowNode(
     },
   };
 }
-
-export function defaultFlowEdges(
-  nodes: PipelineNode[]
-): PipelineFlowEdge[] {
-  return nodes.slice(0, -1).map((node, index) => ({
-    id: `pipeline-edge-${node.id}-${nodes[index + 1].id}`,
-    source: node.id,
-    target: nodes[index + 1].id,
-    type: 'pipelineEdge',
-  }));
-}
