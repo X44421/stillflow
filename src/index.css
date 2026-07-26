@@ -48,6 +48,192 @@
   .connector-arrow {
     @apply text-gray-300;
   }
+
+  section[aria-labelledby="csv-preview-title"] {
+    height: min(45vh, 540px) !important;
+    min-height: 320px !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"][role="dialog"] {
+    height: 100vh !important;
+    min-height: 0 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"][class*="h-11"] {
+    height: 48px !important;
+    min-height: 0 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header {
+    align-items: flex-start !important;
+    padding-top: 18px !important;
+    padding-bottom: 0 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"][class*="h-11"] > header {
+    align-items: center !important;
+    height: 48px !important;
+    padding-top: 0 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header h2 {
+    color: #000 !important;
+    font-size: 18px !important;
+    line-height: 24px !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"][class*="h-11"] > header h2 {
+    font-size: 13px !important;
+    line-height: 20px !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header h2 + div {
+    margin-top: 6px !important;
+    line-height: 16px !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header h2 + div strong {
+    color: #000 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header > div:last-child {
+    gap: 4px !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header > div:last-child button {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header > div:last-child button:first-child {
+    border: 1px solid #000 !important;
+    color: #6b7280 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > header > div:last-child button:not(:first-child) {
+    border: 1px solid transparent !important;
+    color: #9ca3af !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] > div {
+    position: relative !important;
+    padding-bottom: 12px !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav {
+    height: 40px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav button {
+    height: 40px !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav button:first-child {
+    padding-left: 0 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav button::after {
+    left: 0 !important;
+    right: 12px !important;
+    height: 1px !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav + div {
+    overflow: hidden !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) {
+    display: flex !important;
+    height: 100% !important;
+    min-height: 260px !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding-top: 0 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:first-child {
+    position: absolute !important;
+    top: 4px !important;
+    right: 0 !important;
+    z-index: 20 !important;
+    margin: 0 !important;
+    max-width: min(620px, calc(100% - 24px)) !important;
+    padding: 4px !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    background: #fff !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(-4px) !important;
+    transition: opacity 120ms ease, transform 120ms ease !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"]:hover nav + div > div:has(table) > div:first-child,
+  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:first-child:focus-within {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: none !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:nth-child(2) {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: auto !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] table {
+    min-width: max-content !important;
+    font-size: 12px !important;
+    line-height: 20px !important;
+    color: #000 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] table thead {
+    display: none !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"]:hover table thead,
+  section[aria-labelledby="csv-preview-title"] table thead:focus-within {
+    display: table-header-group !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] table th {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    background: #fff !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] table td {
+    max-width: 260px !important;
+    padding: 5px 8px !important;
+    border-bottom: 1px solid #f3f4f6 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:last-child {
+    height: 48px !important;
+    flex-shrink: 0 !important;
+    align-items: center !important;
+    margin-top: 0 !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:last-child button {
+    height: 28px !important;
+    border-radius: 6px !important;
+  }
+
+  section[aria-labelledby="csv-preview-title"] nav + div > div:has(table) > div:last-child button:disabled {
+    border-color: #f3f4f6 !important;
+    color: #d1d5db !important;
+    opacity: 1 !important;
+  }
 }
 
 @keyframes pulse-dot {
