@@ -4,6 +4,7 @@ import IconSidebar from './components/IconSidebar';
 import DatasetPanel from './components/DatasetPanel';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
+import CsvPreviewCard from './components/CsvPreviewCard';
 import ProjectConfigCard, {
   type ProjectConfigValues,
 } from './components/ProjectConfigCard';
@@ -13,7 +14,6 @@ import {
   createProject,
   deleteBackendDataset,
   deleteProject,
-  getExportUrl,
   importCsvDataset,
   listBackendDatasets,
   listProjects,
@@ -159,6 +159,7 @@ const App: React.FC = () => {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [projectReady, setProjectReady] = useState(false);
   const [workspaceDatasets, setWorkspaceDatasets] = useState<Dataset[]>([]);
+  const [previewDataset, setPreviewDataset] = useState<Dataset | null>(null);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [latestOutputId, setLatestOutputId] = useState<string | null>(null);
@@ -337,6 +338,7 @@ const App: React.FC = () => {
       setProjectReady(false);
       setWorkspaceMessage('Loading project');
       setWorkspaceDatasets([]);
+      setPreviewDataset(null);
       hydrateProject(project);
       try {
         const backendDatasets = await listBackendDatasets(project.id);
@@ -383,12 +385,14 @@ const App: React.FC = () => {
       return;
     }
     setProjectConfigError(null);
+    setPreviewDataset(null);
     setProjectConfigMode('create');
   }, [globalRunning]);
 
   const handleConfigureProject = useCallback(() => {
     if (!activeProject) return;
     setProjectConfigError(null);
+    setPreviewDataset(null);
     setProjectConfigMode('edit');
   }, [activeProject]);
 
@@ -423,6 +427,7 @@ const App: React.FC = () => {
         }
 
         let projectToActivate = project;
+        let datasetToPreview: Dataset | null = null;
         let completionMessage: string | null = null;
         if (values.datasetFile) {
           setWorkspaceMessage('Importing CSV');
@@ -432,6 +437,7 @@ const App: React.FC = () => {
               project.id
             );
             const importedNodes = bindDatasetToNodes([], dataset);
+            datasetToPreview = dataset;
             projectToActivate = {
               ...project,
               selectedDatasetId: dataset.id,
@@ -468,6 +474,9 @@ const App: React.FC = () => {
         const loaded = await activateProject(projectToActivate);
         if (loaded && completionMessage) {
           setWorkspaceMessage(completionMessage);
+        }
+        if (loaded && datasetToPreview) {
+          setPreviewDataset(datasetToPreview);
         }
         setProjectConfigBusy(false);
         return;
@@ -638,6 +647,7 @@ const App: React.FC = () => {
       setNodes(boundNodes);
       setSelectedNode(boundNodes[0]?.id ?? '');
       setShowDetail(boundNodes.length > 0);
+      setPreviewDataset(dataset);
       try {
         const updated = await saveProjectWorkspace(activeProjectId, {
           selectedDatasetId: dataset.id,
@@ -674,30 +684,28 @@ const App: React.FC = () => {
     }
   }, [activeProjectId, globalRunning, nodes, projectReady]);
 
-  const handleSelectDataset = useCallback((dataset: Dataset) => {
-    if (globalRunning) {
-      setWorkspaceMessage('Wait for the current run to finish');
-      return;
-    }
-    if (dataset.category === 'output' && dataset.source === 'generated') {
-      window.open(getExportUrl(dataset.id, false), '_blank', 'noopener,noreferrer');
-      setWorkspaceMessage('Opened cleaned output');
-      return;
-    }
-    if (dataset.category !== 'source') {
-      setSelectedDatasetId(dataset.id);
-      setWorkspaceMessage('Dataset selected');
-      return;
-    }
+  const handleSelectDataset = useCallback(
+    (dataset: Dataset) => {
+      if (globalRunning) {
+        setWorkspaceMessage('Wait for the current run to finish');
+        return;
+      }
+      setPreviewDataset(dataset);
+      if (dataset.category !== 'source') {
+        setWorkspaceMessage('Dataset preview opened');
+        return;
+      }
 
-    setSelectedDatasetId(dataset.id);
-    setLatestOutputId(null);
-    const boundNodes = bindDatasetToNodes(nodes, dataset);
-    setNodes(boundNodes);
-    setSelectedNode(boundNodes[0]?.id ?? '');
-    setShowDetail(boundNodes.length > 0);
-    setWorkspaceMessage('Dataset selected');
-  }, [globalRunning, nodes]);
+      setSelectedDatasetId(dataset.id);
+      setLatestOutputId(null);
+      const boundNodes = bindDatasetToNodes(nodes, dataset);
+      setNodes(boundNodes);
+      setSelectedNode(boundNodes[0]?.id ?? '');
+      setShowDetail(boundNodes.length > 0);
+      setWorkspaceMessage('Dataset selected');
+    },
+    [globalRunning, nodes]
+  );
 
   const handleRenameDataset = useCallback(
     async (dataset: Dataset) => {
@@ -717,6 +725,9 @@ const App: React.FC = () => {
         const updated = await renameBackendDataset(dataset.id, name);
         setWorkspaceDatasets((current) =>
           current.map((item) => (item.id === updated.id ? updated : item))
+        );
+        setPreviewDataset((current) =>
+          current?.id === updated.id ? updated : current
         );
         if (selectedDatasetId === dataset.id && dataset.category === 'source') {
           setNodes((current) =>
@@ -767,6 +778,9 @@ const App: React.FC = () => {
         if (latestOutputId === dataset.id) {
           setLatestOutputId(null);
         }
+        setPreviewDataset((current) =>
+          current?.id === dataset.id ? null : current
+        );
         setWorkspaceMessage('Dataset deleted');
       } catch (error) {
         const message =
@@ -782,13 +796,16 @@ const App: React.FC = () => {
       setWorkspaceMessage('Run the pipeline to create a result');
       return;
     }
-    window.open(
-      getExportUrl(latestOutputId, false),
-      '_blank',
-      'noopener,noreferrer'
+    const output = workspaceDatasets.find(
+      (dataset) => dataset.id === latestOutputId
     );
-    setWorkspaceMessage('Opened cleaned output');
-  }, [latestOutputId]);
+    if (!output) {
+      setWorkspaceMessage('The latest output is unavailable');
+      return;
+    }
+    setPreviewDataset(output);
+    setWorkspaceMessage('Dataset preview opened');
+  }, [latestOutputId, workspaceDatasets]);
 
   /** Header "Run All" runs every node, updating status + progress along the way. */
   const handleRunAll = useCallback(async () => {
@@ -1073,6 +1090,12 @@ const App: React.FC = () => {
           error={projectConfigError}
           onCancel={handleCloseProjectConfig}
           onSubmit={handleSubmitProjectConfig}
+        />
+      )}
+      {previewDataset && (
+        <CsvPreviewCard
+          dataset={previewDataset}
+          onClose={() => setPreviewDataset(null)}
         />
       )}
     </div>
