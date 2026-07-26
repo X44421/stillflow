@@ -1,10 +1,17 @@
 import React from 'react';
 import { HelpCircle, Bell, ChevronDown, Check, Play, Search } from '../icons/hero';
+import type { Project } from '../types';
 
 interface HeaderProps {
+  projects?: Project[];
+  activeProjectId?: string | null;
   running?: boolean;
   progress?: number;
   onRunAll?: () => void;
+  onSelectProject?: (projectId: string) => void | Promise<void>;
+  onCreateProject?: () => void | Promise<void>;
+  onRenameProject?: () => void | Promise<void>;
+  onDeleteProject?: () => void | Promise<void>;
   onSearch?: (query: string) => void;
   savedLabel?: string;
   statusLabel?: string;
@@ -12,14 +19,23 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({
+  projects = [],
+  activeProjectId = null,
   running = false,
   progress = 0,
   onRunAll,
+  onSelectProject,
+  onCreateProject,
+  onRenameProject,
+  onDeleteProject,
   onSearch: _onSearch,
   savedLabel = 'Saved 2m ago',
   statusLabel = 'Published',
   error: _error,
 }) => {
+  const [showProjectMenu, setShowProjectMenu] = React.useState(false);
+  const activeProject = projects.find((project) => project.id === activeProjectId);
+
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
       <div className="flex items-center gap-3">
@@ -31,9 +47,83 @@ const Header: React.FC<HeaderProps> = ({
             <rect x="9" y="9" width="6" height="6" rx="1" fill="white" />
           </svg>
         </div>
-        <div className="flex items-center gap-2 cursor-pointer">
-          <h1 className="text-[15px] font-semibold text-gray-900">Customer Data Cleaning</h1>
-          <ChevronDown size={16} className="text-gray-500" />
+        <div className="relative">
+          <button
+            type="button"
+            className="flex items-center gap-2 cursor-pointer"
+            aria-haspopup="menu"
+            aria-expanded={showProjectMenu}
+            onClick={() => setShowProjectMenu((open) => !open)}
+          >
+            <h1 className="text-[15px] font-semibold text-gray-900">
+              {activeProject?.name ?? 'Customer Data Cleaning'}
+            </h1>
+            <ChevronDown size={16} className="text-gray-500" />
+          </button>
+          {showProjectMenu && (
+            <>
+              <button
+                type="button"
+                className="fixed inset-0 z-30 cursor-default"
+                aria-label="Close project menu"
+                onClick={() => setShowProjectMenu(false)}
+              />
+              <div
+                className="absolute left-0 top-full mt-2 z-40 w-64 rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
+                role="menu"
+              >
+                {projects.map((project) => (
+                  <button
+                    key={project.id}
+                    type="button"
+                    className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                    onClick={() => {
+                      setShowProjectMenu(false);
+                      void onSelectProject?.(project.id);
+                    }}
+                  >
+                    <span className="truncate">{project.name}</span>
+                    {project.id === activeProjectId && (
+                      <Check size={14} className="ml-2 flex-shrink-0 text-gray-500" />
+                    )}
+                  </button>
+                ))}
+                <div className="my-1 h-px bg-gray-100" />
+                <button
+                  type="button"
+                  className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    setShowProjectMenu(false);
+                    void onCreateProject?.();
+                  }}
+                >
+                  New project
+                </button>
+                <button
+                  type="button"
+                  className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50 disabled:text-gray-300"
+                  disabled={!activeProject}
+                  onClick={() => {
+                    setShowProjectMenu(false);
+                    void onRenameProject?.();
+                  }}
+                >
+                  Rename project
+                </button>
+                <button
+                  type="button"
+                  className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-red-600 hover:bg-red-50 disabled:text-gray-300 disabled:hover:bg-transparent"
+                  disabled={!activeProject || projects.length <= 1}
+                  onClick={() => {
+                    setShowProjectMenu(false);
+                    void onDeleteProject?.();
+                  }}
+                >
+                  Delete project
+                </button>
+              </div>
+            </>
+          )}
         </div>
         <span className="flex items-center gap-1.5 bg-green-50 text-green-700 text-xs font-medium px-2.5 py-1 rounded-full border border-green-200">
           <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>

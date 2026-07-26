@@ -45,6 +45,8 @@ interface DatasetPanelProps {
   importing?: boolean;
   onSelectDataset?: (dataset: Dataset) => void;
   onImportCsv?: (file: File) => Promise<void>;
+  onRenameDataset?: (dataset: Dataset) => void | Promise<void>;
+  onDeleteDataset?: (dataset: Dataset) => void | Promise<void>;
 }
 
 const DatasetPanel: React.FC<DatasetPanelProps> = ({
@@ -53,6 +55,8 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
   importing = false,
   onSelectDataset,
   onImportCsv,
+  onRenameDataset,
+  onDeleteDataset,
 }) => {
   const datasets = externalDatasets ?? fallbackDatasets;
   const [activeTab, setActiveTab] = useState<'all' | 'source' | 'interim' | 'output'>('all');
@@ -63,6 +67,7 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
     output: true,
   });
   const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedId =
     controlledSelectedId === undefined ? localSelectedId : controlledSelectedId;
@@ -122,7 +127,7 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
                   setLocalSelectedId(dataset.id);
                   onSelectDataset?.(dataset);
                 }}
-                className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors mx-1 ${
+                className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors mx-1 ${
                   selectedId === dataset.id
                     ? 'bg-gray-100 ring-1 ring-gray-300'
                     : 'hover:bg-gray-50'
@@ -135,9 +140,57 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
                     {typeLabel[dataset.type]} · {dataset.size}
                   </div>
                 </div>
-                <button className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all">
+                <button
+                  type="button"
+                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all"
+                  aria-label={`Manage ${dataset.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!dataset.projectId) return;
+                    setOpenMenuId((current) =>
+                      current === dataset.id ? null : dataset.id
+                    );
+                  }}
+                >
                   <MoreHorizontal size={14} className="text-gray-500" />
                 </button>
+                {openMenuId === dataset.id && (
+                  <>
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-20 cursor-default"
+                      aria-label="Close dataset menu"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setOpenMenuId(null);
+                      }}
+                    />
+                    <div className="absolute right-1 top-9 z-30 w-28 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+                      <button
+                        type="button"
+                        className="w-full rounded-md px-2 py-1.5 text-left text-[12px] text-gray-700 hover:bg-gray-50"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenMenuId(null);
+                          void onRenameDataset?.(dataset);
+                        }}
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full rounded-md px-2 py-1.5 text-left text-[12px] text-red-600 hover:bg-red-50"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenMenuId(null);
+                          void onDeleteDataset?.(dataset);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -219,7 +272,9 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
       <div className="flex-1 overflow-y-auto px-1 pb-3">
         {filteredDatasets.length === 0 ? (
           <div className="px-3 py-6 text-center text-[12px] text-gray-400">
-            No datasets match “{searchQuery}”.
+            {searchQuery.trim()
+              ? `No datasets match "${searchQuery}".`
+              : 'No datasets yet.'}
           </div>
         ) : (
           <>

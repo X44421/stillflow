@@ -1,5 +1,6 @@
 export interface Dataset {
   id: string;
+  projectId?: string | null;
   name: string;
   type: 'csv' | 'parquet' | 'excel' | 's3' | 'table';
   category: 'source' | 'interim' | 'output';
@@ -45,6 +46,17 @@ export interface PipelineNode {
   metrics?: PipelineMetrics;
   error?: string;
   config: PipelineNodeConfig;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  selectedDatasetId: string | null;
+  latestOutputId: string | null;
+  nodes: PipelineNode[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PreviewColumn {

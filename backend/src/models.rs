@@ -8,6 +8,8 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct StoredDataset {
     pub id: Uuid,
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
     pub name: String,
     pub category: String,
     pub source: String,
@@ -21,6 +23,7 @@ impl StoredDataset {
     pub fn to_dto(&self) -> DatasetDto {
         DatasetDto {
             id: self.id,
+            project_id: self.project_id,
             name: self.name.clone(),
             dataset_type: "csv".to_owned(),
             category: self.category.clone(),
@@ -40,6 +43,7 @@ impl StoredDataset {
 #[serde(rename_all = "camelCase")]
 pub struct DatasetDto {
     pub id: Uuid,
+    pub project_id: Option<Uuid>,
     pub name: String,
     #[serde(rename = "type")]
     pub dataset_type: String,
@@ -66,7 +70,18 @@ pub struct ImportDatasetResponse {
     pub dataset: DatasetDto,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDatasetsQuery {
+    pub project_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameDatasetRequest {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PipelineNodeRequest {
     pub id: String,
     #[serde(rename = "type")]
@@ -75,7 +90,7 @@ pub struct PipelineNodeRequest {
     pub config: PipelineConfig,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PipelineConfig {
     pub column: String,
@@ -93,6 +108,74 @@ impl Default for PipelineConfig {
             null_handling: "Ignore".to_owned(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectNodeSnapshot {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub node_type: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub rows: String,
+    pub status: String,
+    #[serde(default)]
+    pub config: PipelineConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredProject {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub selected_dataset_id: Option<Uuid>,
+    #[serde(default)]
+    pub latest_output_id: Option<Uuid>,
+    #[serde(default)]
+    pub nodes: Vec<ProjectNodeSnapshot>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectListResponse {
+    pub projects: Vec<StoredProject>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectResponse {
+    pub project: StoredProject,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProjectRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub nodes: Vec<ProjectNodeSnapshot>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateProjectRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveProjectWorkspaceRequest {
+    pub selected_dataset_id: Option<Uuid>,
+    pub latest_output_id: Option<Uuid>,
+    pub nodes: Vec<ProjectNodeSnapshot>,
 }
 
 #[derive(Debug, Deserialize)]

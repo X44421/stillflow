@@ -46,7 +46,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(api::list_datasets).post(api::import_dataset),
         )
         .route("/api/datasets/import", post(api::import_dataset))
+        .route(
+            "/api/datasets/:id",
+            axum::routing::patch(api::rename_dataset).delete(api::delete_dataset),
+        )
         .route("/api/datasets/:id/preview", get(api::preview_dataset))
+        .route(
+            "/api/projects",
+            get(api::list_projects).post(api::create_project),
+        )
+        .route(
+            "/api/projects/:id",
+            get(api::get_project)
+                .patch(api::update_project)
+                .delete(api::delete_project),
+        )
+        .route(
+            "/api/projects/:id/workspace",
+            axum::routing::put(api::save_project_workspace),
+        )
         .route("/api/pipeline/run", post(api::run_pipeline))
         .route(
             "/api/exports/:id/download",
