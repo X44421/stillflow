@@ -6,28 +6,28 @@ const EMPTY_DATASETS: Dataset[] = [];
 
 const typeIconMap: Record<string, React.ReactNode> = {
   csv: (
-    <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <FileText size={16} className="text-green-600" />
+    <div className="w-8 h-8 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <FileText size={16} className="text-[#0b6c96]" />
     </div>
   ),
   parquet: (
-    <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Database size={16} className="text-blue-600" />
+    <div className="w-8 h-8 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <Database size={16} className="text-[#0b6c96]" />
     </div>
   ),
   excel: (
-    <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <FileText size={16} className="text-emerald-600" />
+    <div className="w-8 h-8 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <FileText size={16} className="text-[#0b6c96]" />
     </div>
   ),
   s3: (
-    <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <HardDrive size={16} className="text-red-500" />
+    <div className="w-8 h-8 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <HardDrive size={16} className="text-[#0b6c96]" />
     </div>
   ),
   table: (
-    <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Database size={16} className="text-purple-600" />
+    <div className="w-8 h-8 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <Database size={16} className="text-[#0b6c96]" />
     </div>
   ),
 };
@@ -130,8 +130,8 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
                 }}
                 className={`group relative flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors mx-1 ${
                   selectedId === dataset.id
-                    ? 'bg-gray-100 ring-1 ring-gray-300'
-                    : 'hover:bg-gray-50'
+                    ? 'bg-[#e8f7fe] ring-1 ring-[#20beff]/30'
+                    : 'hover:bg-[#f1f3f4]'
                 }`}
               >
                 {typeIconMap[dataset.type]}
@@ -201,7 +201,7 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
   };
 
   return (
-    <div className="w-[272px] bg-white border-r border-gray-200 flex flex-col flex-shrink-0 overflow-hidden">
+    <div className="w-[272px] bg-white border-r border-[#e3e6e8] flex flex-col flex-shrink-0 overflow-hidden">
       <div className="p-3 pb-2">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-[15px] font-semibold text-gray-900">Datasets</h2>
@@ -256,20 +256,20 @@ const DatasetPanel: React.FC<DatasetPanelProps> = ({
             placeholder="Search datasets"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-8 pl-8 pr-10 text-[13px] border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-gray-300 focus:outline-none transition-colors placeholder:text-gray-400"
+            className="w-full h-8 pl-8 pr-10 text-[13px] border border-[#dadce0] rounded-full bg-[#f1f3f4] focus:bg-white focus:border-[#20beff] focus:ring-1 focus:ring-[#20beff] focus:outline-none transition-colors placeholder:text-[#80868b]"
           />
           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
             ⌘K
           </span>
         </div>
-        <div className="flex gap-0.5 bg-gray-100 p-0.5 rounded-lg">
+        <div className="flex gap-0.5 bg-[#f1f3f4] p-0.5 rounded-full">
           {tabs.map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`flex-1 text-[12px] font-medium py-1.5 rounded-md transition-all ${
                 activeTab === tab.key
-                  ? 'bg-white text-gray-900 shadow-sm'
+                  ? 'bg-[#e8f7fe] text-[#0b6c96] shadow-none'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >

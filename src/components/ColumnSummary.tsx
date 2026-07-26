@@ -4,10 +4,10 @@ import { axisLabel, compact, pctLabel, type ColumnStats } from "../lib/csv";
 
 export function TypeIcon({ type, className = "" }: { type: ColumnStats["type"]; className?: string }) {
   const c = `h-3.5 w-3.5 shrink-0 ${className}`;
-  if (type === "integer" || type === "decimal") return <Hash className={`${c} text-[#18181b]`} />;
-  if (type === "date") return <Calendar className={`${c} text-[#52525b]`} />;
-  if (type === "boolean") return <ToggleLeft className={`${c} text-[#71717a]`} />;
-  return <CaseSensitive className={`${c} text-[#a1a1aa]`} />;
+  if (type === "integer" || type === "decimal") return <Hash className={`${c} text-[#0b6c96]`} />;
+  if (type === "date") return <Calendar className={`${c} text-[#0f9ad6]`} />;
+  if (type === "boolean") return <ToggleLeft className={`${c} text-[#5f6368]`} />;
+  return <CaseSensitive className={`${c} text-[#80868b]`} />;
 }
 
 export function typeLabel(t: ColumnStats["type"]) {
@@ -18,9 +18,9 @@ export function typeLabel(t: ColumnStats["type"]) {
 export function ValidityBar({ s, tall = false }: { s: ColumnStats; tall?: boolean }) {
   const t = Math.max(1, s.total);
   const seg = [
-    { w: (s.valid / t) * 100, c: "#18181b", k: "Valid" },
-    { w: (s.mismatched / t) * 100, c: "#71717a", k: "Mismatched" },
-    { w: (s.missing / t) * 100, c: "#d4d4d8", k: "Missing" },
+    { w: (s.valid / t) * 100, c: "#46a352", k: "Valid" },
+    { w: (s.mismatched / t) * 100, c: "#e5534b", k: "Mismatched" },
+    { w: (s.missing / t) * 100, c: "#c9cdd1", k: "Missing" },
   ].filter((x) => x.w > 0);
   return (
     <div className={`flex w-full overflow-hidden rounded-full bg-[#eceff1] ${tall ? "h-[6px]" : "h-[3px]"}`}>
@@ -53,7 +53,7 @@ function Histogram({ s }: { s: ColumnStats }) {
               className="w-full rounded-[1px] transition-colors"
               style={{
                 height: `${Math.max(bk.count ? 8 : 0, (bk.count / max) * 100)}%`,
-                background: hover === i ? "#18181b" : "#d4d4d8",
+                background: hover === i ? "#20beff" : "#c9cdd1",
               }}
             />
           </div>
@@ -67,7 +67,7 @@ function Histogram({ s }: { s: ColumnStats }) {
   );
 }
 
-const CAT_COLORS = ["#3f3f46", "#a1a1aa", "#e4e4e7"];
+const CAT_COLORS = ["#20beff", "#73d2f4", "#dce1e4"];
 
 function CategoryBar({ s }: { s: ColumnStats }) {
   const allUnique = s.unique >= s.valid * 0.98 && s.unique > 12;
@@ -139,9 +139,9 @@ export function ColumnDetailCard({ s }: { s: ColumnStats }) {
       <ValidityBar s={s} tall />
       <div className="mt-2 grid grid-cols-3 gap-1 text-center">
         {[
-          ["Valid", s.valid, "#18181b"],
-          ["Mismatched", s.mismatched, "#71717a"],
-          ["Missing", s.missing, "#a1a1aa"],
+          ["Valid", s.valid, "#46a352"],
+          ["Mismatched", s.mismatched, "#e5534b"],
+          ["Missing", s.missing, "#c9cdd1"],
         ].map(([k, v, c]) => (
           <div key={k as string} className="rounded bg-[#f8f9fa] py-1.5">
             <div className="text-[10px] text-[#5f6368]">{k as string}</div>

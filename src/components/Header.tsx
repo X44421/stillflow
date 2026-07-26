@@ -37,9 +37,9 @@ const Header: React.FC<HeaderProps> = ({
   const activeProject = projects.find((project) => project.id === activeProjectId);
 
   return (
-    <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
+    <header className="h-14 bg-white border-b border-[#e3e6e8] flex items-center justify-between px-4 flex-shrink-0">
       <div className="flex items-center gap-3">
-        <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center">
+        <div className="w-8 h-8 bg-[#20beff] rounded-lg flex items-center justify-center">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <rect x="1" y="1" width="6" height="6" rx="1" fill="white" />
             <rect x="9" y="1" width="6" height="6" rx="1" fill="white" />
@@ -69,14 +69,14 @@ const Header: React.FC<HeaderProps> = ({
                 onClick={() => setShowProjectMenu(false)}
               />
               <div
-                className="absolute left-0 top-full mt-2 z-40 w-64 rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
+                className="absolute left-0 top-full mt-2 z-40 w-64 rounded-lg border border-[#e3e6e8] bg-white p-1 shadow-[0_8px_24px_rgba(32,33,36,.16)]"
                 role="menu"
               >
                 {projects.map((project) => (
                   <button
                     key={project.id}
                     type="button"
-                    className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                    className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-[13px] text-[#3c4043] hover:bg-[#f1f3f4]"
                     onClick={() => {
                       setShowProjectMenu(false);
                       void onSelectProject?.(project.id);
@@ -91,7 +91,7 @@ const Header: React.FC<HeaderProps> = ({
                 <div className="my-1 h-px bg-gray-100" />
                 <button
                   type="button"
-                  className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                  className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-[#3c4043] hover:bg-[#f1f3f4]"
                   onClick={() => {
                     setShowProjectMenu(false);
                     void onCreateProject?.();
@@ -101,7 +101,7 @@ const Header: React.FC<HeaderProps> = ({
                 </button>
                 <button
                   type="button"
-                  className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50 disabled:text-gray-300"
+                  className="w-full rounded-md px-2.5 py-2 text-left text-[13px] text-[#3c4043] hover:bg-[#f1f3f4] disabled:text-gray-300"
                   disabled={!activeProject}
                   onClick={() => {
                     setShowProjectMenu(false);
@@ -128,7 +128,7 @@ const Header: React.FC<HeaderProps> = ({
         <span
           className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
             statusLabel === 'Running'
-              ? 'bg-gray-900 text-white border-gray-900'
+              ? 'bg-[#20beff] text-white border-[#20beff]'
               : statusLabel === 'Offline'
                 ? 'bg-gray-50 text-gray-500 border-gray-200'
                 : 'bg-green-50 text-green-700 border-green-200'
@@ -156,7 +156,7 @@ const Header: React.FC<HeaderProps> = ({
           <input
             type="text"
             placeholder="Search nodes…"
-            className="h-8 w-44 pl-8 pr-3 text-[13px] border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-gray-300 focus:outline-none transition-colors placeholder:text-gray-400"
+            className="h-8 w-44 pl-8 pr-3 text-[13px] border border-[#dadce0] rounded-full bg-[#f1f3f4] focus:bg-white focus:border-[#20beff] focus:ring-1 focus:ring-[#20beff] focus:outline-none transition-colors placeholder:text-[#80868b]"
             onChange={(e) => {
               const ev = new CustomEvent('opencode:search-nodes', { detail: e.target.value });
               window.dispatchEvent(ev);
@@ -172,7 +172,7 @@ const Header: React.FC<HeaderProps> = ({
           onClick={onRunAll}
           disabled={running}
           className={`ml-2 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
-            running ? 'bg-gray-700 cursor-wait' : 'bg-gray-900 hover:bg-gray-800'
+            running ? 'bg-[#0f9ad6] cursor-wait' : 'bg-[#20beff] hover:bg-[#0f9ad6]'
           }`}
         >
           <Play size={14} fill="white" />

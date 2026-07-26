@@ -69,28 +69,28 @@ interface PipelineCanvasProps {
 
 const NODE_ICON: Record<NodeType, React.ReactNode> = {
   source: (
-    <div className="w-9 h-9 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <FileText size={18} className="text-green-600" />
+    <div className="w-9 h-9 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <FileText size={18} className="text-[#0b6c96]" />
     </div>
   ),
   filter: (
-    <div className="w-9 h-9 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Filter size={18} className="text-purple-600" />
+    <div className="w-9 h-9 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <Filter size={18} className="text-[#0b6c96]" />
     </div>
   ),
   deduplicate: (
-    <div className="w-9 h-9 bg-teal-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Copy size={18} className="text-teal-600" />
+    <div className="w-9 h-9 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <Copy size={18} className="text-[#0b6c96]" />
     </div>
   ),
   normalize: (
-    <div className="w-9 h-9 bg-orange-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Type size={18} className="text-orange-600" />
+    <div className="w-9 h-9 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <Type size={18} className="text-[#0b6c96]" />
     </div>
   ),
   export: (
-    <div className="w-9 h-9 bg-amber-50 rounded-lg flex items-center justify-center flex-shrink-0">
-      <Upload size={18} className="text-amber-600" />
+    <div className="w-9 h-9 bg-[#e8f7fe] rounded-lg flex items-center justify-center flex-shrink-0">
+      <Upload size={18} className="text-[#0b6c96]" />
     </div>
   ),
 };
@@ -131,8 +131,8 @@ function PipelineFlowNodeView({
         }}
         className={`bg-white rounded-xl border px-4 py-3 flex items-center gap-3 min-w-[240px] max-w-[280px] cursor-grab select-none active:cursor-grabbing transition-all duration-150 ${
           selected
-            ? 'border-gray-900 shadow-lg ring-1 ring-gray-900'
-            : 'border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300'
+            ? 'border-[#20beff] shadow-[0_4px_12px_rgba(32,190,255,.16)] ring-1 ring-[#20beff]/30'
+            : 'border-[#dadce0] shadow-sm hover:shadow-md hover:border-[#aeb4b9]'
         }`}
       >
         {NODE_ICON[node.type]}
@@ -178,7 +178,7 @@ function PipelineFlowEdgeView({
     targetPosition,
     borderRadius: 12,
   });
-  const stroke = selected ? '#111827' : '#d1d5db';
+  const stroke = selected ? '#20beff' : '#cfd4d8';
 
   return (
     <>
@@ -235,7 +235,7 @@ function PipelineConnectionLine({
     targetPosition: toPosition,
     borderRadius: 12,
   });
-  const stroke = connectionStatus === 'invalid' ? '#ef4444' : '#9ca3af';
+  const stroke = connectionStatus === 'invalid' ? '#e5534b' : '#20beff';
 
   return (
     <>
@@ -427,11 +427,11 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
   );
 
   return (
-    <div className="min-h-0 flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
+    <div className="min-h-0 flex-1 bg-[#f5f7f8] flex flex-col relative overflow-hidden">
       <div className="absolute top-4 left-4 z-20">
-        <div className="flex flex-col bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
+        <div className="flex flex-col bg-white border border-[#dadce0] rounded-lg shadow-sm px-1 py-1 gap-0.5">
           <button
-            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-700 transition-colors"
+            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#f1f3f4] text-[#0b6c96] transition-colors"
             title="Add node"
             onClick={() => setShowPalette((open) => !open)}
           >
@@ -523,7 +523,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
         }}
         connectionLineType={ConnectionLineType.SmoothStep}
         connectionLineComponent={PipelineConnectionLine}
-        connectionLineStyle={{ stroke: '#d1d5db', strokeWidth: 1.5 }}
+        connectionLineStyle={{ stroke: '#20beff', strokeWidth: 1.5 }}
         connectionRadius={28}
         reconnectRadius={24}
         connectionDragThreshold={3}
@@ -562,7 +562,7 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
         />
       </ReactFlow>
 
-      <div className="absolute bottom-4 left-4 z-10 flex items-center bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
+      <div className="absolute bottom-4 left-4 z-10 flex items-center bg-white border border-[#dadce0] rounded-lg shadow-sm px-1 py-1 gap-0.5">
         <button
           onClick={() => handleZoom(zoomPercent - 10)}
           className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"

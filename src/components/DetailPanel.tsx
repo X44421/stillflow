@@ -21,11 +21,11 @@ const TYPE_ICON: Record<NodeType, React.ReactNode> = {
 };
 
 const TYPE_BG: Record<NodeType, string> = {
-  deduplicate: 'bg-violet-50 text-violet-600',
-  normalize: 'bg-orange-50 text-orange-600',
-  filter: 'bg-purple-50 text-purple-600',
-  source: 'bg-green-50 text-green-600',
-  export: 'bg-amber-50 text-amber-600',
+  deduplicate: 'bg-[#e8f7fe] text-[#0b6c96]',
+  normalize: 'bg-[#e8f7fe] text-[#0b6c96]',
+  filter: 'bg-[#e8f7fe] text-[#0b6c96]',
+  source: 'bg-[#e8f7fe] text-[#0b6c96]',
+  export: 'bg-[#e8f7fe] text-[#0b6c96]',
 };
 
 const TYPE_LABEL: Record<NodeType, string> = {
@@ -160,7 +160,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   const rowsOutDisplay = formatRows(metrics.rowsOut);
 
   return (
-    <div className="w-[356px] bg-white border-l border-gray-200 flex flex-col flex-shrink-0 overflow-hidden relative shadow-[-12px_0_32px_rgba(16,24,40,0.05)]">
+    <div className="w-[356px] bg-white border-l border-[#e3e6e8] flex flex-col flex-shrink-0 overflow-hidden relative shadow-[-12px_0_32px_rgba(32,33,36,0.05)]">
       <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d9dadd transparent' }}>
         {/* Header */}
         <div className="p-4 pb-3 border-b border-gray-100">
@@ -189,8 +189,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 node.status === 'completed'
                   ? 'text-green-700 bg-green-50'
                   : node.status === 'running'
-                  ? 'text-white bg-gray-900'
-                  : 'text-gray-600 bg-gray-100'
+                  ? 'text-white bg-[#20beff]'
+                  : 'text-[#5f6368] bg-[#f1f3f4]'
               }`}
             >
               {node.status === 'completed' ? (
@@ -273,7 +273,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gray-900 rounded-full transition-[width] duration-150 ease-out"
+                  className="h-full bg-[#20beff] rounded-full transition-[width] duration-150 ease-out"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
@@ -286,24 +286,24 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         <div className="p-4 border-b border-gray-100">
           <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Metrics</h4>
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-xl p-3">
+            <div className="bg-[#f5f7f8] rounded-lg p-3">
               <div className="text-[11px] text-gray-500 mb-1">Rows</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? rowsOutDisplay : '—'}</div>
               <div className="text-[11px] text-gray-400">output rows</div>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3 relative">
+            <div className="bg-[#f5f7f8] rounded-lg p-3 relative">
               <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.duplicates}%` : '—'}</div>
               {hasRun && metrics.duplicates > 0 && (
                 <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
               )}
             </div>
-            <div className="bg-gray-50 rounded-xl p-3">
+            <div className="bg-[#f5f7f8] rounded-lg p-3">
               <div className="text-[11px] text-gray-500 mb-1">Missing</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.missing}%` : '—'}</div>
               <div className="text-[11px] text-gray-400">across columns</div>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3">
+            <div className="bg-[#f5f7f8] rounded-lg p-3">
               <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? metrics.qualityScore : '—'}</div>
               {hasRun && (
@@ -322,7 +322,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <button
             onClick={handleRun}
             disabled={running || disabled}
-            className="w-full bg-gray-900 text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-800 transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
+            className="w-full bg-[#20beff] text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-[#0f9ad6] transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
           >
             <Play size={14} fill="white" />
             <span>{running ? 'Running…' : 'Run From Here'}</span>

@@ -75,7 +75,7 @@ const ProjectConfigCard: React.FC<ProjectConfigCardProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-config-title"
-        className="max-h-[calc(100vh-32px)] w-full max-w-[720px] overflow-y-auto rounded-lg border border-gray-200 bg-white px-6 py-7 shadow-xl sm:px-10 sm:py-9"
+        className="max-h-[calc(100vh-32px)] w-full max-w-[720px] overflow-y-auto rounded-lg border border-[#e3e6e8] bg-white px-6 py-7 shadow-[0_8px_24px_rgba(32,33,36,.16)] sm:px-10 sm:py-9"
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={(event) => {
           event.preventDefault();
@@ -107,7 +107,7 @@ const ProjectConfigCard: React.FC<ProjectConfigCardProps> = ({
             </button>
             <button
               type="submit"
-              className="h-8 rounded-md bg-[#1b1d20] px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-[#2d3035] disabled:cursor-wait disabled:bg-gray-400"
+              className="h-8 rounded-full bg-[#20beff] px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-[#0f9ad6] disabled:cursor-wait disabled:bg-gray-400"
               disabled={busy || !name.trim() || Boolean(fileError)}
             >
               {busy
@@ -128,7 +128,7 @@ const ProjectConfigCard: React.FC<ProjectConfigCardProps> = ({
               maxLength={120}
               value={name}
               onChange={(event) => setName(event.target.value)}
-              className="h-10 w-full border-0 border-b border-gray-200 bg-transparent px-0 pb-2 text-[22px] font-medium leading-8 text-[#1b1d20] outline-none placeholder:font-normal placeholder:text-gray-400 focus:border-[#1b1d20]"
+              className="h-10 w-full border-0 border-b border-[#e3e6e8] bg-transparent px-0 pb-2 text-[22px] font-medium leading-8 text-[#202124] outline-none placeholder:font-normal placeholder:text-gray-400 focus:border-[#20beff]"
               placeholder="Untitled project"
               autoComplete="off"
               spellCheck={false}
@@ -146,7 +146,7 @@ const ProjectConfigCard: React.FC<ProjectConfigCardProps> = ({
                 onBlur={() => {
                   if (!description.trim()) setDescriptionExpanded(false);
                 }}
-                className="min-h-[72px] w-full resize-none rounded-md border border-gray-300 bg-white px-3 py-2.5 text-[13px] leading-5 text-[#1b1d20] outline-none transition-colors placeholder:text-gray-400 focus:border-[#1b1d20] focus:ring-2 focus:ring-black/5"
+                className="min-h-[72px] w-full resize-none rounded-lg border border-[#dadce0] bg-white px-3 py-2.5 text-[13px] leading-5 text-[#202124] outline-none transition-colors placeholder:text-gray-400 focus:border-[#20beff] focus:ring-1 focus:ring-[#20beff]"
                 placeholder="Describe the goal of this project..."
               />
             ) : (

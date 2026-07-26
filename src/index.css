@@ -1,19 +1,19 @@
 @import "tailwindcss";
 @import "@xyflow/react/dist/style.css";
 
-/* ── Mono design tokens (lieflat-charts mono-tokens.js) ─────────
-   纸灰 #F0EFEB + 炭黑 #1C1C1A 两极,中间 7 级灰阶 ladder。
-   明度即数据:最重要 = 最黑。一律实心,无渐变无发光。          */
+/* Kaggle preview visual tokens. These tokens are intentionally visual-only:
+   panel composition and Workspace layout stay in their existing components. */
 @theme {
-  --color-paper: #f0efeb;
-  --color-ink: #1c1c1a;
-  --color-ink-2: #4a4944;
-  --color-ink-3: #6a6963;
-  --color-ink-4: #8f8e88;
-  --color-ink-5: #b0afa9;
-  --color-ink-6: #c6c5bf;
-  --color-ink-7: #d8d7d1;
-  --color-grid: #deddd6;
+  --color-kaggle: #20beff;
+  --color-kaggle-dark: #0f9ad6;
+  --color-ink: #202124;
+  --color-ink-2: #3c4043;
+  --color-muted: #5f6368;
+  --color-line: #e3e6e8;
+  --color-surface: #f5f7f8;
+  --color-valid: #46a352;
+  --color-mismatch: #e5534b;
+  --color-missing: #c9cdd1;
 
   --font-sans:
     "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -25,22 +25,16 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  body {
-    @apply bg-white font-sans text-gray-900;
-  }
+  body { background: #fff; color: #202124; font-family: var(--font-sans); }
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 11px;
+    height: 11px;
   }
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
-  ::-webkit-scrollbar-thumb {
-    @apply bg-gray-300 rounded-full;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-400;
-  }
+  ::-webkit-scrollbar-thumb { background: #cfd4d8; border: 3px solid #fff; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #aeb4b9; }
 }
 
 @layer components {
@@ -133,7 +127,7 @@
   display: block;
   width: 8px;
   height: 8px;
-  border: 1.5px solid #d1d5db;
+  border: 1.5px solid #cfd4d8;
   border-radius: 999px;
   background: #fff;
   content: "";
@@ -147,7 +141,7 @@
 .react-flow__node:hover .pipeline-node-handle::after,
 .react-flow__node:focus-visible .pipeline-node-handle::after,
 .react-flow__handle.pipeline-node-handle.connectingfrom::after {
-  border-color: #9ca3af;
+  border-color: #20beff;
   opacity: 1;
 }
 

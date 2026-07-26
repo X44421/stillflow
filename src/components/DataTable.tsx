@@ -113,7 +113,7 @@ export function DataTable({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search this file..."
-            className="h-8 w-[190px] rounded-full border border-[#dadce0] pr-7 pl-8 text-[13px] outline-none focus:border-[#18181b] focus:ring-1 focus:ring-[#18181b]"
+            className="h-8 w-[190px] rounded-full border border-[#dadce0] pr-7 pl-8 text-[13px] outline-none focus:border-[#20beff] focus:ring-1 focus:ring-[#20beff]"
           />
           {query && (
             <button
@@ -153,7 +153,7 @@ export function DataTable({
                           return n.size === columns.length ? h : n;
                         })
                       }
-                      className="accent-[#18181b]"
+                      className="accent-[#20beff]"
                     />
                     <TypeIcon type={statMap[c].type} />
                     <span className="truncate">{c}</span>
@@ -177,7 +177,7 @@ export function DataTable({
               onClick={() => setView(v)}
               title={`${label} view`}
               className={`flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] transition ${
-                view === v ? "bg-[#18181b] font-medium text-white" : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                view === v ? "bg-[#e8f7fe] font-medium text-[#0b6c96]" : "text-[#5f6368] hover:bg-[#f1f3f4]"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -222,8 +222,8 @@ export function DataTable({
                   <MiniChart s={s} />
                 </div>
                 <div className="mt-2 flex justify-between border-t border-[#f1f3f4] pt-2 font-mono text-[10.5px] text-[#5f6368]">
-                  <span className="text-[#18181b]">valid {pctLabel((s.valid / s.total) * 100)}</span>
-                  <span className="text-[#71717a]">mismatch {pctLabel((s.mismatched / s.total) * 100)}</span>
+                  <span className="text-[#46a352]">valid {pctLabel((s.valid / s.total) * 100)}</span>
+                  <span className="text-[#e5534b]">mismatch {pctLabel((s.mismatched / s.total) * 100)}</span>
                   <span>missing {pctLabel((s.missing / s.total) * 100)}</span>
                   <span>{s.unique.toLocaleString()} uniq</span>
                 </div>
@@ -258,15 +258,15 @@ export function DataTable({
                           <button
                             onClick={() => toggleSort(c)}
                             title={`Sort by ${c}`}
-                            className="min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-[#202124] hover:text-[#18181b]"
+                            className="min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-[#202124] hover:text-[#0b6c96]"
                           >
                             {c}
                           </button>
                           {active &&
                             (sort.dir === "asc" ? (
-                              <ArrowUpAZ className="h-3.5 w-3.5 text-[#18181b]" />
+                              <ArrowUpAZ className="h-3.5 w-3.5 text-[#0f9ad6]" />
                             ) : (
-                              <ArrowDownAZ className="h-3.5 w-3.5 text-[#18181b]" />
+                              <ArrowDownAZ className="h-3.5 w-3.5 text-[#0f9ad6]" />
                             ))}
                           <button
                             onClick={() => setOpenMenu(openMenu === c ? null : c)}
