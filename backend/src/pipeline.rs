@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     fs::File,
     path::Path,
@@ -132,23 +133,52 @@ pub fn build_preview(
         .iter()
         .enumerate()
         .map(|(index, name)| {
-            let values = table.rows.iter().filter_map(|row| row.get(index));
+            let values: Vec<&String> = table
+                .rows
+                .iter()
+                .filter_map(|row| row.get(index))
+                .collect();
             let null_count = values
-                .clone()
+                .iter()
                 .filter(|value| value.trim().is_empty())
                 .count();
             let distinct_count = values
-                .clone()
-                .filter(|value| !value.trim().is_empty())
+                .iter()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
                 .collect::<HashSet<_>>()
                 .len();
-            let column_type = infer_type(values.take(100));
+            let whitespace_count = values
+                .iter()
+                .filter(|value| {
+                    !value.trim().is_empty() && value.as_str() != value.trim()
+                })
+                .count();
+            let column_type = infer_type(values.iter().copied().take(100));
+            let numeric_values: Vec<f64> = if column_type == "number" {
+                values
+                    .iter()
+                    .filter_map(|value| value.trim().parse::<f64>().ok())
+                    .filter(|value| value.is_finite())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let minimum = numeric_values.iter().copied().reduce(f64::min);
+            let maximum = numeric_values.iter().copied().reduce(f64::max);
+            let average = (!numeric_values.is_empty()).then(|| {
+                numeric_values.iter().sum::<f64>() / numeric_values.len() as f64
+            });
 
             PreviewColumn {
                 name: name.clone(),
                 column_type,
                 null_count,
                 distinct_count,
+                whitespace_count,
+                minimum,
+                maximum,
+                average,
             }
         })
         .collect();
@@ -168,6 +198,111 @@ pub fn build_preview(
         .collect();
 
     (columns, rows)
+}
+
+pub fn build_preview_page(
+    table: &TableData,
+    offset: usize,
+    limit: usize,
+    sort_by: Option<&str>,
+    sort_direction: Option<&str>,
+    search: Option<&str>,
+) -> Result<(Vec<BTreeMap<String, String>>, usize), PipelineError> {
+    let search = search
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase);
+    let mut rows: Vec<&Vec<String>> = table
+        .rows
+        .iter()
+        .filter(|row| {
+            search.as_ref().map_or(true, |query| {
+                row.iter()
+                    .any(|value| value.to_lowercase().contains(query))
+            })
+        })
+        .collect();
+
+    if let Some(column) = sort_by.map(str::trim).filter(|value| !value.is_empty()) {
+        let index = column_index(table, column)?;
+        let column_type = infer_type(table.rows.iter().filter_map(|row| row.get(index)).take(100));
+        let descending = match sort_direction.unwrap_or("asc") {
+            "asc" => false,
+            "desc" => true,
+            direction => {
+                return Err(PipelineError::Invalid(format!(
+                    "Unsupported preview sort direction: {direction}"
+                )));
+            }
+        };
+        rows.sort_by(|left, right| {
+            compare_preview_values(
+                left.get(index).map(String::as_str).unwrap_or_default(),
+                right.get(index).map(String::as_str).unwrap_or_default(),
+                &column_type,
+                descending,
+            )
+        });
+    }
+
+    let filtered_rows = rows.len();
+    let rows = rows
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|row| {
+            table
+                .headers
+                .iter()
+                .cloned()
+                .zip(row.iter().cloned())
+                .collect()
+        })
+        .collect();
+    Ok((rows, filtered_rows))
+}
+
+pub fn count_duplicate_rows(table: &TableData) -> usize {
+    let mut seen = HashSet::new();
+    let mut duplicates = 0;
+    for row in &table.rows {
+        if !seen.insert(row) {
+            duplicates += 1;
+        }
+    }
+    duplicates
+}
+
+fn compare_preview_values(
+    left: &str,
+    right: &str,
+    column_type: &str,
+    descending: bool,
+) -> Ordering {
+    let left = left.trim();
+    let right = right.trim();
+    match (left.is_empty(), right.is_empty()) {
+        (true, false) => return Ordering::Greater,
+        (false, true) => return Ordering::Less,
+        (true, true) => return Ordering::Equal,
+        (false, false) => {}
+    }
+
+    let ordering = if column_type == "number" {
+        match (left.parse::<f64>(), right.parse::<f64>()) {
+            (Ok(left), Ok(right)) if left.is_finite() && right.is_finite() => {
+                left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+            }
+            _ => left.to_lowercase().cmp(&right.to_lowercase()),
+        }
+    } else {
+        left.to_lowercase().cmp(&right.to_lowercase())
+    };
+    if descending {
+        ordering.reverse()
+    } else {
+        ordering
+    }
 }
 
 fn validate_headers(headers: &[String]) -> Result<(), PipelineError> {
@@ -219,6 +354,35 @@ fn deduplicate_rows(
     table: &mut TableData,
     config: &PipelineConfig,
 ) -> Result<(), PipelineError> {
+    if config.column.trim().is_empty() {
+        let rows = std::mem::take(&mut table.rows);
+        table.rows = match config.strategy.as_str() {
+            "Keep last" => {
+                let mut seen = HashSet::new();
+                let mut output = Vec::with_capacity(rows.len());
+                for row in rows.into_iter().rev() {
+                    if seen.insert(row.clone()) {
+                        output.push(row);
+                    }
+                }
+                output.reverse();
+                output
+            }
+            "Keep first" | "Merge records" => {
+                let mut seen = HashSet::new();
+                rows.into_iter()
+                    .filter(|row| seen.insert(row.clone()))
+                    .collect()
+            }
+            strategy => {
+                return Err(PipelineError::Invalid(format!(
+                    "Unsupported deduplicate strategy: {strategy}"
+                )));
+            }
+        };
+        return Ok(());
+    }
+
     let index = column_index(table, &config.column)?;
     let rows = std::mem::take(&mut table.rows);
     let remove_nulls = config.null_handling == "Remove null rows";
@@ -342,22 +506,22 @@ fn merge_row(target: &mut [String], incoming: &[String]) {
 }
 
 fn normalize_rows(table: &mut TableData, config: &PipelineConfig) -> Result<(), PipelineError> {
-    let email_columns: HashSet<usize> = table
-        .headers
+    let target_columns = if config.column.trim().is_empty() {
+        (0..table.headers.len()).collect::<Vec<_>>()
+    } else {
+        vec![column_index(table, &config.column)?]
+    };
+    let email_columns: HashSet<usize> = target_columns
         .iter()
-        .enumerate()
-        .filter_map(|(index, header)| {
-            header
-                .to_lowercase()
-                .contains("email")
-                .then_some(index)
-        })
+        .copied()
+        .filter(|index| table.headers[*index].to_lowercase().contains("email"))
         .collect();
 
     for row in &mut table.rows {
-        for (index, value) in row.iter_mut().enumerate() {
+        for index in &target_columns {
+            let value = &mut row[*index];
             let normalized = value.trim();
-            *value = if email_columns.contains(&index) {
+            *value = if email_columns.contains(index) {
                 normalized.to_lowercase()
             } else {
                 normalized.to_owned()
@@ -428,7 +592,12 @@ fn infer_type<'a>(values: impl Iterator<Item = &'a String>) -> String {
     if values.is_empty() {
         return "string".to_owned();
     }
-    if values.iter().all(|value| value.parse::<f64>().is_ok()) {
+    if values.iter().all(|value| {
+        value
+            .parse::<f64>()
+            .map(|number| number.is_finite())
+            .unwrap_or(false)
+    }) {
         return "number".to_owned();
     }
     if values
@@ -501,6 +670,36 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(columns[2].null_count, 1);
         assert_eq!(columns[0].distinct_count, 2);
+        assert_eq!(columns[1].whitespace_count, 2);
+    }
+
+    #[test]
+    fn preview_page_filters_sorts_and_offsets() {
+        let table = TableData {
+            headers: vec!["id".to_owned(), "name".to_owned()],
+            rows: vec![
+                vec!["2".to_owned(), "Beta".to_owned()],
+                vec!["1".to_owned(), "Alpha".to_owned()],
+                vec!["3".to_owned(), "Gamma".to_owned()],
+            ],
+        };
+
+        let (rows, filtered_rows) =
+            build_preview_page(&table, 1, 1, Some("id"), Some("desc"), Some("a"))
+                .expect("preview page");
+
+        assert_eq!(filtered_rows, 3);
+        assert_eq!(rows[0].get("id").map(String::as_str), Some("2"));
+    }
+
+    #[test]
+    fn deduplicate_without_column_removes_identical_rows() {
+        let mut table = test_table();
+        table.rows.push(table.rows[0].clone());
+
+        deduplicate_rows(&mut table, &PipelineConfig::default()).expect("deduplicate rows");
+
+        assert_eq!(table.rows.len(), 3);
     }
 
     #[test]

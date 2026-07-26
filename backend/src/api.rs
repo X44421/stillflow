@@ -23,7 +23,8 @@ use crate::{
         StoredProject, UpdateProjectRequest,
     },
     pipeline::{
-        build_preview, execute_pipeline, read_csv_file, write_csv_file, PipelineError,
+        build_preview, build_preview_page, count_duplicate_rows, execute_pipeline, read_csv_file,
+        write_csv_file, PipelineError,
     },
     storage::Storage,
 };
@@ -321,19 +322,35 @@ pub async fn preview_dataset(
         .await
         .ok_or_else(|| ApiError::not_found("Dataset not found"))?;
     let path = state.storage.resolve(&dataset);
-    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
     let table = tokio::task::spawn_blocking(move || read_csv_file(&path))
         .await
         .map_err(|error| ApiError::internal(format!("CSV preview task failed: {error}")))?
         .map_err(|error| pipeline_request_error("Could not preview CSV", error))?;
-    let (columns, rows) = build_preview(&table, limit);
+    let (columns, sample_rows) = build_preview(&table, 500);
+    let (rows, filtered_rows) = build_preview_page(
+        &table,
+        offset,
+        limit,
+        query.sort_by.as_deref(),
+        query.sort_direction.as_deref(),
+        query.search.as_deref(),
+    )
+    .map_err(|error| pipeline_request_error("Could not preview CSV", error))?;
+    let duplicate_rows = count_duplicate_rows(&table);
 
     Ok(Json(PreviewResponse {
         table_name: dataset.id.to_string(),
         columns,
         rows,
+        sample_rows,
         total_rows: table.rows.len(),
+        filtered_rows,
+        duplicate_rows,
+        offset,
+        limit,
     }))
 }
 

@@ -997,6 +997,21 @@ const App: React.FC = () => {
     setShowDetail(true);
   }, [selectedNode]);
 
+  const handleCreatePreviewNode = useCallback((node: PipelineNode) => {
+    setNodes((current) => {
+      const exportIndex = current.findIndex((item) => item.type === 'export');
+      const insertIndex = exportIndex >= 0 ? exportIndex : current.length;
+      return [
+        ...current.slice(0, insertIndex),
+        node,
+        ...current.slice(insertIndex).map(resetNodeRuntime),
+      ];
+    });
+    setSelectedNode(node.id);
+    setShowDetail(true);
+    setWorkspaceMessage(`${node.name} added from preview`);
+  }, []);
+
   const handleDuplicateNode = useCallback((nodeId: string) => {
     const index = nodes.findIndex((node) => node.id === nodeId);
     const node = nodes[index];
@@ -1067,6 +1082,12 @@ const App: React.FC = () => {
             <CsvPreviewCard
               dataset={previewDataset}
               onClose={() => setPreviewDataset(null)}
+              onCreateNode={
+                previewDataset.category === 'source' &&
+                previewDataset.id === selectedDatasetId
+                  ? handleCreatePreviewNode
+                  : undefined
+              }
             />
           )}
         </div>

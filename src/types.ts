@@ -64,16 +64,31 @@ export interface PreviewColumn {
   type: string;
   nullCount: number;
   distinctCount: number;
+  whitespaceCount: number;
+  minimum: number | null;
+  maximum: number | null;
+  average: number | null;
 }
 
 export interface DataPreviewResult {
   tableName: string;
   columns: PreviewColumn[];
   rows: Record<string, unknown>[];
+  sampleRows: Record<string, unknown>[];
   totalRows: number;
+  filteredRows: number;
+  duplicateRows: number;
+  offset: number;
+  limit: number;
 }
 
-export type PreviewLimit = 100 | 500;
+export interface DataPreviewQuery {
+  offset?: number;
+  limit?: number;
+  sortBy?: string;
+  sortDirection?: 'asc' | 'desc';
+  search?: string;
+}
 
 export type EventLevel = 'info' | 'success' | 'error';
 

@@ -227,6 +227,10 @@ pub struct PreviewColumn {
     pub column_type: String,
     pub null_count: usize,
     pub distinct_count: usize,
+    pub whitespace_count: usize,
+    pub minimum: Option<f64>,
+    pub maximum: Option<f64>,
+    pub average: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -235,12 +239,22 @@ pub struct PreviewResponse {
     pub table_name: String,
     pub columns: Vec<PreviewColumn>,
     pub rows: Vec<BTreeMap<String, String>>,
+    pub sample_rows: Vec<BTreeMap<String, String>>,
     pub total_rows: usize,
+    pub filtered_rows: usize,
+    pub duplicate_rows: usize,
+    pub offset: usize,
+    pub limit: usize,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PreviewQuery {
+    pub offset: Option<usize>,
     pub limit: Option<usize>,
+    pub sort_by: Option<String>,
+    pub sort_direction: Option<String>,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

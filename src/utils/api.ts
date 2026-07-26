@@ -1,4 +1,5 @@
 import type {
+  DataPreviewQuery,
   DataPreviewResult,
   Dataset,
   PipelineMetrics,
@@ -193,10 +194,27 @@ export async function runBackendPipeline(
 
 export async function previewBackendDataset(
   datasetId: string,
-  limit: 100 | 500 = 100
+  query: DataPreviewQuery = {}
 ): Promise<DataPreviewResult> {
+  const parameters = new URLSearchParams();
+  if (query.offset !== undefined) {
+    parameters.set('offset', String(query.offset));
+  }
+  if (query.limit !== undefined) {
+    parameters.set('limit', String(query.limit));
+  }
+  if (query.sortBy) {
+    parameters.set('sortBy', query.sortBy);
+  }
+  if (query.sortDirection) {
+    parameters.set('sortDirection', query.sortDirection);
+  }
+  if (query.search) {
+    parameters.set('search', query.search);
+  }
+  const suffix = parameters.size > 0 ? `?${parameters.toString()}` : '';
   return apiRequest<DataPreviewResult>(
-    `/api/datasets/${encodeURIComponent(datasetId)}/preview?limit=${limit}`
+    `/api/datasets/${encodeURIComponent(datasetId)}/preview${suffix}`
   );
 }
 
