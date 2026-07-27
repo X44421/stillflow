@@ -16,7 +16,6 @@ function startProcess(label, command, args) {
     env: process.env,
     stdio: 'inherit',
     detached: !isWindows,
-    shell: isWindows,
   });
 
   children.add(child);

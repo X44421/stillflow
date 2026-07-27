@@ -24,9 +24,12 @@ import {
   Play,
   Sparkles,
   LayoutGrid,
+  Settings,
   Maximize2,
   Undo2,
   Redo2,
+  Minus,
+  ZoomIn,
   FileText,
   Filter,
   Copy,
@@ -407,6 +410,22 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
     setGraphLayout,
   ]);
 
+  const handleZoom = useCallback(
+    (nextPercent: number) => {
+      const zoom = Math.min(200, Math.max(40, nextPercent)) / 100;
+      if (flowInstance) {
+        const currentViewport = flowInstance.getViewport();
+        void flowInstance.setViewport(
+          { ...currentViewport, zoom },
+          { duration: 120 }
+        );
+      } else {
+        setGraphViewport(graphKey, { ...viewport, zoom });
+      }
+    },
+    [flowInstance, graphKey, setGraphViewport, viewport]
+  );
+
   return (
     <div className="min-h-0 flex-1 bg-[#f5f7f8] flex flex-col relative overflow-hidden">
       <div className="absolute top-4 left-4 z-20">
@@ -444,6 +463,12 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
               strokeWidth={1.5}
               className={layoutRunning ? 'animate-pulse' : undefined}
             />
+          </button>
+          <button
+            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+            title="Canvas settings"
+          >
+            <Settings size={18} strokeWidth={1.5} />
           </button>
           <button
             className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
@@ -537,6 +562,33 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
         />
       </ReactFlow>
 
+      <div className="absolute bottom-4 left-4 z-10 flex items-center bg-white border border-[#dadce0] rounded-lg shadow-sm px-1 py-1 gap-0.5">
+        <button
+          onClick={() => handleZoom(zoomPercent - 10)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+          title="Zoom out"
+        >
+          <Minus size={16} />
+        </button>
+        <span className="text-xs text-gray-600 font-medium px-2 min-w-[48px] text-center">
+          {zoomPercent}%
+        </span>
+        <button
+          onClick={() => handleZoom(zoomPercent + 10)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+          title="Zoom in"
+        >
+          <Plus size={16} />
+        </button>
+        <div className="w-px h-5 bg-gray-200 mx-0.5" />
+        <button
+          onClick={() => handleZoom(100)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+          title="Reset zoom"
+        >
+          <ZoomIn size={16} />
+        </button>
+      </div>
     </div>
   );
 };
