@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Columns3,
   Download,
-  Expand,
   Info,
   LayoutGrid,
   Minus,
@@ -118,7 +117,7 @@ export function DataTable({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search this file..."
-            className="h-8 w-[190px] rounded-full border border-[#dadce0] pr-7 pl-8 text-[13px] outline-none focus:border-[#20beff] focus:ring-1 focus:ring-[#20beff]"
+            className="h-8 w-[190px] rounded-full border border-[#dadce0] pr-7 pl-8 text-[13px] outline-none focus:border-[#18181b] focus:ring-1 focus:ring-[#18181b]"
           />
           {query && (
             <button
@@ -158,7 +157,7 @@ export function DataTable({
                           return n.size === columns.length ? h : n;
                         })
                       }
-                      className="accent-[#20beff]"
+                      className="accent-[#18181b]"
                     />
                     <TypeIcon type={statMap[c].type} />
                     <span className="truncate">{c}</span>
@@ -182,7 +181,7 @@ export function DataTable({
               onClick={() => setView(v)}
               title={`${label} view`}
               className={`flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] transition ${
-                view === v ? "bg-[#e8f7fe] font-medium text-[#0b6c96]" : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                view === v ? "bg-[#18181b] font-medium text-white" : "text-[#5f6368] hover:bg-[#f1f3f4]"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -197,12 +196,6 @@ export function DataTable({
           className="grid h-8 w-8 place-items-center rounded-full border border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]"
         >
           <Download className="h-3.5 w-3.5" />
-        </button>
-        <button
-          title="Fullscreen"
-          className="grid h-8 w-8 place-items-center rounded-full border border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]"
-        >
-          <Expand className="h-3.5 w-3.5" />
         </button>
         {onMinimize && (
           <button
@@ -245,8 +238,8 @@ export function DataTable({
                   <MiniChart s={s} />
                 </div>
                 <div className="mt-2 flex justify-between border-t border-[#f1f3f4] pt-2 font-mono text-[10.5px] text-[#5f6368]">
-                  <span className="text-[#46a352]">valid {pctLabel((s.valid / s.total) * 100)}</span>
-                  <span className="text-[#e5534b]">mismatch {pctLabel((s.mismatched / s.total) * 100)}</span>
+                  <span className="text-[#18181b]">valid {pctLabel((s.valid / s.total) * 100)}</span>
+                  <span className="text-[#71717a]">mismatch {pctLabel((s.mismatched / s.total) * 100)}</span>
                   <span>missing {pctLabel((s.missing / s.total) * 100)}</span>
                   <span>{s.unique.toLocaleString()} uniq</span>
                 </div>
@@ -281,15 +274,15 @@ export function DataTable({
                           <button
                             onClick={() => toggleSort(c)}
                             title={`Sort by ${c}`}
-                            className="min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-[#202124] hover:text-[#0b6c96]"
+                            className="min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold text-[#202124] hover:text-[#18181b]"
                           >
                             {c}
                           </button>
                           {active &&
                             (sort.dir === "asc" ? (
-                              <ArrowUpAZ className="h-3.5 w-3.5 text-[#0f9ad6]" />
+                              <ArrowUpAZ className="h-3.5 w-3.5 text-[#18181b]" />
                             ) : (
-                              <ArrowDownAZ className="h-3.5 w-3.5 text-[#0f9ad6]" />
+                              <ArrowDownAZ className="h-3.5 w-3.5 text-[#18181b]" />
                             ))}
                           <button
                             onClick={() => setOpenMenu(openMenu === c ? null : c)}
@@ -334,7 +327,7 @@ export function DataTable({
                         title={raw}
                         className={`truncate border-r border-b border-[#eceff1] px-2.5 py-[7px] last:border-r-0 ${
                           num || s.type === "date" ? "font-mono text-[12px]" : ""
-                        } ${isMissing(raw) ? "bg-[#fafafa]" : ""} ${focusColumn === c ? "bg-[#f0fbff]" : ""}`}
+                        } ${isMissing(raw) ? "bg-[#fafafa]" : ""} ${focusColumn === c ? "bg-[#fafafa]" : ""}`}
                       >
                         {isMissing(raw) ? (
                           <span className="text-[11px] text-[#bdc1c6] italic">null</span>

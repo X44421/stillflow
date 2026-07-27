@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { ChevronUp, Minus, X } from 'lucide-react';
+import { ChevronUp, X } from 'lucide-react';
 import { DataExplorer } from './components/DataExplorer';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
@@ -178,7 +178,7 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   }, [tableRows]);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
+  const [_importing, setImporting] = useState(false);
   const [latestOutputId, setLatestOutputId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState('');
   const [showDetail, setShowDetail] = useState(false);
@@ -190,8 +190,8 @@ const App: React.FC = () => {
     null
   );
   const [globalRunning, setGlobalRunning] = useState(false);
-  const [globalProgress, setGlobalProgress] = useState(0);
-  const [workspaceMessage, setWorkspaceMessage] = useState('Ready');
+  const [_globalProgress, setGlobalProgress] = useState(0);
+  const [_workspaceMessage, setWorkspaceMessage] = useState('Ready');
   const activeProject =
     projects.find((project) => project.id === activeProjectId) ?? null;
   const activeDataset =
@@ -375,7 +375,7 @@ const App: React.FC = () => {
     [hydrateProject]
   );
 
-  const handleSelectProject = useCallback(
+  const _handleSelectProject = useCallback(
     async (projectId: string) => {
       if (globalRunning) {
         setWorkspaceMessage('Wait for the current run to finish');
@@ -396,7 +396,7 @@ const App: React.FC = () => {
     ]
   );
 
-  const handleCreateProject = useCallback(() => {
+  const _handleCreateProject = useCallback(() => {
     if (globalRunning) {
       setWorkspaceMessage('Wait for the current run to finish');
       return;
@@ -406,7 +406,7 @@ const App: React.FC = () => {
     setProjectConfigMode('create');
   }, [globalRunning]);
 
-  const handleConfigureProject = useCallback(() => {
+  const _handleConfigureProject = useCallback(() => {
     if (!activeProject) return;
     setProjectConfigError(null);
     setPreviewDataset(null);
@@ -540,7 +540,7 @@ const App: React.FC = () => {
     setProjectConfigMode(null);
   }, [projectConfigBusy]);
 
-  const handleDeleteProject = useCallback(async () => {
+  const _handleDeleteProject = useCallback(async () => {
     if (!activeProject) return;
     if (globalRunning) {
       setWorkspaceMessage('Wait for the current run to finish');
@@ -702,7 +702,7 @@ const App: React.FC = () => {
     }
   }, [activeProjectId, globalRunning, nodes, projectReady]);
 
-  const handleSelectDataset = useCallback(
+  const _handleSelectDataset = useCallback(
     (dataset: Dataset) => {
       if (globalRunning) {
         setWorkspaceMessage('Wait for the current run to finish');
@@ -725,7 +725,7 @@ const App: React.FC = () => {
     [globalRunning, nodes]
   );
 
-  const handleRenameDataset = useCallback(
+  const _handleRenameDataset = useCallback(
     async (dataset: Dataset) => {
       if (globalRunning) {
         setWorkspaceMessage('Wait for the current run to finish');
@@ -764,7 +764,7 @@ const App: React.FC = () => {
     [globalRunning, selectedDatasetId]
   );
 
-  const handleDeleteDataset = useCallback(
+  const _handleDeleteDataset = useCallback(
     async (dataset: Dataset) => {
       if (globalRunning) {
         setWorkspaceMessage('Wait for the current run to finish');
@@ -1045,6 +1045,15 @@ const App: React.FC = () => {
   }, [nodes]);
 
   const selected = nodes.find((n) => n.id === selectedNode) ?? null;
+
+  // Kept for future re-integration of Header / DatasetPanel.
+  void _handleSelectProject;
+  void _handleCreateProject;
+  void _handleConfigureProject;
+  void _handleDeleteProject;
+  void _handleSelectDataset;
+  void _handleRenameDataset;
+  void _handleDeleteDataset;
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-[#f5f7f8]">

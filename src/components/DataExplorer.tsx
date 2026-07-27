@@ -4,7 +4,6 @@ import {
   ChevronRight,
   FileSpreadsheet,
   Folder,
-  Maximize2,
   RotateCcw,
   Upload,
 } from "lucide-react";
@@ -46,9 +45,8 @@ export function DataExplorer({
   return (
     <aside className="flex h-full w-[272px] shrink-0 flex-col overflow-hidden bg-[#f5f7f8]">
       <div className="overflow-hidden border-b border-[#e3e6e8] bg-transparent">
-        <div className="flex items-center justify-between border-b border-[#e3e6e8] px-3 py-2.5">
+        <div className="flex items-center justify-between px-3 py-2.5">
           <h2 className="text-[14px] font-semibold text-[#202124]">Data Explorer</h2>
-          <Maximize2 className="h-3.5 w-3.5 text-[#5f6368]" />
         </div>
 
         <div className="px-3 py-2 text-[12px] text-[#5f6368]">
@@ -70,7 +68,7 @@ export function DataExplorer({
                 onSelect(null);
                 onOpenPreview();
               }}
-              className="ml-5 flex w-[calc(100%-1.25rem)] items-center gap-1.5 rounded bg-[#e8f7fe] px-2 py-1.5 text-left text-[13px] font-medium text-[#0b6c96]"
+              className="ml-5 flex w-[calc(100%-1.25rem)] items-center gap-1.5 rounded bg-[#18181b] px-2 py-1.5 text-left text-[13px] font-medium text-white"
             >
               <FileSpreadsheet className="h-4 w-4 shrink-0" />
               <span className="truncate">{fileName}</span>
@@ -92,7 +90,7 @@ export function DataExplorer({
                 onFocus={() => onSelect(stat.name)}
                 onClick={() => onSelect(stat.name)}
                 className={`flex w-full items-center gap-1.5 rounded px-2 py-[5px] text-left text-[12.5px] transition-colors ${
-                  selected === stat.name ? "bg-[#f0fbff] text-[#0b6c96]" : "text-[#3c4043] hover:bg-[#f1f3f4]"
+                  selected === stat.name ? "bg-[#f1f3f4] text-[#18181b]" : "text-[#3c4043] hover:bg-[#f1f3f4]"
                 }`}
               >
                 <TypeIcon type={stat.type} />
@@ -119,7 +117,7 @@ export function DataExplorer({
           if (file) onUpload(file);
         }}
         className={`m-3 mt-1 rounded-xl border border-dashed p-3 text-center transition ${
-          drag ? "border-[#20beff] bg-[#f0fbff]" : "border-[#dadce0] bg-white"
+          drag ? "border-[#18181b] bg-[#fafafa]" : "border-[#dadce0] bg-white"
         }`}
       >
         <Upload className="mx-auto h-4 w-4 text-[#5f6368]" />
