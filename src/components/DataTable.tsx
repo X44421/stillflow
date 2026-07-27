@@ -8,7 +8,6 @@ import {
   Download,
   Info,
   LayoutGrid,
-  Minus,
   Rows3,
   Search,
   SlidersHorizontal,
@@ -39,8 +38,6 @@ export function DataTable({
   sizeLabel,
   focusColumn,
   onDownload,
-  onMinimize,
-  onClose,
 }: {
   columns: string[];
   rows: Row[];
@@ -49,8 +46,6 @@ export function DataTable({
   sizeLabel: string;
   focusColumn?: string | null;
   onDownload: () => void;
-  onMinimize?: () => void;
-  onClose?: () => void;
 }) {
   const [view, setView] = useState<View>("detail");
   const [query, setQuery] = useState("");
@@ -197,24 +192,6 @@ export function DataTable({
         >
           <Download className="h-3.5 w-3.5" />
         </button>
-        {onMinimize && (
-          <button
-            onClick={onMinimize}
-            title="Minimize preview"
-            className="grid h-8 w-8 place-items-center rounded-full border border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {onClose && (
-          <button
-            onClick={onClose}
-            title="Close preview"
-            className="grid h-8 w-8 place-items-center rounded-full border border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
       </div>
 
       {/* ------------------------- column view --------------------------- */}
