@@ -21,11 +21,11 @@ const TYPE_ICON: Record<NodeType, React.ReactNode> = {
 };
 
 const TYPE_BG: Record<NodeType, string> = {
-  deduplicate: 'bg-[#e8f7fe] text-[#0b6c96]',
-  normalize: 'bg-[#e8f7fe] text-[#0b6c96]',
-  filter: 'bg-[#e8f7fe] text-[#0b6c96]',
-  source: 'bg-[#e8f7fe] text-[#0b6c96]',
-  export: 'bg-[#e8f7fe] text-[#0b6c96]',
+  deduplicate: 'bg-[#f1f3f4] text-[#18181b]',
+  normalize: 'bg-[#f1f3f4] text-[#18181b]',
+  filter: 'bg-[#f1f3f4] text-[#18181b]',
+  source: 'bg-[#f1f3f4] text-[#18181b]',
+  export: 'bg-[#f1f3f4] text-[#18181b]',
 };
 
 const TYPE_LABEL: Record<NodeType, string> = {
@@ -187,18 +187,18 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <span
               className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
                 node.status === 'completed'
-                  ? 'text-green-700 bg-green-50'
+                  ? 'text-[#18181b] bg-[#f1f3f4]'
                   : node.status === 'running'
-                  ? 'text-white bg-[#20beff]'
+                  ? 'text-white bg-[#18181b]'
                   : 'text-[#5f6368] bg-[#f1f3f4]'
               }`}
             >
               {node.status === 'completed' ? (
-                <span className="w-1.5 h-1.5 bg-green-600 rounded-full" />
+                <span className="w-1.5 h-1.5 bg-[#18181b] rounded-full" />
               ) : node.status === 'running' ? (
                 <span className="w-1.5 h-1.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
               ) : (
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
+                <span className="w-1.5 h-1.5 bg-[#a1a1aa] rounded-full" />
               )}
               {node.status === 'completed'
                 ? 'Completed'
@@ -273,7 +273,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-[#20beff] rounded-full transition-[width] duration-150 ease-out"
+                  className="h-full bg-[#18181b] rounded-full transition-[width] duration-150 ease-out"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
@@ -295,7 +295,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.duplicates}%` : '—'}</div>
               {hasRun && metrics.duplicates > 0 && (
-                <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
+                <div className="text-[11px] text-[#71717a] font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
               )}
             </div>
             <div className="bg-[#f5f7f8] rounded-lg p-3">
@@ -307,8 +307,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? metrics.qualityScore : '—'}</div>
               {hasRun && (
-                <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                <div className="text-[11px] text-[#71717a] font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-[#18181b] rounded-full" />
                   {metrics.qualityScore >= 80 ? 'Good' : metrics.qualityScore >= 60 ? 'Fair' : 'Poor'}
                 </div>
               )}
@@ -322,7 +322,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <button
             onClick={handleRun}
             disabled={running || disabled}
-            className="w-full bg-[#20beff] text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-[#0f9ad6] transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
+            className="w-full bg-[#18181b] text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-[#3f3f46] transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
           >
             <Play size={14} fill="white" />
             <span>{running ? 'Running…' : 'Run From Here'}</span>

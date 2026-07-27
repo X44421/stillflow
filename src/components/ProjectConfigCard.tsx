@@ -107,7 +107,7 @@ const ProjectConfigCard: React.FC<ProjectConfigCardProps> = ({
             </button>
             <button
               type="submit"
-              className="h-8 rounded-full bg-[#20beff] px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-[#0f9ad6] disabled:cursor-wait disabled:bg-gray-400"
+              className="h-8 rounded-full bg-[#18181b] px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-[#3f3f46] disabled:cursor-wait disabled:bg-gray-400"
               disabled={busy || !name.trim() || Boolean(fileError)}
             >
               {busy
@@ -128,7 +128,7 @@ const ProjectConfigCard: React.FC<ProjectConfigCardProps> = ({
               maxLength={120}
               value={name}
               onChange={(event) => setName(event.target.value)}
-              className="h-10 w-full border-0 border-b border-[#e3e6e8] bg-transparent px-0 pb-2 text-[22px] font-medium leading-8 text-[#202124] outline-none placeholder:font-normal placeholder:text-gray-400 focus:border-[#20beff]"
+              className="h-10 w-full border-0 border-b border-[#e3e6e8] bg-transparent px-0 pb-2 text-[22px] font-medium leading-8 text-[#202124] outline-none placeholder:font-normal placeholder:text-gray-400 focus:border-[#18181b]"
               placeholder="Untitled project"
               autoComplete="off"
               spellCheck={false}
@@ -146,7 +146,7 @@ const ProjectConfigCard: React.FC<ProjectConfigCardProps> = ({
                 onBlur={() => {
                   if (!description.trim()) setDescriptionExpanded(false);
                 }}
-                className="min-h-[72px] w-full resize-none rounded-lg border border-[#dadce0] bg-white px-3 py-2.5 text-[13px] leading-5 text-[#202124] outline-none transition-colors placeholder:text-gray-400 focus:border-[#20beff] focus:ring-1 focus:ring-[#20beff]"
+                className="min-h-[72px] w-full resize-none rounded-lg border border-[#dadce0] bg-white px-3 py-2.5 text-[13px] leading-5 text-[#202124] outline-none transition-colors placeholder:text-gray-400 focus:border-[#18181b] focus:ring-1 focus:ring-[#18181b]"
                 placeholder="Describe the goal of this project..."
               />
             ) : (
