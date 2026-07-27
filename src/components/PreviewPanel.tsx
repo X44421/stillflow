@@ -5,7 +5,7 @@ import { ChevronDown, Minus, X } from 'lucide-react';
 const MIN_HEIGHT = 160;
 const MAX_HEIGHT_RATIO = 0.75;
 const DEFAULT_HEIGHT = 420;
-const MINIMIZED_HEIGHT = 40;
+const MINIMIZED_HEIGHT = 54;
 
 export function PreviewPanel({
   title,
@@ -70,7 +70,7 @@ export function PreviewPanel({
 
   return (
     <div
-      className="flex-shrink-0 overflow-hidden rounded-b-xl border border-t-0 border-[#e3e6e8] bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.04)] transition-[height] duration-200 ease-out"
+      className="flex flex-col flex-shrink-0 overflow-hidden rounded-b-xl border border-t-0 border-[#e3e6e8] bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.04)] transition-[height] duration-200 ease-out"
       style={{ height: displayHeight }}
     >
       {/* Drag handle */}
