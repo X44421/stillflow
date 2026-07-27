@@ -1,8 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { TopShell } from './components/TopShell';
-import { NavRail, type RailMode } from './components/NavRail';
-import { BottomPanel } from './components/BottomPanel';
-import { StatusStrip } from './components/StatusStrip';
+import { ChevronUp, X } from 'lucide-react';
 import { DataExplorer } from './components/DataExplorer';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
@@ -167,7 +164,6 @@ const App: React.FC = () => {
   const [previewState, setPreviewState] = useState<
     'expanded' | 'minimized' | 'closed'
   >('closed');
-  const [railMode, setRailMode] = useState<RailMode>('canvas');
 
   /* ── Kaggle DataTable source ─────────────────────────────── */
   const tableRows = useMemo<Row[]>(() => buildRows(1000), []);
@@ -1060,10 +1056,8 @@ const App: React.FC = () => {
   void _handleDeleteDataset;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#f5f7f8]">
-      <TopShell />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <NavRail mode={railMode} onMode={setRailMode} />
+    <div className="h-screen w-screen overflow-hidden bg-[#f5f7f8]">
+      <div className="flex h-full overflow-hidden">
         <DataExplorer
           fileName={previewDataset?.name ?? FILE_META.name}
           sizeLabel={previewDataset?.size ?? FILE_META.sizeLabel}
@@ -1076,8 +1070,8 @@ const App: React.FC = () => {
           onReset={() => setFocusedColumn(null)}
           custom={Boolean(previewDataset)}
         />
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-x border-[#e3e6e8] bg-white">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden px-3 pb-3 pt-14">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#e3e6e8] bg-white">
             <PipelineCanvas
               graphKey={activeProjectId ?? 'unassigned'}
               nodes={nodes}
@@ -1089,26 +1083,56 @@ const App: React.FC = () => {
               onDeleteNode={handleDeleteNode}
             />
           </div>
-          {previewState !== 'closed' && previewDataset && (
-            <BottomPanel
-              title={`Data Preview · ${previewDataset.name}`}
-              onClose={() => setPreviewState('closed')}
-            >
-              <div className="h-full overflow-auto">
+          <div
+            className={`overflow-hidden rounded-xl border border-[#e3e6e8] bg-white ${
+              previewState === 'closed'
+                ? 'hidden'
+                : previewState === 'minimized'
+                  ? 'flex-none'
+                  : 'min-h-0 flex-[0_1_46%]'
+            }`}
+          >
+              {previewState === 'minimized' && (
+                <div className="flex h-11 items-center border-b border-[#e3e6e8] px-3">
+                  <span className="truncate text-[13px] font-semibold text-[#202124]">
+                    Data Preview · {previewDataset?.name ?? FILE_META.name}
+                  </span>
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      type="button"
+                      title="Expand preview"
+                      aria-label="Expand preview"
+                      onClick={() => setPreviewState('expanded')}
+                      className="grid h-7 w-7 place-items-center rounded-full text-[#5f6368] hover:bg-[#f1f3f4]"
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Close preview"
+                      aria-label="Close preview"
+                      onClick={() => setPreviewState('closed')}
+                      className="grid h-7 w-7 place-items-center rounded-full text-[#5f6368] hover:bg-[#f1f3f4]"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className={previewState === 'expanded' ? 'h-full overflow-auto' : 'hidden'}>
                 <DataTable
                   columns={CSV_COLUMNS}
                   rows={tableRows}
                   stats={tableStats}
-                  fileName={previewDataset.name}
-                  sizeLabel={previewDataset.size}
+                  fileName={previewDataset?.name ?? FILE_META.name}
+                  sizeLabel={previewDataset?.size ?? FILE_META.sizeLabel}
                   focusColumn={focusedColumn}
                   onDownload={tableDownload}
                   onMinimize={() => setPreviewState('minimized')}
                   onClose={() => setPreviewState('closed')}
                 />
               </div>
-            </BottomPanel>
-          )}
+          </div>
         </div>
         {showDetail && selected && (
           <DetailPanel
@@ -1123,7 +1147,6 @@ const App: React.FC = () => {
           />
         )}
       </div>
-      <StatusStrip message={_workspaceMessage} selectionCount={selectedNode ? 1 : 0} />
       {projectConfigMode && (
         <ProjectConfigCard
           mode={projectConfigMode}
