@@ -4,7 +4,7 @@
 
 **Risk:** high
 
-**Implementation:** blocked until spike approval
+**Implementation:** blocked
 
 **Branch:** `agent/mvp-006-local-tabular`
 
@@ -52,7 +52,55 @@ Explicitly out of scope for Issue #6:
 | Predicate pushdown (`SourceFilter`) | Reject via capability negotiation |
 | `SamplingStrategy::Reservoir` / `Random` | Reject via capability negotiation |
 | CSV lenient / skip-malformed-rows mode | Deferred until Rejected Dataset protocol exists |
-| Schema override via connection config JSON | Use request fields (authorized below) or defer |
+| Schema override via connection config JSON | Use request fields (authorized below) |
+| Following symlinks / junctions | Deferred to a future Issue; #6 always rejects |
+
+---
+
+## Engineering constraints (inlined)
+
+`AGENTS.md` is **not present** on this branch / `main` at contract authoring time. The following rules are therefore **inlined** and binding for #6. When a development-control document lands later, it must not contradict these rules without a new contract.
+
+### Dependency direction
+
+```text
+stillflow-api
+      ↓
+stillflow-engine
+      ↓
+stillflow-connector-local-tabular   ← adapter (new)
+      ↓
+stillflow-connectors                ← trait + registry only
+      ↓
+stillflow-core                      ← domain types + Arrow boundary types
+```
+
+Rules:
+
+1. `stillflow-core`: domain types, errors, events, `RequestContext`, `BatchStream` only. No Polars / DuckDB / SQLx / Axum. No source-format decode.
+2. Use `arrow-array` + `arrow-schema` **59**; never the `arrow` meta crate.
+3. `stillflow-connectors`: trait + capabilities + registry + `RawBatchStream` only. Adapters go in separate crates.
+4. Format-specific decode logic lives in `stillflow-connector-local-tabular`, not in `stillflow-connectors`.
+5. The adapter **may** depend directly on workspace `arrow-array` / `arrow-schema` 59 for constructing `RecordBatch`. Public Arrow contracts remain defined by `stillflow-core`.
+6. Unsupported optimizations return `ConnectorError` with `UnsupportedCapability` — never silent fallback.
+7. Secrets via `CredentialRef` only; run `ensure_no_secret_fields` on connection config.
+8. Do not modify `SourceConnector` method signatures unless this contract authorizes the change.
+9. Prefer focused diffs; no drive-by refactors.
+10. Do not modify frontend layout/CSS.
+11. Report contract deviations, new deps, and any `unwrap` / `expect` in the completion summary.
+
+### Tests required before implementation handoff
+
+```bash
+cd backend
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+### Stop and escalate
+
+Stop if frozen connector contracts need changing beyond this document. File a contract revision request to Sol instead of redefining traits in an adapter PR.
 
 ---
 
@@ -70,14 +118,14 @@ stillflow-core         ← domain types, RequestContext, BatchStream
 
 Frozen contracts from #5 (must not change without authorization in this contract):
 
-- `SourceConnector` trait method signatures (unchanged)
+- `SourceConnector` trait method signatures (unchanged except via authorized request field additions)
 - `ConnectorRegistry` as the only public dispatch entry
 - `RequestContext` on all I/O request types
 - `RawBatchStream::new`; registry attaches cancellation/deadline wrapping
 - `PreviewRequest` limits: default 1,000 rows, max 10,000 rows, max 50 MiB bytes
 - `ReadRequest::batch_size` range 1–65,536
 - `ConnectorKind::LocalFile` (reuse; do **not** add a new enum variant)
-- Arrow boundary: `arrow-array` + `arrow-schema` **59** only in `stillflow-core`
+- Arrow boundary: `arrow-array` + `arrow-schema` **59** only as the public tabular interchange
 
 **Authorized by this contract (#6 public API supplement):**
 
@@ -90,13 +138,9 @@ pub schema_override: Option<std::sync::Arc<arrow_schema::Schema>>
 
 Schema override is generic read semantics, not LocalFile-specific configuration. It applies to the current operation only and does not mutate `SourceAsset` or `SourceConnection`.
 
-Per `AGENTS.md` rule 4, format-specific decode logic lives in an **adapter crate**, not in `stillflow-connectors` trait/registry code.
-
 ---
 
 ## Frozen invariants
-
-Implementation must preserve all of the following:
 
 1. `stillflow-core` must not depend on Polars.
 2. `stillflow-connectors` must not contain source-specific decode logic.
@@ -111,6 +155,9 @@ Implementation must preserve all of the following:
 11. No fake streaming: `read_batches` must not full-materialize the dataset.
 12. No `unsafe` in project code for Arrow bridging.
 13. Do not downgrade workspace Arrow 59 or modify `SourceConnector` beyond the authorized `schema_override` fields.
+14. Assets under multiple roots are uniquely identified by `(locator.container, locator.path)`.
+15. `discover` never returns a silently truncated asset list.
+16. Symlinks (and conservatively unknown reparse points) are always rejected in #6.
 
 ---
 
@@ -140,16 +187,20 @@ Implementation must preserve all of the following:
 
 ```jsonc
 {
-  "allowedRoots": ["/absolute/path/to/data"]
+  "allowedRoots": [
+    { "id": "uploads", "path": "/data/uploads" },
+    { "id": "fixtures", "path": "/data/fixtures" }
+  ]
 }
 ```
 
 | Field | Type | Required | Default | Semantics |
 | --- | --- | --- | --- | --- |
-| `allowedRoots` | `string[]` | **Yes** | — | Absolute directory roots. At least one. No `..` segments in config. |
-| `followSymlinks` | `bool` | No | `false` | When `false`, any symlink component is rejected (see Path security). |
+| `allowedRoots` | `object[]` | **Yes** | — | At least one root. Each entry has unique `id` and absolute `path`. |
+| `allowedRoots[].id` | `string` | **Yes** | — | Stable root identifier stored in `locator.container`. Non-empty; unique within connection. |
+| `allowedRoots[].path` | `string` | **Yes** | — | Absolute directory path. No `..` segments in config. |
 | `maxDiscoveryDepth` | `u32` | No | `8` | Max directory depth relative to each allowed root. |
-| `maxDiscoveryEntries` | `u32` | No | `10_000` | Max files returned per `discover` call. |
+| `maxDiscoveryEntries` | `u32` | No | `10_000` | Max files allowed per `discover` call. Exceeding → hard error (see Discovery). |
 | `defaultBatchSize` | `usize` | No | `8192` | Hint for callers; connector still validates `ReadRequest.batch_size`. |
 | `schemaInference` | `object` | No | see below | Bounds inference sampling. |
 | `formatDefaults` | `object` | No | `{}` | Connection-wide format defaults (delimiter, `hasHeader`, etc.). **No schema override here.** |
@@ -176,10 +227,19 @@ Schema override is **not** stored in connection config. Use `InspectRequest.sche
 
 ### Allowed roots validation
 
-- Every root must be absolute.
-- Reject roots containing `..` in config before resolution.
+- Every root `path` must be absolute.
+- Reject paths containing `..` in config before resolution.
+- Every root `id` must be non-empty and unique within the connection.
 - Resolve each root with the **non-following** path algorithm (see Path security) and store the resolved absolute path.
-- Roots should exist and be directories; `test_connection` may return `Degraded` if a root is missing.
+- Root accessibility is reported by `test_connection` (see below).
+
+### `test_connection` results (frozen)
+
+| Condition | Result |
+| --- | --- |
+| All configured roots exist, are directories, and are accessible | `ConnectionStatus::Ok` |
+| At least one root accessible, at least one missing / inaccessible | `ConnectionStatus::Degraded { warnings }` listing inaccessible root ids |
+| No root accessible | Fatal error: `NotFound` if missing, `Authorization` if permission denied (prefer the dominant cause; if mixed, `NotFound` with message covering inaccessible roots) |
 
 ---
 
@@ -194,8 +254,21 @@ Schema override is **not** stored in connection config. Use `InspectRequest.sche
 3. If `parent_path` is set, resolve it under each root (path security); skip roots where it does not exist.
 4. Emit one `SourceAsset` per matching **file**.
 5. Skip hidden files (name starts with `.`).
-6. Skip/reject symlinks per Path security (`followSymlinks` default `false`).
-7. Stop after `maxDiscoveryEntries`; emit finding `discover.truncated` when truncated.
+6. Reject / skip any symlink or unknown reparse point (always).
+7. If the number of matching files would exceed `maxDiscoveryEntries`, **abort the entire discover** with `InvalidConfiguration`. Do **not** return a partial `Vec`.
+
+**Truncation policy (frozen — no warning channel):**
+
+`discover()` returns `ConnectorResult<Vec<SourceAsset>>` with no findings/warnings field. Therefore:
+
+```text
+matching files > maxDiscoveryEntries
+  → Err(InvalidConfiguration)
+  → message: suggest narrowing parent_path or raising maxDiscoveryEntries
+  → no incomplete Vec is returned
+```
+
+Callers must never treat a successful `Ok(vec)` as a silently truncated listing.
 
 **Asset fields:**
 
@@ -203,9 +276,18 @@ Schema override is **not** stored in connection config. Use `InspectRequest.sche
 | --- | --- |
 | `kind` | `AssetKind::File` |
 | `name` | File basename |
-| `locator.path` | Relative POSIX path from the matched root |
-| `locator.container` | `None` |
+| `locator.path` | Relative POSIX path **within** the matched root |
+| `locator.container` | `Some(root.id)` — **required** for multi-root uniqueness |
 | `connection_id` | owning connection UUID |
+
+**Resolution rule for inspect / preview / read:**
+
+```text
+root = connection.allowedRoots.find(r => r.id == asset.locator.container)
+path = resolve(root.path, asset.locator.path)  // path security
+```
+
+Missing / unknown `locator.container` → `InvalidConfiguration`.
 
 **Not required:** schema inference during discover.
 
@@ -219,11 +301,11 @@ Schema override is **not** stored in connection config. Use `InspectRequest.sche
 
 **Behaviour:**
 
-1. Resolve asset path under an allowed root (path security).
+1. Resolve asset via `locator.container` + `locator.path` (path security).
 2. Detect format from extension + Parquet magic check.
 3. Read file metadata: `size_bytes`, `modified_at`.
 4. Determine schema:
-   - If `schema_override` is `Some`, use it directly.
+   - If `schema_override` is `Some`, validate compatibility with inferred/footer schema when available; incompatible override → `SchemaDrift`.
    - Else **Parquet:** footer / metadata only — no full row scan.
    - Else **CSV / JSONL:** bounded sample using `schemaInference` limits.
 5. Populate `AssetMetadata { schema, format, size_bytes, row_count, modified_at, findings }`.
@@ -259,6 +341,7 @@ Schema override is **not** stored in connection config. Use `InspectRequest.sche
 6. Read at most `row_limit` rows.
 7. Stop before adding a row or batch that would exceed `byte_limit` (Arrow memory accounting).
 8. Set `rows_truncated` / `bytes_truncated` when limits hit.
+9. Enforce post-sample schema drift rules during scan (see Error semantics).
 
 ### `byte_limit` accounting (frozen)
 
@@ -277,6 +360,8 @@ byte_limit = cumulative estimated in-memory size of returned Arrow batches
 
 **Truncation rule:** if the next row or batch would exceed `byte_limit`, stop before including it and set `bytes_truncated = true`.
 
+If the **first** row/batch alone exceeds `byte_limit`, return empty batches with `bytes_truncated = true` and `rows_returned = 0` (or fail with `InvalidConfiguration` if the connector cannot produce a zero-row schema-bearing result). Prefer returning schema + empty batches + flags when schema is known.
+
 ---
 
 ## Batch streaming semantics
@@ -288,13 +373,15 @@ byte_limit = cumulative estimated in-memory size of returned Arrow batches
 **Behaviour:**
 
 1. Reject non-empty `filter` → `UnsupportedCapability`.
-2. Reject non-`None` `checkpoint` → `UnsupportedCapability`.
+2. Reject non-`None` `checkpoint` → `UnsupportedCapability` (`incremental_read` not supported). `checkpoint()` method itself returns `Ok(None)` after `ensure_active()`.
 3. Honour `batch_size` (1–65,536, validated by core).
 4. Apply `schema_override` when present.
-5. Open format-specific bounded scan; apply projection at scan layer when supported.
-6. Iterate chunks of at most `batch_size` rows without full-file materialization.
-7. Convert each chunk to `arrow_array::RecordBatch` via the **spike-approved** bridge.
-8. Return `RawBatchStream`; registry wraps with `attach_request_context`.
+5. Resolve asset via `locator.container` + `locator.path`.
+6. Open format-specific bounded scan; apply projection at scan layer when supported.
+7. Iterate chunks of at most `batch_size` rows without full-file materialization.
+8. Convert each chunk to `arrow_array::RecordBatch` via the **spike-approved** bridge.
+9. Enforce schema drift rules against the inspect / override schema.
+10. Return `RawBatchStream`; registry wraps with `attach_request_context`.
 
 **Stream semantics (frozen):**
 
@@ -319,7 +406,24 @@ Polars 0.46 uses its own `polars-arrow 0.46` implementation ([polars 0.46 crate 
 
 `df-interchange 0.3.3` lists Arrow **54–58** only ([df-interchange docs](https://docs.rs/df-interchange/latest/df_interchange/)) and is **not** a predetermined solution for Arrow 59.
 
-Composer must publish spike results at `docs/issues/spikes/issue-006-arrow-bridge-spike.md` (or PR comment linked from the implementation PR) evaluating **all three** strategies:
+### Spike phases (frozen)
+
+```text
+Spike Phase 1 — actually compile and verify Options A and B only
+  ├─ A succeeds → stop; report A as selected
+  ├─ B succeeds → stop; report B as selected
+  └─ A and B both fail → STOP and report BLOCKER to Sol
+       (do not begin Option C)
+
+After Sol explicitly approves Option C:
+Spike Phase 2 — actually compile and verify Option C
+  ├─ C succeeds → report C as selected
+  └─ C fails → STOP; escalate again
+```
+
+Composer must **not** pre-require Option C compilation success in Phase 1 tests.
+
+Publish results at `docs/issues/spikes/issue-006-arrow-bridge-spike.md`.
 
 #### Option A — Arrow C Data Interface
 
@@ -346,9 +450,9 @@ arrow-rs CSV / JSON / Parquet readers (arrow 59 ecosystem)
   → arrow_array::RecordBatch directly
 ```
 
-Polars remains reserved for later Cleaning Engine work. If A and B fail the gate, **stop** and escalate to Sol for Option C approval. Composer must not silently choose C without Sol sign-off.
+Polars remains reserved for later Cleaning Engine work. Option C requires **Sol approval after Phase 1 failure**. Composer must not silently choose C.
 
-### Spike acceptance criteria (all options)
+### Spike acceptance criteria
 
 | Criterion | Required |
 | --- | --- |
@@ -362,7 +466,7 @@ Polars remains reserved for later Cleaning Engine work. If A and B fail the gate
 | Workspace Arrow version | **59** (no downgrade) |
 | Frozen traits | `SourceConnector` unchanged except authorized `schema_override` fields |
 
-### If spike fails all options
+### If spike fails
 
 Stop implementation. Report BLOCKER to Sol. Do not:
 
@@ -370,6 +474,7 @@ Stop implementation. Report BLOCKER to Sol. Do not:
 - modify `SourceConnector` beyond authorized request fields
 - fake streaming with full `collect()`
 - add `unsafe` bridging code
+- begin Option C without Sol approval
 
 ### Post-spike implementation rules
 
@@ -377,9 +482,11 @@ Stop implementation. Report BLOCKER to Sol. Do not:
 | --- | --- |
 | Adapter location | `stillflow-connector-local-tabular` only |
 | Core purity | No Polars / arrow-rs reader deps in `stillflow-core` |
+| Connector purity | No format decode in `stillflow-connectors` |
 | Meta crate | Do not add `arrow` meta crate |
 | Unsupported dtypes | `InvalidData`, never silent string coercion |
-| Dependency pins | Polars / bridge deps added only after spike selects a strategy |
+| Dependency pins | Decode/bridge deps added only after spike selects a strategy |
+| Arrow deps in adapter | Workspace `arrow-array` / `arrow-schema` 59 allowed |
 
 ### Dtype mapping (MVP, after successful bridge)
 
@@ -401,46 +508,51 @@ Stop implementation. Report BLOCKER to Sol. Do not:
 
 ## Path security
 
-All asset paths are resolved relative to an allowed root **without following symlinks by default**.
+All asset paths are resolved relative to the root identified by `locator.container`.
 
-### Default resolution algorithm (frozen)
+### Resolution algorithm (frozen — no symlink following)
 
 ```text
-1. Reject absolute asset locator paths.
-2. Reject locator paths containing ".." components.
-3. Start from resolved allowed root (root itself resolved without following symlinks).
-4. For each relative path component:
+1. Require locator.container = Some(root_id); else InvalidConfiguration.
+2. Lookup root by id in connection.allowedRoots; else InvalidConfiguration.
+3. Reject absolute locator.path values.
+4. Reject locator.path containing ".." components.
+5. Start from resolved allowed root path (root itself resolved without following symlinks).
+6. For each relative path component:
    a. Join component to current path.
    b. Call symlink_metadata on the joined path.
-   c. If metadata is a symlink:
-        - if followSymlinks == false → reject immediately
-        - if followSymlinks == true → resolve link target, verify target is under canonical allowed root, continue from target
-   d. If metadata is a normal directory/file entry → continue
-5. After full walk, verify final path is under allowed root prefix.
-6. Open final path.
+   c. If metadata is a symlink OR unknown reparse point / junction → reject immediately.
+   d. If metadata is a normal directory/file entry → continue.
+7. After full walk, verify final path is under the allowed root prefix.
+8. Open final path.
 ```
 
-**Do not** use `std::fs::canonicalize` as the primary security primitive on the default path; it follows symlinks and conflicts with "do not follow symlinks" semantics.
+**Do not** use `std::fs::canonicalize` as the primary security primitive; it follows symlinks.
 
-### `followSymlinks: true` (future opt-in within this contract)
+### Symlink policy for #6 (frozen)
 
-When enabled, resolved symlink target must still lie within the canonical allowed root prefix. Otherwise reject.
+```text
+Always reject symlinks.
+No followSymlinks config flag in MVP.
+```
+
+Allowing symlink follow introduces TOCTOU, Windows junction, and reparse-point risks. Track a follow-up Issue if needed later.
 
 ### Rejection errors
 
 | Condition | `ErrorCategory` |
 | --- | --- |
+| Unknown / missing `locator.container` | `InvalidConfiguration` |
 | Path escapes allowed root | `InvalidConfiguration` |
 | `..` in input | `InvalidConfiguration` |
-| Symlink when `followSymlinks == false` | `InvalidConfiguration` |
-| Symlink target escapes root | `InvalidConfiguration` |
+| Symlink / junction / unknown reparse point | `InvalidConfiguration` |
 | Missing file | `NotFound` |
 | Permission denied | `Authorization` or `InvalidConfiguration` |
 
 ### Windows notes
 
-- Add tests or explicit platform notes for junctions / reparse points.
-- If full parity is not implemented in #6, document as **platform limitation** in spike/PR and reject unknown reparse points conservatively.
+- Treat junctions / reparse points as reject-by-default in #6.
+- Document as **platform limitation** if finer classification is deferred; still must not follow them.
 
 ---
 
@@ -450,15 +562,31 @@ When enabled, resolved symlink target must still lie within the canonical allowe
 
 | Code / case | Category | When |
 | --- | --- | --- |
-| Path escape / symlink policy violation | `InvalidConfiguration` | Security check fails |
+| Path escape / symlink / missing container | `InvalidConfiguration` | Security / locator check fails |
+| Discover exceeds `maxDiscoveryEntries` | `InvalidConfiguration` | Would truncate listing |
 | Unsupported extension | `InvalidData` | `.json`, `.tsv`, unknown |
 | Invalid Parquet footer | `InvalidData` | Magic/metadata corrupt |
-| UTF-8 decode failure | `InvalidData` | Invalid UTF-8 in CSV/JSONL |
-| CSV malformed row | `InvalidData` | Strict mode only (see below) |
-| JSONL malformed line / non-object line | `InvalidData` | See JSONL policy |
+| Non-UTF-8 text | `InvalidData` | Invalid UTF-8 in CSV/JSONL |
+| CSV malformed row | `InvalidData` | Strict mode |
+| JSONL malformed / non-object line | `InvalidData` | See JSONL policy |
 | JSONL unstable nested typing | `InvalidData` | See JSONL policy |
-| Polars/bridge unsupported dtype | `InvalidData` | Cannot map to Arrow 59 |
+| Post-sample / override schema conflict | `SchemaDrift` | See drift rules |
+| Unsupported dtype at boundary | `InvalidData` | Cannot map to Arrow 59 |
+| Unsupported sampling / filter / checkpoint request | `UnsupportedCapability` | Capability negotiation |
 | IO errors | `TransientSource` or `Internal` | Mapped per retryability |
+
+### Schema drift rules (frozen)
+
+Relative to the schema established by inspect inference / footer / `schema_override`:
+
+| Event during preview / read | Result |
+| --- | --- |
+| Missing field present in schema | Fill with Null (nullable fields); if field is non-nullable and no value → `SchemaDrift` |
+| New field appears after sample / not in override | `SchemaDrift` — do **not** ignore or coerce to Utf8 |
+| Existing field type conflicts with established schema | `SchemaDrift` |
+| `schema_override` incompatible with footer / stable inferred schema | `SchemaDrift` |
+
+Never silently drop new columns. Never force-cast conflicting types to Utf8 to continue.
 
 ### CSV malformed-row policy (frozen — strict only)
 
@@ -469,8 +597,7 @@ Default and only behaviour: strict
 - First malformed row → `InvalidData`
 - Error must include safe location metadata: row number and/or byte offset
 - Error must **not** include full raw row content (PII/secrets risk)
-- No `ignoreMalformedLines`, no silent skip, no "successful import with dropped rows"
-- Lenient / rejected-row handling deferred until Rejected Dataset protocol exists
+- No lenient skip mode in #6
 
 ### Inspection findings (non-fatal)
 
@@ -479,12 +606,13 @@ Default and only behaviour: strict
 | `csv.bom_stripped` | Info | UTF-8 BOM removed |
 | `csv.delimiter_inferred` | Info | Delimiter auto-detected |
 | `csv.infer_schema_truncated` | Warning | Inference hit sample bounds |
-| `jsonl.schema_widened` | Warning | New fields appeared during sample |
+| `jsonl.schema_widened` | Warning | New fields appeared **within** sample (schema still stabilized) |
 | `jsonl.nested_field_as_struct` | Info | Stable nested object mapped to struct |
 | `jsonl.nested_field_as_list` | Info | Stable list mapped to list |
 | `parquet.row_count_from_metadata` | Info | Row count from footer |
 | `inspect.row_count_unknown` | Warning | Row count not computed |
-| `discover.truncated` | Warning | Hit `maxDiscoveryEntries` |
+
+Note: there is **no** `discover.truncated` finding — discover over-limit is a hard error.
 
 ### JSONL nested-type policy (frozen)
 
@@ -511,12 +639,12 @@ Non-object top-level JSON lines are **rejected** (not skipped).
 
 | Operation | `RequestContext` source | Cooperative checks |
 | --- | --- | --- |
-| `test_connection` | `TestConnectionRequest.context` | Before each root stat |
+| `test_connection` | `TestConnectionRequest.context` | Before each root access check |
 | `discover` | `DiscoverRequest.context` | Every 100 entries during walk |
 | `inspect` | `InspectRequest.context` | Before IO, after metadata, after sample |
 | `preview` | `PreviewRequest.context` | Before scan, between batch fetches |
 | `read_batches` | `ReadRequest.context` | Between chunks in adapter; registry wraps stream |
-| `checkpoint` | `CheckpointRequest.context` | `ensure_active()` then `None` |
+| `checkpoint` | `CheckpointRequest.context` | `ensure_active()` then `Ok(None)` |
 
 Blocking decode work runs on `tokio::task::spawn_blocking`. Do not start a new blocking job after terminal cancellation.
 
@@ -531,7 +659,7 @@ Blocking decode work runs on `tokio::task::spawn_blocking`. Do not start a new b
 | `schema_discovery` | `true` | inspect |
 | `preview` | `true` | bounded head preview |
 | `streaming` | `true` | `read_batches` |
-| `incremental_read` | `false` | checkpoint always `None` |
+| `incremental_read` | `false` | `checkpoint()` always `None` |
 | `predicate_pushdown` | `false` | reject `filter` |
 | `column_projection` | `true` | when spike-selected engine supports it |
 | `range_read` | `false` | local files only |
@@ -552,11 +680,12 @@ Registry negotiation (unchanged from #5):
 
 | Topic | Decision |
 | --- | --- |
-| Encoding | UTF-8 only; optional BOM strip (`csv.bom_stripped`) |
+| Encoding | UTF-8 only; optional BOM strip (`csv.bom_stripped`); non-UTF-8 → `InvalidData` |
 | Delimiter | Comma default; override via `formatDefaults.csv.delimiter` |
 | Header | `hasHeader: true` default |
+| Empty file | Valid; schema may be empty / header-only; zero rows |
 | Empty lines | Skip |
-| Malformed rows | **Strict fatal** (see Error semantics) |
+| Malformed rows | **Strict fatal** |
 | Inference sample | `maxSampleRows` / `maxSampleBytes` |
 
 ### JSONL
@@ -565,6 +694,7 @@ Registry negotiation (unchanged from #5):
 | --- | --- |
 | Line format | Exactly one JSON value per line |
 | Top-level type | Must be JSON **object** |
+| Empty file | Valid; zero rows; empty or override schema |
 | Nested typing | See JSONL nested-type policy |
 | Inference sample | Same bounds as CSV |
 
@@ -609,9 +739,9 @@ backend/crates/stillflow-connector-local-tabular/
 **Authorized core changes:**
 
 ```text
-backend/crates/stillflow-core/src/domain/mod.rs      # schema_override on requests
-backend/crates/stillflow-core/src/domain/preview.rs
-backend/crates/stillflow-core/src/domain/read.rs
+backend/crates/stillflow-core/src/domain/mod.rs      # schema_override on InspectRequest
+backend/crates/stillflow-core/src/domain/preview.rs  # schema_override on PreviewRequest
+backend/crates/stillflow-core/src/domain/read.rs     # schema_override on ReadRequest
 ```
 
 **Workspace wiring:**
@@ -625,9 +755,12 @@ backend/Cargo.lock
 
 ```text
 backend/crates/stillflow-connector-local-tabular/tests/fixtures/
-  csv/{orders,orders_bom,orders_semicolon,orders_malformed}.csv
-  jsonl/{events,events_heterogeneous,events_bad_line,events_unstable_nested}.jsonl
+  csv/{orders,orders_bom,orders_semicolon,orders_malformed,orders_empty,orders_non_utf8}.csv
+  jsonl/{events,events_heterogeneous,events_bad_line,events_unstable_nested,events_empty}.jsonl
   parquet/orders.parquet
+  multi_root/
+    uploads/data/orders.csv
+    fixtures/data/orders.csv
 ```
 
 ### Must NOT modify (unless new contract)
@@ -646,15 +779,27 @@ backend/crates/stillflow-connector-local-tabular/tests/fixtures/
 Candidate dependencies (spike will confirm which are needed):
 
 ```toml
-# Option A/B candidates — only if proven
+# Option A/B candidates — only if proven in Spike Phase 1
 polars = { version = "0.46", ... }
 polars-arrow = { version = "0.46", features = ["arrow_rs"] }  # candidate only
 
-# Option C candidates — only if Sol approves after A/B fail
+# Option C candidates — only after Sol approves Spike Phase 2
 # arrow-csv / arrow-json / parquet crate aligned with arrow 59
 ```
 
 Workspace `arrow-array` / `arrow-schema` remain **59**.
+
+Adapter dependency direction:
+
+```text
+stillflow-connector-local-tabular
+        ↓
+stillflow-connectors
+        ↓
+stillflow-core
+```
+
+The adapter may also depend on workspace `arrow-array` / `arrow-schema` 59 directly.
 
 **Forbidden:** `arrow` meta crate, `duckdb`, `sqlx`, `object_store`, `calamine`, `axum` in the adapter crate.
 
@@ -664,31 +809,45 @@ Workspace `arrow-array` / `arrow-schema` remain **59**.
 
 | # | Area | Test | Type |
 | --- | --- | --- | --- |
-| S1 | Spike gate | A/B/C bridge compiles and round-trips fixtures | spike |
-| S2 | Spike gate | proves O(batch) memory, no full collect | spike |
+| S1 | Spike Phase 1 | Options A and B compile + round-trip fixtures (C not required) | spike |
+| S2 | Spike Phase 1 | proves O(batch) memory, no full collect | spike |
+| S3 | Spike Phase 2 | Option C only after Sol approval | spike |
 | T1 | Path security | `../` traversal rejected | unit |
-| T2 | Path security | symlink component rejected (`followSymlinks: false`) | unit |
-| T3 | Path security | valid relative path resolves under root | unit |
-| T4 | Path security | Windows junction/reparse note or test | unit/platform |
-| T5 | Discover | finds `.csv`, `.jsonl`, `.parquet`; ignores `.tsv`, `.json` | integration |
-| T6 | Discover | respects `maxDiscoveryEntries` + warning | integration |
-| T7 | Discover | honours cancellation mid-walk | async |
-| T8 | Inspect | CSV schema inference within sample bounds | integration |
-| T9 | Inspect | Parquet schema from footer without full read | integration |
-| T10 | Inspect | `schema_override` on `InspectRequest` replaces inference | integration |
-| T11 | Preview | default 1,000 rows, `rows_truncated` | integration |
-| T12 | Preview | `byte_limit` uses Arrow memory accounting | integration |
-| T13 | Preview | projection returns subset of columns | integration |
-| T14 | Preview | rejects `filter` with `UnsupportedCapability` | integration |
-| T15 | Read | batch stream chunk sizes ≤ `batch_size` | integration |
-| T16 | Read | Parquet projection changes output schema | integration |
-| T17 | Read | JSONL stable struct/list round-trip | integration |
-| T18 | Read | JSONL unstable nested typing fails | integration |
-| T19 | Read | malformed CSV fails with row/offset, no raw payload | integration |
-| T20 | Read | cancellation during stream terminates once | async |
-| T21 | Read | `schema_override` on `ReadRequest` honoured | integration |
-| T22 | Registry | asset/connection mismatch rejected | integration |
-| T23 | Registry | `discover` works without `schema_discovery` | integration |
+| T2 | Path security | symlink component rejected | unit |
+| T3 | Path security | valid relative path resolves under selected root | unit |
+| T4 | Path security | Windows junction/reparse rejected or documented | unit/platform |
+| T5 | Multi-root | two roots with same relative path resolve via `locator.container` | integration |
+| T6 | Discover | exceeds `maxDiscoveryEntries` → `InvalidConfiguration`, no partial Vec | integration |
+| T7 | Discover | finds `.csv`, `.jsonl`, `.parquet`; ignores `.tsv`, `.json` | integration |
+| T8 | Discover | honours cancellation mid-walk | async |
+| T9 | Connection | all roots accessible → `Ok` | integration |
+| T10 | Connection | some roots inaccessible → `Degraded` | integration |
+| T11 | Connection | no roots accessible → `NotFound` / `Authorization` | integration |
+| T12 | Inspect | CSV schema inference within sample bounds | integration |
+| T13 | Inspect | Parquet schema from footer without full read | integration |
+| T14 | Inspect | `schema_override` replaces inference when compatible | integration |
+| T15 | Inspect | incompatible `schema_override` → `SchemaDrift` | integration |
+| T16 | Preview | default 1,000 rows, `rows_truncated` | integration |
+| T17 | Preview | `byte_limit` uses Arrow memory accounting | integration |
+| T18 | Preview | first row already exceeds `byte_limit` → truncate flags / empty batches | integration |
+| T19 | Preview | projection returns subset of columns | integration |
+| T20 | Preview | rejects `filter` with `UnsupportedCapability` | integration |
+| T21 | Preview | rejects `Reservoir` / `Random` sampling | integration |
+| T22 | Read | batch stream chunk sizes ≤ `batch_size` | integration |
+| T23 | Read | Parquet projection changes output schema | integration |
+| T24 | Read | JSONL stable struct/list round-trip | integration |
+| T25 | Read | JSONL unstable nested typing fails | integration |
+| T26 | Read | malformed CSV fails with row/offset, no raw payload | integration |
+| T27 | Read | non-UTF-8 CSV/JSONL → `InvalidData` | integration |
+| T28 | Read | BOM CSV strips BOM and reads successfully | integration |
+| T29 | Read | empty CSV / empty JSONL succeed with zero rows | integration |
+| T30 | Read | post-sample new field → `SchemaDrift` | integration |
+| T31 | Read | post-sample type conflict → `SchemaDrift` | integration |
+| T32 | Read | cancellation during stream terminates once | async |
+| T33 | Read | `schema_override` on `ReadRequest` honoured | integration |
+| T34 | Checkpoint | `checkpoint()` returns `Ok(None)` | integration |
+| T35 | Registry | asset/connection mismatch rejected | integration |
+| T36 | Registry | `discover` works without `schema_discovery` | integration |
 
 ---
 
@@ -713,17 +872,22 @@ cargo test --workspace
 
 ## Forbidden changes
 
-1. Begin implementation or add decode dependencies before spike approval.
-2. Assume `polars-arrow arrow_rs → arrow 59` without proof.
-3. Store schema override in connection config JSON.
-4. Implement CSV lenient / skip-malformed-rows mode.
-5. Full-file `.collect()` in `read_batches`.
-6. Add `unsafe` bridging code.
-7. Downgrade workspace Arrow 59.
-8. Modify `SourceConnector` beyond authorized `schema_override` request fields.
-9. Silent fallback when capabilities are unsupported.
-10. Coerce unstable JSON values to `Utf8` to force reads.
-11. Frontend layout/CSS changes.
+1. Begin Spike Phase 1 before Sol marks this contract `FROZEN`.
+2. Begin implementation or add decode dependencies before spike approval.
+3. Assume `polars-arrow arrow_rs → arrow 59` without proof.
+4. Begin Option C without Sol approval after Phase 1 failure.
+5. Store schema override in connection config JSON.
+6. Implement CSV lenient / skip-malformed-rows mode.
+7. Return truncated discover results with a soft warning.
+8. Leave `locator.container` empty when multiple roots are configured.
+9. Follow symlinks / junctions in #6.
+10. Full-file `.collect()` in `read_batches`.
+11. Add `unsafe` bridging code.
+12. Downgrade workspace Arrow 59.
+13. Modify `SourceConnector` beyond authorized `schema_override` request fields.
+14. Silent fallback when capabilities are unsupported.
+15. Coerce unstable JSON values or drifted fields to `Utf8` to force reads.
+16. Frontend layout/CSS changes.
 
 ---
 
@@ -731,30 +895,32 @@ cargo test --workspace
 
 | Risk | Mitigation |
 | --- | --- |
-| No proven Polars 0.46 → Arrow 59 bridge | Three-option spike; escalate Option C to Sol |
+| No proven Polars 0.46 → Arrow 59 bridge | Phase 1 A/B spike; escalate C to Sol |
 | `df-interchange` does not list Arrow 59 | Do not rely on it without verification |
-| JSONL heterogeneous files fail strict policy | Explicit tests + typed `InvalidData` |
-| Windows junction / reparse semantics | Dedicated test or documented limitation |
+| JSONL heterogeneous files fail strict policy | Explicit tests + typed `InvalidData` / `SchemaDrift` |
+| Windows junction / reparse semantics | Reject by default; document limitation |
 | `spawn_blocking` cancel latency | Between-chunk checks |
 | Issue #6 GitHub body mentions TSV/JSON | This contract supersedes issue body for scope |
+| `AGENTS.md` missing on branch | Constraints inlined in this document |
 
 ---
 
 ## Implementation sequence
 
-**Blocked until Sol freezes this contract and spike is approved.**
+**Blocked until Sol freezes this contract.**
 
-1. **Sol review** — freeze contract.
-2. **Spike gate** — evaluate Options A/B/C; publish `issue-006-arrow-bridge-spike.md`; obtain Sol approval for selected strategy (or Option C escalation).
-3. **Core request extension** — add `schema_override` to inspect/preview/read requests.
-4. **Adapter crate scaffold** + workspace wiring per spike outcome.
-5. **Path security** — tests T1–T4.
-6. **`test_connection` + `discover`** — tests T5–T7.
-7. **`inspect`** — tests T8–T10.
-8. **`preview`** — tests T11–T14.
-9. **`read_batches` stream** — tests T15–T21.
-10. **Registry integration** — tests T22–T23.
-11. **Composer completion report** per `AGENTS.md`.
+1. **Sol review** — mark contract `FROZEN`.
+2. **Spike Phase 1** — evaluate Options A and B only; publish spike notes; stop if both fail.
+3. **Optional Spike Phase 2** — only after Sol approves Option C.
+4. **Core request extension** — add `schema_override` to inspect/preview/read requests.
+5. **Adapter crate scaffold** + workspace wiring per spike outcome.
+6. **Config + path security + multi-root locator** — tests T1–T5, T9–T11.
+7. **`discover`** — tests T6–T8.
+8. **`inspect`** — tests T12–T15.
+9. **`preview`** — tests T16–T21.
+10. **`read_batches` stream** — tests T22–T34.
+11. **Registry integration** — tests T35–T36.
+12. **Completion summary** — list new deps, contract deviations, and any `unwrap` / `expect`.
 
 ---
 
@@ -763,18 +929,20 @@ cargo test --workspace
 | Item | Authorization |
 | --- | --- |
 | `schema_override` on `InspectRequest`, `PreviewRequest`, `ReadRequest` | Authorized by this contract |
+| `allowedRoots` as `{ id, path }[]` with `locator.container = Some(root.id)` | Authorized by this contract |
 | All other frozen #5 contracts | Unchanged unless Sol issues a new contract |
 
 ---
 
 ## Review checklist for Sol
 
-- [ ] Arrow bridge is hypothesis-only until spike proves otherwise
-- [ ] Options A/B/C and escalation path are clear
-- [ ] Schema override uses request fields, not connection config
-- [ ] CSV strict-only policy is frozen
-- [ ] Symlink algorithm does not rely on `canonicalize` follow semantics
-- [ ] `byte_limit` defined as Arrow in-memory size
-- [ ] JSONL nested allow/reject policy is frozen
-- [ ] Implementation blocked until spike approval
-- [ ] Scope matches MVP (#6 CSV/JSONL/Parquet local only)
+- [ ] Multi-root assets uniquely identified via `locator.container`
+- [ ] Discover over-limit is hard `InvalidConfiguration`, no partial Vec
+- [ ] `AGENTS.md` absence handled by inlined engineering constraints
+- [ ] Spike Phase 1 = A/B only; Phase 2 = C after Sol approval
+- [ ] Schema drift rules frozen
+- [ ] `test_connection` Ok / Degraded / fatal outcomes frozen
+- [ ] Symlinks always rejected in #6
+- [ ] Dependency direction includes adapter → connectors → core
+- [ ] Test matrix covers multi-root, drift, empty files, BOM, non-UTF-8, byte_limit edge, checkpoint
+- [ ] Implementation remains blocked until `FROZEN`
