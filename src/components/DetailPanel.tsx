@@ -7,18 +7,17 @@ import {
   Type,
   Eye,
   Play,
-  FileText,
-  Upload,
+  Clock,
 } from '../icons/hero';
-import type { PipelineNode, NodeType, WorkspaceEvent } from '../types';
 import { formatRows } from '../utils/duckdb';
+import type { PipelineNode, NodeType, PipelineMetrics, WorkspaceEvent } from '../types';
 
 const TYPE_ICON: Record<NodeType, React.ReactNode> = {
-  source: <FileText size={20} />,
-  filter: <Filter size={20} />,
   deduplicate: <Copy size={20} />,
   normalize: <Type size={20} />,
-  export: <Upload size={20} />,
+  filter: <Filter size={20} />,
+  source: <Copy size={20} />,
+  export: <Copy size={20} />,
 };
 
 const TYPE_BG: Record<NodeType, string> = {
@@ -30,126 +29,24 @@ const TYPE_BG: Record<NodeType, string> = {
 };
 
 const TYPE_LABEL: Record<NodeType, string> = {
-  source: 'Source',
-  filter: 'Transformation',
-  deduplicate: 'Process',
-  normalize: 'Transformation',
-  export: 'Output',
+  source: 'Source Node',
+  filter: 'Transform Node',
+  deduplicate: 'Process Node',
+  normalize: 'Transform Node',
+  export: 'Output Node',
 };
 
-const STATUS_META: Record<
-  PipelineNode['status'],
-  { label: string; dot: string }
-> = {
-  completed: { label: 'Completed', dot: 'bg-green-600' },
-  running: { label: 'Running', dot: 'bg-gray-900' },
-  failed: { label: 'Failed', dot: 'bg-red-500' },
-  pending: { label: 'Draft', dot: 'bg-gray-400' },
-  disabled: { label: 'Disabled', dot: 'bg-gray-300' },
+const CONFIG_OPTIONS: Record<string, string[]> = {
+  strategy: ['Keep first', 'Keep last', 'Merge records'],
+  scope: ['Current dataset', 'Selected branch', 'Entire pipeline'],
+  nullHandling: ['Ignore', 'Treat as duplicate', 'Remove null rows'],
 };
-
-/** Truthful output labels — never the rule description ("Keep matched rows"). */
-const OUTPUT_LABEL: Record<NodeType, string> = {
-  source: '',
-  filter: 'Filtered preview',
-  deduplicate: 'Deduplicated preview',
-  normalize: 'Normalized preview',
-  export: 'CSV export',
-};
-
-const FILTER_OPERATORS = [
-  'is not empty',
-  'is empty',
-  'equals',
-  'not equals',
-  'contains',
-  'not contains',
-  'greater than',
-  'less than',
-];
-const EMPTINESS_OPERATORS = new Set(['is empty', 'is not empty']);
-
-const FILTER_MODES = ['Keep matching rows', 'Remove matching rows'];
-const FILTER_NULL_HANDLING = ['Treat as non-match', 'Treat as match'];
-const DEDUP_STRATEGIES = ['Keep first', 'Keep last', 'Merge records'];
-const DEDUP_NULL_HANDLING = ['Ignore', 'Treat as duplicate', 'Remove null rows'];
-const NORMALIZE_NULL_HANDLING = ['Ignore', 'Remove null rows'];
-
-const CONTROL_CLASS =
-  'text-[13px] font-medium text-gray-900 text-right bg-transparent border border-gray-300 rounded-md px-2 py-0.5 w-36 outline-none focus:border-gray-400';
-
-function Section({
-  title,
-  action,
-  children,
-  last = false,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-  last?: boolean;
-}) {
-  return (
-    <div className={`p-4 ${last ? '' : 'border-b border-gray-100'}`}>
-      <div className="mb-3 flex items-center justify-between">
-        <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider">{title}</h4>
-        {action}
-      </div>
-      <div className="space-y-2.5">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-h-[22px] items-center justify-between">
-      <span className="text-[13px] text-gray-500">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function Value({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="truncate text-[13px] font-medium text-gray-900">
-      {children}
-    </span>
-  );
-}
-
-function SelectControl({
-  value,
-  options,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <select
-      className={CONTROL_CLASS}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      {placeholder !== undefined && <option value="">{placeholder}</option>}
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 interface DetailPanelProps {
   node: PipelineNode;
   nodes: PipelineNode[];
   events?: WorkspaceEvent[];
   availableColumns?: string[];
-  datasetName?: string;
   onClose: () => void;
   onRun: (nodeId: string) => void | Promise<void>;
   onPreview?: () => void;
@@ -161,17 +58,22 @@ interface DetailPanelProps {
 const DetailPanel: React.FC<DetailPanelProps> = ({
   node,
   nodes,
-  availableColumns = [],
-  datasetName = '',
   onClose,
   onRun,
   onUpdate,
   onDelete,
 }) => {
+  // The currently-running status comes from `node` (App-owned).
   const running = node.status === 'running';
-  const disabled = node.status === 'disabled';
+  const [disabledLocal, setDisabledLocal] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  const [editConfig, setEditConfig] = useState({ ...node.config });
+  useEffect(() => {
+    setEditConfig({ ...node.config });
+  }, [node.id, node.config]);
 
   const toastTimer = useRef<number | undefined>(undefined);
   const showToast = useCallback((message: string) => {
@@ -181,20 +83,28 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   }, []);
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
+  // Determine Input / Output context from the nodes list, relative to the selected
   const idx = nodes.findIndex((n) => n.id === node.id);
   const prevNode = idx > 0 ? nodes[idx - 1] : null;
   const nextNode = idx >= 0 && idx < nodes.length - 1 ? nodes[idx + 1] : null;
 
-  const metrics = node.metrics;
-  const hasRun = Boolean(metrics);
-
-  const setConfig = (patch: Partial<PipelineNode['config']>) => {
-    onUpdate(node.id, { config: { ...node.config, ...patch } });
+  // Loaded metrics are whatever the App recorded for this node.
+  const metrics: PipelineMetrics = node.metrics ?? {
+    rowsIn: 0,
+    rowsOut: parseFloat((node.rows || '').replace(/[A-Za-z]/g, '')) || 0,
+    duplicates: 0,
+    missing: 0,
+    nullColumns: 0,
+    qualityScore: 0,
+    duration: 0,
+    memory: 0,
   };
+
+  const hasRun = Boolean(node.metrics);
 
   const handleRun = async () => {
     if (running) return;
-    if (disabled) {
+    if (disabledLocal) {
       showToast('Enable the node before running');
       return;
     }
@@ -203,16 +113,17 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   };
 
   const handleDisable = () => {
-    if (node.type === 'source') {
-      showToast('Source node is required');
-      return;
+    const next = !disabledLocal;
+    setDisabledLocal(next);
+    showToast(next ? 'Node disabled' : 'Node enabled');
+  };
+
+  const handleEdit = () => {
+    if (editing) {
+      onUpdate(node.id, { config: { ...editConfig } });
+      showToast('Configuration saved');
     }
-    onUpdate(node.id, {
-      status: disabled ? 'pending' : 'disabled',
-      metrics: undefined,
-      error: undefined,
-    });
-    showToast(disabled ? 'Node enabled' : 'Node disabled');
+    setEditing((e) => !e);
   };
 
   const handleMenuAction = (item: { label: string; delete?: boolean }) => {
@@ -222,30 +133,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       showToast('Node deleted');
       return;
     }
-    if (item.label === 'Disable node' || item.label === 'Enable node') {
-      handleDisable();
-      return;
-    }
     showToast(item.label);
   };
 
-  const progressPct =
-    node.status === 'completed' ? 100 : node.status === 'running' ? 67 : 0;
+  // Progress driven by App's node status — for visual continuity show 0% when pending,
+  // 100% when completed, indeterminate-ish for running.
+  const progressPct = node.status === 'completed' ? 100 : node.status === 'running' ? 67 : 0;
 
-  const operator = node.config.operator ?? 'is not empty';
-  const needsValue = !EMPTINESS_OPERATORS.has(operator);
-  const ruleIncomplete =
-    node.type === 'filter' &&
-    (!node.config.column.trim() || (needsValue && !node.config.value?.trim()));
-
-  const inputLabel =
-    node.type === 'source'
-      ? 'Local file'
-      : (prevNode?.name ?? datasetName) || null;
-  const outputLabel =
-    node.type === 'source'
-      ? datasetName || null
-      : (OUTPUT_LABEL[node.type] ?? null);
+  const rowsOutDisplay = formatRows(metrics.rowsOut);
 
   return (
     <div className="w-[356px] bg-white border-l border-gray-200 flex flex-col flex-shrink-0 overflow-hidden relative shadow-[-12px_0_32px_rgba(16,24,40,0.05)]">
@@ -271,7 +166,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-2 mt-3">
+          <div className="flex items-center gap-3 mt-3">
             <span
               className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
                 node.status === 'completed'
@@ -281,262 +176,194 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                   : 'text-gray-600 bg-gray-100'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                node.status === 'completed' ? 'bg-green-600' :
-                node.status === 'running' ? 'bg-white animate-pulse' :
-                'bg-gray-400'
-              }`} />
-              {node.status === 'completed' ? 'Completed' : node.status === 'running' ? 'Running' : 'Draft'}
+              {node.status === 'completed' ? (
+                <span className="w-1.5 h-1.5 bg-green-600 rounded-full" />
+              ) : node.status === 'running' ? (
+                <span className="w-1.5 h-1.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+              ) : (
+                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
+              )}
+              {node.status === 'completed' ? 'Completed' : node.status === 'running' ? 'Running' : 'Pending'}
             </span>
-            {node.error && (
-              <span className="text-[12px] text-red-600">Error</span>
-            )}
+            <span className="text-[11px] text-gray-400 flex items-center gap-1">
+              <Clock size={12} />
+              {hasRun ? 'Updated just now' : 'Not run yet'}
+            </span>
           </div>
         </div>
 
-        {/* Actions — Preview changes is the primary verb */}
-        <Section title="Actions">
-          <button
-            onClick={handleRun}
-            disabled={running || disabled || ruleIncomplete}
-            title={
-              ruleIncomplete
-                ? 'Complete the rule before running'
-                : 'Run up to this node and preview the result'
-            }
-            className="w-full bg-gray-900 text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-800 transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
-          >
-            <Play size={14} fill="white" />
-            <span>{running ? 'Running…' : 'Preview changes'}</span>
-          </button>
-          {ruleIncomplete && (
-            <p className="text-[12px] text-gray-400">
-              {node.config.column.trim()
-                ? 'Enter a comparison value to complete the rule.'
-                : 'Select a column to complete the rule.'}
-            </p>
-          )}
-          {running && (
-            <div className="flex items-center gap-2 pt-1">
-              <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+        {/* Context */}
+        <div className="p-4 border-b border-gray-100">
+          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Context</h4>
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-500">Input</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {prevNode ? prevNode.name : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-500">Output</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {nextNode ? nextNode.name : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-500">Relation</span>
+              <span className="inline-flex items-center min-h-[22px] px-[9px] bg-gray-100 rounded-full text-[11px] font-medium text-gray-900">
+                transforms
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Runtime */}
+        <div className="p-4 border-b border-gray-100">
+          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Runtime</h4>
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-500">Rows</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {hasRun ? `${formatRows(metrics.rowsIn)} / ${formatRows(metrics.rowsOut)}` : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-500">Duration</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {hasRun ? (metrics.duration < 1000 ? `${metrics.duration}ms` : `${(metrics.duration / 1000).toFixed(1)}s`) : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-500">Memory</span>
+              <span className="text-[13px] font-medium text-gray-900">
+                {hasRun ? `${metrics.memory} MB` : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-gray-500">Mode</span>
+              <span className="text-[13px] font-medium text-gray-900">Incremental</span>
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gray-900 rounded-full transition-[width] duration-150 ease-out"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
-              <span className="text-[11px] text-gray-500 font-medium">{progressPct}%</span>
+              <span className="text-[11px] text-gray-500 ml-2 font-medium">{progressPct}%</span>
             </div>
-          )}
-        </Section>
+          </div>
+        </div>
 
-        {/* Rule — per type */}
-        {node.type === 'filter' && (
-          <Section title="Rule">
-            <Row label="Mode">
-              <div className="w-36">
-                <SelectControl
-                  value={node.config.mode ?? FILTER_MODES[0]}
-                  options={FILTER_MODES}
-                  onChange={(mode) => setConfig({ mode })}
-                />
-              </div>
-            </Row>
-            <div className="pt-1 pb-0.5 text-[11px] font-medium text-gray-400">Conditions</div>
-            <Row label="Column">
-              <div className="w-36">
-                {availableColumns.length > 0 ? (
-                  <SelectControl
-                    value={node.config.column}
-                    options={availableColumns}
-                    placeholder="Select column"
-                    onChange={(column) => setConfig({ column })}
-                  />
-                ) : (
-                  <input
-                    className={CONTROL_CLASS}
-                    placeholder="Column name"
-                    value={node.config.column}
-                    onChange={(event) => setConfig({ column: event.target.value })}
-                  />
-                )}
-              </div>
-            </Row>
-            <Row label="Operator">
-              <div className="w-36">
-                <SelectControl
-                  value={operator}
-                  options={FILTER_OPERATORS}
-                  onChange={(next) => setConfig({ operator: next })}
-                />
-              </div>
-            </Row>
-            {needsValue && (
-              <Row label="Value">
-                <div className="w-36">
-                  <input
-                    className={CONTROL_CLASS}
-                    placeholder='e.g. "US" or 100000'
-                    value={node.config.value ?? ''}
-                    onChange={(event) => setConfig({ value: event.target.value })}
-                  />
+        {/* Metrics */}
+        <div className="p-4 border-b border-gray-100">
+          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Metrics</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-xl p-3">
+              <div className="text-[11px] text-gray-500 mb-1">Rows</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? rowsOutDisplay : '—'}</div>
+              <div className="text-[11px] text-gray-400">output rows</div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 relative">
+              <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.duplicates}%` : '—'}</div>
+              {hasRun && metrics.duplicates > 0 && (
+                <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
+              )}
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <div className="text-[11px] text-gray-500 mb-1">Missing</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.missing}%` : '—'}</div>
+              <div className="text-[11px] text-gray-400">across columns</div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
+              <div className="text-lg font-bold text-gray-900">{hasRun ? metrics.qualityScore : '—'}</div>
+              {hasRun && (
+                <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                  {metrics.qualityScore >= 80 ? 'Good' : metrics.qualityScore >= 60 ? 'Fair' : 'Poor'}
                 </div>
-              </Row>
-            )}
-            <Row label="Null handling">
-              <div className="w-36">
-                <SelectControl
-                  value={node.config.nullHandling}
-                  options={FILTER_NULL_HANDLING}
-                  onChange={(nullHandling) => setConfig({ nullHandling })}
-                />
-              </div>
-            </Row>
-          </Section>
-        )}
+              )}
+            </div>
+          </div>
+        </div>
 
-        {node.type === 'deduplicate' && (
-          <Section title="Rule">
-            <Row label="Column">
-              <div className="w-36">
-                {availableColumns.length > 0 ? (
-                  <SelectControl
-                    value={node.config.column}
-                    options={availableColumns}
-                    placeholder="Entire row"
-                    onChange={(column) => setConfig({ column })}
-                  />
+        {/* Actions */}
+        <div className="p-4 border-b border-gray-100">
+          <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Actions</h4>
+          <button
+            onClick={handleRun}
+            disabled={running}
+            className="w-full bg-gray-900 text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-800 transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
+          >
+            <Play size={14} fill="white" />
+            <span>{running ? 'Running…' : 'Run From Here'}</span>
+          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => showToast('Result preview opened')}
+              className="flex items-center justify-center gap-1.5 text-[12px] font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 py-2 rounded-lg transition-colors"
+            >
+              <Eye size={13} />
+              Preview Result
+            </button>
+            <button
+              onClick={handleDisable}
+              className={`flex items-center justify-center gap-1.5 text-[12px] font-medium py-2 rounded-lg transition-colors ${
+                disabledLocal ? 'bg-gray-900 text-white hover:bg-gray-800' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+              }`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="6" y="4" width="12" height="16" rx="2" />
+                <path d="M10 8h4m-4 4h4m-4 4h4" />
+              </svg>
+              <span>{disabledLocal ? 'Enable' : 'Disable'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Configuration */}
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider">Configuration</h4>
+            <button onClick={handleEdit} className="text-[12px] text-gray-900 font-medium hover:text-gray-700 transition-colors">
+              {editing ? 'Save' : 'Edit'}
+            </button>
+          </div>
+          <div className="space-y-2.5">
+            {(['column', 'strategy', 'scope', 'nullHandling'] as const).map((field) => (
+              <div key={field} className="flex items-center justify-between min-h-[28px]">
+                <span className="text-[13px] text-gray-500">
+                  {field === 'nullHandling' ? 'Null Handling' : field.charAt(0).toUpperCase() + field.slice(1)}
+                </span>
+                {editing ? (
+                  field === 'column' ? (
+                    <input
+                      className="text-[13px] font-medium text-gray-900 text-right bg-transparent border border-gray-300 rounded-md px-2 py-0.5 w-36 outline-none focus:border-gray-400"
+                      value={editConfig[field]}
+                      onChange={(e) => setEditConfig((c) => ({ ...c, [field]: e.target.value }))}
+                    />
+                  ) : (
+                    <select
+                      className="text-[13px] font-medium text-gray-900 text-right bg-transparent border border-gray-300 rounded-md px-2 py-0.5 w-36 outline-none focus:border-gray-400"
+                      value={editConfig[field]}
+                      onChange={(e) => setEditConfig((c) => ({ ...c, [field]: e.target.value }))}
+                    >
+                      {CONFIG_OPTIONS[field].map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  )
                 ) : (
-                  <input
-                    className={CONTROL_CLASS}
-                    placeholder="Entire row"
-                    value={node.config.column}
-                    onChange={(event) => setConfig({ column: event.target.value })}
-                  />
+                  <span className="text-[13px] font-medium text-gray-900">{node.config[field]}</span>
                 )}
               </div>
-            </Row>
-            <Row label="Strategy">
-              <div className="w-36">
-                <SelectControl
-                  value={node.config.strategy}
-                  options={DEDUP_STRATEGIES}
-                  onChange={(strategy) => setConfig({ strategy })}
-                />
-              </div>
-            </Row>
-            <Row label="Null handling">
-              <div className="w-36">
-                <SelectControl
-                  value={node.config.nullHandling}
-                  options={DEDUP_NULL_HANDLING}
-                  onChange={(nullHandling) => setConfig({ nullHandling })}
-                />
-              </div>
-            </Row>
-          </Section>
-        )}
-
-        {node.type === 'normalize' && (
-          <Section title="Rule">
-            <Row label="Column">
-              <div className="w-36">
-                {availableColumns.length > 0 ? (
-                  <SelectControl
-                    value={node.config.column}
-                    options={availableColumns}
-                    placeholder="All text columns"
-                    onChange={(column) => setConfig({ column })}
-                  />
-                ) : (
-                  <input
-                    className={CONTROL_CLASS}
-                    placeholder="All text columns"
-                    value={node.config.column}
-                    onChange={(event) => setConfig({ column: event.target.value })}
-                  />
-                )}
-              </div>
-            </Row>
-            <Row label="Null handling">
-              <div className="w-36">
-                <SelectControl
-                  value={node.config.nullHandling}
-                  options={NORMALIZE_NULL_HANDLING}
-                  onChange={(nullHandling) => setConfig({ nullHandling })}
-                />
-              </div>
-            </Row>
-            <p className="pt-1 text-[12px] text-gray-400">
-              Trims whitespace and lowercases email values.
-            </p>
-          </Section>
-        )}
-
-        {node.type === 'source' && (
-          <Section title="Source">
-            <Row label="File"><Value>{node.name}</Value></Row>
-            {node.description && <Row label="Detail"><Value>{node.description}</Value></Row>}
-            {node.rows && <Row label="Rows"><Value>{node.rows}</Value></Row>}
-          </Section>
-        )}
-
-        {node.type === 'export' && (
-          <Section title="Rule">
-            <Row label="Format"><Value>CSV (UTF-8)</Value></Row>
-            <Row label="File name"><Value>{node.name}</Value></Row>
-          </Section>
-        )}
-
-        {/* Input / Output */}
-        {(inputLabel || outputLabel) && (
-          <Section title="Input / Output">
-            {inputLabel && <Row label="Input"><Value>{inputLabel}</Value></Row>}
-            {outputLabel && <Row label="Output"><Value>{outputLabel}</Value></Row>}
-          </Section>
-        )}
-
-        {/* Impact — after a run */}
-        {hasRun && metrics && (
-          <Section title="Preview impact">
-            <Row label="Sample evaluated"><Value>{formatRows(metrics.rowsIn)}</Value></Row>
-            {node.type === 'filter' ? (
-              <>
-                <Row label="Matched"><Value>{formatRows(metrics.rowsOut)}</Value></Row>
-                <Row label="Removed"><Value>{formatRows(metrics.rowsIn - metrics.rowsOut)}</Value></Row>
-              </>
-            ) : node.type === 'deduplicate' ? (
-              <>
-                <Row label="Duplicates removed"><Value>{formatRows(metrics.duplicates)}</Value></Row>
-                <Row label="Rows out"><Value>{formatRows(metrics.rowsOut)}</Value></Row>
-              </>
-            ) : (
-              <Row label="Rows out"><Value>{formatRows(metrics.rowsOut)}</Value></Row>
-            )}
-            <Row label="Errors"><Value>{node.error ? '1' : '0'}</Value></Row>
-          </Section>
-        )}
-
-        {/* Last run */}
-        {hasRun && metrics && (
-          <Section title="Last run">
-            <Row label="Duration">
-              <Value>
-                {metrics.duration < 1000
-                  ? `${Math.round(metrics.duration)}ms`
-                  : `${(metrics.duration / 1000).toFixed(1)}s`}
-              </Value>
-            </Row>
-            <Row label="Memory"><Value>{metrics.memory} MB</Value></Row>
-          </Section>
-        )}
-
-        {/* Relationships — only shown when both sides exist */}
-        {(prevNode || nextNode) && (
-          <Section title="Relationships" last>
-            {prevNode && <Row label="Upstream"><Value>{prevNode.name}</Value></Row>}
-            {nextNode && <Row label="Downstream"><Value>{nextNode.name}</Value></Row>}
-          </Section>
-        )}
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* More Menu */}
@@ -547,7 +374,6 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             {[
               { label: 'Duplicate node' },
               { label: 'Copy node' },
-              { label: disabled ? 'Enable node' : 'Disable node' },
               { label: 'Delete node', delete: true },
             ].map((item) => (
               <button
