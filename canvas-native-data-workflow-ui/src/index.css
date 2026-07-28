@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+@theme {
+  --color-void: #eef1f4;
+  --color-ws: #f8fafb;
+  --color-surf: #ffffff;
+  --color-surfa: #ffffff;
+  --color-node: #ffffff;
+  --color-nodesel: #f4f6f8;
+  --color-line: #dce2e8;
+  --color-linea: #c9d1d9;
+  --color-div: #e5e9ed;
+  --color-t1: #171a1f;
+  --color-t2: #5e6874;
+  --color-t3: #9099a4;
+  --color-t4: #b0b8c1;
+  --color-ind: #2196d2;
+  --color-ok: #4ba66a;
+  --color-run: #2196d2;
+  --color-warn: #c58b32;
+  --color-err: #c95e62;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #eef1f4;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #171a1f;
+  overflow: hidden;
+  font-feature-settings: "cv05", "ss01";
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.nosel {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ---------- scrollbars ---------- */
+.scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll::-webkit-scrollbar-thumb {
+  background: #c9d1d9;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: #a9b4bf;
+  background-clip: padding-box;
+}
+.scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ---------- canvas dot grid ---------- */
+.dotgrid {
+  background-image: radial-gradient(circle at 1px 1px, rgba(23, 26, 31, 0.06) 1px, transparent 0);
+}
+.dotgrid-coarse {
+  background-image: radial-gradient(circle at 1px 1px, rgba(23, 26, 31, 0.09) 1.4px, transparent 0);
+}
+
+.surface-shadow {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.8) inset,
+    0 18px 48px -24px rgba(0, 0, 0, 0.12),
+    0 4px 16px -8px rgba(0, 0, 0, 0.08);
+}
+.island-shadow {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.8) inset,
+    0 10px 28px -18px rgba(0, 0, 0, 0.1);
+}
+
+.dash-flow {
+  stroke-dasharray: 3 4;
+  animation: dashmove 900ms linear infinite;
+}
+@keyframes dashmove {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fadeUp 130ms ease-out;
+}
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+
+input,
+button,
+textarea {
+  font-family: inherit;
+  outline: none;
+}
+input::placeholder {
+  color: #b0b8c1;
+}
