@@ -1,0 +1,11 @@
+﻿[package]
+name = "issue-006-option-a-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+polars = { version = "0.46", default-features = false, features = ["csv", "json", "parquet", "lazy", "dtype-struct", "dtype-array"] }
+polars-arrow = "0.46"
+arrow-array = { version = "59", features = ["ffi"] }
+arrow-schema = { version = "59", features = ["ffi"] }
