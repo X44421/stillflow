@@ -163,21 +163,21 @@ const SECRET_FIELD_NAMES: &[&str] = &[
     "connection_string",
 ];
 
-/// Rejects JSON objects that contain known secret field names.
+/// Rejects JSON values that contain secret field names or secret-like values.
 pub fn ensure_no_secret_fields(value: &serde_json::Value) -> ConnectorResult<()> {
     match value {
         serde_json::Value::Object(map) => {
-            for key in map.keys() {
+            for (key, item) in map {
                 let normalized = key.to_ascii_lowercase();
                 if SECRET_FIELD_NAMES
                     .iter()
                     .any(|candidate| normalized.contains(candidate))
                 {
                     return Err(ConnectorError::invalid_configuration(format!(
-            "configuration must not embed secret field `{key}`; use credential references instead"
-          )));
+                        "configuration must not embed secret field `{key}`; use credential references instead"
+                    )));
                 }
-                ensure_no_secret_fields(&map[key])?;
+                ensure_no_secret_fields(item)?;
             }
         }
         serde_json::Value::Array(items) => {
@@ -185,9 +185,17 @@ pub fn ensure_no_secret_fields(value: &serde_json::Value) -> ConnectorResult<()>
                 ensure_no_secret_fields(item)?;
             }
         }
+        serde_json::Value::String(text) => {
+            ensure_safe_string_value(text)?;
+        }
         _ => {}
     }
     Ok(())
+}
+
+/// Rejects event metadata that may leak credentials or internal secrets.
+pub fn ensure_safe_event_metadata(value: &serde_json::Value) -> ConnectorResult<()> {
+    ensure_no_secret_fields(value)
 }
 
 /// Redacts common secret patterns from user-visible messages.
@@ -204,6 +212,18 @@ pub fn sanitize_message(message: String) -> String {
         }
     }
     sanitized
+}
+
+fn ensure_safe_string_value(value: &str) -> ConnectorResult<()> {
+    let lower = value.to_ascii_lowercase();
+    for marker in ["password=", "token=", "api_key=", "secret=", "bearer "] {
+        if lower.contains(marker) {
+            return Err(ConnectorError::invalid_configuration(
+                "configuration must not embed secret values; use credential references instead",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -223,6 +243,12 @@ mod tests {
           "options": { "apiKey": "abc" }
         });
         ensure_no_secret_fields(&config).expect_err("nested secret keys must be rejected");
+    }
+
+    #[test]
+    fn rejects_secret_values_in_strings() {
+        let config = serde_json::json!({ "note": "password=hunter2" });
+        ensure_no_secret_fields(&config).expect_err("secret values must be rejected");
     }
 
     #[test]

@@ -2,14 +2,16 @@
 
 mod capabilities;
 mod connector;
+mod raw_batch_stream;
 mod registry;
 
 pub use capabilities::{Capability, ConnectorCapabilities};
 pub use connector::{SourceConnector, SourceConnectorRef};
+pub use raw_batch_stream::RawBatchStream;
 pub use registry::ConnectorRegistry;
 
 pub use stillflow_core::{
     AssetKind, AssetLocator, AssetMetadata, BatchItem, BatchStream, Checkpoint, ConnectionStatus,
     ConnectorError, ConnectorKind, ConnectorResult, DatasetSnapshot, DiscoverRequest, PreviewData,
-    PreviewRequest, ReadRequest, RequestContext, SourceAsset,
+    PreviewRequest, ReadRequest, RequestContext, SourceAsset, SourceConnection,
 };

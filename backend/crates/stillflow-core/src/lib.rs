@@ -16,10 +16,14 @@ mod serde_tests;
 
 pub use domain::{
     AssetKind, AssetLocator, AssetMetadata, Checkpoint, ConnectionStatus, CredentialRef, Dataset,
-    DatasetSnapshot, DiscoverRequest, InspectionFinding, PreviewData, PreviewRequest, ReadRequest,
-    SamplingStrategy, Session, SourceAsset, SourceConnection, SourceFilter,
+    DatasetSnapshot, DiscoverRequest, FilterDialect, InspectionFinding, PreviewData,
+    PreviewRequest, ReadRequest, SamplingStrategy, SchemaFieldSnapshot, Session, SourceAsset,
+    SourceConnection, SourceFilter,
 };
-pub use error::{ConnectorError, ConnectorResult, ErrorCategory, SanitizedErrorSummary};
+pub use error::{
+    ensure_no_secret_fields, ensure_safe_event_metadata, ConnectorError, ConnectorResult,
+    ErrorCategory, SanitizedErrorSummary,
+};
 pub use events::{ConnectorKind, IngestionEvent, ObjectKind, RelationshipKind};
 pub use request::RequestContext;
 pub use stream::{attach_request_context, BatchItem, BatchStream};

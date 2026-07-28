@@ -3,16 +3,20 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use stillflow_core::{
-    attach_request_context, BatchStream, Checkpoint, ConnectionStatus, ConnectorKind,
-    ConnectorResult, DiscoverRequest, PreviewData, PreviewRequest, ReadRequest, SourceAsset,
+    AssetMetadata, Checkpoint, ConnectionStatus, ConnectorKind, ConnectorResult, DiscoverRequest,
+    PreviewData, PreviewRequest, ReadRequest, SourceAsset, SourceConnection,
 };
 
 use crate::capabilities::ConnectorCapabilities;
+use crate::raw_batch_stream::RawBatchStream;
 
 /// Object-safe connector implementation handle.
 pub type SourceConnectorRef = Arc<dyn SourceConnector>;
 
 /// Arrow-based connector contract for discovery, inspection, preview and reads.
+///
+/// Implementations return [`RawBatchStream`] from [`Self::read_batches`]. Request
+/// context wrapping is enforced by [`crate::ConnectorRegistry::read_batches`].
 #[async_trait]
 pub trait SourceConnector: Send + Sync {
     /// Stable connector kind used by the registry.
@@ -22,26 +26,43 @@ pub trait SourceConnector: Send + Sync {
     fn capabilities(&self) -> ConnectorCapabilities;
 
     /// Verifies that the configured source is reachable.
-    async fn test_connection(&self) -> ConnectorResult<ConnectionStatus>;
+    async fn test_connection(
+        &self,
+        connection: &SourceConnection,
+    ) -> ConnectorResult<ConnectionStatus>;
 
     /// Discovers assets available through the configured source.
-    async fn discover(&self, request: DiscoverRequest) -> ConnectorResult<Vec<SourceAsset>>;
+    async fn discover(
+        &self,
+        connection: &SourceConnection,
+        request: DiscoverRequest,
+    ) -> ConnectorResult<Vec<SourceAsset>>;
 
     /// Returns schema, format and inspection findings for one asset.
-    async fn inspect(&self, asset: &SourceAsset) -> ConnectorResult<stillflow_core::AssetMetadata>;
+    async fn inspect(
+        &self,
+        connection: &SourceConnection,
+        asset: &SourceAsset,
+    ) -> ConnectorResult<AssetMetadata>;
 
     /// Returns a bounded Arrow preview for one asset.
-    async fn preview(&self, request: PreviewRequest) -> ConnectorResult<PreviewData>;
+    async fn preview(
+        &self,
+        connection: &SourceConnection,
+        request: PreviewRequest,
+    ) -> ConnectorResult<PreviewData>;
 
-    /// Opens a bounded Arrow batch stream for one asset.
-    async fn read_batches(&self, request: ReadRequest) -> ConnectorResult<BatchStream>;
+    /// Opens a bounded Arrow batch stream for one asset without request wrapping.
+    async fn read_batches(
+        &self,
+        connection: &SourceConnection,
+        request: ReadRequest,
+    ) -> ConnectorResult<RawBatchStream>;
 
     /// Returns the latest checkpoint for incremental reads, if any.
-    async fn checkpoint(&self, asset: &SourceAsset) -> ConnectorResult<Option<Checkpoint>>;
-}
-
-/// Attaches request cancellation and deadlines to a connector batch stream.
-#[allow(dead_code)]
-pub fn wrap_batch_stream(stream: BatchStream, request: &ReadRequest) -> BatchStream {
-    attach_request_context(stream, request.context.clone())
+    async fn checkpoint(
+        &self,
+        connection: &SourceConnection,
+        asset: &SourceAsset,
+    ) -> ConnectorResult<Option<Checkpoint>>;
 }

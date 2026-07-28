@@ -29,6 +29,16 @@ impl RequestContext {
         }
     }
 
+    pub fn with_cancellation_and_deadline(
+        cancellation: CancellationToken,
+        deadline: Instant,
+    ) -> Self {
+        Self {
+            cancellation,
+            deadline: Some(deadline),
+        }
+    }
+
     pub fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
     }
@@ -82,6 +92,20 @@ mod tests {
         assert_eq!(
             context.ensure_active().expect_err("timed out").category(),
             crate::ErrorCategory::Timeout
+        );
+    }
+
+    #[test]
+    fn carries_cancellation_and_deadline_together() {
+        let token = CancellationToken::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let context = RequestContext::with_cancellation_and_deadline(token.clone(), deadline);
+        assert!(context.ensure_active().is_ok());
+        assert_eq!(context.deadline(), Some(deadline));
+        token.cancel();
+        assert_eq!(
+            context.ensure_active().expect_err("cancelled").category(),
+            crate::ErrorCategory::Cancelled
         );
     }
 }

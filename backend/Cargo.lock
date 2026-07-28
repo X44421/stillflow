@@ -533,6 +533,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "futures",
+ "serde_json",
  "stillflow-core",
  "tokio",
  "tokio-util",

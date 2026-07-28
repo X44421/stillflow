@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
-use crate::error::SanitizedErrorSummary;
+use crate::error::{ensure_safe_event_metadata, ConnectorResult, SanitizedErrorSummary};
 
 /// Connector implementation kind used by the registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -49,29 +49,81 @@ pub enum RelationshipKind {
 }
 
 /// Auditable ingestion event with sanitized metadata.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IngestionEvent {
-    pub id: Uuid,
-    pub session_id: Uuid,
-    pub object_kind: ObjectKind,
-    pub object_id: Uuid,
-    pub relationship: RelationshipKind,
-    pub timestamp: DateTime<Utc>,
-    pub metadata: serde_json::Value,
+    id: Uuid,
+    session_id: Uuid,
+    object_kind: ObjectKind,
+    object_id: Uuid,
+    relationship: RelationshipKind,
+    timestamp: DateTime<Utc>,
+    metadata: serde_json::Value,
+    error: Option<SanitizedErrorSummary>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IngestionEventData {
+    id: Uuid,
+    session_id: Uuid,
+    object_kind: ObjectKind,
+    object_id: Uuid,
+    relationship: RelationshipKind,
+    timestamp: DateTime<Utc>,
+    metadata: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<SanitizedErrorSummary>,
+    error: Option<SanitizedErrorSummary>,
+}
+
+impl Serialize for IngestionEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        IngestionEventData {
+            id: self.id,
+            session_id: self.session_id,
+            object_kind: self.object_kind,
+            object_id: self.object_id,
+            relationship: self.relationship,
+            timestamp: self.timestamp,
+            metadata: self.metadata.clone(),
+            error: self.error.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for IngestionEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let data = IngestionEventData::deserialize(deserializer)?;
+        ensure_safe_event_metadata(&data.metadata).map_err(DeError::custom)?;
+        Ok(Self {
+            id: data.id,
+            session_id: data.session_id,
+            object_kind: data.object_kind,
+            object_id: data.object_id,
+            relationship: data.relationship,
+            timestamp: data.timestamp,
+            metadata: data.metadata,
+            error: data.error,
+        })
+    }
 }
 
 impl IngestionEvent {
-    pub fn new(
+    pub fn try_new(
         session_id: Uuid,
         object_kind: ObjectKind,
         object_id: Uuid,
         relationship: RelationshipKind,
         metadata: serde_json::Value,
-    ) -> Self {
-        Self {
+    ) -> ConnectorResult<Self> {
+        ensure_safe_event_metadata(&metadata)?;
+        Ok(Self {
             id: Uuid::new_v4(),
             session_id,
             object_kind,
@@ -80,12 +132,32 @@ impl IngestionEvent {
             timestamp: Utc::now(),
             metadata,
             error: None,
-        }
+        })
     }
 
     pub fn with_error(mut self, error: SanitizedErrorSummary) -> Self {
         self.error = Some(error);
         self
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn session_id(&self) -> Uuid {
+        self.session_id
+    }
+
+    pub fn metadata(&self) -> &serde_json::Value {
+        &self.metadata
+    }
+
+    pub fn object_kind(&self) -> ObjectKind {
+        self.object_kind
+    }
+
+    pub fn relationship(&self) -> RelationshipKind {
+        self.relationship
     }
 }
 
@@ -93,8 +165,11 @@ impl IngestionEvent {
 pub struct ObjectEventMapper;
 
 impl ObjectEventMapper {
-    pub fn connection_tested(session_id: Uuid, connection_id: Uuid) -> IngestionEvent {
-        IngestionEvent::new(
+    pub fn connection_tested(
+        session_id: Uuid,
+        connection_id: Uuid,
+    ) -> ConnectorResult<IngestionEvent> {
+        IngestionEvent::try_new(
             session_id,
             ObjectKind::SourceConnection,
             connection_id,
@@ -107,19 +182,23 @@ impl ObjectEventMapper {
         session_id: Uuid,
         connection_id: Uuid,
         error: SanitizedErrorSummary,
-    ) -> IngestionEvent {
-        IngestionEvent::new(
+    ) -> ConnectorResult<IngestionEvent> {
+        Ok(IngestionEvent::try_new(
             session_id,
             ObjectKind::SourceConnection,
             connection_id,
             RelationshipKind::Failed,
             serde_json::json!({}),
-        )
-        .with_error(error)
+        )?
+        .with_error(error))
     }
 
-    pub fn asset_discovered(session_id: Uuid, asset_id: Uuid, name: &str) -> IngestionEvent {
-        IngestionEvent::new(
+    pub fn asset_discovered(
+        session_id: Uuid,
+        asset_id: Uuid,
+        name: &str,
+    ) -> ConnectorResult<IngestionEvent> {
+        IngestionEvent::try_new(
             session_id,
             ObjectKind::SourceAsset,
             asset_id,
@@ -128,8 +207,12 @@ impl ObjectEventMapper {
         )
     }
 
-    pub fn asset_inspected(session_id: Uuid, asset_id: Uuid, format: &str) -> IngestionEvent {
-        IngestionEvent::new(
+    pub fn asset_inspected(
+        session_id: Uuid,
+        asset_id: Uuid,
+        format: &str,
+    ) -> ConnectorResult<IngestionEvent> {
+        IngestionEvent::try_new(
             session_id,
             ObjectKind::SourceAsset,
             asset_id,
@@ -138,8 +221,8 @@ impl ObjectEventMapper {
         )
     }
 
-    pub fn dataset_imported(session_id: Uuid, dataset_id: Uuid) -> IngestionEvent {
-        IngestionEvent::new(
+    pub fn dataset_imported(session_id: Uuid, dataset_id: Uuid) -> ConnectorResult<IngestionEvent> {
+        IngestionEvent::try_new(
             session_id,
             ObjectKind::Dataset,
             dataset_id,
@@ -148,8 +231,11 @@ impl ObjectEventMapper {
         )
     }
 
-    pub fn snapshot_materialized(session_id: Uuid, snapshot_id: Uuid) -> IngestionEvent {
-        IngestionEvent::new(
+    pub fn snapshot_materialized(
+        session_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> ConnectorResult<IngestionEvent> {
+        IngestionEvent::try_new(
             session_id,
             ObjectKind::Snapshot,
             snapshot_id,
@@ -158,8 +244,8 @@ impl ObjectEventMapper {
         )
     }
 
-    pub fn session_completed(session_id: Uuid) -> IngestionEvent {
-        IngestionEvent::new(
+    pub fn session_completed(session_id: Uuid) -> ConnectorResult<IngestionEvent> {
+        IngestionEvent::try_new(
             session_id,
             ObjectKind::Session,
             session_id,
@@ -183,11 +269,11 @@ mod tests {
         let snapshot_id = Uuid::new_v4();
 
         let events = [
-            ObjectEventMapper::connection_tested(session_id, connection_id),
-            ObjectEventMapper::asset_discovered(session_id, asset_id, "orders.csv"),
-            ObjectEventMapper::dataset_imported(session_id, dataset_id),
-            ObjectEventMapper::snapshot_materialized(session_id, snapshot_id),
-            ObjectEventMapper::session_completed(session_id),
+            ObjectEventMapper::connection_tested(session_id, connection_id).expect("event"),
+            ObjectEventMapper::asset_discovered(session_id, asset_id, "orders.csv").expect("event"),
+            ObjectEventMapper::dataset_imported(session_id, dataset_id).expect("event"),
+            ObjectEventMapper::snapshot_materialized(session_id, snapshot_id).expect("event"),
+            ObjectEventMapper::session_completed(session_id).expect("event"),
         ];
 
         assert_eq!(events[0].object_kind, ObjectKind::SourceConnection);
@@ -207,10 +293,25 @@ mod tests {
             Default::default(),
         )
         .sanitized_summary();
-        let event = ObjectEventMapper::connection_failed(session_id, connection_id, error);
+        let event =
+            ObjectEventMapper::connection_failed(session_id, connection_id, error).expect("event");
         let json = serde_json::to_string(&event).expect("serialize event");
         assert!(!json.contains("secret-value"));
         assert!(!json.contains("internal detail"));
         assert!(json.contains("authentication"));
+    }
+
+    #[test]
+    fn rejects_secret_metadata_on_deserialize() {
+        let json = serde_json::json!({
+            "id": Uuid::new_v4(),
+            "sessionId": Uuid::new_v4(),
+            "objectKind": "sourceConnection",
+            "objectId": Uuid::new_v4(),
+            "relationship": "failed",
+            "timestamp": Utc::now(),
+            "metadata": { "password": "secret" }
+        });
+        serde_json::from_value::<IngestionEvent>(json).expect_err("metadata must be validated");
     }
 }
