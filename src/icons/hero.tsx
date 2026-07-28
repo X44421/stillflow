@@ -29,6 +29,7 @@ export const HelpCircle = wrap(O.QuestionMarkCircleIcon);
 export const Layers = wrap(O.RectangleStackIcon);
 export const LayoutGrid = wrap(O.ViewColumnsIcon);
 export const Maximize2 = wrap(O.ArrowsPointingOutIcon);
+export const Minimize2 = wrap(O.ArrowsPointingInIcon);
 export const Minus = wrap(O.MinusIcon);
 export const MoreHorizontal = wrap(O.EllipsisHorizontalIcon);
 export const Play = wrap(S.PlayIcon);

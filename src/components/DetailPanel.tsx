@@ -9,7 +9,7 @@ import {
   Play,
   Clock,
 } from '../icons/hero';
-import { formatRows } from '../utils/duckdb';
+import { formatRows } from '../utils/format';
 import type { PipelineNode, NodeType, PipelineMetrics, WorkspaceEvent } from '../types';
 
 const TYPE_ICON: Record<NodeType, React.ReactNode> = {
@@ -21,11 +21,11 @@ const TYPE_ICON: Record<NodeType, React.ReactNode> = {
 };
 
 const TYPE_BG: Record<NodeType, string> = {
-  deduplicate: 'bg-violet-50 text-violet-600',
-  normalize: 'bg-orange-50 text-orange-600',
-  filter: 'bg-purple-50 text-purple-600',
-  source: 'bg-green-50 text-green-600',
-  export: 'bg-amber-50 text-amber-600',
+  deduplicate: 'bg-[#f1f3f4] text-[#18181b]',
+  normalize: 'bg-[#f1f3f4] text-[#18181b]',
+  filter: 'bg-[#f1f3f4] text-[#18181b]',
+  source: 'bg-[#f1f3f4] text-[#18181b]',
+  export: 'bg-[#f1f3f4] text-[#18181b]',
 };
 
 const TYPE_LABEL: Record<NodeType, string> = {
@@ -51,8 +51,8 @@ interface DetailPanelProps {
   onRun: (nodeId: string) => void | Promise<void>;
   onPreview?: () => void;
   onUpdate: (nodeId: string, patch: Partial<PipelineNode>) => void;
-  onDuplicate?: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
+  onDuplicate: (nodeId: string) => void;
 }
 
 const DetailPanel: React.FC<DetailPanelProps> = ({
@@ -60,12 +60,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   nodes,
   onClose,
   onRun,
+  onPreview,
   onUpdate,
   onDelete,
+  onDuplicate,
 }) => {
   // The currently-running status comes from `node` (App-owned).
   const running = node.status === 'running';
-  const [disabledLocal, setDisabledLocal] = useState(false);
+  const disabled = node.status === 'disabled';
   const [editing, setEditing] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -104,7 +106,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
   const handleRun = async () => {
     if (running) return;
-    if (disabledLocal) {
+    if (disabled) {
       showToast('Enable the node before running');
       return;
     }
@@ -113,9 +115,16 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   };
 
   const handleDisable = () => {
-    const next = !disabledLocal;
-    setDisabledLocal(next);
-    showToast(next ? 'Node disabled' : 'Node enabled');
+    if (node.type === 'source') {
+      showToast('Source node is required');
+      return;
+    }
+    onUpdate(node.id, {
+      status: disabled ? 'pending' : 'disabled',
+      metrics: undefined,
+      error: undefined,
+    });
+    showToast(disabled ? 'Node enabled' : 'Node disabled');
   };
 
   const handleEdit = () => {
@@ -133,6 +142,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       showToast('Node deleted');
       return;
     }
+    if (item.label === 'Duplicate node') {
+      onDuplicate(node.id);
+      showToast('Node duplicated');
+      return;
+    }
+    if (item.label === 'Copy node') {
+      void navigator.clipboard?.writeText(node.name);
+    }
     showToast(item.label);
   };
 
@@ -143,7 +160,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   const rowsOutDisplay = formatRows(metrics.rowsOut);
 
   return (
-    <div className="w-[356px] bg-white border-l border-gray-200 flex flex-col flex-shrink-0 overflow-hidden relative shadow-[-12px_0_32px_rgba(16,24,40,0.05)]">
+    <div className="w-[356px] bg-white border-l border-[#e3e6e8] flex flex-col flex-shrink-0 overflow-hidden relative shadow-[-12px_0_32px_rgba(32,33,36,0.05)]">
       <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d9dadd transparent' }}>
         {/* Header */}
         <div className="p-4 pb-3 border-b border-gray-100">
@@ -170,20 +187,28 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <span
               className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
                 node.status === 'completed'
-                  ? 'text-green-700 bg-green-50'
+                  ? 'text-[#18181b] bg-[#f1f3f4]'
                   : node.status === 'running'
-                  ? 'text-white bg-gray-900'
-                  : 'text-gray-600 bg-gray-100'
+                  ? 'text-white bg-[#18181b]'
+                  : 'text-[#5f6368] bg-[#f1f3f4]'
               }`}
             >
               {node.status === 'completed' ? (
-                <span className="w-1.5 h-1.5 bg-green-600 rounded-full" />
+                <span className="w-1.5 h-1.5 bg-[#18181b] rounded-full" />
               ) : node.status === 'running' ? (
                 <span className="w-1.5 h-1.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
               ) : (
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
+                <span className="w-1.5 h-1.5 bg-[#a1a1aa] rounded-full" />
               )}
-              {node.status === 'completed' ? 'Completed' : node.status === 'running' ? 'Running' : 'Pending'}
+              {node.status === 'completed'
+                ? 'Completed'
+                : node.status === 'running'
+                  ? 'Running'
+                  : node.status === 'disabled'
+                    ? 'Disabled'
+                    : node.status === 'failed'
+                      ? 'Failed'
+                      : 'Pending'}
             </span>
             <span className="text-[11px] text-gray-400 flex items-center gap-1">
               <Clock size={12} />
@@ -248,7 +273,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gray-900 rounded-full transition-[width] duration-150 ease-out"
+                  className="h-full bg-[#18181b] rounded-full transition-[width] duration-150 ease-out"
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
@@ -261,29 +286,29 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         <div className="p-4 border-b border-gray-100">
           <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Metrics</h4>
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-xl p-3">
+            <div className="bg-[#f5f7f8] rounded-lg p-3">
               <div className="text-[11px] text-gray-500 mb-1">Rows</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? rowsOutDisplay : '—'}</div>
               <div className="text-[11px] text-gray-400">output rows</div>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3 relative">
+            <div className="bg-[#f5f7f8] rounded-lg p-3 relative">
               <div className="text-[11px] text-gray-500 mb-1">Duplicates</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.duplicates}%` : '—'}</div>
               {hasRun && metrics.duplicates > 0 && (
-                <div className="text-[11px] text-green-600 font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
+                <div className="text-[11px] text-[#71717a] font-medium absolute right-3 bottom-3">↓ {(metrics.duplicates * 0.38).toFixed(1)}%</div>
               )}
             </div>
-            <div className="bg-gray-50 rounded-xl p-3">
+            <div className="bg-[#f5f7f8] rounded-lg p-3">
               <div className="text-[11px] text-gray-500 mb-1">Missing</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? `${metrics.missing}%` : '—'}</div>
               <div className="text-[11px] text-gray-400">across columns</div>
             </div>
-            <div className="bg-gray-50 rounded-xl p-3">
+            <div className="bg-[#f5f7f8] rounded-lg p-3">
               <div className="text-[11px] text-gray-500 mb-1">Quality Score</div>
               <div className="text-lg font-bold text-gray-900">{hasRun ? metrics.qualityScore : '—'}</div>
               {hasRun && (
-                <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                <div className="text-[11px] text-[#71717a] font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-[#18181b] rounded-full" />
                   {metrics.qualityScore >= 80 ? 'Good' : metrics.qualityScore >= 60 ? 'Fair' : 'Poor'}
                 </div>
               )}
@@ -296,15 +321,18 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <h4 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Actions</h4>
           <button
             onClick={handleRun}
-            disabled={running}
-            className="w-full bg-gray-900 text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-gray-800 transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
+            disabled={running || disabled}
+            className="w-full bg-[#18181b] text-white text-[13px] font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-[#3f3f46] transition-colors mb-2 disabled:opacity-55 disabled:cursor-wait"
           >
             <Play size={14} fill="white" />
             <span>{running ? 'Running…' : 'Run From Here'}</span>
           </button>
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => showToast('Result preview opened')}
+              onClick={() => {
+                onPreview?.();
+                showToast('Result preview opened');
+              }}
               className="flex items-center justify-center gap-1.5 text-[12px] font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 py-2 rounded-lg transition-colors"
             >
               <Eye size={13} />
@@ -313,14 +341,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <button
               onClick={handleDisable}
               className={`flex items-center justify-center gap-1.5 text-[12px] font-medium py-2 rounded-lg transition-colors ${
-                disabledLocal ? 'bg-gray-900 text-white hover:bg-gray-800' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+                disabled ? 'bg-gray-900 text-white hover:bg-gray-800' : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
               }`}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="6" y="4" width="12" height="16" rx="2" />
                 <path d="M10 8h4m-4 4h4m-4 4h4" />
               </svg>
-              <span>{disabledLocal ? 'Enable' : 'Disable'}</span>
+              <span>{disabled ? 'Enable' : 'Disable'}</span>
             </button>
           </div>
         </div>
