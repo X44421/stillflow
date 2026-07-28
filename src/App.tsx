@@ -4,7 +4,11 @@ import { DataExplorer } from './components/DataExplorer';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
 import AssetPanel, { type ValidationCheck } from './components/AssetPanel';
-import { DataTable } from './components/DataTable';
+import {
+  DataTable,
+  OBJECT_VIEWS,
+  type ObjectView,
+} from './components/DataTable';
 import { CSV_COLUMNS, FILE_META, buildRows } from './data/kaggleDatasets';
 import { isMissing, profileAll, toCSV, type Row } from './lib/csv';
 import { applyChain } from './lib/applyRules';
@@ -1384,16 +1388,15 @@ const App: React.FC = () => {
   }, [assetName, latestOutputId, outputVersion]);
 
   /**
-   * Derive the preview header from the current target. The meta line always
-   * names the processing stage, so the table can never be mistaken for a
-   * different stage of the data.
+   * Derive the preview header from the current target. The stage path and
+   * the active chip already name the stage, so the header only carries a
+   * compact version badge — stage facts live in the toolbar stats text.
    */
   const resolvedPreview = useMemo(() => {
-    const sample = `Sample ${tableRows.length.toLocaleString()} of ${displayRowCount.toLocaleString()} rows · ${CSV_COLUMNS.length} columns`;
     if (previewTarget.scope === 'asset') {
       return {
         title: datasetTitle,
-        meta: `${assetName} · ${assetPublished ? 'Published' : 'Draft'} v${outputVersion} · ${sample}`,
+        badge: `${assetPublished ? 'Published' : 'Draft'} v${outputVersion}`,
         showToggle: false,
         toggleMode: 'input' as const,
         outputAvailable: false,
@@ -1402,7 +1405,7 @@ const App: React.FC = () => {
     if (previewTarget.scope !== 'node') {
       return {
         title: datasetTitle,
-        meta: `Source · v${inputVersion} · ${sample}`,
+        badge: `v${inputVersion}`,
         showToggle: false,
         toggleMode: 'input' as const,
         outputAvailable: false,
@@ -1412,7 +1415,7 @@ const App: React.FC = () => {
     if (!node) {
       return {
         title: datasetTitle,
-        meta: `Source · v${inputVersion} · ${sample}`,
+        badge: `v${inputVersion}`,
         showToggle: false,
         toggleMode: 'input' as const,
         outputAvailable: false,
@@ -1421,7 +1424,7 @@ const App: React.FC = () => {
     const mode = previewTarget.mode;
     return {
       title: datasetTitle,
-      meta: `${node.name} ${mode === 'output' ? 'output' : 'input'} · ${sample}`,
+      badge: undefined,
       showToggle: true,
       toggleMode: mode,
       outputAvailable: Boolean(node.metrics),
@@ -1430,12 +1433,49 @@ const App: React.FC = () => {
     previewTarget,
     nodes,
     datasetTitle,
-    displayRowCount,
-    tableRows.length,
-    assetName,
     assetPublished,
     outputVersion,
   ]);
+
+  /** Object view (Data/Changes/…) — lifted so the tab strip can live in
+      the preview header row instead of a second strip. */
+  const [objectView, setObjectView] = useState<ObjectView>('data');
+  const visibleObjectViews = useMemo(
+    () =>
+      OBJECT_VIEWS.filter(
+        ([view]) =>
+          (view !== 'changes' && view !== 'rejected') ||
+          previewTarget.scope === 'node'
+      ),
+    [previewTarget.scope]
+  );
+  const previewTabs = (
+    <>
+      {visibleObjectViews.map(([view, label]) => (
+        <button
+          key={view}
+          onClick={() => setObjectView(view)}
+          className={`h-[22px] rounded-[4px] px-2 text-[11px] font-medium transition-colors ${
+            objectView === view
+              ? 'bg-[#171a1f] text-white'
+              : 'text-[#5e6874] hover:bg-[#edf2f6]'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </>
+  );
+
+  /* Leaving node scope while on a node-only view falls back to Data. */
+  useEffect(() => {
+    if (
+      previewTarget.scope !== 'node' &&
+      (objectView === 'changes' || objectView === 'rejected')
+    ) {
+      setObjectView('data');
+    }
+  }, [previewTarget.scope, objectView]);
 
   /** Stage path: Source → each transform → the output asset. */
   const previewStages = useMemo<PreviewStage[]>(() => {
@@ -1679,8 +1719,9 @@ const App: React.FC = () => {
 
           <PreviewPanel
             title={resolvedPreview.title}
-            meta={resolvedPreview.meta}
+            badge={resolvedPreview.badge}
             stages={previewStages}
+            tabs={previewTabs}
             showToggle={resolvedPreview.showToggle}
             toggleMode={resolvedPreview.toggleMode}
             onToggleMode={handlePreviewToggleMode}
@@ -1700,6 +1741,9 @@ const App: React.FC = () => {
                   ? (nodes.find((n) => n.id === previewTarget.nodeId)?.name ?? null)
                   : null
               }
+              objectView={objectView}
+              onObjectViewChange={setObjectView}
+              statsText={`Sample ${tableRows.length.toLocaleString()} of ${displayRowCount.toLocaleString()} rows · ${CSV_COLUMNS.length} columns`}
             />
           </PreviewPanel>
         </div>

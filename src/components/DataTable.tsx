@@ -16,13 +16,14 @@ import { ColumnDetailCard, MiniChart, TypeIcon, ValidityBar, typeLabel } from ".
 
 /* Object views decide WHAT the user looks at; display settings only decide
    how the Data view renders. The two concepts stay separate on purpose. */
-type ObjectView = "data" | "changes" | "rejected" | "profile" | "schema" | "quality";
+export type ObjectView = "data" | "changes" | "rejected" | "profile" | "schema" | "quality";
 type Density = "compact" | "detailed";
 type Sort = { col: string; dir: "asc" | "desc" } | null;
 
 const WIDE = new Set(["title", "subtitle", "ref", "tags", "licenseName", "creatorName"]);
 
-const OBJECT_VIEWS: [ObjectView, string][] = [
+/** All object views; Changes / Rejected are contextual (node scope only). */
+export const OBJECT_VIEWS: [ObjectView, string][] = [
   ["data", "Data"],
   ["changes", "Changes"],
   ["rejected", "Rejected"],
@@ -50,6 +51,9 @@ export function DataTable({
   changes,
   rejected,
   nodeName,
+  objectView,
+  onObjectViewChange,
+  statsText,
 }: {
   columns: string[];
   rows: Row[];
@@ -63,8 +67,12 @@ export function DataTable({
   rejected?: RejectedRow[] | null;
   /** Name of the node the Changes / Rejected views describe. */
   nodeName?: string | null;
+  /** Controlled object view — the tab strip lives in the preview header. */
+  objectView: ObjectView;
+  onObjectViewChange: (view: ObjectView) => void;
+  /** Stage facts shown at the right of the toolbar (sample size, columns). */
+  statsText?: string;
 }) {
-  const [objectView, setObjectView] = useState<ObjectView>("data");
   const [density, setDensity] = useState<Density>("compact");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>(null);
@@ -120,28 +128,11 @@ export function DataTable({
 
   const focusInData = (column: string) => {
     onFocusColumn?.(column);
-    setObjectView("data");
+    onObjectViewChange("data");
   };
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
-      {/* ------------------------- object views -------------------------- */}
-      <div className="flex flex-shrink-0 items-center gap-3 border-b border-[#edf2f6] px-3">
-        {OBJECT_VIEWS.map(([view, label]) => (
-          <button
-            key={view}
-            onClick={() => setObjectView(view)}
-            className={`-mb-px border-b-2 px-0.5 pt-2 pb-1.5 text-[12px] font-medium transition-colors ${
-              objectView === view
-                ? "border-[#171a1f] text-[#171a1f]"
-                : "border-transparent text-[#9099a4] hover:text-[#5e6874]"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
       {/* ---------------------------- toolbar ---------------------------- */}
       <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 border-b border-[#edf2f6] px-3 py-1.5">
         {objectView === "data" && (
@@ -245,6 +236,12 @@ export function DataTable({
         )}
 
         <div className="ml-auto" />
+
+        {statsText && (
+          <span className="hidden shrink-0 text-[11px] text-[#9099a4] lg:inline">
+            {statsText}
+          </span>
+        )}
 
         <button
           onClick={onDownload}

@@ -12,11 +12,16 @@ export interface PreviewStage {
  * The data preview is a fixed workspace region, not a floating window:
  * no minimize / close controls — its height is negotiated with the canvas
  * through the draggable divider owned by the App shell.
+ *
+ * The header is a single 44px strip: identity (title + version badge),
+ * stage path, and the object-view tabs share one row. Stage facts live
+ * in the data toolbar below instead of a second text line.
  */
 export function PreviewPanel({
   title,
-  meta,
+  badge,
   stages,
+  tabs,
   children,
   showToggle,
   toggleMode,
@@ -25,8 +30,11 @@ export function PreviewPanel({
   emptyHint,
 }: {
   title: string;
-  meta?: string;
+  /** Small version chip next to the title (e.g. "v1", "Draft v2"). */
+  badge?: string;
   stages?: PreviewStage[];
+  /** Object-view tab strip, rendered between the stage path and the toggle. */
+  tabs?: React.ReactNode;
   children: React.ReactNode;
   showToggle?: boolean;
   toggleMode?: 'input' | 'output';
@@ -36,11 +44,16 @@ export function PreviewPanel({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[#dce2e8] bg-white">
-      {/* Header — dataset name, processing stage path, and stage facts */}
+      {/* Header — one strip: title + badge · stage path · view tabs · toggle */}
       <div className="flex h-11 flex-shrink-0 items-center gap-2.5 border-b border-[#edf2f6] px-3">
-        <span className="max-w-[240px] truncate text-[13px] font-semibold leading-[18px] text-[#171a1f]">
+        <span className="max-w-[220px] truncate text-[13px] font-semibold leading-[18px] text-[#171a1f]">
           {title}
         </span>
+        {badge && (
+          <span className="shrink-0 rounded bg-[#f4f6f8] px-1.5 py-0.5 text-[10.5px] font-medium text-[#5e6874]">
+            {badge}
+          </span>
+        )}
 
         {stages && stages.length > 0 && (
           <div className="flex shrink-0 items-center gap-0.5 border-l border-[#edf2f6] pl-2.5">
@@ -68,10 +81,8 @@ export function PreviewPanel({
 
         <div className="min-w-0 flex-1" />
 
-        {meta && (
-          <span className="hidden truncate text-[11px] leading-[18px] text-[#5e6874] md:inline">
-            {meta}
-          </span>
+        {tabs && (
+          <div className="flex shrink-0 items-center gap-0.5">{tabs}</div>
         )}
 
         {showToggle && (
