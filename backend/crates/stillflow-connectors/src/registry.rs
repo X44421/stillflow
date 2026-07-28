@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use stillflow_core::{
-    attach_request_context, BatchStream, Checkpoint, ConnectionStatus, ConnectorError,
-    ConnectorKind, ConnectorResult, DiscoverRequest, PreviewData, PreviewRequest, ReadRequest,
-    SourceAsset, SourceConnection,
+    attach_request_context, BatchStream, Checkpoint, CheckpointRequest, ConnectionStatus,
+    ConnectorError, ConnectorKind, ConnectorResult, DiscoverRequest, InspectRequest, PreviewData,
+    PreviewRequest, ReadRequest, SourceAsset, SourceConnection, TestConnectionRequest,
 };
 
+use crate::capabilities::Capability;
 use crate::connector::SourceConnectorRef;
 
 /// Registry mapping connector kinds to shared adapter implementations.
@@ -33,11 +34,11 @@ impl ConnectorRegistry {
         Ok(())
     }
 
-    pub fn get(&self, kind: ConnectorKind) -> Option<SourceConnectorRef> {
+    pub(crate) fn get(&self, kind: ConnectorKind) -> Option<SourceConnectorRef> {
         self.connectors.get(&kind).cloned()
     }
 
-    pub fn require(&self, kind: ConnectorKind) -> ConnectorResult<SourceConnectorRef> {
+    pub(crate) fn require(&self, kind: ConnectorKind) -> ConnectorResult<SourceConnectorRef> {
         self.get(kind).ok_or_else(|| {
             ConnectorError::invalid_configuration(format!("unknown connector kind `{kind:?}`"))
         })
@@ -46,10 +47,12 @@ impl ConnectorRegistry {
     pub async fn test_connection(
         &self,
         connection: &SourceConnection,
+        request: TestConnectionRequest,
     ) -> ConnectorResult<ConnectionStatus> {
         connection.validate()?;
+        request.validate()?;
         let connector = self.require(connection.kind())?;
-        connector.test_connection(connection).await
+        connector.test_connection(connection, request).await
     }
 
     pub async fn discover(
@@ -60,17 +63,25 @@ impl ConnectorRegistry {
         connection.validate()?;
         request.validate()?;
         let connector = self.require(connection.kind())?;
+        connector
+            .capabilities()
+            .ensure(Capability::SchemaDiscovery)?;
         connector.discover(connection, request).await
     }
 
     pub async fn inspect(
         &self,
         connection: &SourceConnection,
-        asset: &SourceAsset,
+        request: InspectRequest,
     ) -> ConnectorResult<stillflow_core::AssetMetadata> {
         connection.validate()?;
+        request.validate()?;
+        validate_asset_belongs_to_connection(connection, &request.asset)?;
         let connector = self.require(connection.kind())?;
-        connector.inspect(connection, asset).await
+        connector
+            .capabilities()
+            .ensure(Capability::SchemaDiscovery)?;
+        connector.inspect(connection, request).await
     }
 
     pub async fn preview(
@@ -80,7 +91,19 @@ impl ConnectorRegistry {
     ) -> ConnectorResult<PreviewData> {
         connection.validate()?;
         request.validate()?;
+        validate_asset_belongs_to_connection(connection, &request.asset)?;
         let connector = self.require(connection.kind())?;
+        connector.capabilities().ensure(Capability::Preview)?;
+        if request.filter.is_some() {
+            connector
+                .capabilities()
+                .ensure(Capability::PredicatePushdown)?;
+        }
+        if request.projection.is_some() {
+            connector
+                .capabilities()
+                .ensure(Capability::ColumnProjection)?;
+        }
         connector.preview(connection, request).await
     }
 
@@ -91,8 +114,25 @@ impl ConnectorRegistry {
     ) -> ConnectorResult<BatchStream> {
         connection.validate()?;
         request.validate()?;
+        validate_asset_belongs_to_connection(connection, &request.asset)?;
         let context = request.context.clone();
         let connector = self.require(connection.kind())?;
+        connector.capabilities().ensure(Capability::Streaming)?;
+        if request.filter.is_some() {
+            connector
+                .capabilities()
+                .ensure(Capability::PredicatePushdown)?;
+        }
+        if request.projection.is_some() {
+            connector
+                .capabilities()
+                .ensure(Capability::ColumnProjection)?;
+        }
+        if request.checkpoint.is_some() {
+            connector
+                .capabilities()
+                .ensure(Capability::IncrementalRead)?;
+        }
         let raw = connector.read_batches(connection, request).await?;
         Ok(attach_request_context(raw.into_inner(), context))
     }
@@ -100,12 +140,29 @@ impl ConnectorRegistry {
     pub async fn checkpoint(
         &self,
         connection: &SourceConnection,
-        asset: &SourceAsset,
+        request: CheckpointRequest,
     ) -> ConnectorResult<Option<Checkpoint>> {
         connection.validate()?;
+        request.validate()?;
+        validate_asset_belongs_to_connection(connection, &request.asset)?;
         let connector = self.require(connection.kind())?;
-        connector.checkpoint(connection, asset).await
+        connector
+            .capabilities()
+            .ensure(Capability::IncrementalRead)?;
+        connector.checkpoint(connection, request).await
     }
+}
+
+fn validate_asset_belongs_to_connection(
+    connection: &SourceConnection,
+    asset: &SourceAsset,
+) -> ConnectorResult<()> {
+    if asset.connection_id != connection.id() {
+        return Err(ConnectorError::invalid_configuration(
+            "asset does not belong to the provided connection",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -116,7 +173,7 @@ mod tests {
     use futures::{stream, StreamExt};
     use stillflow_core::{
         AssetLocator, AssetMetadata, ConnectionStatus, CredentialRef, DiscoverRequest,
-        PreviewRequest, ReadRequest, SourceAsset,
+        InspectRequest, PreviewRequest, ReadRequest, SourceAsset, TestConnectionRequest,
     };
 
     use super::*;
@@ -136,6 +193,10 @@ mod tests {
             ConnectorCapabilities {
                 preview: true,
                 streaming: true,
+                schema_discovery: true,
+                incremental_read: true,
+                predicate_pushdown: true,
+                column_projection: true,
                 ..ConnectorCapabilities::default()
             }
         }
@@ -143,7 +204,9 @@ mod tests {
         async fn test_connection(
             &self,
             _connection: &SourceConnection,
+            request: TestConnectionRequest,
         ) -> ConnectorResult<ConnectionStatus> {
+            request.context.ensure_active()?;
             Ok(ConnectionStatus::Ok)
         }
 
@@ -159,8 +222,9 @@ mod tests {
         async fn inspect(
             &self,
             _connection: &SourceConnection,
-            _asset: &SourceAsset,
+            request: InspectRequest,
         ) -> ConnectorResult<AssetMetadata> {
+            request.context.ensure_active()?;
             Ok(AssetMetadata::new(
                 Arc::new(arrow_schema::Schema::empty()),
                 "stub",
@@ -192,8 +256,9 @@ mod tests {
         async fn checkpoint(
             &self,
             _connection: &SourceConnection,
-            _asset: &SourceAsset,
+            request: CheckpointRequest,
         ) -> ConnectorResult<Option<stillflow_core::Checkpoint>> {
+            request.context.ensure_active()?;
             Ok(None)
         }
     }
@@ -203,7 +268,7 @@ mod tests {
             ConnectorKind::LocalFile,
             name,
             serde_json::json!({ "root": format!("/data/{name}") }),
-            CredentialRef::new(format!("cred://local/{name}")),
+            CredentialRef::new(format!("cred://local/{name}")).expect("credential ref"),
         )
         .expect("connection")
     }
@@ -231,7 +296,14 @@ mod tests {
         let resolved = registry.require(connection.kind()).expect("resolve");
         assert_eq!(resolved.kind(), ConnectorKind::LocalFile);
         assert!(matches!(
-            registry.test_connection(&connection).await,
+            registry
+                .test_connection(
+                    &connection,
+                    TestConnectionRequest {
+                        context: stillflow_core::RequestContext::default(),
+                    }
+                )
+                .await,
             Ok(ConnectionStatus::Ok)
         ));
     }
@@ -245,8 +317,14 @@ mod tests {
         let first = sample_connection("warehouse-a");
         let second = sample_connection("warehouse-b");
         assert_ne!(first.id(), second.id());
-        assert!(registry.test_connection(&first).await.is_ok());
-        assert!(registry.test_connection(&second).await.is_ok());
+        let request = TestConnectionRequest {
+            context: stillflow_core::RequestContext::default(),
+        };
+        assert!(registry
+            .test_connection(&first, request.clone())
+            .await
+            .is_ok());
+        assert!(registry.test_connection(&second, request).await.is_ok());
     }
 
     #[tokio::test]
@@ -306,5 +384,126 @@ mod tests {
             .await
             .expect_err("cancelled preview");
         assert_eq!(error.category(), stillflow_core::ErrorCategory::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn rejects_mismatched_asset_connection() {
+        let mut registry = ConnectorRegistry::new();
+        registry
+            .register(Arc::new(StubConnector) as SourceConnectorRef)
+            .expect("register");
+        let connection = sample_connection("uploads");
+        let other_connection = sample_connection("warehouse");
+        let asset = sample_asset(other_connection.id(), "orders.csv");
+        let request = PreviewRequest {
+            context: stillflow_core::RequestContext::default(),
+            asset,
+            projection: None,
+            filter: None,
+            row_limit: 100,
+            byte_limit: 1024,
+            sampling: stillflow_core::SamplingStrategy::Head,
+        };
+        let error = registry
+            .preview(&connection, request)
+            .await
+            .expect_err("mismatched asset");
+        assert_eq!(
+            error.category(),
+            stillflow_core::ErrorCategory::InvalidConfiguration
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_preview_capability() {
+        struct LimitedConnector;
+
+        #[async_trait]
+        impl SourceConnector for LimitedConnector {
+            fn kind(&self) -> ConnectorKind {
+                ConnectorKind::LocalFile
+            }
+
+            fn capabilities(&self) -> ConnectorCapabilities {
+                ConnectorCapabilities::default()
+            }
+
+            async fn test_connection(
+                &self,
+                _connection: &SourceConnection,
+                _request: TestConnectionRequest,
+            ) -> ConnectorResult<ConnectionStatus> {
+                Ok(ConnectionStatus::Ok)
+            }
+
+            async fn discover(
+                &self,
+                _connection: &SourceConnection,
+                _request: DiscoverRequest,
+            ) -> ConnectorResult<Vec<SourceAsset>> {
+                Ok(Vec::new())
+            }
+
+            async fn inspect(
+                &self,
+                _connection: &SourceConnection,
+                _request: InspectRequest,
+            ) -> ConnectorResult<AssetMetadata> {
+                Ok(AssetMetadata::new(
+                    Arc::new(arrow_schema::Schema::empty()),
+                    "stub",
+                ))
+            }
+
+            async fn preview(
+                &self,
+                _connection: &SourceConnection,
+                _request: PreviewRequest,
+            ) -> ConnectorResult<stillflow_core::PreviewData> {
+                Ok(stillflow_core::PreviewData::empty(Arc::new(
+                    arrow_schema::Schema::empty(),
+                )))
+            }
+
+            async fn read_batches(
+                &self,
+                _connection: &SourceConnection,
+                _request: ReadRequest,
+            ) -> ConnectorResult<RawBatchStream> {
+                Ok(RawBatchStream::new(Box::pin(stream::empty())))
+            }
+
+            async fn checkpoint(
+                &self,
+                _connection: &SourceConnection,
+                _request: CheckpointRequest,
+            ) -> ConnectorResult<Option<stillflow_core::Checkpoint>> {
+                Ok(None)
+            }
+        }
+
+        let mut registry = ConnectorRegistry::new();
+        registry
+            .register(Arc::new(LimitedConnector) as SourceConnectorRef)
+            .expect("register");
+        let connection = sample_connection("uploads");
+        let asset = sample_asset(connection.id(), "orders.csv");
+        let request = PreviewRequest {
+            context: stillflow_core::RequestContext::default(),
+            asset,
+            projection: None,
+            filter: None,
+            row_limit: 100,
+            byte_limit: 1024,
+            sampling: stillflow_core::SamplingStrategy::Head,
+        };
+        let error = registry
+            .preview(&connection, request)
+            .await
+            .expect_err("unsupported preview");
+        assert_eq!(
+            error.category(),
+            stillflow_core::ErrorCategory::UnsupportedCapability
+        );
     }
 }

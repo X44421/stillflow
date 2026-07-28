@@ -140,6 +140,18 @@ impl IngestionEvent {
         self
     }
 
+    pub fn try_with_error(
+        mut self,
+        category: crate::ErrorCategory,
+        retryable: bool,
+        message: impl Into<String>,
+    ) -> ConnectorResult<Self> {
+        self.error = Some(SanitizedErrorSummary::try_new(
+            category, retryable, message,
+        )?);
+        Ok(self)
+    }
+
     pub fn id(&self) -> Uuid {
         self.id
     }
@@ -158,6 +170,10 @@ impl IngestionEvent {
 
     pub fn relationship(&self) -> RelationshipKind {
         self.relationship
+    }
+
+    pub fn error(&self) -> Option<&SanitizedErrorSummary> {
+        self.error.as_ref()
     }
 }
 
@@ -299,6 +315,28 @@ mod tests {
         assert!(!json.contains("secret-value"));
         assert!(!json.contains("internal detail"));
         assert!(json.contains("authentication"));
+    }
+
+    #[test]
+    fn sanitizes_secret_error_on_deserialize() {
+        let json = serde_json::json!({
+            "id": Uuid::new_v4(),
+            "sessionId": Uuid::new_v4(),
+            "objectKind": "sourceConnection",
+            "objectId": Uuid::new_v4(),
+            "relationship": "failed",
+            "timestamp": Utc::now(),
+            "metadata": {},
+            "error": {
+                "category": "authentication",
+                "retryable": false,
+                "message": "password=secret-value"
+            }
+        });
+        let event: IngestionEvent = serde_json::from_value(json).expect("deserialize");
+        let error = event.error().expect("error");
+        assert!(!error.message().contains("secret-value"));
+        assert!(error.message().contains("password=***"));
     }
 
     #[test]

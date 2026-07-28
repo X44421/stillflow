@@ -37,6 +37,44 @@ impl DiscoverRequest {
     }
 }
 
+/// Request parameters for connection testing.
+#[derive(Debug, Clone)]
+pub struct TestConnectionRequest {
+    pub context: crate::RequestContext,
+}
+
+impl TestConnectionRequest {
+    pub fn validate(&self) -> crate::ConnectorResult<()> {
+        self.context.ensure_active()
+    }
+}
+
+/// Request parameters for asset inspection.
+#[derive(Debug, Clone)]
+pub struct InspectRequest {
+    pub context: crate::RequestContext,
+    pub asset: SourceAsset,
+}
+
+impl InspectRequest {
+    pub fn validate(&self) -> crate::ConnectorResult<()> {
+        self.context.ensure_active()
+    }
+}
+
+/// Request parameters for checkpoint reads.
+#[derive(Debug, Clone)]
+pub struct CheckpointRequest {
+    pub context: crate::RequestContext,
+    pub asset: SourceAsset,
+}
+
+impl CheckpointRequest {
+    pub fn validate(&self) -> crate::ConnectorResult<()> {
+        self.context.ensure_active()
+    }
+}
+
 /// Dialect used to interpret a [`SourceFilter`] expression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

@@ -6,8 +6,8 @@ use stillflow_core::BatchStream;
 pub struct RawBatchStream(BatchStream);
 
 impl RawBatchStream {
-    #[allow(dead_code)] // used by connector implementations and unit tests
-    pub(crate) fn new(inner: BatchStream) -> Self {
+    /// Constructs a raw batch stream for connector adapter implementations.
+    pub fn new(inner: BatchStream) -> Self {
         Self(inner)
     }
 

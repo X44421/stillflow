@@ -20,6 +20,7 @@ struct CancellableBatchStream {
     context: crate::RequestContext,
     terminated: bool,
     deadline_sleep: Option<Pin<Box<Sleep>>>,
+    cancellation_wait: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
 }
 
 impl CancellableBatchStream {
@@ -29,6 +30,7 @@ impl CancellableBatchStream {
             context,
             terminated: false,
             deadline_sleep: None,
+            cancellation_wait: None,
         }
     }
 
@@ -50,9 +52,19 @@ impl Stream for CancellableBatchStream {
             return self.terminal_error(error);
         }
 
-        let cancel = self.context.cancellation().clone();
-        let mut cancelled = std::pin::pin!(cancel.cancelled());
-        if cancelled.as_mut().poll(cx).is_ready() {
+        if self.cancellation_wait.is_none() {
+            let cancel = self.context.cancellation().clone();
+            self.cancellation_wait = Some(Box::pin(async move {
+                cancel.cancelled().await;
+            }));
+        }
+        if let Poll::Ready(()) = self
+            .cancellation_wait
+            .as_mut()
+            .expect("cancellation wait")
+            .as_mut()
+            .poll(cx)
+        {
             return self.terminal_error(ConnectorError::cancelled());
         }
 

@@ -22,7 +22,7 @@ mod serde_roundtrip_tests {
             ConnectorKind::SqlDatabase,
             "warehouse",
             serde_json::json!({ "host": "db.example.com", "database": "analytics" }),
-            CredentialRef::new("cred://vault/warehouse"),
+            CredentialRef::new("cred://vault/warehouse").expect("credential ref"),
         )
         .expect("connection");
         let restored = roundtrip(&connection);

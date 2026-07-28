@@ -22,12 +22,61 @@ pub enum ErrorCategory {
 }
 
 /// Sanitized error summary safe for events and API responses.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SanitizedErrorSummary {
     pub category: ErrorCategory,
     pub retryable: bool,
-    pub message: String,
+    message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SanitizedErrorSummaryData {
+    category: ErrorCategory,
+    retryable: bool,
+    message: String,
+}
+
+impl SanitizedErrorSummary {
+    pub fn try_new(
+        category: ErrorCategory,
+        retryable: bool,
+        message: impl Into<String>,
+    ) -> ConnectorResult<Self> {
+        Ok(Self {
+            category,
+            retryable,
+            message: sanitize_message(message.into()),
+        })
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl Serialize for SanitizedErrorSummary {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        SanitizedErrorSummaryData {
+            category: self.category,
+            retryable: self.retryable,
+            message: self.message.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SanitizedErrorSummary {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let data = SanitizedErrorSummaryData::deserialize(deserializer)?;
+        Self::try_new(data.category, data.retryable, data.message).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Typed connector failure with retryability and sanitized context.
@@ -70,11 +119,8 @@ impl ConnectorError {
     }
 
     pub fn sanitized_summary(&self) -> SanitizedErrorSummary {
-        SanitizedErrorSummary {
-            category: self.category,
-            retryable: self.retryable,
-            message: self.user_message.clone(),
-        }
+        SanitizedErrorSummary::try_new(self.category, self.retryable, self.user_message.clone())
+            .expect("sanitized summary must be safe")
     }
 
     pub fn for_unsupported_capability(capability: impl Into<String>) -> Self {
@@ -214,7 +260,7 @@ pub fn sanitize_message(message: String) -> String {
     sanitized
 }
 
-fn ensure_safe_string_value(value: &str) -> ConnectorResult<()> {
+pub(crate) fn ensure_safe_string_value(value: &str) -> ConnectorResult<()> {
     let lower = value.to_ascii_lowercase();
     for marker in ["password=", "token=", "api_key=", "secret=", "bearer "] {
         if lower.contains(marker) {
@@ -249,6 +295,18 @@ mod tests {
     fn rejects_secret_values_in_strings() {
         let config = serde_json::json!({ "note": "password=hunter2" });
         ensure_no_secret_fields(&config).expect_err("secret values must be rejected");
+    }
+
+    #[test]
+    fn sanitizes_error_summary_message_on_deserialize() {
+        let json = serde_json::json!({
+            "category": "authentication",
+            "retryable": false,
+            "message": "failed: password=secret-value"
+        });
+        let summary: SanitizedErrorSummary = serde_json::from_value(json).expect("deserialize");
+        assert!(!summary.message().contains("secret-value"));
+        assert!(summary.message().contains("password=***"));
     }
 
     #[test]

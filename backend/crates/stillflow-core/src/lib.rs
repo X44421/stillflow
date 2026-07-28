@@ -15,10 +15,11 @@ pub mod stream;
 mod serde_tests;
 
 pub use domain::{
-    AssetKind, AssetLocator, AssetMetadata, Checkpoint, ConnectionStatus, CredentialRef, Dataset,
-    DatasetSnapshot, DiscoverRequest, FilterDialect, InspectionFinding, PreviewData,
-    PreviewRequest, ReadRequest, SamplingStrategy, SchemaFieldSnapshot, Session, SourceAsset,
-    SourceConnection, SourceFilter,
+    AssetKind, AssetLocator, AssetMetadata, Checkpoint, CheckpointRequest, ConnectionStatus,
+    CredentialRef, Dataset, DatasetSnapshot, DiscoverRequest, FilterDialect, InspectRequest,
+    InspectionFinding, PreviewData, PreviewRequest, ReadRequest, SamplingStrategy,
+    SchemaFieldSnapshot, Session, SourceAsset, SourceConnection, SourceFilter,
+    TestConnectionRequest,
 };
 pub use error::{
     ensure_no_secret_fields, ensure_safe_event_metadata, ConnectorError, ConnectorResult,

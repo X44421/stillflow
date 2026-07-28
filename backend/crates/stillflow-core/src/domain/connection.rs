@@ -2,18 +2,52 @@ use chrono::{DateTime, Utc};
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
-use crate::error::{ensure_no_secret_fields, ConnectorResult};
+use crate::error::{ensure_no_secret_fields, ensure_safe_string_value, ConnectorResult};
 use crate::events::ConnectorKind;
 
 /// Reference to credentials stored outside the domain model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct CredentialRef(pub String);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialRef(String);
 
 impl CredentialRef {
-    pub fn new(reference: impl Into<String>) -> Self {
-        Self(reference.into())
+    pub fn new(reference: impl Into<String>) -> ConnectorResult<Self> {
+        let reference = reference.into();
+        validate_credential_reference(&reference)?;
+        Ok(Self(reference))
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Serialize for CredentialRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CredentialRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let reference = String::deserialize(deserializer)?;
+        validate_credential_reference(&reference).map_err(DeError::custom)?;
+        Ok(Self(reference))
+    }
+}
+
+fn validate_credential_reference(reference: &str) -> ConnectorResult<()> {
+    if !reference.starts_with("cred://") {
+        return Err(crate::ConnectorError::invalid_configuration(
+            "credential reference must start with cred://",
+        ));
+    }
+    ensure_safe_string_value(reference)
 }
 
 /// A configured data source endpoint.
@@ -155,7 +189,7 @@ mod tests {
             ConnectorKind::SqlDatabase,
             "warehouse",
             config,
-            CredentialRef::new("cred://vault/warehouse"),
+            CredentialRef::new("cred://vault/warehouse").expect("credential ref"),
         )
         .expect_err("secret keys must be rejected");
         assert_eq!(error.category(), crate::ErrorCategory::InvalidConfiguration);
@@ -177,13 +211,25 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_credential_reference() {
+        let error = CredentialRef::new("password=secret").expect_err("invalid credential ref");
+        assert_eq!(error.category(), crate::ErrorCategory::InvalidConfiguration);
+    }
+
+    #[test]
+    fn rejects_raw_secret_credential_reference_on_deserialize() {
+        let json = serde_json::json!("password=hunter2");
+        serde_json::from_value::<CredentialRef>(json)
+            .expect_err("credential ref must be validated");
+    }
+
+    #[test]
     fn rejects_struct_literal_bypass() {
-        // SourceConnection fields are private; only validated constructors/deserialize are available.
         let connection = SourceConnection::try_new(
             ConnectorKind::LocalFile,
             "uploads",
             serde_json::json!({ "root": "/data/uploads" }),
-            CredentialRef::new("cred://local/default"),
+            CredentialRef::new("cred://local/default").expect("credential ref"),
         )
         .expect("valid connection");
         let json = serde_json::to_string(&connection).expect("serialize");

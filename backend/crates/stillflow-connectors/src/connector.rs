@@ -3,8 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use stillflow_core::{
-    AssetMetadata, Checkpoint, ConnectionStatus, ConnectorKind, ConnectorResult, DiscoverRequest,
-    PreviewData, PreviewRequest, ReadRequest, SourceAsset, SourceConnection,
+    AssetMetadata, Checkpoint, CheckpointRequest, ConnectionStatus, ConnectorKind, ConnectorResult,
+    DiscoverRequest, InspectRequest, PreviewData, PreviewRequest, ReadRequest, SourceConnection,
+    TestConnectionRequest,
 };
 
 use crate::capabilities::ConnectorCapabilities;
@@ -29,6 +30,7 @@ pub trait SourceConnector: Send + Sync {
     async fn test_connection(
         &self,
         connection: &SourceConnection,
+        request: TestConnectionRequest,
     ) -> ConnectorResult<ConnectionStatus>;
 
     /// Discovers assets available through the configured source.
@@ -36,13 +38,13 @@ pub trait SourceConnector: Send + Sync {
         &self,
         connection: &SourceConnection,
         request: DiscoverRequest,
-    ) -> ConnectorResult<Vec<SourceAsset>>;
+    ) -> ConnectorResult<Vec<stillflow_core::SourceAsset>>;
 
     /// Returns schema, format and inspection findings for one asset.
     async fn inspect(
         &self,
         connection: &SourceConnection,
-        asset: &SourceAsset,
+        request: InspectRequest,
     ) -> ConnectorResult<AssetMetadata>;
 
     /// Returns a bounded Arrow preview for one asset.
@@ -63,6 +65,6 @@ pub trait SourceConnector: Send + Sync {
     async fn checkpoint(
         &self,
         connection: &SourceConnection,
-        asset: &SourceAsset,
+        request: CheckpointRequest,
     ) -> ConnectorResult<Option<Checkpoint>>;
 }
