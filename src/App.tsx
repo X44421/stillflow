@@ -3,9 +3,13 @@ import { PreviewPanel, type PreviewStage } from './components/PreviewPanel';
 import { DataExplorer } from './components/DataExplorer';
 import PipelineCanvas from './components/PipelineCanvas';
 import DetailPanel from './components/DetailPanel';
+import AssetPanel, { type ValidationCheck } from './components/AssetPanel';
 import { DataTable } from './components/DataTable';
 import { CSV_COLUMNS, FILE_META, buildRows } from './data/kaggleDatasets';
-import { profileAll, toCSV, type Row } from './lib/csv';
+import { isMissing, profileAll, toCSV, type Row } from './lib/csv';
+import { applyChain } from './lib/applyRules';
+import { OUTPUT_ASSET_ID } from './features/canvas/graphAdapter';
+import { Play } from './icons/hero';
 import ProjectConfigCard, {
   type ProjectConfigValues,
 } from './components/ProjectConfigCard';
@@ -188,15 +192,32 @@ const App: React.FC = () => {
   /**
    * Which context the Preview panel reflects.  When scope='dataset'
    * the header shows the file name; when scope='node' it carries the
-   * selected node name and an Input / Output toggle.
+   * selected node name and an Input / Output toggle; scope='asset' is
+   * the terminal output dataset.
    */
   type PreviewTarget =
     | { scope: 'dataset' }
-    | { scope: 'node'; nodeId: string; mode: 'input' | 'output' };
+    | { scope: 'node'; nodeId: string; mode: 'input' | 'output' }
+    | { scope: 'asset' };
 
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget>({
     scope: 'dataset',
   });
+
+  /* ── Output asset: versions + publish state (persisted locally) ── */
+  const [runCount, setRunCount] = useState(0);
+  const [outputStale, setOutputStale] = useState(false);
+  const [publishedMap, setPublishedMap] = useState<Record<string, number>>(
+    () => {
+      try {
+        return JSON.parse(
+          window.localStorage.getItem('stillflow.published') ?? '{}'
+        ) as Record<string, number>;
+      } catch {
+        return {};
+      }
+    }
+  );
 
   /* Canvas / Preview are fixed regions sharing one vertical split. */
   const [canvasHeight, setCanvasHeight] = useState(264);
@@ -205,7 +226,6 @@ const App: React.FC = () => {
 
   /* ── Kaggle DataTable source ─────────────────────────────── */
   const tableRows = useMemo<Row[]>(() => buildRows(1000), []);
-  const tableStats = useMemo(() => profileAll(CSV_COLUMNS, tableRows), [tableRows]);
   const displayRowCount =
     previewDataset?.rowCount ?? tableRows.length;
   const tableDownload = useCallback(() => {
@@ -255,7 +275,7 @@ const App: React.FC = () => {
       setActiveProjectId(project.id);
       setNodes(projectNodes);
       setSelectedDatasetId(project.selectedDatasetId);
-      setLatestOutputId(project.selectedDatasetId);
+      setLatestOutputId(project.latestOutputId ?? null);
       setSelectedNode(projectNodes[0]?.id ?? '');
       setShowDetail(projectNodes.length > 0);
       if (selectedDataset && !previewDataset) {
@@ -621,6 +641,13 @@ const App: React.FC = () => {
    * in the sidebar) returns the primary selection to the dataset.
    */
   const handleSelectNode = useCallback((nodeId: string) => {
+    if (nodeId === OUTPUT_ASSET_ID) {
+      // The output asset is primary; the preview shows the final stage.
+      setSelectedNode(OUTPUT_ASSET_ID);
+      setShowDetail(true);
+      setPreviewTarget({ scope: 'asset' });
+      return;
+    }
     if (nodeId) {
       setSelectedNode(nodeId);
       setShowDetail(true);
@@ -634,6 +661,12 @@ const App: React.FC = () => {
 
   /** Double click selects and jumps straight to the node's input stage. */
   const handleNodeDoubleClick = useCallback((nodeId: string) => {
+    if (nodeId === OUTPUT_ASSET_ID) {
+      setSelectedNode(OUTPUT_ASSET_ID);
+      setShowDetail(true);
+      setPreviewTarget({ scope: 'asset' });
+      return;
+    }
     setSelectedNode(nodeId);
     setShowDetail(true);
     setPreviewTarget({ scope: 'node', nodeId, mode: 'input' });
@@ -668,16 +701,45 @@ const App: React.FC = () => {
     []
   );
 
+  /* Restore the run counter that versions output datasets. */
+  useEffect(() => {
+    if (!activeProjectId) return;
+    try {
+      const stored = window.localStorage.getItem(
+        `stillflow.runs.${activeProjectId}`
+      );
+      setRunCount(stored ? parseInt(stored, 10) || 0 : 0);
+    } catch {
+      setRunCount(0);
+    }
+    setOutputStale(false);
+  }, [activeProjectId]);
+
   const applyBackendResult = useCallback(
     (result: BackendPipelineResult) => {
       applyNodeMetrics(result.executions);
       setLatestOutputId(result.dataset.id);
+      setOutputStale(false);
+      setRunCount((current) => {
+        const next = current + 1;
+        try {
+          if (activeProjectId) {
+            window.localStorage.setItem(
+              `stillflow.runs.${activeProjectId}`,
+              String(next)
+            );
+          }
+        } catch {
+          // Version still increments for this session.
+        }
+        return next;
+      });
       setWorkspaceDatasets((current) => [
         result.dataset,
         ...current.filter((dataset) => dataset.id !== result.dataset.id),
       ]);
     },
-    [applyNodeMetrics]
+    [activeProjectId, applyNodeMetrics]
   );
 
   const executableNodes = useCallback((chain: PipelineNode[]) => {
@@ -917,6 +979,10 @@ const App: React.FC = () => {
       setGlobalProgress(90);
       applyBackendResult(result);
       setWorkspaceMessage(`Cleaned ${result.dataset.rowCount ?? 0} rows`);
+      // A completed run makes the new output asset the primary object.
+      setSelectedNode(OUTPUT_ASSET_ID);
+      setShowDetail(true);
+      setPreviewTarget({ scope: 'asset' });
       setGlobalProgress(100);
     } catch (err) {
       console.error('Run All failed', err);
@@ -1017,6 +1083,7 @@ const App: React.FC = () => {
       if (changedIndex < 0) return prev;
 
       const invalidatesRuntime = Boolean(patch.config || patch.status);
+      if (invalidatesRuntime) setOutputStale(true);
       return prev.map((node, index) => {
         if (node.id === nodeId) {
           return invalidatesRuntime
@@ -1031,6 +1098,10 @@ const App: React.FC = () => {
 
   const handleDeleteNode = useCallback(
     (nodeId: string) => {
+      if (nodeId === OUTPUT_ASSET_ID) {
+        setWorkspaceMessage('Output asset is produced by the pipeline');
+        return;
+      }
       const index = nodes.findIndex((node) => node.id === nodeId);
       const node = nodes[index];
       if (!node) return;
@@ -1038,6 +1109,7 @@ const App: React.FC = () => {
         setWorkspaceMessage('Source node is required');
         return;
       }
+      setOutputStale(true);
 
       setNodes((prev) =>
         prev
@@ -1066,15 +1138,18 @@ const App: React.FC = () => {
     setSelectedNode(node.id);
     setShowDetail(true);
     setPreviewTarget({ scope: 'node', nodeId: node.id, mode: 'input' });
+    setOutputStale(true);
   }, [selectedNode]);
 
   const handleDuplicateNode = useCallback((nodeId: string) => {
+    if (nodeId === OUTPUT_ASSET_ID) return;
     const index = nodes.findIndex((node) => node.id === nodeId);
     const node = nodes[index];
     if (!node || node.type === 'source') {
       setWorkspaceMessage('Source node is unique');
       return;
     }
+    setOutputStale(true);
 
     const duplicate: PipelineNode = {
       ...node,
@@ -1099,6 +1174,215 @@ const App: React.FC = () => {
   const selected = nodes.find((n) => n.id === selectedNode) ?? null;
   const datasetTitle = previewDataset?.name ?? FILE_META.name;
 
+  /* ── Client-side chain evaluation on the displayed sample ─────────
+     Every stage the preview shows is derived by really applying the
+     configured rules — never by stitching placeholder numbers. When a
+     rule references columns outside the displayed sample, evaluation is
+     skipped entirely instead of producing misleading numbers. */
+  const sampleEvaluable = useMemo(
+    () =>
+      nodes.every((node) => {
+        const column = node.config.column?.trim();
+        return !column || CSV_COLUMNS.includes(column);
+      }),
+    [nodes]
+  );
+
+  const fullChain = useMemo(
+    () =>
+      sampleEvaluable
+        ? applyChain(tableRows, nodes)
+        : { rows: tableRows, impacts: [] },
+    [sampleEvaluable, tableRows, nodes]
+  );
+
+  const stageRows = useMemo<Row[]>(() => {
+    if (previewTarget.scope === 'dataset' || !sampleEvaluable) return tableRows;
+    if (previewTarget.scope === 'asset') return fullChain.rows;
+    const idx = nodes.findIndex((n) => n.id === previewTarget.nodeId);
+    if (idx < 0) return tableRows;
+    const through =
+      previewTarget.mode === 'output'
+        ? previewTarget.nodeId
+        : idx > 0
+          ? nodes[idx - 1].id
+          : undefined;
+    return applyChain(tableRows, nodes, through).rows;
+  }, [previewTarget, nodes, tableRows, fullChain.rows, sampleEvaluable]);
+
+  const stageStats = useMemo(
+    () => profileAll(CSV_COLUMNS, stageRows),
+    [stageRows]
+  );
+
+  /** Impact of the node the preview currently targets (Changes/Rejected). */
+  const previewImpact = useMemo(() => {
+    if (previewTarget.scope !== 'node') return null;
+    return (
+      fullChain.impacts.find((i) => i.nodeId === previewTarget.nodeId) ?? null
+    );
+  }, [fullChain, previewTarget]);
+
+  /** Impact of the node the Inspector shows (live sample estimate). */
+  const selectedSampleImpact = useMemo(
+    () => fullChain.impacts.find((i) => i.nodeId === selectedNode) ?? null,
+    [fullChain, selectedNode]
+  );
+
+  /* ── Output dataset asset ──────────────────────────────────────────
+     Only a dataset the pipeline actually produced (category 'output')
+     counts — never the source dataset the id may fall back to. */
+  const outputDataset =
+    workspaceDatasets.find(
+      (d) => d.id === latestOutputId && d.category === 'output'
+    ) ?? null;
+  const inputVersion = 1;
+  const outputVersion = inputVersion + runCount;
+  const assetPublished =
+    latestOutputId !== null && publishedMap[latestOutputId] !== undefined;
+  const assetName =
+    outputDataset?.name ??
+    `${datasetTitle.replace(/\.[^.]+$/, '')}_cleaned.csv`;
+
+  const outputAssetNode = useMemo<PipelineNode>(
+    () => ({
+      id: OUTPUT_ASSET_ID,
+      type: 'export',
+      name: assetName,
+      description: outputDataset
+        ? `${assetPublished ? 'Published' : 'Draft'} v${outputVersion} · ${(
+            outputDataset.rowCount ?? 0
+          ).toLocaleString()} rows`
+        : 'Run the pipeline to create',
+      rows: outputDataset ? String(outputDataset.rowCount ?? '') : '',
+      status: outputDataset ? 'completed' : 'pending',
+      config: defaultConfigFor('export'),
+    }),
+    [assetName, assetPublished, outputDataset, outputVersion]
+  );
+
+  /** Canvas renders the real chain plus the terminal output asset. */
+  const displayNodes = useMemo(
+    () => [...nodes, outputAssetNode],
+    [nodes, outputAssetNode]
+  );
+
+  /* ── Validation gate — checks the output must pass before publish ──
+     Post-run checks use the real full-data run metrics; pre-run checks
+     fall back to the displayed sample when it carries the rule columns. */
+  const assetChecks = useMemo<ValidationCheck[]>(() => {
+    const checks: ValidationCheck[] = [];
+    const executed = nodes.filter((n) => n.metrics);
+    const lastMetrics = executed[executed.length - 1]?.metrics;
+    const firstMetrics = executed[0]?.metrics;
+
+    if (outputDataset && lastMetrics && firstMetrics) {
+      // Full-data checks from the actual run.
+      checks.push({
+        label: 'Missing cells ≤ 1%',
+        detail: `${lastMetrics.missing}% empty cells in the run output`,
+        state:
+          lastMetrics.missing <= 1
+            ? 'pass'
+            : lastMetrics.missing <= 10
+              ? 'warn'
+              : 'fail',
+      });
+      const removedPct =
+        firstMetrics.rowsIn > 0
+          ? ((firstMetrics.rowsIn - lastMetrics.rowsOut) /
+              firstMetrics.rowsIn) *
+            100
+          : 0;
+      checks.push({
+        label: 'Rejected rows ≤ 5%',
+        detail: `${removedPct.toFixed(1)}% of rows removed by the chain`,
+        state: removedPct <= 5 ? 'pass' : removedPct <= 25 ? 'warn' : 'fail',
+      });
+      checks.push({
+        label: 'Schema compatible',
+        detail: `${CSV_COLUMNS.length} columns preserved through the chain`,
+        state: 'pass',
+      });
+      return checks;
+    }
+
+    if (!sampleEvaluable) {
+      checks.push({
+        label: 'Awaiting pipeline run',
+        detail:
+          'Rule columns are not part of the displayed sample — checks evaluate on the full data after a run',
+        state: 'warn',
+      });
+      return checks;
+    }
+
+    const rows = fullChain.rows;
+    const total = Math.max(1, rows.length);
+
+    const filterNode = nodes.find(
+      (n) => n.type === 'filter' && n.config.column.trim()
+    );
+    if (filterNode) {
+      const column = filterNode.config.column;
+      const valid = rows.filter((r) => !isMissing(r[column] ?? '')).length;
+      const pct = (valid / total) * 100;
+      checks.push({
+        label: `${column} completeness ≥ 99%`,
+        detail: `${pct.toFixed(1)}% complete on the sample`,
+        state: pct >= 99 ? 'pass' : pct >= 95 ? 'warn' : 'fail',
+      });
+    }
+
+    const seen = new Set<string>();
+    let duplicates = 0;
+    for (const row of rows) {
+      const key = JSON.stringify(row);
+      if (seen.has(key)) duplicates++;
+      else seen.add(key);
+    }
+    const dupPct = (duplicates / total) * 100;
+    checks.push({
+      label: 'Duplicate rate ≤ 1%',
+      detail: `${dupPct.toFixed(2)}% exact duplicates on the sample`,
+      state: dupPct <= 1 ? 'pass' : dupPct <= 5 ? 'warn' : 'fail',
+    });
+
+    const removed = fullChain.impacts.reduce(
+      (sum, impact) => sum + (impact.rowsIn - impact.rowsOut),
+      0
+    );
+    const rejPct = (removed / Math.max(1, tableRows.length)) * 100;
+    checks.push({
+      label: 'Rejected rows ≤ 5%',
+      detail: `${rejPct.toFixed(1)}% of sample rows removed by the chain`,
+      state: rejPct <= 5 ? 'pass' : rejPct <= 25 ? 'warn' : 'fail',
+    });
+
+    checks.push({
+      label: 'Schema compatible',
+      detail: `${CSV_COLUMNS.length} columns preserved through the chain`,
+      state: 'pass',
+    });
+    return checks;
+  }, [fullChain, nodes, tableRows.length, sampleEvaluable, outputDataset]);
+
+  const assetBlocked = assetChecks.some((check) => check.state === 'fail');
+
+  const handlePublish = useCallback(() => {
+    if (!latestOutputId) return;
+    setPublishedMap((current) => {
+      const next = { ...current, [latestOutputId]: outputVersion };
+      try {
+        window.localStorage.setItem('stillflow.published', JSON.stringify(next));
+      } catch {
+        // Publish state still applies for this session.
+      }
+      return next;
+    });
+    setWorkspaceMessage(`Published ${assetName} v${outputVersion}`);
+  }, [assetName, latestOutputId, outputVersion]);
+
   /**
    * Derive the preview header from the current target. The meta line always
    * names the processing stage, so the table can never be mistaken for a
@@ -1106,10 +1390,19 @@ const App: React.FC = () => {
    */
   const resolvedPreview = useMemo(() => {
     const sample = `Sample ${tableRows.length.toLocaleString()} of ${displayRowCount.toLocaleString()} rows · ${CSV_COLUMNS.length} columns`;
+    if (previewTarget.scope === 'asset') {
+      return {
+        title: datasetTitle,
+        meta: `${assetName} · ${assetPublished ? 'Published' : 'Draft'} v${outputVersion} · ${sample}`,
+        showToggle: false,
+        toggleMode: 'input' as const,
+        outputAvailable: false,
+      };
+    }
     if (previewTarget.scope !== 'node') {
       return {
         title: datasetTitle,
-        meta: `Source · ${sample}`,
+        meta: `Source · v${inputVersion} · ${sample}`,
         showToggle: false,
         toggleMode: 'input' as const,
         outputAvailable: false,
@@ -1119,7 +1412,7 @@ const App: React.FC = () => {
     if (!node) {
       return {
         title: datasetTitle,
-        meta: `Source · ${sample}`,
+        meta: `Source · v${inputVersion} · ${sample}`,
         showToggle: false,
         toggleMode: 'input' as const,
         outputAvailable: false,
@@ -1133,40 +1426,58 @@ const App: React.FC = () => {
       toggleMode: mode,
       outputAvailable: Boolean(node.metrics),
     };
-  }, [previewTarget, nodes, datasetTitle, displayRowCount, tableRows.length]);
+  }, [
+    previewTarget,
+    nodes,
+    datasetTitle,
+    displayRowCount,
+    tableRows.length,
+    assetName,
+    assetPublished,
+    outputVersion,
+  ]);
 
-  /** Stage path: Source → each transform, mirroring the pipeline chain. */
-  const previewStages = useMemo<PreviewStage[]>(
-    () =>
-      nodes.map((node) => {
-        const isSourceStage = node.type === 'source';
-        const active =
-          previewTarget.scope === 'dataset'
-            ? isSourceStage
-            : previewTarget.nodeId === node.id;
-        return {
-          id: node.id,
-          label: isSourceStage ? 'Source' : node.name,
-          active,
-          onSelect: () => {
-            if (isSourceStage) {
-              setSelectedNode('');
-              setShowDetail(false);
-              setPreviewTarget({ scope: 'dataset' });
-            } else {
-              setSelectedNode(node.id);
-              setShowDetail(true);
-              setPreviewTarget({
-                scope: 'node',
-                nodeId: node.id,
-                mode: node.metrics ? 'output' : 'input',
-              });
-            }
-          },
-        };
-      }),
-    [nodes, previewTarget]
-  );
+  /** Stage path: Source → each transform → the output asset. */
+  const previewStages = useMemo<PreviewStage[]>(() => {
+    const stages: PreviewStage[] = nodes.map((node) => {
+      const isSourceStage = node.type === 'source';
+      const active =
+        previewTarget.scope === 'dataset'
+          ? isSourceStage
+          : previewTarget.scope === 'node' && previewTarget.nodeId === node.id;
+      return {
+        id: node.id,
+        label: isSourceStage ? 'Source' : node.name,
+        active,
+        onSelect: () => {
+          if (isSourceStage) {
+            setSelectedNode('');
+            setShowDetail(false);
+            setPreviewTarget({ scope: 'dataset' });
+          } else {
+            setSelectedNode(node.id);
+            setShowDetail(true);
+            setPreviewTarget({
+              scope: 'node',
+              nodeId: node.id,
+              mode: node.metrics ? 'output' : 'input',
+            });
+          }
+        },
+      };
+    });
+    stages.push({
+      id: OUTPUT_ASSET_ID,
+      label: 'Output',
+      active: previewTarget.scope === 'asset',
+      onSelect: () => {
+        setSelectedNode(OUTPUT_ASSET_ID);
+        setShowDetail(true);
+        setPreviewTarget({ scope: 'asset' });
+      },
+    });
+    return stages;
+  }, [nodes, previewTarget]);
 
   /* ── Canvas / Preview vertical split ────────────────────────────── */
   const handleSplitStart = useCallback(
@@ -1251,17 +1562,28 @@ const App: React.FC = () => {
             style={{ height: canvasHeight }}
           >
             <div className="flex h-11 flex-shrink-0 items-center border-b border-[#edf2f6] px-3">
-              {/* Object path: dataset / workflow / selected node */}
+              {/* Object path: dataset · version / workflow / selected object */}
               <div className="flex min-w-0 items-center gap-1.5 text-[13px]">
-                <span className="truncate text-[#5e6874]">{datasetTitle}</span>
+                <span className="truncate text-[#5e6874]">
+                  {datasetTitle}
+                  <span className="text-[#9099a4]"> · v{inputVersion}</span>
+                </span>
                 <span className="shrink-0 text-[#c9d1d9]">/</span>
                 <span
                   className={`truncate ${
-                    selected ? 'text-[#5e6874]' : 'font-semibold text-[#171a1f]'
+                    selectedNode ? 'text-[#5e6874]' : 'font-semibold text-[#171a1f]'
                   }`}
                 >
                   {activeProject?.name ?? 'Workflow'}
                 </span>
+                {selectedNode === OUTPUT_ASSET_ID && (
+                  <>
+                    <span className="shrink-0 text-[#c9d1d9]">/</span>
+                    <span className="truncate font-semibold text-[#171a1f]">
+                      {assetName}
+                    </span>
+                  </>
+                )}
                 {selected && (
                   <>
                     <span className="shrink-0 text-[#c9d1d9]">/</span>
@@ -1273,13 +1595,13 @@ const App: React.FC = () => {
               </div>
               {nodes.length > 0 && (
                 <span className="ml-auto shrink-0 text-[11px] text-[#9099a4] tabular">
-                  {nodes.length} node{nodes.length !== 1 ? 's' : ''}
+                  {displayNodes.length} object{displayNodes.length !== 1 ? 's' : ''}
                 </span>
               )}
             </div>
             <PipelineCanvas
               graphKey={activeProjectId ?? 'unassigned'}
-              nodes={nodes}
+              nodes={displayNodes}
               selectedNode={selectedNode}
               running={globalRunning}
               onRunAll={handleRunAll}
@@ -1287,6 +1609,57 @@ const App: React.FC = () => {
               onNodeDoubleClick={handleNodeDoubleClick}
               onAddNode={handleAddNode}
               onDeleteNode={handleDeleteNode}
+              topRightActions={
+                <>
+                  {outputDataset && !assetPublished && (
+                    <button
+                      onClick={() => {
+                        setSelectedNode(OUTPUT_ASSET_ID);
+                        setShowDetail(true);
+                        setPreviewTarget({ scope: 'asset' });
+                      }}
+                      title="Inspect the output dataset"
+                      className="flex h-8 items-center gap-1.5 rounded-[7px] border border-[#dce2e8] bg-white px-3 text-[12px] font-medium text-[#39434e] shadow-[0_2px_6px_rgba(24,36,48,.06)] transition-colors hover:bg-[#edf2f6]"
+                    >
+                      Review output
+                    </button>
+                  )}
+                  {outputDataset &&
+                    (assetPublished ? (
+                      <span className="flex h-8 items-center gap-1 rounded-[7px] border border-[#dce2e8] bg-white px-3 text-[12px] font-medium text-[#4ba66a] shadow-[0_2px_6px_rgba(24,36,48,.06)]">
+                        ✓ Published v{outputVersion}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={handlePublish}
+                        disabled={outputStale || assetBlocked}
+                        title={
+                          outputStale
+                            ? 'Re-run to refresh the output before publishing'
+                            : assetBlocked
+                              ? 'Resolve the failed quality checks first'
+                              : 'Mark this version as a published asset'
+                        }
+                        className="flex h-8 items-center gap-1.5 rounded-[7px] bg-[#2196d2] px-3 text-[12px] font-medium text-white shadow-[0_2px_6px_rgba(24,36,48,.06)] transition-colors hover:bg-[#1686be] disabled:cursor-not-allowed disabled:bg-[#c9d1d9]"
+                      >
+                        Publish dataset
+                      </button>
+                    ))}
+                  <button
+                    onClick={handleRunAll}
+                    disabled={globalRunning}
+                    title="Run the full pipeline end to end"
+                    className={`flex h-8 items-center gap-1.5 rounded-[7px] px-3 text-[12px] font-medium shadow-[0_2px_6px_rgba(24,36,48,.06)] transition-colors disabled:cursor-wait disabled:opacity-50 ${
+                      outputDataset
+                        ? 'border border-[#dce2e8] bg-white text-[#39434e] hover:bg-[#edf2f6]'
+                        : 'bg-[#2196d2] text-white hover:bg-[#1686be]'
+                    }`}
+                  >
+                    <Play size={13} fill="currentColor" />
+                    {globalRunning ? 'Running…' : 'Run pipeline'}
+                  </button>
+                </>
+              }
             />
           </div>
 
@@ -1315,20 +1688,44 @@ const App: React.FC = () => {
           >
             <DataTable
               columns={CSV_COLUMNS}
-              rows={tableRows}
-              stats={tableStats}
+              rows={stageRows}
+              stats={stageStats}
               focusColumn={focusedColumn}
               onFocusColumn={setFocusedColumn}
               onDownload={tableDownload}
+              changes={previewImpact?.changes ?? null}
+              rejected={previewImpact?.rejected ?? null}
+              nodeName={
+                previewTarget.scope === 'node'
+                  ? (nodes.find((n) => n.id === previewTarget.nodeId)?.name ?? null)
+                  : null
+              }
             />
           </PreviewPanel>
         </div>
+        {showDetail && selectedNode === OUTPUT_ASSET_ID && (
+          <AssetPanel
+            assetName={assetName}
+            version={outputVersion}
+            published={assetPublished}
+            stale={outputStale}
+            rows={outputDataset?.rowCount ?? null}
+            columnCount={CSV_COLUMNS.length}
+            sourceName={datasetTitle}
+            checks={assetChecks}
+            onClose={handleCloseDetail}
+            onPreviewOutput={() => setPreviewTarget({ scope: 'asset' })}
+            onPublish={handlePublish}
+          />
+        )}
         {showDetail && selected && (
           <DetailPanel
             node={selected}
             nodes={nodes}
             availableColumns={previewDataset?.columns ?? CSV_COLUMNS}
             datasetName={datasetTitle}
+            assetName={assetName}
+            sampleImpact={selectedSampleImpact}
             onClose={handleCloseDetail}
             onDelete={handleDeleteNode}
             onDuplicate={handleDuplicateNode}

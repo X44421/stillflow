@@ -1,12 +1,14 @@
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 import type { PipelineNode } from '../../types';
 
-export const NODE_WIDTH = 260;
-export const NODE_HEIGHT = 78;
-export const NODE_WITH_ROWS_HEIGHT = 96;
-export const NODE_GAP = 40;
-export const DEFAULT_X = 420;
-export const DEFAULT_Y = 120;
+export const NODE_WIDTH = 176;
+export const NODE_HEIGHT = 58;
+export const NODE_GAP = 72;
+export const DEFAULT_X = 64;
+export const DEFAULT_Y = 56;
+
+/** Display-only terminal node representing the pipeline's output dataset. */
+export const OUTPUT_ASSET_ID = 'output-asset';
 
 export type PipelineFlowNodeData = {
   pipelineNode: PipelineNode;
@@ -17,19 +19,26 @@ export type PipelineFlowNode = Node<
   'pipelineNode'
 >;
 
+export type PipelineEdgeTone = 'active' | 'dim';
+
 export type PipelineFlowEdge = Edge<
-  Record<string, never>,
+  { tone?: PipelineEdgeTone },
   'pipelineEdge'
 >;
 
 export function getNodeHeight(node: PipelineNode): number {
-  return node.rows ? NODE_WITH_ROWS_HEIGHT : NODE_HEIGHT;
+  // Nodes that produced metrics show an extra impact line.
+  return NODE_HEIGHT + (node.metrics ? 14 : 0);
 }
 
+/**
+ * Pipelines read left → right, anchored to the top-left work area instead of
+ * the geometric center, so a growing chain expands naturally to the right.
+ */
 export function defaultNodePosition(index: number): XYPosition {
   return {
-    x: DEFAULT_X,
-    y: DEFAULT_Y + index * (NODE_WITH_ROWS_HEIGHT + NODE_GAP),
+    x: DEFAULT_X + index * (NODE_WIDTH + NODE_GAP),
+    y: DEFAULT_Y,
   };
 }
 

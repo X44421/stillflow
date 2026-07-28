@@ -19,10 +19,10 @@ export async function layoutPipelineGraph(
     id: 'pipeline',
     layoutOptions: {
       'elk.algorithm': 'layered',
-      'elk.direction': 'DOWN',
+      'elk.direction': 'RIGHT',
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.nodeNode': '40',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '40',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '72',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
       'elk.padding': '[top=40,left=40,bottom=40,right=40]',
     },

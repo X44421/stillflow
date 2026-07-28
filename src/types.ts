@@ -23,6 +23,12 @@ export interface PipelineNodeConfig {
   strategy: string;
   scope: string;
   nullHandling: string;
+  /** filter: whether matched rows are kept or removed */
+  mode?: string;
+  /** filter: comparison operator for the rule condition */
+  operator?: string;
+  /** filter: comparison value (unused by emptiness operators) */
+  value?: string;
 }
 
 export interface PipelineMetrics {

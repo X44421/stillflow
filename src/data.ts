@@ -1,4 +1,4 @@
-import type { PipelineNodeConfig, TransformObject } from './types';
+import type { NodeType, PipelineNodeConfig, TransformObject } from './types';
 
 export const defaultConfig: PipelineNodeConfig = {
   column: '',
@@ -6,6 +6,33 @@ export const defaultConfig: PipelineNodeConfig = {
   scope: 'Current dataset',
   nullHandling: 'Ignore',
 };
+
+/**
+ * Rule defaults that match each node type's semantics — a Filter must never
+ * inherit Deduplicate options like "Keep first" (and vice versa).
+ */
+export function defaultConfigFor(type: NodeType): PipelineNodeConfig {
+  if (type === 'filter') {
+    return {
+      column: '',
+      strategy: '',
+      scope: 'Current dataset',
+      nullHandling: 'Treat as non-match',
+      mode: 'Keep matching rows',
+      operator: 'is not empty',
+      value: '',
+    };
+  }
+  if (type === 'normalize') {
+    return {
+      column: '',
+      strategy: '',
+      scope: 'Current dataset',
+      nullHandling: 'Ignore',
+    };
+  }
+  return { ...defaultConfig };
+}
 
 export const transformObjects: TransformObject[] = [
   {

@@ -1,122 +1,122 @@
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Minus, X } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 
-const MIN_HEIGHT = 160;
-const MAX_HEIGHT_RATIO = 0.75;
-const DEFAULT_HEIGHT = 420;
-const MINIMIZED_HEIGHT = 54;
+export interface PreviewStage {
+  id: string;
+  label: string;
+  active: boolean;
+  onSelect: () => void;
+}
 
+/**
+ * The data preview is a fixed workspace region, not a floating window:
+ * no minimize / close controls — its height is negotiated with the canvas
+ * through the draggable divider owned by the App shell.
+ */
 export function PreviewPanel({
   title,
-  subtitle,
+  meta,
+  stages,
   children,
-  isOpen,
-  onClose,
+  showToggle,
+  toggleMode,
+  onToggleMode,
+  outputAvailable,
   emptyHint,
 }: {
   title: string;
-  subtitle?: string;
+  meta?: string;
+  stages?: PreviewStage[];
   children: React.ReactNode;
-  isOpen: boolean;
-  onClose: () => void;
+  showToggle?: boolean;
+  toggleMode?: 'input' | 'output';
+  onToggleMode?: (mode: 'input' | 'output') => void;
+  outputAvailable?: boolean;
   emptyHint?: string;
 }) {
-  const [expanded, setExpanded] = useState(true);
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
-
-  useEffect(() => {
-    if (isOpen) setExpanded(true);
-  }, [isOpen]);
-
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = { startY: e.clientY, startH: height };
-    setIsDragging(true);
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-  }, [height]);
-
-  useEffect(() => {
-    const handleMove = (e: MouseEvent) => {
-      if (!dragRef.current) return;
-      const delta = dragRef.current.startY - e.clientY;
-      const maxH = window.innerHeight * MAX_HEIGHT_RATIO;
-      const newH = Math.max(MIN_HEIGHT, Math.min(maxH, dragRef.current.startH + delta));
-      setHeight(newH);
-      if (!expanded) setExpanded(true);
-    };
-    const handleUp = () => {
-      dragRef.current = null;
-      setIsDragging(false);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMove);
-      document.addEventListener('mouseup', handleUp);
-    }
-    return () => {
-      document.removeEventListener('mousemove', handleMove);
-      document.removeEventListener('mouseup', handleUp);
-    };
-  }, [isDragging, expanded]);
-
-  if (!isOpen) return null;
-
-  const displayHeight = expanded ? height : MINIMIZED_HEIGHT;
-
   return (
-    <div
-      className="flex flex-col flex-shrink-0 overflow-hidden rounded-b-xl border border-t-0 border-[#e3e6e8] bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.04)] transition-[height] duration-200 ease-out"
-      style={{ height: displayHeight }}
-    >
-      {/* Drag handle */}
-      <div
-        onMouseDown={handleResizeStart}
-        className="group flex h-2.5 flex-shrink-0 cursor-row-resize items-center justify-center"
-      >
-        <div className="h-1 w-8 rounded-full bg-[#d4d4d8] transition-colors group-hover:bg-[#71717a]" />
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[#dce2e8] bg-white">
+      {/* Header — dataset name, processing stage path, and stage facts */}
+      <div className="flex h-11 flex-shrink-0 items-center gap-2.5 border-b border-[#edf2f6] px-3">
+        <span className="max-w-[240px] truncate text-[13px] font-semibold leading-[18px] text-[#171a1f]">
+          {title}
+        </span>
 
-      {/* Header */}
-      <div className="flex h-11 flex-shrink-0 items-center border-b border-[#e3e6e8] px-3">
-        <div className="min-w-0 flex-1">
-          <span className="truncate text-[13px] font-semibold text-[#202124]">{title}</span>
-          {subtitle && <span className="ml-2 text-[12px] text-[#5f6368]">({subtitle})</span>}
-        </div>
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            title={expanded ? 'Minimize preview' : 'Expand preview'}
-            aria-label={expanded ? 'Minimize preview' : 'Expand preview'}
-            onClick={() => setExpanded((e) => !e)}
-            className="grid h-8 w-8 place-items-center rounded-full text-[#5f6368] hover:bg-[#f1f3f4]"
-          >
-            {expanded ? <Minus className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            type="button"
-            title="Close preview"
-            aria-label="Close preview"
-            onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-full text-[#5f6368] hover:bg-[#f1f3f4]"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        {stages && stages.length > 0 && (
+          <div className="flex shrink-0 items-center gap-0.5 border-l border-[#edf2f6] pl-2.5">
+            {stages.map((stage, index) => (
+              <span key={stage.id} className="flex items-center gap-0.5">
+                {index > 0 && (
+                  <ChevronRight className="h-3 w-3 shrink-0 text-[#c9d1d9]" />
+                )}
+                <button
+                  type="button"
+                  onClick={stage.onSelect}
+                  title={`Preview ${stage.label}`}
+                  className={`h-[22px] rounded-[4px] px-1.5 text-[11px] font-medium transition-colors ${
+                    stage.active
+                      ? 'bg-[#e8f4fa] text-[#1686be]'
+                      : 'text-[#5e6874] hover:bg-[#edf2f6]'
+                  }`}
+                >
+                  {stage.label}
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="min-w-0 flex-1" />
+
+        {meta && (
+          <span className="hidden truncate text-[11px] leading-[18px] text-[#5e6874] md:inline">
+            {meta}
+          </span>
+        )}
+
+        {showToggle && (
+          <div className="flex shrink-0 items-center rounded-[4px] border border-[#dce2e8] p-px">
+            <button
+              type="button"
+              onClick={() => onToggleMode?.('input')}
+              className={`h-[22px] rounded-[3px] px-2 text-[10.5px] font-medium transition-colors ${
+                toggleMode === 'input'
+                  ? 'bg-[#e8f4fa] text-[#1686be]'
+                  : 'text-[#9099a4] hover:bg-[#edf2f6]'
+              }`}
+            >
+              Input
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (outputAvailable) onToggleMode?.('output');
+              }}
+              className={`h-[22px] rounded-[3px] px-2 text-[10.5px] font-medium transition-colors ${
+                toggleMode === 'output'
+                  ? 'bg-[#e8f4fa] text-[#1686be]'
+                  : outputAvailable
+                    ? 'text-[#9099a4] hover:bg-[#edf2f6]'
+                    : 'cursor-default text-[#c9d1d9]'
+              }`}
+              title={
+                outputAvailable ? 'View output rows' : 'Preview changes to see output'
+              }
+            >
+              Output
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Content */}
       <div className="min-h-0 flex-1 overflow-hidden">
         {children ? (
-          <div className="h-full overflow-auto">{children}</div>
+          <div className="flex h-full flex-col overflow-hidden">{children}</div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-            <span className="text-[13px] text-[#5f6368]">{emptyHint ?? 'No preview available'}</span>
-            <span className="text-[12px] text-[#a1a1aa]">
+            <span className="text-[13px] text-[#5e6874]">{emptyHint ?? 'No preview available'}</span>
+            <span className="text-[12px] text-[#9099a4]">
               Import or select a dataset to see a preview
             </span>
           </div>
