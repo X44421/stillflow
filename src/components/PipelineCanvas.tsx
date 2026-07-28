@@ -2,9 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Play,
-  Sparkles,
   LayoutGrid,
-  Settings,
   Maximize2,
   Undo2,
   Redo2,
@@ -19,6 +17,7 @@ import {
   Circle,
 } from '../icons/hero';
 import ObjectPalette from './ObjectPalette';
+import { defaultConfigFor } from '../data';
 import type { PipelineNode, NodeType } from '../types';
 
 interface PipelineCanvasProps {
@@ -62,6 +61,8 @@ const NODE_ICON: Record<NodeType, React.ReactNode> = {
 const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
   nodes,
   selectedNode,
+  running = false,
+  onRunAll,
   onSelectNode,
   onAddNode,
   onDeleteNode,
@@ -112,46 +113,36 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
       description: obj.description,
       rows: '',
       status: 'pending',
-      config: {
-        column: 'customer_id',
-        strategy: 'Keep first',
-        scope: 'Current dataset',
-        nullHandling: 'Ignore',
-      },
+      config: defaultConfigFor(type),
     });
     setShowPalette(false);
   };
 
   return (
     <div className="flex-1 bg-gray-50 flex flex-col relative overflow-hidden">
-      {/* Toolbar - top-left, vertical */}
+      {/* Toolbar — top-left: edit tools */}
       <div className="absolute top-4 left-4 z-20">
         <div className="flex flex-col bg-white border border-gray-200 rounded-xl shadow-sm px-1 py-1 gap-0.5">
           <button
             className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-700 transition-colors"
-            title="Add node"
+            title="Add transform node"
             onClick={() => setShowPalette((p) => !p)}
           >
             <Plus size={18} strokeWidth={1.5} />
           </button>
-          <button
-            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
-            title="Run pipeline"
-          >
-            <Play size={18} strokeWidth={1.5} />
-          </button>
           <div className="w-full h-px bg-gray-100 my-0.5" />
-          {[Sparkles, LayoutGrid, Settings, Maximize2, Undo2, Redo2].map((Icon, i) => (
+          {[LayoutGrid, Undo2, Redo2].map((Icon, i) => (
             <button
               key={i}
               className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+              title={['Auto layout', 'Undo', 'Redo'][i]}
             >
               <Icon size={18} strokeWidth={1.5} />
             </button>
           ))}
         </div>
 
-        {/* Palette popover - opens to the right of toolbar */}
+        {/* Palette popover */}
         {showPalette && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowPalette(false)} />
@@ -161,6 +152,21 @@ const PipelineCanvas: React.FC<PipelineCanvasProps> = ({
           </>
         )}
       </div>
+
+      {/* Top-right: execution */}
+      {onRunAll && (
+        <div className="absolute top-4 right-4 z-20">
+          <button
+            onClick={onRunAll}
+            disabled={running}
+            title="Run the full pipeline end to end"
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-white border border-gray-200 px-3.5 text-[13px] font-medium text-gray-700 shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-55 disabled:cursor-wait"
+          >
+            <Play size={14} fill="currentColor" />
+            {running ? 'Running…' : 'Run pipeline'}
+          </button>
+        </div>
+      )}
 
       {/* Pipeline nodes - centered */}
       <div

@@ -149,6 +149,8 @@ const App: React.FC = () => {
         <PipelineCanvas
           nodes={nodes}
           selectedNode={selectedNode}
+          running={globalRunning}
+          onRunAll={handleRunAll}
           onSelectNode={handleSelectNode}
           onAddNode={handleAddNode}
           onDeleteNode={handleDeleteNode}

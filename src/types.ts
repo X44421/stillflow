@@ -1,12 +1,17 @@
 export interface Dataset {
   id: string;
+  projectId?: string | null;
   name: string;
   type: 'csv' | 'parquet' | 'excel' | 's3' | 'table';
   category: 'source' | 'interim' | 'output';
   size: string;
-  source?: 'sample' | 'local' | 'connected';
+  source?: 'local' | 'connected' | 'generated';
   tableName?: string;
   icon?: string;
+  rowCount?: number;
+  columns?: string[];
+  downloadUrl?: string;
+  createdAt?: string;
 }
 
 export type NodeType = 'source' | 'filter' | 'deduplicate' | 'normalize' | 'export';
@@ -18,6 +23,12 @@ export interface PipelineNodeConfig {
   strategy: string;
   scope: string;
   nullHandling: string;
+  /** filter: whether matched rows are kept or removed */
+  mode?: string;
+  /** filter: comparison operator for the rule condition */
+  operator?: string;
+  /** filter: comparison value (unused by emptiness operators) */
+  value?: string;
 }
 
 export interface PipelineMetrics {
@@ -43,21 +54,47 @@ export interface PipelineNode {
   config: PipelineNodeConfig;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  selectedDatasetId: string | null;
+  latestOutputId: string | null;
+  nodes: PipelineNode[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PreviewColumn {
   name: string;
   type: string;
   nullCount: number;
   distinctCount: number;
+  whitespaceCount: number;
+  minimum: number | null;
+  maximum: number | null;
+  average: number | null;
 }
 
 export interface DataPreviewResult {
   tableName: string;
   columns: PreviewColumn[];
   rows: Record<string, unknown>[];
+  sampleRows: Record<string, unknown>[];
   totalRows: number;
+  filteredRows: number;
+  duplicateRows: number;
+  offset: number;
+  limit: number;
 }
 
-export type PreviewLimit = 100 | 500;
+export interface DataPreviewQuery {
+  offset?: number;
+  limit?: number;
+  sortBy?: string;
+  sortDirection?: 'asc' | 'desc';
+  search?: string;
+}
 
 export type EventLevel = 'info' | 'success' | 'error';
 
