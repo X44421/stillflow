@@ -1,0 +1,11 @@
+[package]
+name = "stillflow-api"
+description = "External API surface exposing the Stillflow ingestion engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+stillflow-core.workspace = true
+stillflow-engine.workspace = true
