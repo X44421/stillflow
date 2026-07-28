@@ -1,23 +1,18 @@
 //! Connector contracts and registry boundary for Stillflow data sources.
-//!
-//! `stillflow-connectors` defines the single connector contract used for
-//! discovery, inspection, preview, streaming reads and checkpoints, plus
-//! the registry that maps source types to connector implementations.
-//!
-//! Connector behavior is intentionally not implemented yet; the contract
-//! traits land with the Arrow connector interface milestone.
 
-/// Returns the name of this crate, as a smoke test for workspace wiring.
-pub fn crate_name() -> &'static str {
-    "stillflow-connectors"
-}
+mod capabilities;
+mod connector;
+mod raw_batch_stream;
+mod registry;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use capabilities::{Capability, ConnectorCapabilities};
+pub use connector::{SourceConnector, SourceConnectorRef};
+pub use raw_batch_stream::RawBatchStream;
+pub use registry::ConnectorRegistry;
 
-    #[test]
-    fn crate_name_is_stable() {
-        assert_eq!(crate_name(), "stillflow-connectors");
-    }
-}
+pub use stillflow_core::{
+    AssetKind, AssetLocator, AssetMetadata, BatchItem, BatchStream, Checkpoint, CheckpointRequest,
+    ConnectionStatus, ConnectorError, ConnectorKind, ConnectorResult, DatasetSnapshot,
+    DiscoverRequest, InspectRequest, PreviewData, PreviewRequest, ReadRequest, RequestContext,
+    SourceAsset, SourceConnection, TestConnectionRequest,
+};

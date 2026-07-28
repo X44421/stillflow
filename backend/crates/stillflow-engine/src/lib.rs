@@ -5,7 +5,7 @@
 //! imported data as datasets and snapshots, and records auditable events.
 //!
 //! Execution behavior is intentionally not implemented yet; orchestration
-//! arrives after the connector contract and preview milestones land.
+//! arrives after connector implementations land.
 
 /// Returns the name of this crate, as a smoke test for workspace wiring.
 pub fn crate_name() -> &'static str {
