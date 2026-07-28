@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
@@ -8,7 +9,7 @@ use uuid::Uuid;
 use crate::ConnectorError;
 use crate::ConnectorResult;
 
-/// Lossless JSON encoding of an Arrow [`DataType`] for snapshot persistence.
+/// JSON encoding of an Arrow [`DataType`] for snapshot persistence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum EncodedDataType {
@@ -81,9 +82,12 @@ enum EncodedDataType {
         value: Box<EncodedDataType>,
     },
     Map {
-        key: Box<EncodedField>,
-        value: Box<EncodedField>,
+        entries: Box<EncodedField>,
         keys_sorted: bool,
+    },
+    RunEndEncoded {
+        run_ends: Box<EncodedField>,
+        values: Box<EncodedField>,
     },
     BinaryView,
     Utf8View,
@@ -133,15 +137,18 @@ struct EncodedField {
     name: String,
     data_type: EncodedDataType,
     nullable: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    metadata: BTreeMap<String, String>,
 }
 
 impl EncodedField {
-    fn from_field(field: &Field) -> Self {
-        Self {
+    fn try_from_field(field: &Field) -> ConnectorResult<Self> {
+        Ok(Self {
             name: field.name().to_owned(),
-            data_type: EncodedDataType::from_data_type(field.data_type()),
+            data_type: EncodedDataType::try_from_data_type(field.data_type())?,
             nullable: field.is_nullable(),
-        }
+            metadata: field.metadata().clone().into_iter().collect(),
+        })
     }
 
     fn to_field(&self) -> Field {
@@ -150,12 +157,13 @@ impl EncodedField {
             self.data_type.to_data_type(),
             self.nullable,
         )
+        .with_metadata(self.metadata.clone().into_iter().collect())
     }
 }
 
 impl EncodedDataType {
-    fn from_data_type(data_type: &DataType) -> Self {
-        match data_type {
+    fn try_from_data_type(data_type: &DataType) -> ConnectorResult<Self> {
+        Ok(match data_type {
             DataType::Null => Self::Null,
             DataType::Boolean => Self::Boolean,
             DataType::Int8 => Self::Int8,
@@ -203,53 +211,48 @@ impl EncodedDataType {
                 scale: *scale,
             },
             DataType::List(field) => Self::List {
-                element: Box::new(EncodedField::from_field(field)),
+                element: Box::new(EncodedField::try_from_field(field)?),
             },
             DataType::LargeList(field) => Self::LargeList {
-                element: Box::new(EncodedField::from_field(field)),
+                element: Box::new(EncodedField::try_from_field(field)?),
             },
             DataType::FixedSizeList(field, size) => Self::FixedSizeList {
-                element: Box::new(EncodedField::from_field(field)),
+                element: Box::new(EncodedField::try_from_field(field)?),
                 size: *size,
             },
             DataType::Struct(fields) => Self::Struct {
                 fields: fields
                     .iter()
-                    .map(|field| EncodedField::from_field(field.as_ref()))
-                    .collect(),
+                    .map(|field| EncodedField::try_from_field(field.as_ref()))
+                    .collect::<ConnectorResult<_>>()?,
             },
             DataType::Union(union_fields, mode) => Self::Union {
                 fields: union_fields
                     .iter()
-                    .map(|(_, field)| EncodedField::from_field(field.as_ref()))
-                    .collect(),
+                    .map(|(_, field)| EncodedField::try_from_field(field.as_ref()))
+                    .collect::<ConnectorResult<_>>()?,
                 mode: EncodedUnionMode::from_union_mode(*mode),
                 type_ids: union_fields.iter().map(|(id, _)| id).collect(),
             },
             DataType::Dictionary(key, value) => Self::Dictionary {
-                key: Box::new(EncodedDataType::from_data_type(key)),
-                value: Box::new(EncodedDataType::from_data_type(value)),
+                key: Box::new(EncodedDataType::try_from_data_type(key)?),
+                value: Box::new(EncodedDataType::try_from_data_type(value)?),
             },
-            DataType::Map(field, keys_sorted) => {
-                let DataType::Struct(fields) = field.data_type() else {
-                    panic!("map field must contain a struct");
-                };
-                Self::Map {
-                    key: Box::new(EncodedField::from_field(fields[0].as_ref())),
-                    value: Box::new(EncodedField::from_field(fields[1].as_ref())),
-                    keys_sorted: *keys_sorted,
-                }
-            }
-            DataType::RunEndEncoded(_, _) => {
-                panic!("RunEndEncoded is not supported in snapshot schema encoding")
-            }
+            DataType::Map(field, keys_sorted) => Self::Map {
+                entries: Box::new(EncodedField::try_from_field(field)?),
+                keys_sorted: *keys_sorted,
+            },
+            DataType::RunEndEncoded(run_ends, values) => Self::RunEndEncoded {
+                run_ends: Box::new(EncodedField::try_from_field(run_ends)?),
+                values: Box::new(EncodedField::try_from_field(values)?),
+            },
             DataType::BinaryView => Self::BinaryView,
             DataType::Utf8View => Self::Utf8View,
             DataType::ListView(field) => Self::ListView {
-                element: Box::new(EncodedField::from_field(field)),
+                element: Box::new(EncodedField::try_from_field(field)?),
             },
             DataType::LargeListView(field) => Self::LargeListView {
-                element: Box::new(EncodedField::from_field(field)),
+                element: Box::new(EncodedField::try_from_field(field)?),
             },
             DataType::Decimal32(precision, scale) => Self::Decimal32 {
                 precision: *precision,
@@ -259,7 +262,7 @@ impl EncodedDataType {
                 precision: *precision,
                 scale: *scale,
             },
-        }
+        })
     }
 
     fn to_data_type(&self) -> DataType {
@@ -322,19 +325,12 @@ impl EncodedDataType {
                 DataType::Dictionary(Box::new(key.to_data_type()), Box::new(value.to_data_type()))
             }
             Self::Map {
-                key,
-                value,
+                entries,
                 keys_sorted,
-            } => DataType::Map(
-                Arc::new(Field::new(
-                    "entries",
-                    DataType::Struct(
-                        vec![Arc::new(key.to_field()), Arc::new(value.to_field())].into(),
-                    ),
-                    false,
-                )),
-                *keys_sorted,
-            ),
+            } => DataType::Map(Arc::new(entries.to_field()), *keys_sorted),
+            Self::RunEndEncoded { run_ends, values } => {
+                DataType::RunEndEncoded(Arc::new(run_ends.to_field()), Arc::new(values.to_field()))
+            }
             Self::BinaryView => DataType::BinaryView,
             Self::Utf8View => DataType::Utf8View,
             Self::ListView { element } => DataType::ListView(Arc::new(element.to_field())),
@@ -408,16 +404,23 @@ pub struct SchemaFieldSnapshot {
     pub name: String,
     pub data_type: String,
     pub nullable: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
 }
 
 impl SchemaFieldSnapshot {
-    fn from_field(field: &Field) -> Self {
-        let encoded = EncodedDataType::from_data_type(field.data_type());
-        Self {
-            name: field.name().to_owned(),
-            data_type: serde_json::to_string(&encoded).expect("encode data type"),
-            nullable: field.is_nullable(),
-        }
+    fn try_from_field(field: &Field) -> ConnectorResult<Self> {
+        let encoded = EncodedField::try_from_field(field)?;
+        Ok(Self {
+            name: encoded.name,
+            data_type: serde_json::to_string(&encoded.data_type).map_err(|error| {
+                ConnectorError::internal(format!(
+                    "failed to encode schema field data type: {error}"
+                ))
+            })?,
+            nullable: encoded.nullable,
+            metadata: encoded.metadata,
+        })
     }
 
     fn to_field(&self) -> ConnectorResult<Field> {
@@ -426,11 +429,10 @@ impl SchemaFieldSnapshot {
                 "invalid schema field data type encoding: {error}"
             ))
         })?;
-        Ok(Field::new(
-            self.name.clone(),
-            encoded.to_data_type(),
-            self.nullable,
-        ))
+        Ok(
+            Field::new(self.name.clone(), encoded.to_data_type(), self.nullable)
+                .with_metadata(self.metadata.clone().into_iter().collect()),
+        )
     }
 }
 
@@ -447,6 +449,8 @@ pub struct DatasetSnapshot {
     pub lineage: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schema_fields: Vec<SchemaFieldSnapshot>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub schema_metadata: BTreeMap<String, String>,
     #[serde(skip)]
     pub schema: Option<Arc<Schema>>,
     pub created_at: DateTime<Utc>,
@@ -468,6 +472,7 @@ impl DatasetSnapshot {
             quality_score: None,
             lineage: Vec::new(),
             schema_fields: Vec::new(),
+            schema_metadata: BTreeMap::new(),
             schema: None,
             created_at: Utc::now(),
         }
@@ -477,8 +482,9 @@ impl DatasetSnapshot {
         self.schema_fields = schema
             .fields()
             .iter()
-            .map(|field| SchemaFieldSnapshot::from_field(field.as_ref()))
-            .collect();
+            .map(|field| SchemaFieldSnapshot::try_from_field(field.as_ref()))
+            .collect::<ConnectorResult<_>>()?;
+        self.schema_metadata = schema.metadata().clone().into_iter().collect();
         self.schema = Some(schema);
         Ok(self)
     }
@@ -495,12 +501,17 @@ impl DatasetSnapshot {
             .iter()
             .map(SchemaFieldSnapshot::to_field)
             .collect::<ConnectorResult<_>>()?;
-        Ok(Some(Arc::new(Schema::new(fields))))
+        Ok(Some(Arc::new(Schema::new_with_metadata(
+            fields,
+            self.schema_metadata.clone().into_iter().collect(),
+        ))))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[test]
@@ -520,6 +531,64 @@ mod tests {
         let json = serde_json::to_string(&snapshot).expect("serialize");
         let restored: DatasetSnapshot = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(restored.schema_fields.len(), 3);
+        let resolved = restored
+            .resolved_schema()
+            .expect("resolve")
+            .expect("schema");
+        assert_eq!(resolved.as_ref(), schema.as_ref());
+    }
+
+    #[test]
+    fn schema_roundtrip_preserves_metadata_and_map_entries_field() {
+        let key_field = Field::new("custom_key", DataType::Utf8, false).with_metadata(
+            HashMap::from([("key-meta".to_owned(), "key-value".to_owned())]),
+        );
+        let value_field = Field::new("custom_value", DataType::Int64, true);
+        let entries = Field::new(
+            "custom_entries",
+            DataType::Struct(vec![Arc::new(key_field), Arc::new(value_field)].into()),
+            false,
+        )
+        .with_metadata(HashMap::from([(
+            "entries-meta".to_owned(),
+            "entries-value".to_owned(),
+        )]));
+        let schema = Arc::new(Schema::new_with_metadata(
+            vec![
+                Field::new("props", DataType::Map(Arc::new(entries), false), false).with_metadata(
+                    HashMap::from([("field-meta".to_owned(), "field-value".to_owned())]),
+                ),
+            ],
+            HashMap::from([("schema-meta".to_owned(), "schema-value".to_owned())]),
+        ));
+
+        let snapshot = DatasetSnapshot::new(Uuid::new_v4(), Uuid::new_v4(), "snap://2", 5)
+            .with_schema(schema.clone())
+            .expect("schema");
+        let json = serde_json::to_string(&snapshot).expect("serialize");
+        let restored: DatasetSnapshot = serde_json::from_str(&json).expect("deserialize");
+        let resolved = restored
+            .resolved_schema()
+            .expect("resolve")
+            .expect("schema");
+        assert_eq!(resolved.as_ref(), schema.as_ref());
+    }
+
+    #[test]
+    fn run_end_encoded_schema_roundtrips_without_panic() {
+        let run_ends = Arc::new(Field::new("run_ends", DataType::Int32, false));
+        let values = Arc::new(Field::new("values", DataType::Utf8, true));
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "encoded",
+            DataType::RunEndEncoded(run_ends, values),
+            false,
+        )]));
+
+        let snapshot = DatasetSnapshot::new(Uuid::new_v4(), Uuid::new_v4(), "snap://3", 1)
+            .with_schema(schema.clone())
+            .expect("run-end-encoded schema must encode without panic");
+        let json = serde_json::to_string(&snapshot).expect("serialize");
+        let restored: DatasetSnapshot = serde_json::from_str(&json).expect("deserialize");
         let resolved = restored
             .resolved_schema()
             .expect("resolve")

@@ -63,9 +63,6 @@ impl ConnectorRegistry {
         connection.validate()?;
         request.validate()?;
         let connector = self.require(connection.kind())?;
-        connector
-            .capabilities()
-            .ensure(Capability::SchemaDiscovery)?;
         connector.discover(connection, request).await
     }
 
