@@ -1,10 +1,10 @@
 # Issue #6 — Local Tabular Connector
 
-**Status:** Draft — Sol review required
+**Status:** FROZEN — Sol approved
 
 **Risk:** high
 
-**Implementation:** blocked
+**Implementation:** Phase 1 spike authorized; production implementation blocked pending spike approval
 
 **Branch:** `agent/mvp-006-local-tabular`
 
