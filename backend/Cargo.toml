@@ -14,7 +14,7 @@ rust-version = "1.85"
 publish = false
 
 # Shared dependency declarations. Exact versions are pinned by the
-# committed Cargo.lock; members inherit them with `<dep>.workspace = true`.
+# committed Cargo.lock; members inherit them with `.workspace = true`.
 [workspace.dependencies]
 # Internal crates. Dependency direction is strictly one-way:
 # api -> engine -> connectors -> core (no cycles).
@@ -24,4 +24,14 @@ stillflow-core = { path = "crates/stillflow-core" }
 stillflow-engine = { path = "crates/stillflow-engine" }
 
 # Third-party crates shared across members.
-arrow = "59"
+arrow-array = "59"
+arrow-schema = "59"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = "0.7"
+uuid = { version = "1", features = ["serde", "v4"] }
