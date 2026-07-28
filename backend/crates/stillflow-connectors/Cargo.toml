@@ -1,0 +1,10 @@
+[package]
+name = "stillflow-connectors"
+description = "Connector contracts and registry boundary for Stillflow data sources"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+stillflow-core.workspace = true

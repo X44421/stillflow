@@ -1,0 +1,10 @@
+[package]
+name = "stillflow-core"
+description = "Domain model and shared data contracts for the Stillflow ingestion backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+arrow.workspace = true

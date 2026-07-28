@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/stillflow-api",
+    "crates/stillflow-connectors",
+    "crates/stillflow-core",
+    "crates/stillflow-engine",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+# Shared dependency declarations. Exact versions are pinned by the
+# committed Cargo.lock; members inherit them with `<dep>.workspace = true`.
+[workspace.dependencies]
+# Internal crates. Dependency direction is strictly one-way:
+# api -> engine -> connectors -> core (no cycles).
+stillflow-api = { path = "crates/stillflow-api" }
+stillflow-connectors = { path = "crates/stillflow-connectors" }
+stillflow-core = { path = "crates/stillflow-core" }
+stillflow-engine = { path = "crates/stillflow-engine" }
+
+# Third-party crates shared across members.
+arrow = "59"
