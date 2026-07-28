@@ -1,0 +1,40 @@
+---
+description: StillFlow backend engineering constraints for Composer
+globs: backend/**/*
+alwaysApply: true
+---
+
+# StillFlow Engineering
+
+Read `AGENTS.md` and `docs/data-ingestion-architecture.md` before changing backend code.
+
+## Hard rules
+
+- `stillflow-core`: domain types, errors, events, `RequestContext`, `BatchStream` only. No Polars/DuckDB/SQLx/Axum.
+- Use `arrow-array` + `arrow-schema`; never the `arrow` meta crate.
+- `stillflow-connectors`: trait + capabilities + registry only. Adapters go in separate modules/crates.
+- Dependency direction: `api → engine → connectors → core`.
+- Unsupported optimizations return `ConnectorError` with `UnsupportedCapability` — never silent fallback.
+- Secrets via `CredentialRef` only; run `ensure_no_secret_fields` on connection config.
+- Do not modify `SourceConnector` or core public types unless the active Implementation Contract allows it.
+
+## Implementation discipline
+
+- One GitHub Issue per branch (`agent/issue-NNN-*`).
+- Do not touch `main` directly.
+- Do not modify frontend layout/CSS unless explicitly requested.
+- Prefer focused diffs; no drive-by refactors.
+- Report contract deviations, new deps, and `unwrap`/`expect` in the completion summary.
+
+## Tests required before handoff
+
+```bash
+cd backend
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+## Stop and escalate
+
+Stop if you need to change frozen connector contracts. File a contract revision request to Sol instead of redefining traits in an adapter PR.
