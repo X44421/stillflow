@@ -4,3 +4,7 @@ dist/
 .vite-temp/
 desktop-fresh.png
 mobile-fresh.png
+.chrome-profile*/
+.codex-*.png
+.codex-*.log
+.codex-dom.html

@@ -1,0 +1,1870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preview Workspace v2.0 — Optimized</title>
+    <style>
+        :root {
+            --pf-global--BackgroundColor--100: #ffffff;
+            --pf-global--BackgroundColor--200: #f5f5f5;
+            --pf-global--BackgroundColor--300: #ededed;
+            --pf-global--BorderColor--100: #d2d2d2;
+            --pf-global--BorderColor--200: #b8bbbe;
+            --pf-global--Color--100: #151515;
+            --pf-global--Color--200: #3c3f42;
+            --pf-global--Color--400: #6a6e73;
+            --pf-global--FontSize--xs: 11px;
+            --pf-global--FontSize--sm: 12px;
+            --pf-global--FontSize--md: 13px;
+            --pf-global--FontSize--lg: 14px;
+            --pf-global--FontSize--xl: 15px;
+            --pf-global--FontSize--2xl: 16px;
+            --pf-global--spacer--xs: 4px;
+            --pf-global--spacer--sm: 8px;
+            --pf-global--spacer--md: 16px;
+            --pf-global--spacer--lg: 24px;
+            --header-height: 44px;
+            --tabs-height: 36px;
+            --toolbar-height: 40px;
+            --footer-height: 34px;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', 'Menlo', monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            font-size: var(--pf-global--FontSize--md);
+            color: var(--pf-global--Color--100);
+            background: #e8e8e8;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-font-smoothing: antialiased;
+            padding: 24px;
+        }
+
+        /* ── Workspace Shell with Container Query ── */
+        .workspace {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 1200px;
+            height: 90vh;
+            max-height: 800px;
+            background: var(--pf-global--BackgroundColor--100);
+            border: 1px solid var(--pf-global--BorderColor--100);
+            border-radius: 2px;
+            overflow: hidden;
+            container-type: inline-size;
+            container-name: preview;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        }
+
+        /* ── Demo Format Switcher (outside workspace) ── */
+        .demo-controls {
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 2px;
+            background: #fff;
+            border: 1px solid #d2d2d2;
+            border-radius: 4px;
+            padding: 3px;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        .demo-controls button {
+            padding: 6px 14px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: var(--font-sans);
+            color: #3c3f42;
+            border-radius: 3px;
+            white-space: nowrap;
+            transition: all 0.1s;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+        }
+        .demo-controls button:hover {
+            background: #f0f0f0;
+        }
+        .demo-controls button.demo--active {
+            background: #0066cc;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        /* ── Preview Header ── */
+        .preview-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: var(--header-height);
+            padding: 0 var(--pf-global--spacer--md);
+            border-bottom: 1px solid var(--pf-global--BorderColor--100);
+            background: var(--pf-global--BackgroundColor--100);
+            flex-shrink: 0;
+            gap: var(--pf-global--spacer--md);
+        }
+        .preview-header__left {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            flex: 1;
+            gap: 1px;
+        }
+        .preview-header__title {
+            font-size: var(--pf-global--FontSize--2xl);
+            font-weight: 600;
+            color: var(--pf-global--Color--100);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            letter-spacing: -0.01em;
+            line-height: 1.2;
+        }
+        .preview-header__meta {
+            font-size: var(--pf-global--FontSize--xs);
+            color: var(--pf-global--Color--400);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            letter-spacing: 0.02em;
+        }
+        .preview-header__meta span {
+            color: var(--pf-global--Color--200);
+            font-weight: 500;
+        }
+        .preview-header__right {
+            display: flex;
+            align-items: center;
+            gap: var(--pf-global--spacer--sm);
+            flex-shrink: 0;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            line-height: 1.5;
+            background: #f4f4f4;
+            color: #3c3f42;
+            border: 1px solid #d2d2d2;
+        }
+        .badge--sample {
+            background: #f4f4f4;
+            color: #3c3f42;
+            border-color: #d2d2d2;
+        }
+        .btn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 3px;
+            border: 1px solid transparent;
+            background: transparent;
+            cursor: pointer;
+            color: var(--pf-global--Color--400);
+            transition: all 0.1s;
+        }
+        .btn-icon:hover {
+            background: var(--pf-global--BackgroundColor--300);
+            color: var(--pf-global--Color--100);
+            border-color: var(--pf-global--BorderColor--100);
+        }
+        .btn-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+        .btn-text {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 4px 10px;
+            border-radius: 3px;
+            border: 1px solid var(--pf-global--BorderColor--100);
+            background: var(--pf-global--BackgroundColor--100);
+            cursor: pointer;
+            font-size: var(--pf-global--FontSize--sm);
+            color: var(--pf-global--Color--200);
+            font-family: var(--font-sans);
+            white-space: nowrap;
+            transition: all 0.1s;
+            font-weight: 500;
+        }
+        .btn-text:hover {
+            background: var(--pf-global--BackgroundColor--200);
+            border-color: var(--pf-global--BorderColor--200);
+        }
+
+        /* ── Primary Tabs ── */
+        .primary-tabs {
+            display: flex;
+            align-items: stretch;
+            height: var(--tabs-height);
+            border-bottom: 1px solid var(--pf-global--BorderColor--100);
+            flex-shrink: 0;
+            background: var(--pf-global--BackgroundColor--100);
+            padding: 0 var(--pf-global--spacer--md);
+            gap: 0;
+        }
+        .primary-tab {
+            display: inline-flex;
+            align-items: center;
+            padding: 0 var(--pf-global--spacer--md);
+            font-size: var(--pf-global--FontSize--sm);
+            color: var(--pf-global--Color--400);
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            position: relative;
+            white-space: nowrap;
+            transition: color 0.1s;
+            letter-spacing: 0.02em;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+        }
+        .primary-tab:hover {
+            color: var(--pf-global--Color--100);
+        }
+        .primary-tab--active {
+            color: var(--pf-global--Color--100);
+            border-bottom-color: #0066cc;
+            font-weight: 600;
+        }
+        .primary-tab__count {
+            margin-left: 3px;
+            font-size: 10px;
+            color: var(--pf-global--Color--400);
+            font-weight: 400;
+        }
+
+        /* ── Context Toolbar ── */
+        .context-toolbar {
+            display: flex;
+            align-items: center;
+            height: var(--toolbar-height);
+            padding: 0 var(--pf-global--spacer--md);
+            border-bottom: 1px solid var(--pf-global--BorderColor--100);
+            background: var(--pf-global--BackgroundColor--100);
+            gap: var(--pf-global--spacer--sm);
+            flex-shrink: 0;
+        }
+        .context-toolbar__spacer {
+            flex: 1;
+        }
+        .segmented-control {
+            display: flex;
+            border: 1px solid var(--pf-global--BorderColor--100);
+            border-radius: 3px;
+            overflow: hidden;
+            background: var(--pf-global--BackgroundColor--100);
+        }
+        .segmented-btn {
+            padding: 4px 10px;
+            font-size: var(--pf-global--FontSize--xs);
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-family: var(--font-sans);
+            color: var(--pf-global--Color--200);
+            white-space: nowrap;
+            border-right: 1px solid var(--pf-global--BorderColor--100);
+            transition: all 0.1s;
+            line-height: 1.5;
+            font-weight: 500;
+        }
+        .segmented-btn:last-child {
+            border-right: none;
+        }
+        .segmented-btn--active {
+            background: #e8f0fe;
+            color: #0066cc;
+            font-weight: 600;
+        }
+        .segmented-btn:hover:not(.segmented-btn--active) {
+            background: var(--pf-global--BackgroundColor--200);
+        }
+        .search-input {
+            display: flex;
+            align-items: center;
+            border: 1px solid var(--pf-global--BorderColor--100);
+            border-radius: 3px;
+            background: var(--pf-global--BackgroundColor--100);
+            padding: 0 8px;
+            height: 28px;
+            gap: 5px;
+            min-width: 160px;
+            transition: border-color 0.1s;
+        }
+        .search-input:focus-within {
+            border-color: #0066cc;
+        }
+        .search-input input {
+            border: none;
+            outline: none;
+            font-size: var(--pf-global--FontSize--sm);
+            font-family: var(--font-sans);
+            flex: 1;
+            min-width: 0;
+            background: transparent;
+            color: var(--pf-global--Color--100);
+        }
+        .search-input input::placeholder {
+            color: var(--pf-global--Color--400);
+        }
+        .search-input__icon {
+            color: var(--pf-global--Color--400);
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        /* ── Renderer Host ── */
+        .renderer-host {
+            flex: 1;
+            overflow: hidden;
+            background: var(--pf-global--BackgroundColor--100);
+            position: relative;
+        }
+
+        /* ── Tabular Renderer ── */
+        .tabular-scroll {
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+        }
+        .tabular-table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: var(--pf-global--FontSize--md);
+            table-layout: fixed;
+        }
+        .tabular-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--pf-global--BackgroundColor--200);
+        }
+        .tabular-table thead th {
+            padding: 6px 10px;
+            text-align: left;
+            font-weight: 600;
+            font-size: var(--pf-global--FontSize--xs);
+            color: var(--pf-global--Color--200);
+            border-bottom: 2px solid var(--pf-global--BorderColor--200);
+            white-space: nowrap;
+            user-select: none;
+            letter-spacing: 0.03em;
+            background: var(--pf-global--BackgroundColor--200);
+            cursor: default;
+            text-transform: uppercase;
+        }
+        .tabular-table thead th.row-num-header {
+            width: 44px;
+            min-width: 44px;
+            text-align: right;
+            padding-right: 8px;
+        }
+        .tabular-table thead th.col-string {
+            width: 180px;
+        }
+        .tabular-table thead th.col-int {
+            width: 80px;
+        }
+        .tabular-table thead th.col-float {
+            width: 90px;
+        }
+        .tabular-table thead th.col-date {
+            width: 120px;
+        }
+        .tabular-table thead th.col-email {
+            width: 200px;
+        }
+        .tabular-table tbody td {
+            padding: 5px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: var(--pf-global--FontSize--md);
+            color: var(--pf-global--Color--100);
+            font-variant-numeric: tabular-nums;
+            cursor: default;
+        }
+        .tabular-table tbody tr:hover {
+            background: #f8f9fa;
+        }
+        .tabular-table tbody tr.row--selected {
+            background: #e8f0fe;
+            outline: 1px solid #b3d4fc;
+            outline-offset: -1px;
+        }
+        .tabular-table .cell--null {
+            color: #c0c0c0;
+            font-style: italic;
+            font-size: 11px;
+        }
+        .tabular-table .cell--issue {
+            position: relative;
+        }
+        .tabular-table .cell--issue::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            right: 3px;
+            width: 6px;
+            height: 6px;
+            background: #c9190b;
+            border-radius: 50%;
+            border: 1px solid #fff;
+        }
+        .tabular-table .row-num {
+            color: var(--pf-global--Color--400);
+            font-size: 11px;
+            text-align: right;
+            padding-right: 8px !important;
+            width: 44px;
+            min-width: 44px;
+            font-family: var(--font-mono);
+            user-select: none;
+        }
+
+        /* ── Record Renderer ── */
+        .record-layout {
+            display: flex;
+            height: 100%;
+            gap: 0;
+        }
+        .record-list-panel {
+            width: 240px;
+            min-width: 180px;
+            border-right: 1px solid var(--pf-global--BorderColor--100);
+            overflow-y: auto;
+            background: var(--pf-global--BackgroundColor--100);
+            flex-shrink: 0;
+        }
+        .record-list-item {
+            padding: 7px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #f5f5f5;
+            font-size: var(--pf-global--FontSize--sm);
+            color: var(--pf-global--Color--200);
+            transition: background 0.08s;
+        }
+        .record-list-item:hover {
+            background: #f8f9fa;
+        }
+        .record-list-item--active {
+            background: #e8f0fe;
+            color: var(--pf-global--Color--100);
+            font-weight: 500;
+        }
+        .record-list-item__id {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--pf-global--Color--400);
+            font-weight: 500;
+        }
+        .record-list-item__name {
+            font-weight: 500;
+            font-size: var(--pf-global--FontSize--sm);
+        }
+        .record-list-item__summary {
+            font-size: 10px;
+            color: #8a8d90;
+            margin-top: 1px;
+        }
+        .record-detail-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--pf-global--spacer--md);
+        }
+        .record-field {
+            display: flex;
+            padding: 5px 0;
+            border-bottom: 1px solid #f5f5f5;
+            font-size: var(--pf-global--FontSize--md);
+            align-items: baseline;
+            gap: 8px;
+        }
+        .record-field__key {
+            font-weight: 500;
+            color: var(--pf-global--Color--200);
+            min-width: 130px;
+            font-size: var(--pf-global--FontSize--sm);
+            letter-spacing: 0.02em;
+            flex-shrink: 0;
+        }
+        .record-field__type {
+            font-size: 10px;
+            color: #8a8d90;
+            font-weight: 400;
+            min-width: 60px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .record-field__value {
+            color: var(--pf-global--Color--100);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            word-break: break-all;
+            flex: 1;
+        }
+        .record-field__value--nested {
+            color: #0066cc;
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-size: var(--pf-global--FontSize--sm);
+            background: #f0f6ff;
+            padding: 2px 8px;
+            border-radius: 3px;
+            border: 1px solid #d6e4f8;
+            display: inline-block;
+        }
+        .record-field__value--nested:hover {
+            background: #e0edff;
+        }
+        .raw-view {
+            padding: var(--pf-global--spacer--md);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            white-space: pre-wrap;
+            color: var(--pf-global--Color--200);
+            background: #fafafa;
+            border-radius: 3px;
+            border: 1px solid var(--pf-global--BorderColor--100);
+            margin: var(--pf-global--spacer--md);
+            line-height: 1.6;
+            height: calc(100% - 32px);
+        }
+
+        /* ── Conversation Renderer ── */
+        .conv-layout {
+            display: flex;
+            height: 100%;
+        }
+        .conv-list-panel {
+            width: 240px;
+            border-right: 1px solid var(--pf-global--BorderColor--100);
+            overflow-y: auto;
+            flex-shrink: 0;
+            background: var(--pf-global--BackgroundColor--100);
+        }
+        .conv-list-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #f5f5f5;
+            font-size: var(--pf-global--FontSize--sm);
+            transition: background 0.08s;
+        }
+        .conv-list-item:hover {
+            background: #f8f9fa;
+        }
+        .conv-list-item--active {
+            background: #e8f0fe;
+        }
+        .conv-list-item__id {
+            font-weight: 600;
+            font-size: var(--pf-global--FontSize--sm);
+        }
+        .conv-list-item__meta {
+            font-size: 10px;
+            color: #8a8d90;
+            margin-top: 1px;
+        }
+        .conv-detail-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--pf-global--spacer--md);
+        }
+        .conv-message {
+            padding: 8px 0;
+            border-bottom: 1px solid #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .conv-message__header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .conv-message__role {
+            font-weight: 600;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--pf-global--Color--400);
+        }
+        .conv-message__role--system {
+            color: #7d6608;
+        }
+        .conv-message__role--user {
+            color: #1a5276;
+        }
+        .conv-message__role--assistant {
+            color: #1e6e3e;
+        }
+        .conv-message__tokens {
+            font-size: 10px;
+            color: #8a8d90;
+            font-family: var(--font-mono);
+        }
+        .conv-message__content {
+            font-size: var(--pf-global--FontSize--md);
+            color: var(--pf-global--Color--100);
+            line-height: 1.5;
+            margin-top: 2px;
+        }
+        .conv-collapsed {
+            padding: 7px 12px;
+            font-size: var(--pf-global--FontSize--sm);
+            color: var(--pf-global--Color--400);
+            text-align: center;
+            background: #fafafa;
+            border: 1px dashed var(--pf-global--BorderColor--100);
+            border-radius: 3px;
+            margin: 6px 0;
+            cursor: pointer;
+        }
+
+        /* ── Text Renderer ── */
+        .text-layout {
+            display: flex;
+            height: 100%;
+        }
+        .text-content-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--pf-global--spacer--md);
+            font-size: var(--pf-global--FontSize--md);
+            line-height: 1.7;
+            color: var(--pf-global--Color--100);
+        }
+        .text-metrics-bar {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+            color: var(--pf-global--Color--400);
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f0f0f0;
+            flex-wrap: wrap;
+        }
+        .text-metrics-bar span {
+            white-space: nowrap;
+        }
+        .text-metrics-panel {
+            width: 0;
+            overflow: hidden;
+            transition: width 0.15s;
+            background: #fafafa;
+            border-left: 1px solid transparent;
+            flex-shrink: 0;
+        }
+        .text-metrics-panel--open {
+            width: 200px;
+            border-left-color: var(--pf-global--BorderColor--100);
+            padding: var(--pf-global--spacer--md);
+            overflow-y: auto;
+        }
+        .text-metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: var(--pf-global--FontSize--sm);
+        }
+        .text-metric__label {
+            color: var(--pf-global--Color--400);
+        }
+        .text-metric__value {
+            font-weight: 500;
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        /* ── Event Renderer ── */
+        .event-scroll {
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+        }
+        .event-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: var(--pf-global--FontSize--md);
+        }
+        .event-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--pf-global--BackgroundColor--200);
+        }
+        .event-table thead th {
+            padding: 6px 10px;
+            text-align: left;
+            font-weight: 600;
+            font-size: var(--pf-global--FontSize--xs);
+            border-bottom: 2px solid var(--pf-global--BorderColor--200);
+            white-space: nowrap;
+            letter-spacing: 0.03em;
+            background: var(--pf-global--BackgroundColor--200);
+            text-transform: uppercase;
+        }
+        .event-table tbody td {
+            padding: 5px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 12px;
+            font-family: var(--font-mono);
+            white-space: nowrap;
+            cursor: default;
+        }
+        .event-table tbody tr:hover {
+            background: #f8f9fa;
+        }
+        .event-table tbody tr.row--selected {
+            background: #e8f0fe;
+        }
+        .event-status {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            margin-right: 5px;
+            flex-shrink: 0;
+        }
+        .event-status--success {
+            background: #5ba352;
+        }
+        .event-status--warning {
+            background: #f0ab00;
+        }
+        .event-status--error {
+            background: #c9190b;
+        }
+        .event-attrs {
+            font-size: 11px;
+            color: #0066cc;
+            cursor: pointer;
+            font-family: var(--font-sans);
+        }
+        .event-attrs:hover {
+            text-decoration: underline;
+        }
+
+        /* ── Preview Footer ── */
+        .preview-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: var(--footer-height);
+            padding: 0 var(--pf-global--spacer--md);
+            border-top: 1px solid var(--pf-global--BorderColor--100);
+            background: var(--pf-global--BackgroundColor--100);
+            font-size: var(--pf-global--FontSize--xs);
+            color: var(--pf-global--Color--400);
+            flex-shrink: 0;
+            font-family: var(--font-mono);
+            letter-spacing: 0.02em;
+        }
+        .preview-footer__right {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .pagination-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 3px;
+            border: 1px solid var(--pf-global--BorderColor--100);
+            background: var(--pf-global--BackgroundColor--100);
+            cursor: pointer;
+            font-size: 11px;
+            color: var(--pf-global--Color--200);
+            transition: all 0.1s;
+        }
+        .pagination-btn:hover {
+            background: var(--pf-global--BackgroundColor--200);
+            border-color: var(--pf-global--BorderColor--200);
+        }
+
+        /* ── Profile ── */
+        .profile-summary-bar {
+            display: flex;
+            gap: 16px;
+            padding: 10px var(--pf-global--spacer--md);
+            font-size: var(--pf-global--FontSize--sm);
+            color: var(--pf-global--Color--200);
+            border-bottom: 1px solid #f0f0f0;
+            flex-wrap: wrap;
+        }
+        .profile-summary-bar strong {
+            font-weight: 600;
+            color: var(--pf-global--Color--100);
+        }
+        .profile-table-wrap {
+            padding: var(--pf-global--spacer--md);
+            overflow: auto;
+            flex: 1;
+        }
+        .profile-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: var(--pf-global--FontSize--sm);
+        }
+        .profile-table th {
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #8a8d90;
+            padding: 6px 8px;
+            border-bottom: 1px solid #e0e0e0;
+            font-weight: 500;
+        }
+        .profile-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #f5f5f5;
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+        .profile-dist-bar {
+            display: inline-block;
+            height: 6px;
+            background: #d2d2d2;
+            border-radius: 3px;
+            min-width: 40px;
+            vertical-align: middle;
+        }
+        .profile-dist-bar__fill {
+            height: 100%;
+            background: #0066cc;
+            border-radius: 3px;
+        }
+
+        /* ── Quality ── */
+        .quality-summary {
+            padding: 8px var(--pf-global--spacer--md);
+            font-size: var(--pf-global--FontSize--sm);
+            color: var(--pf-global--Color--400);
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .quality-table-wrap {
+            padding: var(--pf-global--spacer--md);
+            overflow: auto;
+            flex: 1;
+        }
+        .quality-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: var(--pf-global--FontSize--sm);
+        }
+        .quality-table th {
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #8a8d90;
+            padding: 6px 8px;
+            border-bottom: 1px solid #e0e0e0;
+            font-weight: 500;
+        }
+        .quality-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #f5f5f5;
+            font-size: var(--pf-global--FontSize--sm);
+        }
+        .quality-sev {
+            font-weight: 600;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .quality-sev--error {
+            color: #c9190b;
+        }
+        .quality-sev--warning {
+            color: #f0ab00;
+        }
+        .quality-sev-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+        .quality-sev-dot--error {
+            background: #c9190b;
+        }
+        .quality-sev-dot--warning {
+            background: #f0ab00;
+        }
+
+        /* ── Compare ── */
+        .compare-panel {
+            display: flex;
+            height: 100%;
+            gap: 1px;
+            background: var(--pf-global--BorderColor--100);
+        }
+        .compare-side {
+            flex: 1;
+            background: #fff;
+            padding: var(--pf-global--spacer--md);
+            overflow-y: auto;
+        }
+        .compare-side__header {
+            font-weight: 600;
+            font-size: 11px;
+            color: #8a8d90;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .compare-stat {
+            font-size: var(--pf-global--FontSize--sm);
+            padding: 4px 0;
+        }
+        .compare-stat--removed {
+            color: #c9190b;
+        }
+        .compare-stat--added {
+            color: #1e6e3e;
+        }
+        .compare-stat--changed {
+            color: #f0ab00;
+        }
+
+        /* ── Container Queries ── */
+        @container preview (max-width: 760px) {
+            .record-layout,
+            .conv-layout {
+                flex-direction: column;
+            }
+            .record-list-panel,
+            .conv-list-panel {
+                width: 100%;
+                max-height: 160px;
+                border-right: none;
+                border-bottom: 1px solid var(--pf-global--BorderColor--100);
+            }
+            .text-layout {
+                flex-direction: column;
+            }
+            .text-content-panel {
+                flex: auto;
+                max-height: 65%;
+            }
+            .context-toolbar {
+                flex-wrap: wrap;
+                height: auto;
+                padding: 5px 8px;
+                gap: 3px;
+            }
+            .search-input {
+                min-width: 100px;
+            }
+        }
+        @container preview (max-width: 560px) {
+            .preview-header__meta {
+                display: none;
+            }
+            .context-toolbar {
+                gap: 2px;
+            }
+            .segmented-btn {
+                padding: 3px 7px;
+                font-size: 10px;
+            }
+        }
+
+        /* ── Fallback viewport queries ── */
+        @media (max-width: 768px) {
+            .demo-controls {
+                flex-wrap: wrap;
+                top: 4px;
+            }
+            .demo-controls button {
+                padding: 4px 8px;
+                font-size: 10px;
+            }
+            body {
+                padding: 60px 8px 8px;
+            }
+            .workspace {
+                height: calc(100vh - 80px);
+                max-height: none;
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #d2d2d2;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ═══════════════ DEMO CONTROLS (outside workspace) ═══════════════ -->
+    <div class="demo-controls" id="demoControls">
+        <button class="demo--active" data-format="tabular">Tabular</button>
+        <button data-format="record">Record</button>
+        <button data-format="text">Text Corpus</button>
+        <button data-format="conversation">Conversation</button>
+        <button data-format="event">Event</button>
+    </div>
+
+    <!-- ═══════════════ WORKSPACE ═══════════════ -->
+    <div class="workspace" id="workspace">
+        <!-- Header -->
+        <div class="preview-header" id="previewHeader"></div>
+
+        <!-- Primary Tabs -->
+        <div class="primary-tabs" id="primaryTabs"></div>
+
+        <!-- Context Toolbar -->
+        <div class="context-toolbar" id="contextToolbar"></div>
+
+        <!-- Renderer Host -->
+        <div class="renderer-host" id="rendererHost"></div>
+
+        <!-- Footer -->
+        <div class="preview-footer" id="previewFooter"></div>
+    </div>
+
+    <script>
+        (function() {
+            // ──────────────────────────────
+            // STATE
+            // ──────────────────────────────
+            const state = {
+                format: 'tabular',
+                tab: 'data',
+                tabular: { selectedRow: null, searchQuery: '', sortCol: null, sortDir: 'asc' },
+                record: { selectedIndex: 0, viewMode: 'record' },
+                text: { viewMode: 'document', metricsOpen: false },
+                conversation: { selectedIndex: 0, viewMode: 'conversation' },
+                event: { selectedIndex: null, viewMode: 'events' },
+            };
+
+            // ──────────────────────────────
+            // MOCK DATA
+            // ──────────────────────────────
+            const tabularColumns = [
+                { key: 'id', label: 'ID', type: 'int' },
+                { key: 'name', label: 'Name', type: 'string' },
+                { key: 'email', label: 'Email', type: 'string' },
+                { key: 'city', label: 'City', type: 'string' },
+                { key: 'status', label: 'Status', type: 'string' },
+                { key: 'score', label: 'Score', type: 'float' },
+                { key: 'signup_date', label: 'Signup Date', type: 'date' },
+                { key: 'plan', label: 'Plan', type: 'string' },
+            ];
+
+            function generateTabularRows(count) {
+                const cities = ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'Philadelphia',
+                'San Antonio'];
+                const statuses = ['active', 'active', 'active', 'inactive', 'suspended'];
+                const plans = ['basic', 'pro', 'enterprise'];
+                const names = ['Alice Johnson', 'Bob Smith', 'Carol White', 'David Lee', 'Eva Martinez', 'Frank Brown',
+                    'Grace Kim', 'Henry Wilson', 'Iris Chen', 'Jack Turner'
+                ];
+                const rows = [];
+                for (let i = 1; i <= count; i++) {
+                    const name = names[(i - 1) % names.length] + (i > names.length ? ' ' + Math.floor(i / names.length) :
+                        '');
+                    const emailOk = i !== 14;
+                    rows.push({
+                        id: i,
+                        name: name,
+                        email: emailOk ? name.toLowerCase().replace(' ', '.') + '@example.com' : null,
+                        city: cities[i % cities.length],
+                        status: statuses[i % statuses.length],
+                        score: (Math.random() * 60 + 38).toFixed(1),
+                        signup_date: `2024-${String((i % 12) + 1).padStart(2,'0')}-${String((i % 28) + 1).padStart(2,'0')}`,
+                        plan: plans[i % plans.length],
+                    });
+                }
+                return rows;
+            }
+            const tabularRows = generateTabularRows(200); // 200 sampled rows
+
+            const recordData = [
+                { id: 1024, name: 'Alice Johnson', email: 'alice@example.com', source: 'api',
+                    preferences: { theme: 'dark', notifications: { email: true, push: false }, language: 'en-US' },
+                    tags: ['vip', 'beta-tester'], issueCount: 0 },
+                { id: 1025, name: 'Bob Smith', email: 'bob@example.com', source: 'web',
+                    preferences: { theme: 'light', notifications: { email: true, push: true }, language: 'en-GB' },
+                    tags: ['regular'], issueCount: 1 },
+                { id: 1026, name: 'Carol White', email: 'carol@example.com', source: 'mobile',
+                    preferences: { theme: 'dark', notifications: { email: false, push: false }, language: 'fr-FR' },
+                    tags: [], issueCount: 0 },
+                { id: 1027, name: 'David Lee', email: 'david@example.com', source: 'api',
+                    preferences: { theme: 'light', notifications: { email: true, push: true }, language: 'ko-KR' },
+                    tags: ['vip'], issueCount: 2 },
+                { id: 1028, name: 'Eva Martinez', email: 'eva@example.com', source: 'web',
+                    preferences: { theme: 'dark', notifications: { email: true, push: true }, language: 'es-ES' },
+                    tags: ['enterprise', 'priority-support'], issueCount: 0 },
+            ];
+
+            const conversationData = [
+                { id: 'conv-001', messageCount: 5, totalTokens: 117, issueCount: 0, messages: [
+                        { role: 'system', content: 'You are a helpful support assistant for a SaaS platform.',
+                            tokens: 14 },
+                        { role: 'user',
+                            content: 'I cannot access my account. I tried resetting my password but the email never arrives.',
+                            tokens: 22 },
+                        { role: 'assistant',
+                            content: 'I understand. Please verify your email and check spam. I can escalate if needed.',
+                            tokens: 28 },
+                        { role: 'user', content: 'Yes, please escalate.', tokens: 6 },
+                        { role: 'assistant',
+                            content: 'Escalated — ticket #TK-8942. Recovery team will contact you within 2 hours.',
+                            tokens: 20 },
+                    ] },
+                { id: 'conv-002', messageCount: 4, totalTokens: 72, issueCount: 1, messages: [
+                        { role: 'system', content: 'You are a technical documentation assistant.', tokens: 8 },
+                        { role: 'user', content: 'How do I configure rate limiting?', tokens: 7 },
+                        { role: 'assistant',
+                            content: 'Navigate to Settings > API Gateway > Rate Limits and set the threshold.',
+                            tokens: 18 },
+                        { role: 'user', content: 'Default threshold?', tokens: 3 },
+                        { role: 'assistant', content: '100 requests per second per IP.', tokens: 10 },
+                    ] },
+                { id: 'conv-003', messageCount: 3, totalTokens: 66, issueCount: 0, messages: [
+                        { role: 'system', content: 'You are a data analysis assistant.', tokens: 8 },
+                        { role: 'user', content: 'Explain the null rate in my customer table.', tokens: 10 },
+                        { role: 'assistant',
+                            content: 'Your customer table has 3.2% null rate. The email column is highest at 1.8%.',
+                            tokens: 22 },
+                    ] },
+            ];
+
+            const eventData = [
+                { time: '10:04:12.032', event: 'validation.run', source: 'pipeline-12', status: 'success',
+                    attributes: { duration_ms: 342, rows_checked: 50000 } },
+                { time: '10:04:18.551', event: 'row.rejected', source: 'node-4', status: 'warning',
+                    attributes: { row_id: 28471, reason: 'schema_mismatch' } },
+                { time: '10:04:22.104', event: 'export.complete', source: 'output-2', status: 'success',
+                    attributes: { rows_exported: 49872, format: 'parquet' } },
+                { time: '10:05:01.789', event: 'validation.run', source: 'pipeline-13', status: 'success',
+                    attributes: { duration_ms: 298, rows_checked: 48000 } },
+                { time: '10:05:09.412', event: 'row.rejected', source: 'node-4', status: 'error',
+                    attributes: { row_id: 39102, reason: 'null_violation' } },
+                { time: '10:05:15.003', event: 'checkpoint.saved', source: 'pipeline-13', status: 'success',
+                    attributes: { checkpoint_id: 'ckpt-582', size_bytes: 2048000 } },
+                { time: '10:05:22.667', event: 'export.complete', source: 'output-2', status: 'success',
+                    attributes: { rows_exported: 47950, format: 'parquet' } },
+                { time: '10:06:00.001', event: 'pipeline.paused', source: 'orchestrator', status: 'warning',
+                    attributes: { reason: 'backpressure', queue_depth: 15000 } },
+            ];
+
+            const textDoc = {
+                title: 'Getting Started with DataForge',
+                content: `# Getting Started with DataForge Platform\n\nWelcome to DataForge, the comprehensive data processing platform. This guide walks you through initial setup.\n\n## Prerequisites\n- A valid DataForge account\n- API credentials with read-access scope\n- Python 3.10+ or Node.js 18+\n\n## Installation\n\`\`\`bash\npip install dataforge-sdk\n\`\`\`\n\n## Core Concepts\nDataForge operates on three primitives: Sources, Pipelines, and Destinations.`,
+                metrics: { characters: 487, tokens: 128, language: 'en-US', encoding: 'UTF-8', duplicateScore: '0.02',
+                    pii: 'None', chunks: 2, currentChunk: 1, hasHtml: false },
+            };
+
+            // ──────────────────────────────
+            // RENDER — partial updates
+            // ──────────────────────────────
+            function renderShell() {
+                renderHeader();
+                renderTabs();
+                renderToolbar();
+                renderContent();
+                renderFooter();
+            }
+
+            function renderHeader() {
+                const h = document.getElementById('previewHeader');
+                const configs = {
+                    tabular: { title: 'customers.parquet', meta: 'Parquet · 80,000 rows · 8 columns · Random sample 200',
+                        version: 'v3' },
+                    record: { title: 'api-responses.jsonl', meta: 'JSONL · 12,418 records · nested objects',
+                        version: 'v2' },
+                    text: { title: 'corpus.md', meta: 'Markdown · 4,200 documents · 3.2M tokens', version: 'v1' },
+                    conversation: { title: 'training-chat.jsonl', meta: 'JSONL · 8,200 conversations · 1.4M tokens',
+                        version: 'v2' },
+                    event: { title: 'pipeline-events.log', meta: 'Log · 15,430 events · Last 24h', version: 'v1' },
+                };
+                const c = configs[state.format];
+                h.innerHTML = `
+              <div class="preview-header__left">
+                <span class="preview-header__title">${escapeHtml(c.title)}</span>
+                <span class="preview-header__meta">${c.meta}</span>
+              </div>
+              <div class="preview-header__right">
+                <span class="badge">${c.version}</span>
+                <button class="btn-icon" aria-label="More options" onclick="alert('More actions')">
+                  <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
+                </button>
+              </div>`;
+            }
+
+            function renderTabs() {
+                const tabs = document.getElementById('primaryTabs');
+                const qualities = { tabular: 3, record: 2, text: 1, conversation: 2, event: 2 };
+                const q = qualities[state.format] || 0;
+                tabs.innerHTML = `
+              <button class="primary-tab${state.tab==='data'?' primary-tab--active':''}" data-tab="data">Data</button>
+              <button class="primary-tab${state.tab==='profile'?' primary-tab--active':''}" data-tab="profile">Profile</button>
+              <button class="primary-tab${state.tab==='quality'?' primary-tab--active':''}" data-tab="quality">Quality <span class="primary-tab__count">${q}</span></button>
+              <button class="primary-tab${state.tab==='compare'?' primary-tab--active':''}" data-tab="compare">Compare</button>`;
+                tabs.querySelectorAll('.primary-tab').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        state.tab = this.dataset.tab;
+                        renderShell();
+                    });
+                });
+            }
+
+            function renderToolbar() {
+                const tb = document.getElementById('contextToolbar');
+                if (state.tab !== 'data') {
+                    tb.innerHTML =
+                        '<span style="font-size:11px;color:#8a8d90;padding:0 4px;">&nbsp;</span>';
+                    return;
+                }
+                let html = '';
+                const fmt = state.format;
+                switch (fmt) {
+                    case 'tabular':
+                        html = `
+                  <div class="search-input">
+                    <span class="search-input__icon"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3l3.6 3.6-.7.7-3.6-3.6a6.5 6.5 0 111.3-1.3l-.6-.4zm-5.2.2a5.5 5.5 0 100-11 5.5 5.5 0 000 11z"/></svg></span>
+                    <input type="text" placeholder="Search all columns..." id="tabularSearch" value="${state.tabular.searchQuery}">
+                  </div>
+                  <button class="btn-text">Filter</button>
+                  <button class="btn-text">Columns</button>
+                  <span class="context-toolbar__spacer"></span>
+                  <button class="btn-text">More</button>`;
+                        break;
+                    case 'record':
+                        html = `
+                  <div class="segmented-control" id="recVM">
+                    <button class="segmented-btn${state.record.viewMode==='table'?' segmented-btn--active':''}" data-vm="table">Table</button>
+                    <button class="segmented-btn${state.record.viewMode==='record'?' segmented-btn--active':''}" data-vm="record">Record</button>
+                    <button class="segmented-btn${state.record.viewMode==='raw'?' segmented-btn--active':''}" data-vm="raw">Raw</button>
+                  </div>
+                  <div class="search-input"><span class="search-input__icon"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3l3.6 3.6-.7.7-3.6-3.6a6.5 6.5 0 111.3-1.3l-.6-.4zm-5.2.2a5.5 5.5 0 100-11 5.5 5.5 0 000 11z"/></svg></span><input type="text" placeholder="Search records..."></div>
+                  <button class="btn-text">Filter</button>
+                  <span class="context-toolbar__spacer"></span>
+                  <button class="btn-text">More</button>`;
+                        break;
+                    case 'text':
+                        html = `
+                  <div class="segmented-control" id="txtVM">
+                    <button class="segmented-btn${state.text.viewMode==='document'?' segmented-btn--active':''}" data-vm="document">Document</button>
+                    <button class="segmented-btn${state.text.viewMode==='chunk'?' segmented-btn--active':''}" data-vm="chunk">Chunk</button>
+                    <button class="segmented-btn${state.text.viewMode==='raw'?' segmented-btn--active':''}" data-vm="raw">Raw</button>
+                  </div>
+                  <div class="search-input"><span class="search-input__icon"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3l3.6 3.6-.7.7-3.6-3.6a6.5 6.5 0 111.3-1.3l-.6-.4zm-5.2.2a5.5 5.5 0 100-11 5.5 5.5 0 000 11z"/></svg></span><input type="text" placeholder="Search text..."></div>
+                  <button class="btn-text" onclick="alert('1 issue found')">Issues</button>
+                  <span class="context-toolbar__spacer"></span>
+                  <button class="btn-text" id="txtMetricsToggle">${state.text.metricsOpen?'Hide':'Show'} Metrics</button>
+                  <button class="btn-text">More</button>`;
+                        break;
+                    case 'conversation':
+                        html = `
+                  <div class="segmented-control" id="convVM">
+                    <button class="segmented-btn${state.conversation.viewMode==='records'?' segmented-btn--active':''}" data-vm="records">Records</button>
+                    <button class="segmented-btn${state.conversation.viewMode==='conversation'?' segmented-btn--active':''}" data-vm="conversation">Conversation</button>
+                    <button class="segmented-btn${state.conversation.viewMode==='raw'?' segmented-btn--active':''}" data-vm="raw">Raw</button>
+                  </div>
+                  <div class="search-input"><span class="search-input__icon"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3l3.6 3.6-.7.7-3.6-3.6a6.5 6.5 0 111.3-1.3l-.6-.4zm-5.2.2a5.5 5.5 0 100-11 5.5 5.5 0 000 11z"/></svg></span><input type="text" placeholder="Search messages..."></div>
+                  <button class="btn-text">Filter</button>
+                  <span class="context-toolbar__spacer"></span>
+                  <button class="btn-text">More</button>`;
+                        break;
+                    case 'event':
+                        html = `
+                  <div class="segmented-control" id="evtVM">
+                    <button class="segmented-btn${state.event.viewMode==='events'?' segmented-btn--active':''}" data-vm="events">Events</button>
+                    <button class="segmented-btn${state.event.viewMode==='raw'?' segmented-btn--active':''}" data-vm="raw">Raw</button>
+                  </div>
+                  <div class="search-input"><span class="search-input__icon"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 10.3l3.6 3.6-.7.7-3.6-3.6a6.5 6.5 0 111.3-1.3l-.6-.4zm-5.2.2a5.5 5.5 0 100-11 5.5 5.5 0 000 11z"/></svg></span><input type="text" placeholder="Search events..."></div>
+                  <button class="btn-text">Time range</button>
+                  <button class="btn-text">Filter</button>
+                  <span class="context-toolbar__spacer"></span>
+                  <button class="btn-text">More</button>`;
+                        break;
+                    default:
+                        html = '';
+                }
+                tb.innerHTML = html;
+                // Attach toolbar events
+                attachToolbarEvents();
+            }
+
+            function attachToolbarEvents() {
+                const fmt = state.format;
+                if (state.tab !== 'data') return;
+                // Segmented controls
+                const segMap = {
+                    record: { id: 'recVM', setter: (v) => { state.record.viewMode = v;
+                            renderContent();
+                            renderFooter(); } },
+                    text: { id: 'txtVM', setter: (v) => { state.text.viewMode = v;
+                            renderContent();
+                            renderFooter(); } },
+                    conversation: { id: 'convVM', setter: (v) => { state.conversation.viewMode = v;
+                            renderContent();
+                            renderFooter(); } },
+                    event: { id: 'evtVM', setter: (v) => { state.event.viewMode = v;
+                            renderContent();
+                            renderFooter(); } },
+                };
+                if (segMap[fmt]) {
+                    const seg = document.getElementById(segMap[fmt].id);
+                    if (seg) {
+                        seg.querySelectorAll('.segmented-btn').forEach(b => {
+                            b.addEventListener('click', function() {
+                                segMap[fmt].setter(this.dataset.vm);
+                            });
+                        });
+                    }
+                }
+                // Tabular search
+                if (fmt === 'tabular') {
+                    const inp = document.getElementById('tabularSearch');
+                    if (inp) {
+                        inp.addEventListener('input', function() {
+                            state.tabular.searchQuery = this.value;
+                            renderContent();
+                        });
+                    }
+                }
+                // Text metrics toggle
+                if (fmt === 'text') {
+                    const tgl = document.getElementById('txtMetricsToggle');
+                    if (tgl) {
+                        tgl.addEventListener('click', function() {
+                            state.text.metricsOpen = !state.text.metricsOpen;
+                            renderContent();
+                            renderToolbar();
+                        });
+                    }
+                }
+            }
+
+            function renderContent() {
+                const host = document.getElementById('rendererHost');
+                if (state.tab === 'profile') return renderProfile(host);
+                if (state.tab === 'quality') return renderQuality(host);
+                if (state.tab === 'compare') return renderCompare(host);
+                switch (state.format) {
+                    case 'tabular':
+                        renderTabularContent(host);
+                        break;
+                    case 'record':
+                        renderRecordContent(host);
+                        break;
+                    case 'text':
+                        renderTextContent(host);
+                        break;
+                    case 'conversation':
+                        renderConversationContent(host);
+                        break;
+                    case 'event':
+                        renderEventContent(host);
+                        break;
+                    default:
+                        host.innerHTML =
+                            '<div style="padding:40px;text-align:center;color:#8a8d90;">Unsupported format</div>';
+                }
+            }
+
+            function renderTabularContent(host) {
+                const rows = tabularRows;
+                const cols = tabularColumns;
+                let html =
+                    '<div class="tabular-scroll"><table class="tabular-table"><thead><tr><th class="row-num-header">#</th>';
+                cols.forEach(c => {
+                    let cls = '';
+                    if (c.type === 'string' || c.key === 'name' || c.key === 'city' || c.key === 'status' || c
+                        .key === 'plan') cls = 'col-string';
+                    else if (c.type === 'int') cls = 'col-int';
+                    else if (c.type === 'float') cls = 'col-float';
+                    else if (c.type === 'date') cls = 'col-date';
+                    if (c.key === 'email') cls = 'col-email';
+                    html +=
+                        `<th class="${cls}">${escapeHtml(c.label)}<span style="font-weight:400;font-size:10px;color:#8a8d90;margin-left:4px;">${c.type}</span></th>`;
+                });
+                html += '</tr></thead><tbody>';
+                rows.forEach((row, i) => {
+                    const sel = state.tabular.selectedRow === i ? ' row--selected' : '';
+                    html +=
+                        `<tr class="${sel}" data-row="${i}"><td class="row-num">${i+1}</td>`;
+                    cols.forEach(c => {
+                        const val = row[c.key];
+                        if (val === null || val === undefined) {
+                            html += '<td class="cell--null">NULL</td>';
+                        } else if (c.key === 'email' && val && !val.includes('@')) {
+                            html +=
+                                `<td class="cell--issue" title="Invalid email format">${escapeHtml(String(val))}</td>`;
+                        } else {
+                            html += `<td>${escapeHtml(String(val))}</td>`;
+                        }
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div>';
+                host.innerHTML = html;
+                // Attach row click
+                host.querySelectorAll('tr[data-row]').forEach(tr => {
+                    tr.addEventListener('click', function() {
+                        state.tabular.selectedRow = parseInt(this.dataset.row);
+                        renderTabularContent(host);
+                    });
+                });
+            }
+
+            function renderRecordContent(host) {
+                const vm = state.record.viewMode;
+                if (vm === 'raw') {
+                    const raw = JSON.stringify(recordData[state.record.selectedIndex], null, 2);
+                    host.innerHTML = `<div class="raw-view">${escapeHtml(raw)}</div>`;
+                    return;
+                }
+                if (vm === 'table') {
+                    let html =
+                        '<div class="tabular-scroll"><table class="tabular-table"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Source</th><th>Tags</th><th>Issues</th></tr></thead><tbody>';
+                    recordData.forEach((r, i) => {
+                        const sel = state.record.selectedIndex === i ? ' row--selected' : '';
+                        html +=
+                            `<tr class="${sel}" data-rec="${i}"><td>${r.id}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.email)}</td><td>${r.source}</td><td>${(r.tags||[]).join(', ')||'—'}</td><td>${r.issueCount||0}</td></tr>`;
+                    });
+                    html += '</tbody></table></div>';
+                    host.innerHTML = html;
+                    host.querySelectorAll('tr[data-rec]').forEach(tr => {
+                        tr.addEventListener('click', function() {
+                            state.record.selectedIndex = parseInt(this.dataset.rec);
+                            renderRecordContent(host);
+                            renderFooter();
+                        });
+                    });
+                    return;
+                }
+                // Record mode
+                const rec = recordData[state.record.selectedIndex];
+                let html = '<div class="record-layout"><div class="record-list-panel">';
+                recordData.forEach((r, i) => {
+                    const active = state.record.selectedIndex === i ? ' record-list-item--active' : '';
+                    html +=
+                        `<div class="record-list-item${active}" data-rec="${i}"><div class="record-list-item__id">#${r.id}</div><div class="record-list-item__name">${escapeHtml(r.name)}</div><div class="record-list-item__summary">${r.source} · ${Object.keys(r.preferences).length} fields · ${r.issueCount||0} issue${r.issueCount!==1?'s':''}</div></div>`;
+                });
+                html += '</div><div class="record-detail-panel">';
+                html +=
+                    `<div class="record-field"><span class="record-field__key">id</span><span class="record-field__type">int</span><span class="record-field__value">${rec.id}</span></div>`;
+                html +=
+                    `<div class="record-field"><span class="record-field__key">name</span><span class="record-field__type">string</span><span class="record-field__value">${escapeHtml(rec.name)}</span></div>`;
+                html +=
+                    `<div class="record-field"><span class="record-field__key">email</span><span class="record-field__type">string</span><span class="record-field__value">${escapeHtml(rec.email)}</span></div>`;
+                html +=
+                    `<div class="record-field"><span class="record-field__key">preferences</span><span class="record-field__type">object</span><span class="record-field__value--nested">3 fields</span></div>`;
+                html +=
+                    `<div class="record-field"><span class="record-field__key">tags</span><span class="record-field__type">array</span><span class="record-field__value--nested">${rec.tags.length} items</span></div>`;
+                html += '</div></div>';
+                host.innerHTML = html;
+                host.querySelectorAll('.record-list-item[data-rec]').forEach(item => {
+                    item.addEventListener('click', function() {
+                        state.record.selectedIndex = parseInt(this.dataset.rec);
+                        renderRecordContent(host);
+                        renderFooter();
+                    });
+                });
+            }
+
+            function renderTextContent(host) {
+                const vm = state.text.viewMode;
+                const doc = textDoc;
+                if (vm === 'raw') {
+                    host.innerHTML = `<div class="raw-view">${escapeHtml(doc.content)}</div>`;
+                    return;
+                }
+                let html = '<div class="text-layout"><div class="text-content-panel">';
+                html +=
+                    `<div class="text-metrics-bar"><span><strong>${doc.metrics.tokens}</strong> tokens</span><span>${doc.metrics.language}</span><span>${doc.metrics.encoding}</span><span>${doc.metrics.chunks} chunks</span><span>PII: ${doc.metrics.pii}</span></div>`;
+                if (vm === 'document') {
+                    html += `<h4 style="margin-bottom:8px;">${escapeHtml(doc.title)}</h4>`;
+                    html +=
+                        `<div style="white-space:pre-wrap;line-height:1.7;">${escapeHtml(doc.content.substring(0,600))}</div>`;
+                    if (doc.content.length > 600) {
+                        html +=
+                            '<div style="padding:8px;text-align:center;color:#8a8d90;font-size:11px;border:1px dashed #d2d2d2;border-radius:3px;margin-top:8px;">Content truncated · Load next segment</div>';
+                    }
+                } else if (vm === 'chunk') {
+                    html +=
+                        `<p style="font-weight:600;font-size:12px;">Chunk ${doc.metrics.currentChunk} of ${doc.metrics.chunks}</p>`;
+                    html +=
+                        `<div style="white-space:pre-wrap;line-height:1.7;">${escapeHtml(doc.content.substring(0,350))}...</div>`;
+                }
+                html += '</div>';
+                html +=
+                    `<div class="text-metrics-panel${state.text.metricsOpen?' text-metrics-panel--open':''}" id="textMetricsPanel">`;
+                const m = doc.metrics;
+                html +=
+                    `<div class="text-metric"><span class="text-metric__label">Characters</span><span class="text-metric__value">${m.characters}</span></div>`;
+                html +=
+                    `<div class="text-metric"><span class="text-metric__label">Tokens</span><span class="text-metric__value">${m.tokens}</span></div>`;
+                html +=
+                    `<div class="text-metric"><span class="text-metric__label">Language</span><span class="text-metric__value">${m.language}</span></div>`;
+                html +=
+                    `<div class="text-metric"><span class="text-metric__label">Duplicate Score</span><span class="text-metric__value">${m.duplicateScore}</span></div>`;
+                html +=
+                    `<div class="text-metric"><span class="text-metric__label">PII</span><span class="text-metric__value">${m.pii}</span></div>`;
+                html += '</div></div>';
+                host.innerHTML = html;
+            }
+
+            function renderConversationContent(host) {
+                const vm = state.conversation.viewMode;
+                if (vm === 'raw') {
+                    const raw = JSON.stringify(conversationData[state.conversation.selectedIndex], null, 2);
+                    host.innerHTML = `<div class="raw-view">${escapeHtml(raw)}</div>`;
+                    return;
+                }
+                if (vm === 'records') {
+                    let html =
+                        '<div class="tabular-scroll"><table class="tabular-table"><thead><tr><th>ID</th><th>Messages</th><th>Tokens</th><th>Issues</th></tr></thead><tbody>';
+                    conversationData.forEach((c, i) => {
+                        const sel = state.conversation.selectedIndex === i ? ' row--selected' : '';
+                        html +=
+                            `<tr class="${sel}" data-conv="${i}"><td>${c.id}</td><td>${c.messageCount}</td><td>${c.totalTokens}</td><td>${c.issueCount||0}</td></tr>`;
+                    });
+                    html += '</tbody></table></div>';
+                    host.innerHTML = html;
+                    host.querySelectorAll('tr[data-conv]').forEach(tr => {
+                        tr.addEventListener('click', function() {
+                            state.conversation.selectedIndex = parseInt(this.dataset.conv);
+                            renderConversationContent(host);
+                            renderFooter();
+                        });
+                    });
+                    return;
+                }
+                const conv = conversationData[state.conversation.selectedIndex];
+                let html = '<div class="conv-layout"><div class="conv-list-panel">';
+                conversationData.forEach((c, i) => {
+                    const active = state.conversation.selectedIndex === i ? ' conv-list-item--active' : '';
+                    html +=
+                        `<div class="conv-list-item${active}" data-conv="${i}"><div class="conv-list-item__id">${c.id}</div><div class="conv-list-item__meta">${c.messageCount} messages · ${c.totalTokens} tokens · ${c.issueCount||0} issue${c.issueCount!==1?'s':''}</div></div>`;
+                });
+                html += '</div><div class="conv-detail-panel">';
+                conv.messages.forEach(m => {
+                    html +=
+                        `<div class="conv-message"><div class="conv-message__header"><span class="conv-message__role conv-message__role--${m.role}">${m.role}</span><span class="conv-message__tokens">${m.tokens} tokens</span></div><div class="conv-message__content">${escapeHtml(m.content)}</div></div>`;
+                });
+                html += '</div></div>';
+                host.innerHTML = html;
+                host.querySelectorAll('.conv-list-item[data-conv]').forEach(item => {
+                    item.addEventListener('click', function() {
+                        state.conversation.selectedIndex = parseInt(this.dataset.conv);
+                        renderConversationContent(host);
+                        renderFooter();
+                    });
+                });
+            }
+
+            function renderEventContent(host) {
+                const vm = state.event.viewMode;
+                if (vm === 'raw') {
+                    const raw = JSON.stringify(eventData, null, 2);
+                    host.innerHTML = `<div class="raw-view">${escapeHtml(raw)}</div>`;
+                    return;
+                }
+                let html = '<div class="event-scroll"><table class="event-table"><thead><tr>';
+                html += '<th>Time</th><th>Event</th><th>Source</th><th>Status</th><th>Attributes</th></tr></thead><tbody>';
+                eventData.forEach((e, i) => {
+                    const sel = state.event.selectedIndex === i ? ' row--selected' : '';
+                    const statusIcon = `event-status--${e.status}`;
+                    const attrKeys = Object.keys(e.attributes).length;
+                    html += `<tr class="${sel}" data-evt="${i}">`;
+                    html += `<td>${e.time}</td><td>${e.event}</td><td>${e.source}</td><td><span class="event-status ${statusIcon}"></span>${e.status}</td>`;
+                    html +=
+                        `<td><span class="event-attrs" title="${escapeHtml(JSON.stringify(e.attributes))}">${attrKeys} attributes</span></td>`;
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div>';
+                host.innerHTML = html;
+                host.querySelectorAll('tr[data-evt]').forEach(tr => {
+                    tr.addEventListener('click', function() {
+                        state.event.selectedIndex = parseInt(this.dataset.evt);
+                        renderEventContent(host);
+                    });
+                });
+            }
+
+            function renderProfile(host) {
+                const fmt = state.format;
+                let summary = '',
+                    tableHtml = '';
+                if (fmt === 'tabular') {
+                    summary =
+                        '<strong>80,000</strong> rows · <strong>8</strong> columns · <strong>3.2%</strong> null rate · <strong>23</strong> duplicates';
+                    tableHtml = `
+                <table class="profile-table"><thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Unique</th><th>Distribution</th></tr></thead><tbody>
+                  <tr><td>id</td><td>int</td><td>0%</td><td>100%</td><td><span class="profile-dist-bar"><span class="profile-dist-bar__fill" style="width:100%"></span></span></td></tr>
+                  <tr><td>name</td><td>string</td><td>0%</td><td>98.2%</td><td><span class="profile-dist-bar"><span class="profile-dist-bar__fill" style="width:88%"></span></span></td></tr>
+                  <tr><td>email</td><td>string</td><td>1.8%</td><td>96.4%</td><td><span class="profile-dist-bar"><span class="profile-dist-bar__fill" style="width:92%"></span></span></td></tr>
+                  <tr><td>score</td><td>float</td><td>0.1%</td><td>72.3%</td><td><span class="profile-dist-bar"><span class="profile-dist-bar__fill" style="width:65%"></span></span></td></tr>
+                </tbody></table>`;
+                } else if (fmt === 'conversation') {
+                    summary =
+                        '<strong>8,200</strong> conversations · <strong>6.4</strong> avg messages · <strong>312</strong> avg tokens · <strong>0.3%</strong> invalid role rate';
+                    tableHtml = `
+                <table class="profile-table"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>
+                  <tr><td>System prompt coverage</td><td>98%</td></tr>
+                  <tr><td>Average messages</td><td>6.4</td></tr>
+                  <tr><td>Average tokens</td><td>312</td></tr>
+                  <tr><td>Role distribution</td><td>system 18% · user 41% · assistant 41%</td></tr>
+                </tbody></table>`;
+                } else if (fmt === 'record') {
+                    summary = '<strong>12,418</strong> records · <strong>5.3</strong> avg fields · max depth <strong>3</strong>';
+                    tableHtml =
+                        '<table class="profile-table"><thead><tr><th>Field</th><th>Type</th><th>Coverage</th></tr></thead><tbody><tr><td>id</td><td>int</td><td>100%</td></tr><tr><td>name</td><td>string</td><td>100%</td></tr><tr><td>preferences</td><td>object</td><td>94%</td></tr></tbody></table>';
+                } else if (fmt === 'text') {
+                    summary =
+                        '<strong>4,200</strong> documents · <strong>280</strong> avg tokens · <strong>3</strong> languages · duplicate score <strong>0.02</strong>';
+                    tableHtml =
+                        '<table class="profile-table"><thead><tr><th>Distribution</th><th>Value</th></tr></thead><tbody><tr><td>Token length (median)</td><td>240</td></tr><tr><td>Language</td><td>en-US 96% · fr-FR 3% · es-ES 1%</td></tr></tbody></table>';
+                } else if (fmt === 'event') {
+                    summary =
+                        '<strong>15,430</strong> events · <strong>6</strong> types · <strong>2.1%</strong> error rate · 24h range';
+                    tableHtml =
+                        '<table class="profile-table"><thead><tr><th>Event Type</th><th>Count</th><th>%</th></tr></thead><tbody><tr><td>validation.run</td><td>6,200</td><td>40.2%</td></tr><tr><td>export.complete</td><td>4,800</td><td>31.1%</td></tr></tbody></table>';
+                }
+                host.innerHTML = `
+              <div style="display:flex;flex-direction:column;height:100%;">
+                <div class="profile-summary-bar">${summary}</div>
+                <div class="profile-table-wrap">${tableHtml}</div>
+              </div>`;
+            }
+
+            function renderQuality(host) {
+                const fmt = state.format;
+                let issues = [];
+                if (fmt === 'tabular') {
+                    issues = [
+                        { sev: 'error', issue: 'Invalid email format', field: 'email', affected: '14 rows',
+                            action: 'Review' },
+                        { sev: 'warning', issue: 'Duplicate records', field: '—', affected: '23 rows',
+                            action: 'Inspect' },
+                        { sev: 'warning', issue: 'Missing values', field: 'email', affected: '0.02%',
+                        action: 'Filter' },
+                    ];
+                } else if (fmt === 'conversation') {
+                    issues = [
+                        { sev: 'error', issue: 'Empty assistant message', field: 'conv-003', affected: '1 msg',
+                            action: 'Review' },
+                        { sev: 'warning', issue: 'Long system prompt (>500 tok)', field: 'conv-001', affected: '1 msg',
+                            action: 'Trim' },
+                    ];
+                } else if (fmt === 'record') {
+                    issues = [
+                        { sev: 'warning', issue: 'Missing tags field', field: 'tags', affected: '3 records',
+                            action: 'Fill' },
+                        { sev: 'error', issue: 'Invalid nested structure', field: 'preferences', affected: '1 record',
+                            action: 'Fix' },
+                    ];
+                } else if (fmt === 'text') {
+                    issues = [
+                        { sev: 'warning', issue: 'Document too short (<50 chars)', field: 'content', affected: '12 docs',
+                            action: 'Review' },
+                    ];
+                } else if (fmt === 'event') {
+                    issues = [
+                        { sev: 'error', issue: 'Missing timestamp', field: 'time', affected: '0.5%',
+                        action: 'Investigate' },
+                        { sev: 'warning', issue: 'Out-of-order timestamps', field: 'time', affected: '8 events',
+                            action: 'Sort' },
+                    ];
+                }
+                let rowsHtml = issues.map(i => `
+              <tr>
+                <td><span class="quality-sev quality-sev--${i.sev}"><span class="quality-sev-dot quality-sev-dot--${i.sev}"></span>${i.sev}</span></td>
+                <td>${i.issue}</td>
+                <td>${i.field}</td>
+                <td>${i.affected}</td>
+                <td>${i.action}</td>
+              </tr>`).join('');
+                host.innerHTML = `
+              <div style="display:flex;flex-direction:column;height:100%;">
+                <div class="quality-summary">${issues.length} issues · ${issues.filter(i=>i.sev==='error').length} errors · ${issues.filter(i=>i.sev==='warning').length} warnings</div>
+                <div class="quality-table-wrap">
+                  <table class="quality-table"><thead><tr><th>Severity</th><th>Issue</th><th>Field</th><th>Affected</th><th>Action</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+                </div>
+              </div>`;
+            }
+
+            function renderCompare(host) {
+                const fmt = state.format;
+                let beforeHtml = '',
+                    afterHtml = '';
+                if (fmt === 'tabular') {
+                    beforeHtml =
+                        '<div class="compare-side__header">Before (v2)</div><p class="compare-stat">80,000 rows · 8 columns</p>';
+                    afterHtml =
+                        '<div class="compare-side__header">After (v3)</div><p class="compare-stat compare-stat--removed">13 rows removed</p><p class="compare-stat compare-stat--changed">47 cells changed</p><p class="compare-stat">Schema unchanged</p>';
+                } else if (fmt === 'conversation') {
+                    beforeHtml =
+                        '<div class="compare-side__header">Before</div><p class="compare-stat">8,205 conversations</p>';
+                    afterHtml =
+                        '<div class="compare-side__header">After</div><p class="compare-stat compare-stat--removed">5 conversations removed</p><p class="compare-stat compare-stat--changed">3 messages edited</p><p class="compare-stat">Token count -47</p>';
+                } else if (fmt === 'record') {
+                    beforeHtml =
+                        '<div class="compare-side__header">Before</div><p class="compare-stat">12,420 records</p>';
+                    afterHtml =
+                        '<div class="compare-side__header">After</div><p class="compare-stat compare-stat--removed">2 records removed</p><p class="compare-stat compare-stat--changed">4 fields changed</p>';
+                } else if (fmt === 'text') {
+                    beforeHtml =
+                        '<div class="compare-side__header">Before</div><p class="compare-stat">4,200 docs · 3.2M tokens</p>';
+                    afterHtml =
+                        '<div class="compare-side__header">After</div><p class="compare-stat compare-stat--removed">Characters -124</p><p class="compare-stat compare-stat--added">PII removed: 2 instances</p>';
+                } else if (fmt === 'event') {
+                    beforeHtml =
+                        '<div class="compare-side__header">Before</div><p class="compare-stat">15,430 events</p>';
+                    afterHtml =
+                        '<div class="compare-side__header">After</div><p class="compare-stat compare-stat--removed">3 events removed</p><p class="compare-stat compare-stat--changed">2 timestamps normalized</p>';
+                }
+                host.innerHTML = `
+              <div class="compare-panel">
+                <div class="compare-side">${beforeHtml}</div>
+                <div class="compare-side">${afterHtml}</div>
+              </div>`;
+            }
+
+            function renderFooter() {
+                const f = document.getElementById('previewFooter');
+                const fmt = state.format;
+                if (state.tab !== 'data') {
+                    f.innerHTML =
+                        '<span style="font-size:11px;color:#8a8d90;">&nbsp;</span><span></span>';
+                    return;
+                }
+                let left = '',
+                    right = '';
+                switch (fmt) {
+                    case 'tabular':
+                        left = '200 sampled rows · 80,000 total';
+                        right = '200 rows';
+                        break;
+                    case 'record':
+                        left = `Record ${state.record.selectedIndex+1} of 12,418`;
+                        right = '';
+                        break;
+                    case 'text':
+                        left = `Document 1 of 4,200 · Chunk ${textDoc.metrics.currentChunk} of ${textDoc.metrics.chunks}`;
+                        right = '';
+                        break;
+                    case 'conversation':
+                        left =
+                            `Conversation ${state.conversation.selectedIndex+1} of 8,200 · ${conversationData[state.conversation.selectedIndex].messageCount} messages`;
+                        right = '';
+                        break;
+                    case 'event':
+                        left = '8 events · 10:04–10:06';
+                        right = '';
+                        break;
+                    default:
+                        left = 'Preview';
+                        right = '';
+                }
+                f.innerHTML = `
+              <span>${left}</span>
+              <div class="preview-footer__right">
+                <button class="pagination-btn" disabled>‹</button>
+                <span style="font-size:10px;">Sample</span>
+                <button class="pagination-btn">›</button>
+              </div>`;
+            }
+
+            function escapeHtml(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            // ──────────────────────────────
+            // INIT
+            // ──────────────────────────────
+            function init() {
+                const params = new URLSearchParams(window.location.search);
+                const format = params.get('format');
+                const tab = params.get('tab');
+                const view = params.get('view');
+                if (format) state.format = format;
+                if (tab) state.tab = tab;
+                if (view) {
+                    if (state.format === 'record') state.record.viewMode = view;
+                    else if (state.format === 'text') state.text.viewMode = view;
+                    else if (state.format === 'conversation') state.conversation.viewMode = view;
+                    else if (state.format === 'event') state.event.viewMode = view;
+                }
+                if (params.get('metrics') === 'open') state.text.metricsOpen = true;
+                renderShell();
+                // Demo controls
+                document.querySelectorAll('.demo-controls button').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        document.querySelectorAll('.demo-controls button').forEach(b => b
+                            .classList.remove('demo--active'));
+                        this.classList.add('demo--active');
+                        state.format = this.dataset.format;
+                        state.tab = 'data';
+                        state.tabular.selectedRow = null;
+                        state.record.selectedIndex = 0;
+                        state.conversation.selectedIndex = 0;
+                        state.event.selectedIndex = null;
+                        state.text.metricsOpen = false;
+                        renderShell();
+                    });
+                });
+            }
+
+            document.addEventListener('DOMContentLoaded', init);
+            console.log('Preview Workspace v2.0 — Optimized');
+            console.log('Changes: Removed Format Switcher from header, fixed sample counts, partial renders, container queries, per-format Compare/Profile/Quality');
+        })();
+    </script>
+</body>
+</html>
