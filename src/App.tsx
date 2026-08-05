@@ -1,24 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Drawer,
-  DrawerColorVariant,
-  DrawerContent,
-  DrawerPanelContent,
-  Page,
-  PageSection,
-} from '@patternfly/react-core';
+import { Page, PageSection } from '@patternfly/react-core';
+import { TimesIcon, WindowMaximizeIcon, WindowMinimizeIcon } from '@patternfly/react-icons';
 import { ObjectTabBar } from './components/ObjectTabBar';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { TopologyCanvas } from './components/TopologyCanvas';
 import { PreviewWorkspace } from './components/PreviewWorkspace';
 import { Inspector } from './components/Inspector';
-import { useMediaQuery } from './hooks/useMediaQuery';
 import type { PreviewTab, RunStatus, TabItem } from './types';
 import { connections, initialTabs, pipelineNodes } from './data';
 
 export default function App() {
-  const isNarrow = useMediaQuery('(max-width: 1024px)');
-
   const [tabs, setTabs] = useState<TabItem[]>(initialTabs);
   const [activeTabId, setActiveTabId] = useState('dataset-customers');
   const [activeNavId, setActiveNavId] = useState('dataset-customers');
@@ -31,7 +22,7 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState(false);
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, RunStatus>>({});
-  const runInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const runInterval = useRef<number | null>(null);
 
   const [breadcrumb, setBreadcrumb] = useState('Customer cleanup');
   const [previewTitle, setPreviewTitle] = useState('customers.csv');
@@ -192,106 +183,122 @@ export default function App() {
     }
   }, []);
 
-  const previewPanel = (
-    <DrawerPanelContent
-      isResizable
-      defaultSize={isNarrow ? '45%' : '42%'}
-      minSize={isNarrow ? '280px' : '480px'}
-      maxSize={isNarrow ? '70%' : '75%'}
-      colorVariant={DrawerColorVariant.default}
-      resizeAriaLabel="Resize preview panel"
-    >
-      <div className="still-preview-panel">
-        <PreviewWorkspace
-          activeTab={previewTab}
-          onTabChange={setPreviewTab}
-          title={previewTitle}
-          meta={previewMeta}
-          isRunning={isRunning}
-          progress={progress}
-        />
-      </div>
-    </DrawerPanelContent>
-  );
-
-  const inspectorPanel = (
-    <DrawerPanelContent
-      isResizable
-      defaultSize={isNarrow ? '300px' : '336px'}
-      minSize="280px"
-      maxSize="440px"
-      colorVariant={DrawerColorVariant.secondary}
-      resizeAriaLabel="Resize inspector panel"
-    >
-      <Inspector
-        objectTitle={inspectorObjTitle}
-        objectType={inspectorObjType}
-        isRunning={isRunning}
-        progress={progress}
-        error={error}
-        onRunNode={handleRun}
-        onCancelRun={handleCancelRun}
-        onValidate={() => setError(false)}
-        onClose={() => setInspectorOpen(false)}
-      />
-    </DrawerPanelContent>
-  );
-
   return (
-    <Page
-      className="still-page"
-      masthead={
-        <ObjectTabBar
-          tabs={tabs}
-          activeTabId={activeTabId}
-          isRunning={isRunning}
-          previewOpen={previewOpen}
-          inspectorOpen={inspectorOpen}
-          onSelect={handleTabSelect}
-          onClose={handleTabClose}
-          onAdd={handleAddTab}
-          onRun={handleRun}
-          onCancel={handleCancelRun}
-          onTogglePreview={() => setPreviewOpen((open) => !open)}
-          onToggleInspector={() => setInspectorOpen((open) => !open)}
-        />
-      }
-      sidebar={<WorkspaceSidebar activeNavId={activeNavId} onSelect={handleNavSelect} />}
-      isManagedSidebar
-      isContentFilled
-    >
-      <PageSection
-        hasBodyWrapper={false}
-        isFilled
-        padding={{ default: 'noPadding' }}
-        className="still-workspace-section"
-        aria-label="StillFlow workspace"
+    <div className="still-desktop-app">
+      <header className="still-desktop-titlebar">
+        <div className="still-desktop-titlebar__menus">
+          <span>File</span>
+          <span>Edit</span>
+          <span>View</span>
+          <span>Help</span>
+        </div>
+        <div className="still-desktop-titlebar__spacer" />
+        <div className="still-desktop-titlebar__windows">
+          <button
+            type="button"
+            className="still-desktop-titlebar__window"
+            aria-label="Minimize"
+            onClick={() => setPreviewOpen(false)}
+          >
+            <WindowMinimizeIcon />
+          </button>
+          <button
+            type="button"
+            className="still-desktop-titlebar__window"
+            aria-label="Maximize"
+            onClick={() => {
+              setPreviewOpen(true);
+              setInspectorOpen(true);
+            }}
+          >
+            <WindowMaximizeIcon />
+          </button>
+          <button
+            type="button"
+            className="still-desktop-titlebar__window still-desktop-titlebar__window--close"
+            aria-label="Close"
+            onClick={() => setInspectorOpen(false)}
+          >
+            <TimesIcon />
+          </button>
+        </div>
+      </header>
+      <Page
+        className="still-page"
+        masthead={
+          <ObjectTabBar
+            tabs={tabs}
+            activeTabId={activeTabId}
+            isRunning={isRunning}
+            previewOpen={previewOpen}
+            inspectorOpen={inspectorOpen}
+            onSelect={handleTabSelect}
+            onClose={handleTabClose}
+            onAdd={handleAddTab}
+            onRun={handleRun}
+            onCancel={handleCancelRun}
+            onTogglePreview={() => setPreviewOpen((open) => !open)}
+            onToggleInspector={() => setInspectorOpen((open) => !open)}
+          />
+        }
+        sidebar={<WorkspaceSidebar activeNavId={activeNavId} onSelect={handleNavSelect} />}
+        isManagedSidebar
+        isContentFilled
       >
-        <Drawer isExpanded={inspectorOpen} isInline position="end" className="still-workspace-drawer">
-          <DrawerContent panelContent={inspectorPanel}>
-            <Drawer
-              isExpanded={previewOpen}
-              isInline
-              position={isNarrow ? 'bottom' : 'end'}
-              className="still-preview-drawer"
-            >
-              <DrawerContent panelContent={previewPanel}>
-                <TopologyCanvas
-                  nodes={pipelineNodes}
-                  edges={connections}
-                  selectedNodeId={selectedNodeId}
-                  onSelectNode={selectNode}
-                  onDeselectNode={deselectAllNodes}
-                  nodeStatuses={nodeStatuses}
+        <PageSection
+          hasBodyWrapper={false}
+          isFilled
+          padding={{ default: 'noPadding' }}
+          className="still-workspace-section"
+          aria-label="StillFlow workspace"
+        >
+          <div className="still-split-workspace">
+            {previewOpen && (
+              <section className="still-data-pane" aria-label="Data preview">
+                <div className="still-preview-panel">
+                  <PreviewWorkspace
+                    activeTab={previewTab}
+                    onTabChange={setPreviewTab}
+                    title={previewTitle}
+                    meta={previewMeta}
+                    isRunning={isRunning}
+                    progress={progress}
+                  />
+                </div>
+              </section>
+            )}
+            {previewOpen && <div className="still-pane-divider" aria-hidden="true" />}
+            <section className="still-workflow-pane" aria-label="Workflow canvas">
+              <TopologyCanvas
+                nodes={pipelineNodes}
+                edges={connections}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={selectNode}
+                onDeselectNode={deselectAllNodes}
+                nodeStatuses={nodeStatuses}
+                isRunning={isRunning}
+                progress={progress}
+                breadcrumb={breadcrumb}
+              />
+            </section>
+            {inspectorOpen && (
+              <section className="still-inspector-pane" aria-label="Inspector">
+                <Inspector
+                  objectTitle={inspectorObjTitle}
+                  objectType={inspectorObjType}
                   isRunning={isRunning}
                   progress={progress}
-                  breadcrumb={breadcrumb}
+                  error={error}
+                  onRunNode={handleRun}
+                  onCancelRun={handleCancelRun}
+                  onValidate={() => setError(false)}
+                  onClose={() => setInspectorOpen(false)}
                 />
-              </DrawerContent>
-            </Drawer>
-          </DrawerContent>
-        </Drawer>
-      </PageSection>
-    </Page>
+              </section>
+            )}
+          </div>
+        </PageSection>
+      </Page>
+    </div>
   );
 }
