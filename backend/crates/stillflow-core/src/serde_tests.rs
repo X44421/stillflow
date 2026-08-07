@@ -1,11 +1,14 @@
 #[cfg(test)]
 mod serde_roundtrip_tests {
+    use std::collections::BTreeSet;
+
+    use chrono::DateTime;
     use uuid::Uuid;
 
     use crate::{
-        AssetKind, AssetLocator, Checkpoint, ConnectorKind, CredentialRef, Dataset,
-        DatasetSnapshot, Expr, SamplingStrategy, Session, SourceAsset, SourceConnection,
-        SourceFilter,
+        AssetKind, AssetLocator, Checkpoint, ColumnId, ConnectorKind, CredentialRef, Dataset,
+        DatasetSnapshot, Expr, LogicalField, LogicalSchema, LogicalType, SamplingStrategy, Session,
+        SnapshotStats, SourceAsset, SourceConnection, SourceFilter,
     };
 
     fn roundtrip<T>(value: &T) -> T
@@ -52,11 +55,31 @@ mod serde_roundtrip_tests {
     fn session_dataset_and_snapshot_roundtrip() {
         let connection_id = Uuid::new_v4();
         let session = Session::with_connection(connection_id);
-        let dataset = Dataset::new(session.id, Uuid::new_v4(), "orders");
-        let snapshot = DatasetSnapshot::new(dataset.id, session.id, "snap://local/1", 42);
+        let source_asset_id = Uuid::new_v4();
+        let dataset = Dataset::new(session.id, source_asset_id, "orders");
+        let schema = LogicalSchema::new(vec![LogicalField::new(
+            ColumnId::from_uuid(Uuid::from_u128(10)),
+            "value",
+            LogicalType::Int64,
+            false,
+        )
+        .expect("field")])
+        .expect("schema");
+        let snapshot = DatasetSnapshot::try_new(
+            Uuid::new_v4(),
+            dataset.id,
+            session.id,
+            source_asset_id,
+            schema,
+            SnapshotStats::try_new(42, 1_024, 1).expect("stats"),
+            BTreeSet::new(),
+            None,
+            DateTime::from_timestamp(1_700_000_000, 0).expect("timestamp"),
+        )
+        .expect("snapshot");
         assert_eq!(roundtrip(&session).connection_ids, session.connection_ids);
         assert_eq!(roundtrip(&dataset).name, dataset.name);
-        assert_eq!(roundtrip(&snapshot).row_count, snapshot.row_count);
+        assert_eq!(roundtrip(&snapshot), snapshot);
     }
 
     #[test]

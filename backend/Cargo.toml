@@ -6,6 +6,7 @@ members = [
     "crates/stillflow-core",
     "crates/stillflow-engine",
     "crates/stillflow-plan",
+    "crates/stillflow-storage",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ stillflow-connectors = { path = "crates/stillflow-connectors" }
 stillflow-core = { path = "crates/stillflow-core" }
 stillflow-engine = { path = "crates/stillflow-engine" }
 stillflow-plan = { path = "crates/stillflow-plan" }
+stillflow-storage = { path = "crates/stillflow-storage" }
 
 # Third-party crates shared across members.
 arrow-array = "59"
@@ -31,8 +33,13 @@ arrow-schema = "59"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
+fs2 = "0.4"
+parquet = { version = "59", default-features = false, features = ["arrow", "snap"] }
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11"
+tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
