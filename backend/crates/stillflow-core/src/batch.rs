@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     ColumnId, ConnectorError, ErrorCategory, LogicalError, LogicalField, LogicalSchema,
-    LogicalType, TimeUnit,
+    LogicalType, TimeUnit, MAX_SCHEMA_FIELDS, MAX_SCHEMA_NESTING_DEPTH,
 };
 
 /// Current in-memory batch-envelope contract version.
@@ -42,6 +42,10 @@ pub struct LogicalSchemaFingerprint([u8; 32]);
 impl LogicalSchemaFingerprint {
     pub fn try_from_schema(schema: &LogicalSchema) -> Result<Self, BatchError> {
         schema.validate()?;
+        Self::from_validated_schema(schema)
+    }
+
+    fn from_validated_schema(schema: &LogicalSchema) -> Result<Self, BatchError> {
         let bytes = serde_json::to_vec(schema)
             .map_err(|error| BatchError::SchemaSerialization(error.to_string()))?;
         Ok(Self(fingerprint_bytes(&bytes)))
@@ -84,6 +88,114 @@ impl fmt::Display for LogicalSchemaFingerprint {
             write!(formatter, "{byte:02x}")?;
         }
         Ok(())
+    }
+}
+
+/// Reusable validated schema and lineage context for envelope construction.
+#[derive(Clone)]
+pub struct BatchEnvelopeFactory {
+    version: u16,
+    schema: Arc<LogicalSchema>,
+    schema_fingerprint: LogicalSchemaFingerprint,
+    arrow_schema: SchemaRef,
+    source_asset_id: Uuid,
+}
+
+impl fmt::Debug for BatchEnvelopeFactory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("BatchEnvelopeFactory")
+            .field("version", &self.version)
+            .field("schema_fingerprint", &self.schema_fingerprint)
+            .field("source_asset_id", &self.source_asset_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl BatchEnvelopeFactory {
+    pub fn try_new(schema: Arc<LogicalSchema>, source_asset_id: Uuid) -> Result<Self, BatchError> {
+        Self::try_from_parts(BATCH_ENVELOPE_VERSION, schema, source_asset_id)
+    }
+
+    pub fn try_from_parts(
+        version: u16,
+        schema: Arc<LogicalSchema>,
+        source_asset_id: Uuid,
+    ) -> Result<Self, BatchError> {
+        if version != BATCH_ENVELOPE_VERSION {
+            return Err(BatchError::UnsupportedEnvelopeVersion(version));
+        }
+        if source_asset_id.is_nil() {
+            return Err(BatchError::NilSourceAssetId);
+        }
+
+        schema.validate()?;
+        let schema_fingerprint = LogicalSchemaFingerprint::from_validated_schema(schema.as_ref())?;
+        let arrow_schema = logical_schema_to_arrow_validated(schema.as_ref(), schema_fingerprint)?;
+
+        Ok(Self {
+            version,
+            schema,
+            schema_fingerprint,
+            arrow_schema,
+            source_asset_id,
+        })
+    }
+
+    pub const fn version(&self) -> u16 {
+        self.version
+    }
+
+    pub fn schema(&self) -> &LogicalSchema {
+        &self.schema
+    }
+
+    pub fn shared_schema(&self) -> &Arc<LogicalSchema> {
+        &self.schema
+    }
+
+    pub const fn schema_fingerprint(&self) -> LogicalSchemaFingerprint {
+        self.schema_fingerprint
+    }
+
+    pub fn arrow_schema(&self) -> &SchemaRef {
+        &self.arrow_schema
+    }
+
+    pub const fn source_asset_id(&self) -> Uuid {
+        self.source_asset_id
+    }
+
+    pub fn try_build(
+        &self,
+        sequence: u64,
+        payload: RecordBatch,
+    ) -> Result<BatchEnvelope, BatchError> {
+        if payload.schema().as_ref() != self.arrow_schema.as_ref() {
+            return Err(BatchError::PhysicalSchemaMismatch);
+        }
+        let payload = if Arc::ptr_eq(payload.schema_ref(), &self.arrow_schema) {
+            payload
+        } else {
+            payload
+                .with_schema(Arc::clone(&self.arrow_schema))
+                .map_err(|_| BatchError::PhysicalSchemaMismatch)?
+        };
+
+        let row_count = payload.num_rows();
+        let byte_count = payload.get_array_memory_size();
+        validate_batch_bounds(row_count, byte_count)?;
+
+        Ok(BatchEnvelope {
+            version: self.version,
+            schema: Arc::clone(&self.schema),
+            schema_fingerprint: self.schema_fingerprint,
+            source_asset_id: self.source_asset_id,
+            sequence,
+            row_count,
+            byte_count,
+            payload,
+        })
     }
 }
 
@@ -137,35 +249,8 @@ impl BatchEnvelope {
         sequence: u64,
         payload: RecordBatch,
     ) -> Result<Self, BatchError> {
-        if version != BATCH_ENVELOPE_VERSION {
-            return Err(BatchError::UnsupportedEnvelopeVersion(version));
-        }
-        if source_asset_id.is_nil() {
-            return Err(BatchError::NilSourceAssetId);
-        }
-
-        schema.validate()?;
-        let schema_fingerprint = LogicalSchemaFingerprint::try_from_schema(&schema)?;
-        let expected_arrow_schema =
-            logical_schema_to_arrow_with_fingerprint(&schema, schema_fingerprint)?;
-        if payload.schema().as_ref() != expected_arrow_schema.as_ref() {
-            return Err(BatchError::PhysicalSchemaMismatch);
-        }
-
-        let row_count = payload.num_rows();
-        let byte_count = payload.get_array_memory_size();
-        validate_batch_bounds(row_count, byte_count)?;
-
-        Ok(Self {
-            version,
-            schema,
-            schema_fingerprint,
-            source_asset_id,
-            sequence,
-            row_count,
-            byte_count,
-            payload,
-        })
+        BatchEnvelopeFactory::try_from_parts(version, schema, source_asset_id)?
+            .try_build(sequence, payload)
     }
 
     pub const fn version(&self) -> u16 {
@@ -211,19 +296,19 @@ impl BatchEnvelope {
 
 /// Converts a validated logical schema to its canonical Apache Arrow 59 schema.
 pub fn logical_schema_to_arrow(schema: &LogicalSchema) -> Result<SchemaRef, BatchError> {
-    let fingerprint = LogicalSchemaFingerprint::try_from_schema(schema)?;
-    logical_schema_to_arrow_with_fingerprint(schema, fingerprint)
+    schema.validate()?;
+    let fingerprint = LogicalSchemaFingerprint::from_validated_schema(schema)?;
+    logical_schema_to_arrow_validated(schema, fingerprint)
 }
 
-fn logical_schema_to_arrow_with_fingerprint(
+fn logical_schema_to_arrow_validated(
     schema: &LogicalSchema,
     fingerprint: LogicalSchemaFingerprint,
 ) -> Result<SchemaRef, BatchError> {
-    schema.validate()?;
     let fields = schema
         .fields
         .iter()
-        .map(logical_field_to_arrow)
+        .map(logical_field_to_arrow_validated)
         .collect::<Result<Vec<_>, _>>()?;
     let mut metadata = HashMap::new();
     metadata.insert(SCHEMA_VERSION_KEY.to_owned(), schema.version.to_string());
@@ -237,32 +322,53 @@ fn logical_schema_to_arrow_with_fingerprint(
 
 /// Rebuilds a logical schema from the canonical Apache Arrow 59 metadata mapping.
 pub fn logical_schema_from_arrow(schema: &Schema) -> Result<LogicalSchema, BatchError> {
-    let version = required_metadata(schema.metadata(), SCHEMA_VERSION_KEY)?
+    let version_text = required_metadata(schema.metadata(), SCHEMA_VERSION_KEY)?;
+    let fingerprint_text = required_metadata(schema.metadata(), SCHEMA_FINGERPRINT_KEY)?;
+    let schema_metadata_text = required_metadata(schema.metadata(), SCHEMA_METADATA_KEY)?;
+    ensure_exact_metadata_keys(
+        schema.metadata(),
+        &[
+            SCHEMA_VERSION_KEY,
+            SCHEMA_FINGERPRINT_KEY,
+            SCHEMA_METADATA_KEY,
+        ],
+        BatchError::NonCanonicalSchemaMetadata,
+    )?;
+
+    let version = version_text
         .parse::<u16>()
         .map_err(|_| BatchError::InvalidReservedMetadata(SCHEMA_VERSION_KEY))?;
-    let declared_fingerprint = LogicalSchemaFingerprint::from_hex(required_metadata(
-        schema.metadata(),
-        SCHEMA_FINGERPRINT_KEY,
-    )?)?;
-    let metadata = decode_metadata(
-        required_metadata(schema.metadata(), SCHEMA_METADATA_KEY)?,
+    if version.to_string() != version_text {
+        return Err(BatchError::NonCanonicalSchemaMetadata);
+    }
+
+    let declared_fingerprint = LogicalSchemaFingerprint::from_hex(fingerprint_text)?;
+    if declared_fingerprint.to_string() != fingerprint_text {
+        return Err(BatchError::NonCanonicalSchemaMetadata);
+    }
+
+    let metadata = decode_canonical_metadata(
+        schema_metadata_text,
         SCHEMA_METADATA_KEY,
+        BatchError::NonCanonicalSchemaMetadata,
     )?;
+    validate_arrow_schema_shape(schema)?;
+
     let fields = schema
         .fields()
         .iter()
         .map(|field| logical_field_from_arrow(field.as_ref()))
         .collect::<Result<Vec<_>, _>>()?;
     let logical = LogicalSchema::from_parts(version, fields, metadata)?;
-    let actual_fingerprint = LogicalSchemaFingerprint::try_from_schema(&logical)?;
-    if declared_fingerprint != actual_fingerprint {
+    let actual_fingerprint = LogicalSchemaFingerprint::from_validated_schema(&logical)?;
+    let actual_fingerprint_text = actual_fingerprint.to_string();
+    if declared_fingerprint != actual_fingerprint || fingerprint_text != actual_fingerprint_text {
         return Err(BatchError::SchemaFingerprintMismatch);
     }
     Ok(logical)
 }
 
-fn logical_field_to_arrow(field: &LogicalField) -> Result<Field, BatchError> {
-    field.validate()?;
+fn logical_field_to_arrow_validated(field: &LogicalField) -> Result<Field, BatchError> {
     let mut metadata = HashMap::new();
     metadata.insert(COLUMN_ID_KEY.to_owned(), field.id.to_string());
     metadata.insert(
@@ -278,21 +384,114 @@ fn logical_field_to_arrow(field: &LogicalField) -> Result<Field, BatchError> {
 }
 
 fn logical_field_from_arrow(field: &Field) -> Result<LogicalField, BatchError> {
-    let id = Uuid::parse_str(required_metadata(field.metadata(), COLUMN_ID_KEY)?)
+    let id_text = required_metadata(field.metadata(), COLUMN_ID_KEY)?;
+    let field_metadata_text = required_metadata(field.metadata(), FIELD_METADATA_KEY)?;
+    ensure_exact_metadata_keys(
+        field.metadata(),
+        &[COLUMN_ID_KEY, FIELD_METADATA_KEY],
+        BatchError::NonCanonicalFieldMetadata,
+    )?;
+
+    let id = Uuid::parse_str(id_text)
         .map(ColumnId::from_uuid)
         .map_err(|_| BatchError::InvalidReservedMetadata(COLUMN_ID_KEY))?;
-    let metadata = decode_metadata(
-        required_metadata(field.metadata(), FIELD_METADATA_KEY)?,
+    if id.to_string() != id_text {
+        return Err(BatchError::NonCanonicalFieldMetadata);
+    }
+    let metadata = decode_canonical_metadata(
+        field_metadata_text,
         FIELD_METADATA_KEY,
+        BatchError::NonCanonicalFieldMetadata,
     )?;
-    LogicalField::new(
+    Ok(LogicalField {
         id,
-        field.name().clone(),
-        logical_type_from_arrow(field.data_type())?,
-        field.is_nullable(),
-    )?
-    .with_metadata(metadata)
-    .map_err(BatchError::from)
+        name: field.name().clone(),
+        data_type: logical_type_from_arrow(field.data_type())?,
+        nullable: field.is_nullable(),
+        metadata,
+    })
+}
+
+fn validate_arrow_schema_shape(schema: &Schema) -> Result<(), BatchError> {
+    let mut fields_seen = 0_usize;
+    let mut stack = Vec::new();
+    push_arrow_fields(schema.fields(), 1, &mut fields_seen, &mut stack)?;
+
+    while let Some((data_type, depth)) = stack.pop() {
+        if depth > MAX_SCHEMA_NESTING_DEPTH {
+            return Err(LogicalError::SchemaNestingDepthExceeded {
+                depth,
+                maximum: MAX_SCHEMA_NESTING_DEPTH,
+            }
+            .into());
+        }
+        match data_type {
+            DataType::List(element) => {
+                if element.name() != Field::LIST_FIELD_DEFAULT_NAME
+                    || !element.is_nullable()
+                    || !element.metadata().is_empty()
+                {
+                    return Err(BatchError::NonCanonicalListElement);
+                }
+                stack.push((element.data_type(), next_arrow_depth(depth)?));
+            }
+            DataType::Struct(fields) => {
+                push_arrow_fields(
+                    fields,
+                    next_arrow_depth(depth)?,
+                    &mut fields_seen,
+                    &mut stack,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn push_arrow_fields<'a>(
+    fields: &'a arrow_schema::Fields,
+    type_depth: usize,
+    fields_seen: &mut usize,
+    stack: &mut Vec<(&'a DataType, usize)>,
+) -> Result<(), BatchError> {
+    for field in fields {
+        *fields_seen =
+            (*fields_seen)
+                .checked_add(1)
+                .ok_or(LogicalError::SchemaFieldLimitExceeded {
+                    fields: usize::MAX,
+                    maximum: MAX_SCHEMA_FIELDS,
+                })?;
+        if *fields_seen > MAX_SCHEMA_FIELDS {
+            return Err(LogicalError::SchemaFieldLimitExceeded {
+                fields: *fields_seen,
+                maximum: MAX_SCHEMA_FIELDS,
+            }
+            .into());
+        }
+        required_metadata(field.metadata(), COLUMN_ID_KEY)?;
+        required_metadata(field.metadata(), FIELD_METADATA_KEY)?;
+        ensure_exact_metadata_keys(
+            field.metadata(),
+            &[COLUMN_ID_KEY, FIELD_METADATA_KEY],
+            BatchError::NonCanonicalFieldMetadata,
+        )?;
+    }
+    for field in fields.iter().rev() {
+        stack.push((field.data_type(), type_depth));
+    }
+    Ok(())
+}
+
+fn next_arrow_depth(depth: usize) -> Result<usize, BatchError> {
+    depth.checked_add(1).ok_or_else(|| {
+        LogicalError::SchemaNestingDepthExceeded {
+            depth: usize::MAX,
+            maximum: MAX_SCHEMA_NESTING_DEPTH,
+        }
+        .into()
+    })
 }
 
 fn logical_type_to_arrow(data_type: &LogicalType) -> Result<DataType, BatchError> {
@@ -319,7 +518,7 @@ fn logical_type_to_arrow(data_type: &LogicalType) -> Result<DataType, BatchError
         LogicalType::Struct(fields) => DataType::Struct(
             fields
                 .iter()
-                .map(logical_field_to_arrow)
+                .map(logical_field_to_arrow_validated)
                 .map(|field| field.map(Arc::new))
                 .collect::<Result<Vec<_>, _>>()?
                 .into(),
@@ -394,6 +593,29 @@ fn decode_metadata(value: &str, key: &'static str) -> Result<BTreeMap<String, St
     serde_json::from_str(value).map_err(|_| BatchError::InvalidReservedMetadata(key))
 }
 
+fn decode_canonical_metadata(
+    value: &str,
+    key: &'static str,
+    noncanonical: BatchError,
+) -> Result<BTreeMap<String, String>, BatchError> {
+    let metadata = decode_metadata(value, key)?;
+    if encode_metadata(&metadata)? != value {
+        return Err(noncanonical);
+    }
+    Ok(metadata)
+}
+
+fn ensure_exact_metadata_keys(
+    metadata: &HashMap<String, String>,
+    expected: &[&str],
+    noncanonical: BatchError,
+) -> Result<(), BatchError> {
+    if metadata.len() != expected.len() || expected.iter().any(|key| !metadata.contains_key(*key)) {
+        return Err(noncanonical);
+    }
+    Ok(())
+}
+
 fn required_metadata<'a>(
     metadata: &'a HashMap<String, String>,
     key: &'static str,
@@ -457,6 +679,10 @@ pub enum BatchError {
     InvalidReservedMetadata(&'static str),
     #[error("Arrow schema fingerprint does not match its logical schema")]
     SchemaFingerprintMismatch,
+    #[error("Arrow schema metadata is not canonical")]
+    NonCanonicalSchemaMetadata,
+    #[error("Arrow field metadata is not canonical")]
+    NonCanonicalFieldMetadata,
     #[error("Arrow list element metadata is not canonical")]
     NonCanonicalListElement,
     #[error("unsupported Arrow physical type {0}")]
@@ -745,6 +971,136 @@ mod tests {
             validate_batch_bounds(1, MAX_BATCH_BYTES + 1),
             Err(BatchError::ByteLimitExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn strict_decoder_rejects_noncanonical_schema_metadata() {
+        let logical = schema_with_type(LogicalType::Utf8);
+        let arrow = logical_schema_to_arrow(&logical).expect("to Arrow");
+
+        let mut extra = arrow.metadata().clone();
+        extra.insert("foreign".to_owned(), "metadata".to_owned());
+        assert!(matches!(
+            logical_schema_from_arrow(&Schema::new_with_metadata(arrow.fields().clone(), extra)),
+            Err(BatchError::NonCanonicalSchemaMetadata)
+        ));
+
+        let mut padded_version = arrow.metadata().clone();
+        padded_version.insert(SCHEMA_VERSION_KEY.to_owned(), "01".to_owned());
+        assert!(matches!(
+            logical_schema_from_arrow(&Schema::new_with_metadata(
+                arrow.fields().clone(),
+                padded_version
+            )),
+            Err(BatchError::NonCanonicalSchemaMetadata)
+        ));
+
+        let mut uppercase_fingerprint = arrow.metadata().clone();
+        uppercase_fingerprint.insert(SCHEMA_FINGERPRINT_KEY.to_owned(), "AA".repeat(32));
+        assert!(matches!(
+            logical_schema_from_arrow(&Schema::new_with_metadata(
+                arrow.fields().clone(),
+                uppercase_fingerprint
+            )),
+            Err(BatchError::NonCanonicalSchemaMetadata)
+        ));
+
+        let mut spaced_json = arrow.metadata().clone();
+        spaced_json.insert(SCHEMA_METADATA_KEY.to_owned(), "{ }".to_owned());
+        assert!(matches!(
+            logical_schema_from_arrow(&Schema::new_with_metadata(
+                arrow.fields().clone(),
+                spaced_json
+            )),
+            Err(BatchError::NonCanonicalSchemaMetadata)
+        ));
+    }
+
+    #[test]
+    fn strict_decoder_rejects_noncanonical_field_metadata() {
+        let logical = schema_with_type(LogicalType::Utf8);
+        let arrow = logical_schema_to_arrow(&logical).expect("to Arrow");
+
+        let mut extra = arrow.field(0).metadata().clone();
+        extra.insert("foreign".to_owned(), "metadata".to_owned());
+        let extra_field = arrow.field(0).clone().with_metadata(extra);
+        let extra_schema = Schema::new_with_metadata(vec![extra_field], arrow.metadata().clone());
+        assert!(matches!(
+            logical_schema_from_arrow(&extra_schema),
+            Err(BatchError::NonCanonicalFieldMetadata)
+        ));
+
+        let mut compact_id = arrow.field(0).metadata().clone();
+        compact_id.insert(
+            COLUMN_ID_KEY.to_owned(),
+            required_metadata(arrow.field(0).metadata(), COLUMN_ID_KEY)
+                .expect("column id")
+                .replace('-', ""),
+        );
+        let compact_field = arrow.field(0).clone().with_metadata(compact_id);
+        let compact_schema =
+            Schema::new_with_metadata(vec![compact_field], arrow.metadata().clone());
+        assert!(matches!(
+            logical_schema_from_arrow(&compact_schema),
+            Err(BatchError::NonCanonicalFieldMetadata)
+        ));
+
+        let mut spaced_json = arrow.field(0).metadata().clone();
+        spaced_json.insert(FIELD_METADATA_KEY.to_owned(), "{ }".to_owned());
+        let spaced_field = arrow.field(0).clone().with_metadata(spaced_json);
+        let spaced_schema = Schema::new_with_metadata(vec![spaced_field], arrow.metadata().clone());
+        assert!(matches!(
+            logical_schema_from_arrow(&spaced_schema),
+            Err(BatchError::NonCanonicalFieldMetadata)
+        ));
+    }
+
+    #[test]
+    fn strict_decoder_rejects_arrow_nesting_beyond_the_logical_limit() {
+        let logical = schema_with_type(LogicalType::Int64);
+        let arrow = logical_schema_to_arrow(&logical).expect("to Arrow");
+        let mut over_limit_type = DataType::Int64;
+        for _ in 1..=MAX_SCHEMA_NESTING_DEPTH {
+            over_limit_type = DataType::new_list(over_limit_type, true);
+        }
+        let over_limit_field = arrow.field(0).clone().with_data_type(over_limit_type);
+        let over_limit =
+            Schema::new_with_metadata(vec![over_limit_field], arrow.metadata().clone());
+
+        assert!(matches!(
+            logical_schema_from_arrow(&over_limit),
+            Err(BatchError::Logical(
+                LogicalError::SchemaNestingDepthExceeded {
+                    depth,
+                    maximum: MAX_SCHEMA_NESTING_DEPTH
+                }
+            )) if depth == MAX_SCHEMA_NESTING_DEPTH + 1
+        ));
+    }
+
+    #[test]
+    fn factory_reuses_validated_logical_and_arrow_schemas() {
+        let logical = Arc::new(schema_with_type(LogicalType::Int64));
+        let source = Uuid::from_u128(7);
+        let factory = BatchEnvelopeFactory::try_new(Arc::clone(&logical), source).expect("factory");
+        let first_batch = RecordBatch::new_empty(Arc::clone(factory.arrow_schema()));
+        let structurally_equal_schema = Arc::new(factory.arrow_schema().as_ref().clone());
+        let second_batch = RecordBatch::new_empty(structurally_equal_schema);
+
+        let first = factory.try_build(0, first_batch).expect("first envelope");
+        let second = factory.try_build(1, second_batch).expect("second envelope");
+
+        assert!(Arc::ptr_eq(first.shared_schema(), second.shared_schema()));
+        assert!(Arc::ptr_eq(
+            first.payload().schema_ref(),
+            second.payload().schema_ref()
+        ));
+        assert!(Arc::ptr_eq(
+            first.payload().schema_ref(),
+            factory.arrow_schema()
+        ));
+        assert_eq!(first.schema_fingerprint(), second.schema_fingerprint());
+        assert_eq!(first.source_asset_id(), second.source_asset_id());
     }
 
     #[test]
