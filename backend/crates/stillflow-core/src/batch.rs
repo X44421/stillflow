@@ -171,10 +171,11 @@ impl BatchEnvelopeFactory {
         sequence: u64,
         payload: RecordBatch,
     ) -> Result<BatchEnvelope, BatchError> {
-        if payload.schema().as_ref() != self.arrow_schema.as_ref() {
+        let shares_arrow_schema = Arc::ptr_eq(payload.schema_ref(), &self.arrow_schema);
+        if !shares_arrow_schema && payload.schema_ref().as_ref() != self.arrow_schema.as_ref() {
             return Err(BatchError::PhysicalSchemaMismatch);
         }
-        let payload = if Arc::ptr_eq(payload.schema_ref(), &self.arrow_schema) {
+        let payload = if shares_arrow_schema {
             payload
         } else {
             payload

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -493,8 +493,8 @@ fn validate_nodes(
                 }
             }
             ValidationNode::Fields { fields, type_depth } => {
-                let mut ids = BTreeSet::new();
-                let mut names = BTreeSet::new();
+                let mut ids = HashSet::new();
+                let mut names = HashSet::new();
                 for field in fields {
                     if field.name.trim().is_empty() {
                         return Err(LogicalError::EmptyColumnName(field.id));
