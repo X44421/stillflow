@@ -101,7 +101,12 @@ impl ConnectorRegistry {
                 .capabilities()
                 .ensure(Capability::ColumnProjection)?;
         }
-        connector.preview(connection, request).await
+        let expected_source_asset_id = request.asset.id;
+        let row_limit = request.row_limit;
+        let byte_limit = request.byte_limit;
+        let preview = connector.preview(connection, request).await?;
+        preview.validate(expected_source_asset_id, row_limit, byte_limit)?;
+        Ok(preview)
     }
 
     pub async fn read_batches(
@@ -113,6 +118,7 @@ impl ConnectorRegistry {
         request.validate()?;
         validate_asset_belongs_to_connection(connection, &request.asset)?;
         let context = request.context.clone();
+        let expected_source_asset_id = request.asset.id;
         let connector = self.require(connection.kind())?;
         connector.capabilities().ensure(Capability::Streaming)?;
         if request.filter.is_some() {
@@ -131,7 +137,11 @@ impl ConnectorRegistry {
                 .ensure(Capability::IncrementalRead)?;
         }
         let raw = connector.read_batches(connection, request).await?;
-        Ok(attach_request_context(raw.into_inner(), context))
+        Ok(attach_request_context(
+            raw.into_inner(),
+            context,
+            expected_source_asset_id,
+        ))
     }
 
     pub async fn checkpoint(

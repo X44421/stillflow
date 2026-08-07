@@ -14,7 +14,7 @@ use crate::raw_batch_stream::RawBatchStream;
 /// Object-safe connector implementation handle.
 pub type SourceConnectorRef = Arc<dyn SourceConnector>;
 
-/// Arrow-based connector contract for discovery, inspection, preview and reads.
+/// Envelope-based connector contract for discovery, inspection, preview and reads.
 ///
 /// Implementations return [`RawBatchStream`] from [`Self::read_batches`]. Request
 /// context wrapping is enforced by [`crate::ConnectorRegistry::read_batches`].
@@ -47,14 +47,14 @@ pub trait SourceConnector: Send + Sync {
         request: InspectRequest,
     ) -> ConnectorResult<AssetMetadata>;
 
-    /// Returns a bounded Arrow preview for one asset.
+    /// Returns a bounded preview containing versioned Arrow envelopes.
     async fn preview(
         &self,
         connection: &SourceConnection,
         request: PreviewRequest,
     ) -> ConnectorResult<PreviewData>;
 
-    /// Opens a bounded Arrow batch stream for one asset without request wrapping.
+    /// Opens a bounded envelope stream for one asset without registry validation.
     async fn read_batches(
         &self,
         connection: &SourceConnection,
