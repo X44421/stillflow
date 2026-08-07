@@ -1,15 +1,19 @@
-use crate::domain::{Checkpoint, SourceFilter};
+use std::collections::BTreeSet;
+
+use crate::domain::Checkpoint;
 use crate::request::RequestContext;
+use crate::ColumnId;
 use crate::ConnectorError;
 use crate::ConnectorResult;
 use crate::SourceAsset;
+use crate::SourceFilter;
 
 /// Streaming read request with projection, predicate and resume state.
 #[derive(Debug, Clone)]
 pub struct ReadRequest {
     pub context: RequestContext,
     pub asset: SourceAsset,
-    pub projection: Option<Vec<String>>,
+    pub projection: Option<Vec<ColumnId>>,
     pub filter: Option<SourceFilter>,
     pub checkpoint: Option<Checkpoint>,
     pub batch_size: usize,
@@ -45,13 +49,16 @@ impl ReadRequest {
                     "read projection must not be empty when provided",
                 ));
             }
-        }
-        if let Some(filter) = &self.filter {
-            if filter.expression.trim().is_empty() {
+            if projection.iter().copied().collect::<BTreeSet<_>>().len() != projection.len() {
                 return Err(ConnectorError::invalid_configuration(
-                    "read filter expression must not be empty when provided",
+                    "read projection must not contain duplicate column ids",
                 ));
             }
+        }
+        if let Some(filter) = &self.filter {
+            filter.expression.validate_shape().map_err(|error| {
+                ConnectorError::invalid_configuration(format!("invalid read filter: {error}"))
+            })?;
         }
         Ok(())
     }
@@ -78,5 +85,24 @@ mod tests {
         );
         let request = ReadRequest::new(asset, 0);
         request.validate().expect_err("invalid batch size");
+    }
+
+    #[test]
+    fn rejects_duplicate_projection_ids() {
+        let asset = SourceAsset::new(
+            uuid::Uuid::new_v4(),
+            AssetKind::File,
+            "orders.csv",
+            AssetLocator {
+                path: "/orders.csv".to_owned(),
+                container: None,
+                schema: None,
+                sheet: None,
+            },
+        );
+        let column = ColumnId::from_uuid(uuid::Uuid::from_u128(1));
+        let mut request = ReadRequest::new(asset, 1024);
+        request.projection = Some(vec![column, column]);
+        request.validate().expect_err("duplicate projection");
     }
 }

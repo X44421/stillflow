@@ -223,7 +223,7 @@ mod tests {
         ) -> ConnectorResult<AssetMetadata> {
             request.context.ensure_active()?;
             Ok(AssetMetadata::new(
-                Arc::new(arrow_schema::Schema::empty()),
+                stillflow_core::LogicalSchema::empty(),
                 "stub",
             ))
         }
@@ -235,9 +235,9 @@ mod tests {
         ) -> ConnectorResult<stillflow_core::PreviewData> {
             request.context.ensure_active()?;
             request.validate()?;
-            Ok(stillflow_core::PreviewData::empty(Arc::new(
-                arrow_schema::Schema::empty(),
-            )))
+            Ok(stillflow_core::PreviewData::empty(
+                stillflow_core::LogicalSchema::empty(),
+            ))
         }
 
         async fn read_batches(
@@ -447,7 +447,7 @@ mod tests {
                 _request: InspectRequest,
             ) -> ConnectorResult<AssetMetadata> {
                 Ok(AssetMetadata::new(
-                    Arc::new(arrow_schema::Schema::empty()),
+                    stillflow_core::LogicalSchema::empty(),
                     "stub",
                 ))
             }
@@ -457,9 +457,9 @@ mod tests {
                 _connection: &SourceConnection,
                 _request: PreviewRequest,
             ) -> ConnectorResult<stillflow_core::PreviewData> {
-                Ok(stillflow_core::PreviewData::empty(Arc::new(
-                    arrow_schema::Schema::empty(),
-                )))
+                Ok(stillflow_core::PreviewData::empty(
+                    stillflow_core::LogicalSchema::empty(),
+                ))
             }
 
             async fn read_batches(

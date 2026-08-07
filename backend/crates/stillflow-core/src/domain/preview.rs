@@ -1,14 +1,15 @@
-use std::sync::Arc;
+use std::collections::BTreeSet;
 
 use arrow_array::RecordBatch;
-use arrow_schema::Schema;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::SourceFilter;
 use crate::request::RequestContext;
+use crate::ColumnId;
 use crate::ConnectorError;
 use crate::ConnectorResult;
+use crate::LogicalSchema;
 use crate::SourceAsset;
+use crate::SourceFilter;
 
 /// Strategy used when sampling rows for preview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -25,7 +26,7 @@ pub enum SamplingStrategy {
 pub struct PreviewRequest {
     pub context: RequestContext,
     pub asset: SourceAsset,
-    pub projection: Option<Vec<String>>,
+    pub projection: Option<Vec<ColumnId>>,
     pub filter: Option<SourceFilter>,
     pub row_limit: usize,
     pub byte_limit: usize,
@@ -79,13 +80,16 @@ impl PreviewRequest {
                     "preview projection must not be empty when provided",
                 ));
             }
-        }
-        if let Some(filter) = &self.filter {
-            if filter.expression.trim().is_empty() {
+            if projection.iter().copied().collect::<BTreeSet<_>>().len() != projection.len() {
                 return Err(ConnectorError::invalid_configuration(
-                    "preview filter expression must not be empty when provided",
+                    "preview projection must not contain duplicate column ids",
                 ));
             }
+        }
+        if let Some(filter) = &self.filter {
+            filter.expression.validate_shape().map_err(|error| {
+                ConnectorError::invalid_configuration(format!("invalid preview filter: {error}"))
+            })?;
         }
         Ok(())
     }
@@ -94,7 +98,7 @@ impl PreviewRequest {
 /// Bounded preview payload returned by connectors.
 #[derive(Debug, Clone)]
 pub struct PreviewData {
-    pub schema: Arc<Schema>,
+    pub schema: LogicalSchema,
     pub batches: Vec<RecordBatch>,
     pub rows_returned: usize,
     pub rows_truncated: bool,
@@ -104,7 +108,7 @@ pub struct PreviewData {
 }
 
 impl PreviewData {
-    pub fn empty(schema: Arc<Schema>) -> Self {
+    pub fn empty(schema: LogicalSchema) -> Self {
         Self {
             schema,
             batches: Vec::new(),
@@ -147,5 +151,13 @@ mod tests {
     fn rejects_excessive_row_limit() {
         let request = PreviewRequest::new(sample_asset(), PreviewRequest::MAX_ROW_LIMIT + 1, 1024);
         request.validate().expect_err("excessive row limit");
+    }
+
+    #[test]
+    fn rejects_duplicate_projection_ids() {
+        let column = ColumnId::from_uuid(uuid::Uuid::from_u128(1));
+        let mut request = PreviewRequest::new(sample_asset(), 10, 1024);
+        request.projection = Some(vec![column, column]);
+        request.validate().expect_err("duplicate projection");
     }
 }

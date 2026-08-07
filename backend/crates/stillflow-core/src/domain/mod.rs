@@ -1,7 +1,5 @@
 //! Core ingestion domain types.
 
-use serde::{Deserialize, Serialize};
-
 mod asset;
 mod checkpoint;
 mod connection;
@@ -72,42 +70,5 @@ pub struct CheckpointRequest {
 impl CheckpointRequest {
     pub fn validate(&self) -> crate::ConnectorResult<()> {
         self.context.ensure_active()
-    }
-}
-
-/// Dialect used to interpret a [`SourceFilter`] expression.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum FilterDialect {
-    /// ANSI SQL subset interpreted by SQL-capable connectors and DuckDB.
-    #[default]
-    Sql,
-    /// JSONPath for document-oriented connectors.
-    JsonPath,
-    /// Connector-native expression syntax declared by the adapter.
-    ConnectorNative,
-}
-
-/// A portable filter expression carried on preview and read requests.
-///
-/// The [`FilterDialect`] tells each engine how to interpret
-/// [`SourceFilter::expression`]. Connectors that do not support predicate
-/// pushdown must return [`crate::ConnectorError`] with category
-/// [`crate::ErrorCategory::UnsupportedCapability`] when a non-empty filter is
-/// supplied.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceFilter {
-    #[serde(default)]
-    pub dialect: FilterDialect,
-    pub expression: String,
-}
-
-impl SourceFilter {
-    pub fn sql(expression: impl Into<String>) -> Self {
-        Self {
-            dialect: FilterDialect::Sql,
-            expression: expression.into(),
-        }
     }
 }
