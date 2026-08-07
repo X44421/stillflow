@@ -1,0 +1,31 @@
+---
+description: Stillflow architecture, contract, and verification gates
+alwaysApply: true
+---
+
+# Stillflow engineering rules
+
+- Start from the latest accepted base. Treat historical branches as read-only
+  evidence; do not merge or cherry-pick them.
+- Read `AGENTS.md`, the accepted architecture, the issue, and the applicable
+  `docs/issues/` contract before editing.
+- Preserve the dependency direction
+  `api -> engine -> {plan, connectors, storage} -> core`.
+- Keep Polars/DuckDB/SQLx/Axum and source-specific libraries out of
+  `stillflow-core` and `stillflow-plan`.
+- Use stable column identities and typed expression/rule nodes. Do not encode
+  executable behavior in display names or free-form strings.
+- Keep plans deterministic: ordered collections, explicit versions, no ambient
+  time, and no IDs generated during serialization.
+- Keep reads and previews bounded by rows, bytes, batches, deadlines, and
+  cancellation.
+- Arrow 59 is the execution interchange boundary; Polars owns cleaning; DuckDB
+  owns bounded preview/federation/materialization.
+- SQLite is metadata storage and Parquet is immutable snapshot storage.
+- Never place secrets in payloads, logs, events, fixtures, or errors.
+- Do not change UI layout, styling, or tokens unless the issue explicitly asks.
+- Public-contract, plan, streaming, persistence, or multi-crate changes require a
+  frozen high-risk contract.
+- Run formatting, Clippy, Rust tests, frontend typecheck, and frontend build when
+  the environment provides the required tools. Report unavailable tools honestly.
+- End with the completion report required by `AGENTS.md`.

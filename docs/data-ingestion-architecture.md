@@ -1,8 +1,8 @@
 # Data Ingestion Architecture
 
-> Status: Proposed
+> Status: Accepted
 > Scope: Backend and data contracts only
-> Last updated: 2026-07-28
+> Last updated: 2026-08-07
 
 ## 1. Decision summary
 
@@ -12,12 +12,15 @@ The Phase 1 stack is:
 
 | Layer | Primary technology | Responsibility |
 | --- | --- | --- |
+| Logical contracts | Rust domain types | Stable LogicalSchema, typed expressions/rules, validated plan DAGs and deterministic fingerprints |
 | Tabular file IO and cleaning | Polars | CSV, TSV, JSON, NDJSON, Parquet, schema inference, projection, filtering, cleaning expressions |
 | Workbook ingestion | Calamine | XLS, XLSX, XLSM, XLSB and ODS workbook discovery and cell extraction |
 | Object storage | object_store | Local files, S3-compatible storage, Azure Blob and GCS through one storage abstraction |
 | Database control plane | SQLx | Connection tests, catalog discovery, schema inspection, preview queries and incremental cursors |
 | Preview and federation | DuckDB | Sampling, preview SQL, file joins, local materialization and CSV-to-Parquet conversion |
-| Interchange protocol | Apache Arrow | Schema and RecordBatch boundary between connectors and engines |
+| Interchange protocol | Apache Arrow 59 | Versioned bounded batch payload between connectors and engines |
+| Metadata persistence | SQLite | Transactional objects, jobs, lineage, events and snapshot manifests |
+| Snapshot persistence | Parquet | Immutable, checksummed columnar partitions |
 
 Document ingestion is a separate protocol. Docling will run as an isolated worker in Phase 2. ConnectorX and Airbyte are deferred until measured demand justifies them.
 
@@ -57,19 +60,28 @@ This architecture preserves the core DataCleaner OS rules:
 ```mermaid
 flowchart TD
     UI[Workspace UI] --> API[Ingestion API]
-    API --> Registry[Connector Registry]
+    API --> Engine[Execution Engine]
+    Engine --> Plan[Logical Plan DAG]
+    Engine --> Registry[Connector Registry]
     Registry --> Tabular[Tabular Connectors]
     Registry --> Documents[Document Worker Gateway]
-    Tabular --> Arrow[Arrow RecordBatch Stream]
+    Tabular --> Arrow[Versioned Arrow Batch Envelope]
     Arrow --> Polars[Polars Cleaning Engine]
     Arrow --> DuckDB[DuckDB Preview and Materialization]
     Documents --> Graph[Document Graph]
-    Polars --> Dataset[Dataset and Snapshot Registry]
-    DuckDB --> Dataset
+    Polars --> Parquet[Immutable Parquet Partitions]
+    DuckDB --> Parquet
+    Parquet --> SQLite[SQLite Snapshot Manifest]
+    SQLite --> Dataset[Dataset and Snapshot Registry]
     Graph --> Dataset
 ```
 
 The control plane owns connection configuration, metadata, jobs and events. The data plane owns bounded streaming reads, sampling, transformation and materialization.
+
+Logical contracts are independent of both planes. `stillflow-core` owns stable
+domain identities, logical schemas and typed expressions; `stillflow-plan` owns
+rules, validated DAGs and canonicalization. See
+[`ADR-001`](architecture/adr-001-logical-physical-and-storage-boundaries.md).
 
 ## 6. Component boundaries
 
@@ -153,13 +165,19 @@ DuckDB does not own cleaning-rule semantics. Polars remains the canonical cleani
 
 ```text
 Tabular Asset
-  -> Arrow Schema
-  -> Stream<Arrow RecordBatch>
+  -> LogicalSchema
+  -> Logical Plan
+  -> Stream<BatchEnvelope<Arrow RecordBatch>>
   -> Polars or DuckDB
-  -> Dataset Snapshot
+  -> immutable Parquet partitions
+  -> atomic SQLite snapshot manifest
 ```
 
-Connector boundaries expose Arrow schemas and RecordBatch streams. They must not expose Polars DataFrames as the public connector ABI. This limits coupling to Polars internals and keeps DuckDB integration explicit.
+Connector boundaries expose stable logical schemas and versioned envelopes around
+bounded Arrow batches. They must not expose Polars DataFrames as the public
+connector ABI. This limits coupling to Polars internals and keeps DuckDB
+integration explicit. The envelope is introduced in its own delivery node; raw
+`RecordBatch` streams are a temporary Phase 0 contract until that migration lands.
 
 The workspace lockfile must pin compatible Arrow versions. Any Polars-to-Arrow conversion is isolated in an engine adapter and covered by round-trip tests.
 
@@ -181,7 +199,7 @@ A Document Graph preserves hierarchy, reading order and cross-element relationsh
 
 ## 8. Connector contract
 
-The initial contract is object-safe and stream-oriented:
+The Phase 0 contract is object-safe and stream-oriented:
 
 ```rust
 #[async_trait::async_trait]
@@ -189,21 +207,46 @@ pub trait SourceConnector: Send + Sync {
     fn kind(&self) -> ConnectorKind;
     fn capabilities(&self) -> ConnectorCapabilities;
 
-    async fn test_connection(&self) -> ConnectorResult<ConnectionStatus>;
-    async fn discover(&self, request: DiscoverRequest)
+    async fn test_connection(
+        &self,
+        connection: &SourceConnection,
+        request: TestConnectionRequest,
+    ) -> ConnectorResult<ConnectionStatus>;
+    async fn discover(
+        &self,
+        connection: &SourceConnection,
+        request: DiscoverRequest,
+    )
         -> ConnectorResult<Vec<SourceAsset>>;
-    async fn inspect(&self, asset: &SourceAsset)
+    async fn inspect(
+        &self,
+        connection: &SourceConnection,
+        request: InspectRequest,
+    )
         -> ConnectorResult<AssetMetadata>;
-    async fn preview(&self, request: PreviewRequest)
+    async fn preview(
+        &self,
+        connection: &SourceConnection,
+        request: PreviewRequest,
+    )
         -> ConnectorResult<PreviewData>;
-    async fn read_batches(&self, request: ReadRequest)
-        -> ConnectorResult<BatchStream>;
-    async fn checkpoint(&self, asset: &SourceAsset)
+    async fn read_batches(
+        &self,
+        connection: &SourceConnection,
+        request: ReadRequest,
+    ) -> ConnectorResult<RawBatchStream>;
+    async fn checkpoint(
+        &self,
+        connection: &SourceConnection,
+        request: CheckpointRequest,
+    )
         -> ConnectorResult<Option<Checkpoint>>;
 }
 ```
 
-BatchStream is a bounded asynchronous stream of Arrow RecordBatches.
+The registry attaches request context to `RawBatchStream` and exposes a bounded
+asynchronous stream. PR2 replaces the raw Arrow payload with the accepted
+versioned `BatchEnvelope` without changing connector responsibilities.
 
 Every connector declares capabilities rather than relying on type checks:
 
@@ -228,10 +271,14 @@ Requests carry cancellation, deadlines, sampling limits and projection informati
 | --- | --- |
 | SourceConnection | Configuration plus a reference to credentials; never raw secret values |
 | SourceAsset | Discoverable file, sheet, table, view or document |
-| AssetMetadata | Schema, size, timestamps, format and inspection findings |
+| LogicalSchema | Stable column identities, logical types, nullability and ordered metadata |
+| Expr / Rule | Closed, typed, serializable cleaning intent with no engine objects or SQL fragments |
+| LogicalPlan | Validated DAG with deterministic canonical bytes and fingerprint |
+| AssetMetadata | Logical schema, size, timestamps, format and inspection findings |
 | PreviewRequest | Asset, projection, predicate, row/byte limit and sampling strategy |
-| PreviewData | Arrow schema, bounded rows, truncation state and warnings |
+| PreviewData | Logical schema, bounded Arrow payloads, truncation state and warnings |
 | ReadRequest | Asset, projection, predicate, checkpoint, batch size and deadline |
+| BatchEnvelope | Version, logical schema identity, sequence, lineage and bounded Arrow payload |
 | Checkpoint | Connector-specific opaque resume token with version metadata |
 | DatasetSnapshot | Immutable materialized output plus lineage and quality metadata |
 
@@ -325,18 +372,24 @@ Errors include a retryability flag, sanitized user message, internal cause chain
 - Keep temporary materializations inside a managed staging directory.
 - Delete temporary data through a defined retention policy.
 
-## 15. Proposed repository layout
+## 15. Target repository layout
 
 ```text
 backend/
   Cargo.toml
   crates/
     stillflow-core/
-      domain types, errors, events and object mapping
+      stable domain IDs, LogicalSchema, Expr, errors, events and object mapping
+    stillflow-plan/
+      Rule AST, logical plan DAG, validation and deterministic canonicalization
     stillflow-connectors/
-      connector trait and file, excel, object-store and sql adapters
+      connector trait, capabilities and registry only
+    stillflow-connector-local-tabular/
+      isolated Polars-backed CSV/TSV/JSON/NDJSON/Parquet adapter
     stillflow-engine/
       Arrow adapters, Polars cleaning and DuckDB preview/materialization
+    stillflow-storage/
+      SQLite metadata, Parquet snapshots, atomic publish and recovery
     stillflow-api/
       HTTP boundary, jobs, cancellation and session integration
   tests/
@@ -368,7 +421,8 @@ API payloads refer to object IDs and credential references. Large RecordBatch st
 
 - Create the Rust workspace and CI checks.
 - Implement core domain types, error taxonomy and connector registry.
-- Freeze Arrow as the tabular connector boundary.
+- Freeze logical schemas, typed expressions/rules and validated plan DAGs.
+- Migrate raw Arrow streams to a versioned BatchEnvelope boundary.
 
 ### Phase 1A — Local tabular files
 
@@ -391,6 +445,7 @@ API payloads refer to object IDs and credential references. Large RecordBatch st
 
 - Native DuckDB preview SQL and local materialization.
 - Explicit Polars/DuckDB conversion tests.
+- SQLite metadata plus immutable Parquet partitions and atomic manifests.
 - End-to-end import, clean, preview and snapshot flow.
 
 ### Phase 2 — Document data
@@ -407,10 +462,12 @@ API payloads refer to object IDs and credential references. Large RecordBatch st
 
 ## 18. Phase 1 definition of done
 
-- Local CSV, NDJSON, Parquet and Excel fixtures can be discovered, inspected, previewed and imported.
+- Local CSV, TSV, JSON, NDJSON, Parquet and Excel fixtures can be discovered,
+  inspected, previewed and imported.
 - S3-compatible objects can be inspected and previewed without unconditional full download.
 - PostgreSQL, MySQL/MariaDB and SQLite can be tested, discovered and previewed using bounded queries.
-- Connector output crosses the public boundary as Arrow RecordBatches.
+- Connector output crosses the public boundary as versioned envelopes around
+  bounded Arrow 59 RecordBatches.
 - Polars cleaning and DuckDB preview produce compatible schemas for supported types.
 - Imports register Dataset and Snapshot objects with lineage and sanitized events.
 - Cancellation, timeouts and typed failures are covered by tests.
@@ -431,6 +488,13 @@ Arrow preserves columnar types, supports bounded batches and integrates with bot
 ### Why both Polars and DuckDB?
 
 Polars is the canonical expression and cleaning engine. DuckDB is the SQL preview, federation and materialization engine. Their responsibilities are deliberately non-overlapping.
+
+### Why SQLite plus Parquet?
+
+SQLite provides transactions and relational integrity for the mutable control
+plane. Parquet provides immutable, columnar analytical storage for dataset
+snapshots. Atomic manifests connect the two without asking either format to serve
+the other's workload.
 
 ### Why defer ConnectorX and Airbyte?
 
