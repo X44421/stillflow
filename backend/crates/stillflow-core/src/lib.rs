@@ -8,6 +8,8 @@
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod expression;
+pub mod logical;
 pub mod request;
 pub mod stream;
 
@@ -16,15 +18,19 @@ mod serde_tests;
 
 pub use domain::{
     AssetKind, AssetLocator, AssetMetadata, Checkpoint, CheckpointRequest, ConnectionStatus,
-    CredentialRef, Dataset, DatasetSnapshot, DiscoverRequest, FilterDialect, InspectRequest,
-    InspectionFinding, PreviewData, PreviewRequest, ReadRequest, SamplingStrategy,
-    SchemaFieldSnapshot, Session, SourceAsset, SourceConnection, SourceFilter,
-    TestConnectionRequest,
+    CredentialRef, Dataset, DatasetSnapshot, DiscoverRequest, InspectRequest, InspectionFinding,
+    PreviewData, PreviewRequest, ReadRequest, SamplingStrategy, SchemaFieldSnapshot, Session,
+    SourceAsset, SourceConnection, TestConnectionRequest,
 };
 pub use error::{
     ensure_no_secret_fields, ensure_safe_event_metadata, ConnectorError, ConnectorResult,
     ErrorCategory, SanitizedErrorSummary,
 };
 pub use events::{ConnectorKind, IngestionEvent, ObjectKind, RelationshipKind};
+pub use expression::{BinaryOperator, Expr, FiniteF64, ScalarValue, SourceFilter, UnaryOperator};
+pub use logical::{
+    ColumnId, LogicalError, LogicalField, LogicalSchema, LogicalType, TimeUnit,
+    LOGICAL_SCHEMA_VERSION,
+};
 pub use request::RequestContext;
 pub use stream::{attach_request_context, BatchItem, BatchStream};

@@ -4,7 +4,7 @@ mod serde_roundtrip_tests {
 
     use crate::{
         AssetKind, AssetLocator, Checkpoint, ConnectorKind, CredentialRef, Dataset,
-        DatasetSnapshot, FilterDialect, SamplingStrategy, Session, SourceAsset, SourceConnection,
+        DatasetSnapshot, Expr, SamplingStrategy, Session, SourceAsset, SourceConnection,
         SourceFilter,
     };
 
@@ -61,9 +61,10 @@ mod serde_roundtrip_tests {
 
     #[test]
     fn filter_and_sampling_strategy_roundtrip() {
-        let filter = SourceFilter::sql("status = 'open'");
+        let filter =
+            SourceFilter::new(Expr::Column(crate::ColumnId::from_uuid(Uuid::from_u128(1))))
+                .expect("filter");
         assert_eq!(roundtrip(&filter).expression, filter.expression);
-        assert_eq!(roundtrip(&filter).dialect, FilterDialect::Sql);
         assert_eq!(
             roundtrip(&SamplingStrategy::Reservoir),
             SamplingStrategy::Reservoir

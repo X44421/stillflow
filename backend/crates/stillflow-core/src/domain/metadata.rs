@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
-use arrow_schema::Schema;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::LogicalSchema;
 
 /// Non-fatal inspection finding surfaced during schema or format analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,9 +22,10 @@ pub enum FindingSeverity {
 }
 
 /// Schema, size, timestamps, format and inspection findings for an asset.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AssetMetadata {
-    pub schema: Arc<Schema>,
+    pub schema: LogicalSchema,
     pub format: String,
     pub size_bytes: Option<u64>,
     pub row_count: Option<u64>,
@@ -34,7 +34,7 @@ pub struct AssetMetadata {
 }
 
 impl AssetMetadata {
-    pub fn new(schema: Arc<Schema>, format: impl Into<String>) -> Self {
+    pub fn new(schema: LogicalSchema, format: impl Into<String>) -> Self {
         Self {
             schema,
             format: format.into(),
