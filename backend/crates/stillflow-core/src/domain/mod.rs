@@ -18,7 +18,7 @@ pub use metadata::{AssetMetadata, InspectionFinding};
 pub use preview::{PreviewData, PreviewRequest, SamplingStrategy};
 pub use read::ReadRequest;
 pub use session::Session;
-pub use snapshot::{DatasetSnapshot, SchemaFieldSnapshot};
+pub use snapshot::{DatasetSnapshot, SnapshotError, SnapshotStats, DATASET_SNAPSHOT_VERSION};
 
 /// Request parameters for asset discovery.
 #[derive(Debug, Clone)]
