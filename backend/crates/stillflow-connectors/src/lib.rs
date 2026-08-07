@@ -11,8 +11,8 @@ pub use raw_batch_stream::RawBatchStream;
 pub use registry::ConnectorRegistry;
 
 pub use stillflow_core::{
-    AssetKind, AssetLocator, AssetMetadata, BatchItem, BatchStream, Checkpoint, CheckpointRequest,
-    ConnectionStatus, ConnectorError, ConnectorKind, ConnectorResult, DatasetSnapshot,
-    DiscoverRequest, InspectRequest, PreviewData, PreviewRequest, ReadRequest, RequestContext,
-    SourceAsset, SourceConnection, TestConnectionRequest,
+    AssetKind, AssetLocator, AssetMetadata, BatchEnvelope, BatchItem, BatchStream, Checkpoint,
+    CheckpointRequest, ConnectionStatus, ConnectorError, ConnectorKind, ConnectorResult,
+    DatasetSnapshot, DiscoverRequest, InspectRequest, PreviewData, PreviewRequest, ReadRequest,
+    RequestContext, SourceAsset, SourceConnection, TestConnectionRequest,
 };
