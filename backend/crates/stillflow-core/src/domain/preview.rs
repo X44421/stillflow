@@ -29,6 +29,8 @@ pub enum SamplingStrategy {
 pub struct PreviewRequest {
     pub context: RequestContext,
     pub asset: SourceAsset,
+    /// Optional caller-authorized schema used instead of source inference.
+    pub schema_override: Option<LogicalSchema>,
     pub projection: Option<Vec<ColumnId>>,
     pub filter: Option<SourceFilter>,
     pub row_limit: usize,
@@ -45,6 +47,7 @@ impl PreviewRequest {
         Self {
             context: RequestContext::default(),
             asset,
+            schema_override: None,
             projection: None,
             filter: None,
             row_limit,
@@ -55,6 +58,13 @@ impl PreviewRequest {
 
     pub fn validate(&self) -> ConnectorResult<()> {
         self.context.ensure_active()?;
+        if let Some(schema) = &self.schema_override {
+            schema.validate().map_err(|error| {
+                ConnectorError::invalid_configuration(format!(
+                    "invalid preview schema override: {error}"
+                ))
+            })?;
+        }
         if self.row_limit == 0 {
             return Err(ConnectorError::invalid_configuration(
                 "preview row_limit must be greater than zero",
@@ -275,6 +285,15 @@ mod tests {
         let mut request = PreviewRequest::new(sample_asset(), 10, 1024);
         request.projection = Some(vec![column, column]);
         request.validate().expect_err("duplicate projection");
+    }
+
+    #[test]
+    fn rejects_invalid_schema_override() {
+        let mut schema = LogicalSchema::empty();
+        schema.version += 1;
+        let mut request = PreviewRequest::new(sample_asset(), 10, 1024);
+        request.schema_override = Some(schema);
+        request.validate().expect_err("invalid schema override");
     }
 
     fn preview_fixture(source_asset_id: Uuid, sequence: u64) -> PreviewData {

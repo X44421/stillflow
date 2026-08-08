@@ -24,9 +24,10 @@ pub use batch::{
 };
 pub use domain::{
     AssetKind, AssetLocator, AssetMetadata, Checkpoint, CheckpointRequest, ConnectionStatus,
-    CredentialRef, Dataset, DatasetSnapshot, DiscoverRequest, InspectRequest, InspectionFinding,
-    PreviewData, PreviewRequest, ReadRequest, SamplingStrategy, Session, SnapshotError,
-    SnapshotStats, SourceAsset, SourceConnection, TestConnectionRequest, DATASET_SNAPSHOT_VERSION,
+    CredentialRef, Dataset, DatasetSnapshot, DiscoverRequest, FindingSeverity, InspectRequest,
+    InspectionFinding, PreviewData, PreviewRequest, ReadRequest, SamplingStrategy, Session,
+    SnapshotError, SnapshotStats, SourceAsset, SourceConnection, TestConnectionRequest,
+    DATASET_SNAPSHOT_VERSION,
 };
 pub use error::{
     ensure_no_secret_fields, ensure_safe_event_metadata, ConnectorError, ConnectorResult,
