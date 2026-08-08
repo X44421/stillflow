@@ -347,6 +347,7 @@ mod tests {
         let request = ReadRequest {
             context,
             asset,
+            schema_override: None,
             projection: None,
             filter: None,
             checkpoint: None,
@@ -380,6 +381,7 @@ mod tests {
         let request = PreviewRequest {
             context,
             asset,
+            schema_override: None,
             projection: None,
             filter: None,
             row_limit: 100,
@@ -405,6 +407,7 @@ mod tests {
         let request = PreviewRequest {
             context: stillflow_core::RequestContext::default(),
             asset,
+            schema_override: None,
             projection: None,
             filter: None,
             row_limit: 100,
@@ -498,6 +501,7 @@ mod tests {
         let request = PreviewRequest {
             context: stillflow_core::RequestContext::default(),
             asset,
+            schema_override: None,
             projection: None,
             filter: None,
             row_limit: 100,

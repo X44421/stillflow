@@ -14,7 +14,7 @@ pub use asset::{AssetKind, AssetLocator, SourceAsset};
 pub use checkpoint::Checkpoint;
 pub use connection::{ConnectionStatus, CredentialRef, SourceConnection};
 pub use dataset::Dataset;
-pub use metadata::{AssetMetadata, InspectionFinding};
+pub use metadata::{AssetMetadata, FindingSeverity, InspectionFinding};
 pub use preview::{PreviewData, PreviewRequest, SamplingStrategy};
 pub use read::ReadRequest;
 pub use session::Session;

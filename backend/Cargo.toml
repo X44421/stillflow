@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/stillflow-api",
+    "crates/stillflow-connector-local-tabular",
     "crates/stillflow-connectors",
     "crates/stillflow-core",
     "crates/stillflow-engine",
@@ -29,7 +30,9 @@ stillflow-storage = { path = "crates/stillflow-storage" }
 
 # Third-party crates shared across members.
 arrow-array = "59"
+arrow-cast = "59"
 arrow-schema = "59"
+arrow-select = "59"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
@@ -43,4 +46,4 @@ tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
-uuid = { version = "1", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4", "v5"] }
