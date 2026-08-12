@@ -917,6 +917,48 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn maps_timeouts_and_provider_errors_without_leaking_sources() {
+        let timeout = run_control(
+            &RequestContext::new(),
+            std::time::Duration::from_millis(1),
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                Ok(())
+            },
+        )
+        .await
+        .expect_err("request timeout");
+        assert_eq!(timeout.category(), ErrorCategory::Timeout);
+        assert!(timeout.retryable());
+
+        #[derive(Debug)]
+        struct SentinelProviderError;
+
+        impl std::fmt::Display for SentinelProviderError {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("SENTINEL_PROVIDER_SECRET")
+            }
+        }
+
+        impl std::error::Error for SentinelProviderError {}
+
+        let mapped = map_store_error(
+            object_store::Error::Generic {
+                store: "fixture",
+                source: Box::new(SentinelProviderError),
+            },
+            "read an object",
+        );
+        assert_eq!(mapped.category(), ErrorCategory::TransientSource);
+        assert!(mapped.retryable());
+        let public = format!(
+            "{mapped:?} {mapped} {}",
+            serde_json::to_string(&mapped.sanitized_summary()).expect("summary")
+        );
+        assert!(!public.contains("SENTINEL_PROVIDER_SECRET"));
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn local_access_rejects_symlink_escape() {
