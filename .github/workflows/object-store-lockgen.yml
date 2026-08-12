@@ -1,0 +1,18 @@
+name: Object store MSRV lock helper
+
+on:
+  pull_request:
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - name: Generate Rust 1.85-compatible lockfile
+        working-directory: backend
+        run: cargo generate-lockfile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: object-store-msrv-lock
+          path: backend/Cargo.lock
