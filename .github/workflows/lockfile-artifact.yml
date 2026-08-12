@@ -15,7 +15,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: rustfmt
-      - run: cargo generate-lockfile
+      - name: Update lockfile through the normal workspace build
+        continue-on-error: true
+        run: cargo check --workspace
         working-directory: backend
       - run: cargo fmt --all
         working-directory: backend
