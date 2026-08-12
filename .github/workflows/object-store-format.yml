@@ -3,6 +3,7 @@ name: Object store format helper
 on:
   push:
     branches: [agent/issue-008-format-lock]
+  pull_request:
 
 jobs:
   format:
