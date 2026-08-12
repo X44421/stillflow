@@ -1,0 +1,30 @@
+[package]
+name = "stillflow-connector-object-store"
+description = "Bounded local and S3-compatible object storage connector for Stillflow"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+arrow-array.workspace = true
+arrow-cast.workspace = true
+arrow-schema.workspace = true
+arrow-select.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+object_store.workspace = true
+parquet = { workspace = true, features = ["async"] }
+serde.workspace = true
+serde_json.workspace = true
+stillflow-connector-local-tabular.workspace = true
+stillflow-connectors.workspace = true
+stillflow-core.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+uuid.workspace = true
+
+[dev-dependencies]
+tokio-util.workspace = true
