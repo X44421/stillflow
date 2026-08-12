@@ -1,4 +1,4 @@
-name: Temporary lockfile artifact
+name: Temporary Rust artifacts
 
 on:
   pull_request:
@@ -7,16 +7,20 @@ permissions:
   contents: read
 
 jobs:
-  lockfile:
+  rust-artifacts:
     if: github.head_ref == 'agent/issue-007-lockfile-ci'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt
       - run: cargo generate-lockfile
+        working-directory: backend
+      - run: cargo fmt --all
         working-directory: backend
       - uses: actions/upload-artifact@v4
         with:
-          name: issue-007-cargo-lock
-          path: backend/Cargo.lock
+          name: issue-007-rust-artifacts
+          path: backend
           if-no-files-found: error
