@@ -5,7 +5,8 @@
 > Contract issue: #16
 > Implementation issue: #6
 > Required base: accepted PR1 contracts, rebuilt from latest `main`
-> Last updated: 2026-08-07
+> Accepted rebuild base: `main@8a6810e7dc1f95aa31288a97b2e146069eb61ff7`
+> Last updated: 2026-08-12
 
 ## 1. Objective
 
@@ -29,6 +30,8 @@ remain read-only references and must not be merged or cherry-picked.
 - Strict schema-drift, malformed-data, path, cancellation, and deadline behavior.
 - CSV, TSV, JSON, NDJSON, and Parquet fixtures and integration tests.
 - An isolated Polars/Arrow 59 bridge through the Arrow C Data Interface.
+- Reuse of one validated `BatchEnvelopeFactory` and canonical Arrow `SchemaRef`
+  for every established output schema.
 
 ## 3. Non-goals
 
@@ -197,6 +200,8 @@ Preview working memory is
 
 1. Validate request and batch size (1..=65,536).
 2. Validate/open the path and establish the output logical/physical schema once.
+   Construct one `BatchEnvelopeFactory` at this point; per-batch one-shot
+   `BatchEnvelope` construction is forbidden on the streaming hot path.
 3. Apply projection at the earliest format-specific scan/decode layer.
 4. Produce Arrow 59 batches with at most `batch_size` rows; only the final batch
    may be smaller.
