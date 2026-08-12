@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use calamine::{Data, DataType, Range};
+use calamine::{Data, Range};
 use stillflow_core::{
     CellRange, ColumnId, ConnectorError, ConnectorResult, LogicalField, LogicalSchema, LogicalType,
     RequestContext, TimeUnit, WorkbookHeaderSelection, WorkbookRegionSelection,

@@ -407,12 +407,12 @@ fn is_text(cell: &Data) -> bool {
     matches!(cell, Data::String(_))
 }
 
-fn relative_cell<'a>(
-    range: &'a Range<Data>,
+fn relative_cell(
+    range: &Range<Data>,
     absolute_start: (u32, u32),
     row: u32,
     column: u32,
-) -> Option<&'a Data> {
+) -> Option<&Data> {
     let row = usize::try_from(row.checked_sub(absolute_start.0)?).ok()?;
     let column = usize::try_from(column.checked_sub(absolute_start.1)?).ok()?;
     range.get((row, column))
