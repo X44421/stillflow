@@ -255,8 +255,8 @@ fn handle_connection(mut stream: TcpStream, state: &FixtureState) -> Result<(), 
         );
     }
     if request.method == "PUT" && query_has(query, "partNumber") {
-        let upload_id = query_value(query, "uploadId")
-            .ok_or_else(|| "upload ID is missing".to_owned())?;
+        let upload_id =
+            query_value(query, "uploadId").ok_or_else(|| "upload ID is missing".to_owned())?;
         let part_number = query_value(query, "partNumber")
             .ok_or_else(|| "part number is missing".to_owned())?
             .parse::<u32>()
@@ -277,8 +277,8 @@ fn handle_connection(mut stream: TcpStream, state: &FixtureState) -> Result<(), 
         );
     }
     if request.method == "POST" && query_has(query, "uploadId") {
-        let upload_id = query_value(query, "uploadId")
-            .ok_or_else(|| "upload ID is missing".to_owned())?;
+        let upload_id =
+            query_value(query, "uploadId").ok_or_else(|| "upload ID is missing".to_owned())?;
         let parts = state
             .uploads
             .lock()
@@ -309,8 +309,8 @@ fn handle_connection(mut stream: TcpStream, state: &FixtureState) -> Result<(), 
         );
     }
     if request.method == "DELETE" && query_has(query, "uploadId") {
-        let upload_id = query_value(query, "uploadId")
-            .ok_or_else(|| "upload ID is missing".to_owned())?;
+        let upload_id =
+            query_value(query, "uploadId").ok_or_else(|| "upload ID is missing".to_owned())?;
         state
             .uploads
             .lock()
@@ -326,13 +326,7 @@ fn handle_connection(mut stream: TcpStream, state: &FixtureState) -> Result<(), 
             .lock()
             .map_err(|_| "objects lock poisoned".to_owned())?
             .insert(key.to_owned(), request.body);
-        return write_response(
-            &mut stream,
-            "200 OK",
-            object_headers(length),
-            0,
-            &[],
-        );
+        return write_response(&mut stream, "200 OK", object_headers(length), 0, &[]);
     }
     let object = state
         .objects
@@ -364,7 +358,13 @@ fn handle_connection(mut stream: TcpStream, state: &FixtureState) -> Result<(), 
                     "Content-Range".to_owned(),
                     format!("bytes {}-{}/{}", range.start, range.end - 1, object.len()),
                 ));
-                write_response(&mut stream, "206 Partial Content", headers, body.len(), body)
+                write_response(
+                    &mut stream,
+                    "206 Partial Content",
+                    headers,
+                    body.len(),
+                    body,
+                )
             } else {
                 state.full_gets.fetch_add(1, Ordering::SeqCst);
                 write_response(
@@ -430,9 +430,8 @@ fn write_response(
     content_length: usize,
     body: &[u8],
 ) -> Result<(), String> {
-    let mut response = format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {content_length}\r\nConnection: close\r\n"
-    );
+    let mut response =
+        format!("HTTP/1.1 {status}\r\nContent-Length: {content_length}\r\nConnection: close\r\n");
     for (name, value) in headers {
         write!(response, "{name}: {value}\r\n")
             .map_err(|_| "response formatting failed".to_owned())?;
@@ -467,11 +466,9 @@ fn parse_range(value: &str, length: usize) -> Result<Range<usize>, String> {
 }
 
 fn query_has(query: &str, key: &str) -> bool {
-    query.split('&').any(|item| {
-        item.split_once('=')
-            .map_or(item, |(name, _)| name)
-            .eq(key)
-    })
+    query
+        .split('&')
+        .any(|item| item.split_once('=').map_or(item, |(name, _)| name).eq(key))
 }
 
 fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
@@ -494,11 +491,7 @@ impl ObjectStoreCredentialResolver for FixtureResolver {
     ) -> ConnectorResult<S3CredentialMaterial> {
         assert_eq!(credential_ref.as_str(), "cred://tests/object-store");
         self.calls.fetch_add(1, Ordering::SeqCst);
-        S3CredentialMaterial::new(
-            ACCESS_KEY,
-            SECRET_KEY,
-            Some(SESSION_TOKEN.to_owned()),
-        )
+        S3CredentialMaterial::new(ACCESS_KEY, SECRET_KEY, Some(SESSION_TOKEN.to_owned()))
     }
 }
 
@@ -703,10 +696,7 @@ async fn real_s3_adapter_is_bounded_streaming_secret_safe_and_abortable() {
         .clone();
     fixture.state.reset_reads();
     let csv_preview = connector
-        .preview(
-            &connection,
-            PreviewRequest::new(csv_asset, 10, 1024 * 1024),
-        )
+        .preview(&connection, PreviewRequest::new(csv_asset, 10, 1024 * 1024))
         .await
         .expect("bounded CSV preview");
     assert!(csv_preview.rows_returned > 0);
