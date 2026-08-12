@@ -130,8 +130,10 @@ fn validate_ods_repeats(
             .map_err(|_| invalid_data("ODS content XML is malformed"))?
         {
             Event::Start(tag) if tag.name() == QName(b"table:table") => {
-                let mut next = OdsSheetBounds::default();
-                next.name = attribute_string(&tag, b"table:name", reader.decoder())?;
+                let next = OdsSheetBounds {
+                    name: attribute_string(&tag, b"table:name", reader.decoder())?,
+                    ..OdsSheetBounds::default()
+                };
                 if sheet.replace(next).is_some() {
                     return Err(invalid_data("ODS content contains nested sheets"));
                 }
