@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/stillflow-api",
     "crates/stillflow-connector-local-tabular",
+    "crates/stillflow-connector-workbook",
     "crates/stillflow-connectors",
     "crates/stillflow-core",
     "crates/stillflow-engine",
@@ -34,6 +35,7 @@ arrow-cast = "59"
 arrow-schema = "59"
 arrow-select = "59"
 async-trait = "0.1"
+calamine = { version = "=0.35.0", features = ["chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 fs2 = "0.4"
@@ -47,3 +49,4 @@ thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
+zip = { version = "=7.0.0", default-features = false, features = ["deflate"] }

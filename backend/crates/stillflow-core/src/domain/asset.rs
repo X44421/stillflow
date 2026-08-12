@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::WorkbookRegionSelection;
+
 /// Kind of discoverable source asset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +26,8 @@ pub struct AssetLocator {
     pub schema: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workbook_region: Option<WorkbookRegionSelection>,
 }
 
 /// A file, sheet, table, view or document discovered through a connector.

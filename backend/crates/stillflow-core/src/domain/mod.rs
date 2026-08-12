@@ -9,6 +9,7 @@ mod preview;
 mod read;
 mod session;
 mod snapshot;
+mod workbook;
 
 pub use asset::{AssetKind, AssetLocator, SourceAsset};
 pub use checkpoint::Checkpoint;
@@ -19,6 +20,11 @@ pub use preview::{PreviewData, PreviewRequest, SamplingStrategy};
 pub use read::ReadRequest;
 pub use session::Session;
 pub use snapshot::{DatasetSnapshot, SnapshotError, SnapshotStats, DATASET_SNAPSHOT_VERSION};
+pub use workbook::{
+    CandidateConfidence, CellCoordinate, CellRange, WorkbookHeaderCandidate,
+    WorkbookHeaderSelection, WorkbookInspection, WorkbookRegionCandidate,
+    WorkbookRegionSelection, WorkbookSheetVisibility,
+};
 
 /// Request parameters for asset discovery.
 #[derive(Debug, Clone)]
@@ -56,7 +62,11 @@ pub struct InspectRequest {
 
 impl InspectRequest {
     pub fn validate(&self) -> crate::ConnectorResult<()> {
-        self.context.ensure_active()
+        self.context.ensure_active()?;
+        if let Some(selection) = &self.asset.locator.workbook_region {
+            selection.validate()?;
+        }
+        Ok(())
     }
 }
 

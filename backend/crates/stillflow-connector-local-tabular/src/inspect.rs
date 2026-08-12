@@ -69,6 +69,7 @@ pub(crate) fn inspect_opened_asset(
         row_count,
         modified_at: opened.modified_at,
         findings,
+        workbook: None,
     })
 }
 

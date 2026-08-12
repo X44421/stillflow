@@ -290,6 +290,7 @@ mod tests {
                 container: None,
                 schema: None,
                 sheet: None,
+                workbook_region: None,
             },
         )
     }

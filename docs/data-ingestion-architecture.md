@@ -386,6 +386,8 @@ backend/
       connector trait, capabilities and registry only
     stillflow-connector-local-tabular/
       isolated Polars-backed CSV/TSV/JSON/NDJSON/Parquet adapter
+    stillflow-connector-workbook/
+      isolated Calamine-backed workbook analyzer and Arrow adapter
     stillflow-engine/
       Arrow adapters, Polars cleaning and DuckDB preview/materialization
     stillflow-storage/

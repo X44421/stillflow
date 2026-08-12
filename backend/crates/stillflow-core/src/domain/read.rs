@@ -40,6 +40,9 @@ impl ReadRequest {
 
     pub fn validate(&self) -> ConnectorResult<()> {
         self.context.ensure_active()?;
+        if let Some(selection) = &self.asset.locator.workbook_region {
+            selection.validate()?;
+        }
         if let Some(schema) = &self.schema_override {
             schema.validate().map_err(|error| {
                 ConnectorError::invalid_configuration(format!(
@@ -92,6 +95,7 @@ mod tests {
                 container: None,
                 schema: None,
                 sheet: None,
+                workbook_region: None,
             },
         );
         let request = ReadRequest::new(asset, 0);
@@ -109,6 +113,7 @@ mod tests {
                 container: None,
                 schema: None,
                 sheet: None,
+                workbook_region: None,
             },
         );
         let column = ColumnId::from_uuid(uuid::Uuid::from_u128(1));
@@ -128,6 +133,7 @@ mod tests {
                 container: None,
                 schema: None,
                 sheet: None,
+                workbook_region: None,
             },
         );
         let mut schema = LogicalSchema::empty();
