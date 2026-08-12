@@ -293,9 +293,9 @@ impl<R: BufRead> JsonObjectStream<R> {
 }
 
 fn ensure_object_bytes(current: usize, additional: usize) -> ConnectorResult<()> {
-    let total = current.checked_add(additional).ok_or_else(|| {
-        json_error("JSON row exceeds the supported decoded byte range")
-    })?;
+    let total = current
+        .checked_add(additional)
+        .ok_or_else(|| json_error("JSON row exceeds the supported decoded byte range"))?;
     if total > MAX_BATCH_BYTES {
         return Err(json_error("JSON row exceeds the public batch byte bound"));
     }

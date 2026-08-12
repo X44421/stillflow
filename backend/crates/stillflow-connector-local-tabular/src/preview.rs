@@ -36,9 +36,9 @@ pub(crate) async fn preview_asset(
     )?;
     let schema = reader.output_schema();
     let envelope_factory =
-        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), request.asset.id).map_err(|_| {
-            preview_error("preview schema cannot establish the public batch boundary")
-        })?;
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), request.asset.id).map_err(
+            |_| preview_error("preview schema cannot establish the public batch boundary"),
+        )?;
     let warnings = std::mem::take(&mut reader.warnings);
     let mut batches = Vec::new();
     let mut source_rows = 0_usize;

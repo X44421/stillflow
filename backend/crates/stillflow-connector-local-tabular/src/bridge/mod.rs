@@ -37,17 +37,13 @@ pub(crate) fn dataframe_to_record_batch(
     let height = frame.height();
     if logical_schema.fields.is_empty() {
         let options = RecordBatchOptions::new().with_row_count(Some(height));
-        return RecordBatch::try_new_with_options(
-            Arc::clone(target_schema),
-            Vec::new(),
-            &options,
-        )
-        .map_err(|_| {
-            bridge_error(
-                ErrorCategory::Internal,
-                "the empty Arrow record batch violated a bridge invariant",
-            )
-        });
+        return RecordBatch::try_new_with_options(Arc::clone(target_schema), Vec::new(), &options)
+            .map_err(|_| {
+                bridge_error(
+                    ErrorCategory::Internal,
+                    "the empty Arrow record batch violated a bridge invariant",
+                )
+            });
     }
 
     let polars_batch = frame.rechunk_to_record_batch(CompatLevel::oldest());
