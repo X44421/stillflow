@@ -34,10 +34,14 @@ const SECRET_KEY: &str = "SENTINEL_SECRET_KEY";
 const SESSION_TOKEN: &str = "SENTINEL_SESSION_TOKEN";
 const LAST_MODIFIED: &str = "Wed, 12 Aug 2026 00:00:00 GMT";
 
+type UploadKey = (String, String);
+type UploadParts = BTreeMap<u32, Vec<u8>>;
+type Uploads = HashMap<UploadKey, UploadParts>;
+
 #[derive(Default)]
 struct FixtureState {
     objects: Mutex<BTreeMap<String, Vec<u8>>>,
-    uploads: Mutex<HashMap<(String, String), BTreeMap<u32, Vec<u8>>>>,
+    uploads: Mutex<Uploads>,
     range_gets: AtomicUsize,
     range_bytes: AtomicUsize,
     full_gets: AtomicUsize,
