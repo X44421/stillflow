@@ -98,7 +98,10 @@ pub(crate) fn inspect_opened(
             FindingSeverity::Info,
         ));
     }
-    if !matches!(inspection.sheet_visibility, WorkbookSheetVisibility::Visible) {
+    if !matches!(
+        inspection.sheet_visibility,
+        WorkbookSheetVisibility::Visible
+    ) {
         findings.push(finding(
             "workbook.hidden_sheet",
             "The selected worksheet is hidden in the workbook.",

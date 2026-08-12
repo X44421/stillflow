@@ -26,8 +26,14 @@ const FIXTURES: &[(&str, &str)] = &[
         "any_sheets.xlsb",
         include_str!("fixtures/any_sheets.xlsb.b64"),
     ),
-    ("any_sheets.xls", include_str!("fixtures/any_sheets.xls.b64")),
-    ("any_sheets.ods", include_str!("fixtures/any_sheets.ods.b64")),
+    (
+        "any_sheets.xls",
+        include_str!("fixtures/any_sheets.xls.b64"),
+    ),
+    (
+        "any_sheets.ods",
+        include_str!("fixtures/any_sheets.ods.b64"),
+    ),
     ("issue3.xlsm", include_str!("fixtures/issue3.xlsm.b64")),
     (
         "temperature.xlsx",
@@ -69,8 +75,7 @@ fn connection_with_config(root: &TempDir, config: serde_json::Value) -> SourceCo
 fn write_zip(path: &std::path::Path, entries: &[(&str, &[u8])]) {
     let file = File::create(path).expect("create package");
     let mut archive = ZipWriter::new(file);
-    let options =
-        SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     for (name, bytes) in entries {
         archive
             .start_file(*name, options)
@@ -166,7 +171,10 @@ async fn discovers_all_supported_formats_and_sheet_visibility() {
         .await
         .expect("inspect hidden sheet");
     assert_eq!(
-        metadata.workbook.expect("workbook metadata").sheet_visibility,
+        metadata
+            .workbook
+            .expect("workbook metadata")
+            .sheet_visibility,
         WorkbookSheetVisibility::Hidden
     );
 }
@@ -212,8 +220,7 @@ async fn inspects_selects_previews_and_streams_a_region() {
         .expect("region candidate");
     assert_eq!(
         candidate.range,
-        CellRange::try_new(CellCoordinate::new(0, 0), CellCoordinate::new(2, 1))
-            .expect("range")
+        CellRange::try_new(CellCoordinate::new(0, 0), CellCoordinate::new(2, 1)).expect("range")
     );
     assert!(candidate
         .header_candidates
@@ -240,7 +247,10 @@ async fn inspects_selects_previews_and_streams_a_region() {
     assert_eq!(selected.schema.fields[1].name, "value");
 
     let preview = registry
-        .preview(&connection, PreviewRequest::new(asset.clone(), 1, 1024 * 1024))
+        .preview(
+            &connection,
+            PreviewRequest::new(asset.clone(), 1, 1024 * 1024),
+        )
         .await
         .expect("preview");
     assert_eq!(preview.rows_returned, 1);
@@ -251,7 +261,11 @@ async fn inspects_selects_previews_and_streams_a_region() {
         .read_batches(&connection, ReadRequest::new(asset, 1))
         .await
         .expect("read stream");
-    let first = stream.next().await.expect("first item").expect("first batch");
+    let first = stream
+        .next()
+        .await
+        .expect("first item")
+        .expect("first batch");
     let second = stream
         .next()
         .await
@@ -419,8 +433,7 @@ async fn discovery_does_not_follow_file_links() {
 
     let root = fixture_root();
     let outside = TempDir::new().expect("outside root");
-    fs::write(outside.path().join("outside.xlsx"), b"outside")
-        .expect("outside workbook");
+    fs::write(outside.path().join("outside.xlsx"), b"outside").expect("outside workbook");
     symlink(
         outside.path().join("outside.xlsx"),
         root.path().join("linked.xlsx"),
@@ -478,12 +491,19 @@ async fn header_only_regions_projection_and_stream_release_are_bounded() {
         .await
         .expect("inspect");
     let mut request = ReadRequest::new(asset.clone(), 1);
-    request.projection = Some(vec![metadata.schema.fields[1].id, metadata.schema.fields[0].id]);
+    request.projection = Some(vec![
+        metadata.schema.fields[1].id,
+        metadata.schema.fields[0].id,
+    ]);
     let mut stream = registry
         .read_batches(&connection, request)
         .await
         .expect("projected stream");
-    let batch = stream.next().await.expect("batch").expect("projected batch");
+    let batch = stream
+        .next()
+        .await
+        .expect("batch")
+        .expect("projected batch");
     assert_eq!(batch.schema().fields[0].name, "value");
     assert_eq!(batch.schema().fields[1].name, "label");
     drop(stream);

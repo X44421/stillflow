@@ -22,8 +22,8 @@ pub use session::Session;
 pub use snapshot::{DatasetSnapshot, SnapshotError, SnapshotStats, DATASET_SNAPSHOT_VERSION};
 pub use workbook::{
     CandidateConfidence, CellCoordinate, CellRange, WorkbookHeaderCandidate,
-    WorkbookHeaderSelection, WorkbookInspection, WorkbookRegionCandidate,
-    WorkbookRegionSelection, WorkbookSheetVisibility,
+    WorkbookHeaderSelection, WorkbookInspection, WorkbookRegionCandidate, WorkbookRegionSelection,
+    WorkbookSheetVisibility,
 };
 
 /// Request parameters for asset discovery.

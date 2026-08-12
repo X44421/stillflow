@@ -52,9 +52,7 @@ impl CellRange {
         u64::from(self.end.column)
             .checked_sub(u64::from(self.start.column))
             .and_then(|distance| distance.checked_add(1))
-            .ok_or_else(|| {
-                ConnectorError::invalid_configuration("workbook column range overflow")
-            })
+            .ok_or_else(|| ConnectorError::invalid_configuration("workbook column range overflow"))
     }
 
     pub fn area(&self) -> ConnectorResult<u64> {

@@ -28,8 +28,8 @@ pub use domain::{
     DiscoverRequest, FindingSeverity, InspectRequest, InspectionFinding, PreviewData,
     PreviewRequest, ReadRequest, SamplingStrategy, Session, SnapshotError, SnapshotStats,
     SourceAsset, SourceConnection, TestConnectionRequest, WorkbookHeaderCandidate,
-    WorkbookHeaderSelection, WorkbookInspection, WorkbookRegionCandidate,
-    WorkbookRegionSelection, WorkbookSheetVisibility, DATASET_SNAPSHOT_VERSION,
+    WorkbookHeaderSelection, WorkbookInspection, WorkbookRegionCandidate, WorkbookRegionSelection,
+    WorkbookSheetVisibility, DATASET_SNAPSHOT_VERSION,
 };
 pub use error::{
     ensure_no_secret_fields, ensure_safe_event_metadata, ConnectorError, ConnectorResult,

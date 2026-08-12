@@ -6,9 +6,9 @@ mod serde_roundtrip_tests {
     use uuid::Uuid;
 
     use crate::{
-        AssetKind, AssetLocator, AssetMetadata, Checkpoint, ColumnId, ConnectorKind,
-        CredentialRef, Dataset, DatasetSnapshot, Expr, LogicalField, LogicalSchema, LogicalType,
-        SamplingStrategy, Session, SnapshotStats, SourceAsset, SourceConnection, SourceFilter,
+        AssetKind, AssetLocator, AssetMetadata, Checkpoint, ColumnId, ConnectorKind, CredentialRef,
+        Dataset, DatasetSnapshot, Expr, LogicalField, LogicalSchema, LogicalType, SamplingStrategy,
+        Session, SnapshotStats, SourceAsset, SourceConnection, SourceFilter,
         WorkbookHeaderSelection, WorkbookRegionSelection,
     };
 

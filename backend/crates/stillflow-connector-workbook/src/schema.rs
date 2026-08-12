@@ -35,8 +35,8 @@ pub(crate) fn prepare_schema(
     context: &RequestContext,
 ) -> ConnectorResult<RegionSchema> {
     selection.validate()?;
-    let source_columns = (selection.range.start.column..=selection.range.end.column)
-        .collect::<Vec<_>>();
+    let source_columns =
+        (selection.range.start.column..=selection.range.end.column).collect::<Vec<_>>();
     let (first_data_row, data_rows_empty) = match selection.header {
         WorkbookHeaderSelection::NoHeader => (selection.range.start.row, false),
         WorkbookHeaderSelection::Row(row) if row == selection.range.end.row => (row, true),
@@ -199,10 +199,7 @@ fn column_names(
                     if trimmed.is_empty() {
                         (format!("column_{}", index + 1), Some(raw))
                     } else {
-                        (
-                            truncate_utf8(trimmed, MAX_HEADER_BYTES),
-                            Some(raw),
-                        )
+                        (truncate_utf8(trimmed, MAX_HEADER_BYTES), Some(raw))
                     }
                 }
             };
@@ -269,7 +266,9 @@ fn project_schema(
         projected_columns.push(column);
     }
     let schema = LogicalSchema::from_parts(schema.version, fields, schema.metadata.clone())
-        .map_err(|_| ConnectorError::invalid_configuration("projected workbook schema is invalid"))?;
+        .map_err(|_| {
+            ConnectorError::invalid_configuration("projected workbook schema is invalid")
+        })?;
     Ok(RegionSchema {
         schema,
         source_columns: projected_columns,
@@ -441,11 +440,8 @@ mod tests {
             "Sheet1",
             Uuid::from_u128(1),
             WorkbookRegionSelection {
-                range: CellRange::try_new(
-                    CellCoordinate::new(0, 0),
-                    CellCoordinate::new(1, 2),
-                )
-                .expect("range"),
+                range: CellRange::try_new(CellCoordinate::new(0, 0), CellCoordinate::new(1, 2))
+                    .expect("range"),
                 header: WorkbookHeaderSelection::Row(0),
             },
             None,
@@ -484,11 +480,8 @@ mod tests {
             Cell::new((2, 1), Data::String("mixed".into())),
         ]);
         let selection = WorkbookRegionSelection {
-            range: CellRange::try_new(
-                CellCoordinate::new(0, 0),
-                CellCoordinate::new(2, 1),
-            )
-            .expect("range"),
+            range: CellRange::try_new(CellCoordinate::new(0, 0), CellCoordinate::new(2, 1))
+                .expect("range"),
             header: WorkbookHeaderSelection::NoHeader,
         };
         let full = prepare_schema(
@@ -534,11 +527,8 @@ mod tests {
             "Sheet1",
             Uuid::from_u128(3),
             WorkbookRegionSelection {
-                range: CellRange::try_new(
-                    CellCoordinate::new(0, 0),
-                    CellCoordinate::new(0, 1),
-                )
-                .expect("range"),
+                range: CellRange::try_new(CellCoordinate::new(0, 0), CellCoordinate::new(0, 1))
+                    .expect("range"),
                 header: WorkbookHeaderSelection::Row(0),
             },
             None,

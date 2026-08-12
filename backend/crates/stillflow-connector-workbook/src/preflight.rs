@@ -19,7 +19,13 @@ pub(crate) fn preflight(
     context.ensure_active()?;
     let size = file
         .metadata()
-        .map_err(|_| source_error(ErrorCategory::TransientSource, true, "workbook metadata could not be read"))?
+        .map_err(|_| {
+            source_error(
+                ErrorCategory::TransientSource,
+                true,
+                "workbook metadata could not be read",
+            )
+        })?
         .len();
     if size > config.max_workbook_bytes {
         return Err(invalid_data("workbook exceeds maxWorkbookBytes"));
@@ -52,11 +58,15 @@ pub(crate) fn preflight(
             return Err(invalid_data("encrypted workbook packages are unsupported"));
         }
         if entry.enclosed_name().is_none() {
-            return Err(invalid_data("workbook package contains an unsafe entry path"));
+            return Err(invalid_data(
+                "workbook package contains an unsafe entry path",
+            ));
         }
         let size = entry.size();
         if size > config.max_expanded_archive_bytes {
-            return Err(invalid_data("workbook package entry exceeds the expansion bound"));
+            return Err(invalid_data(
+                "workbook package entry exceeds the expansion bound",
+            ));
         }
         expanded = expanded
             .checked_add(size)
@@ -74,7 +84,9 @@ pub(crate) fn preflight(
             .by_index(index)
             .map_err(|_| invalid_data("ODS content entry is unreadable"))?;
         if entry.size() > MAX_PREFLIGHT_XML_BYTES {
-            return Err(invalid_data("ODS content entry exceeds the inspection bound"));
+            return Err(invalid_data(
+                "ODS content entry exceeds the inspection bound",
+            ));
         }
         let capacity = usize::try_from(entry.size())
             .map_err(|_| invalid_data("ODS content entry exceeds the platform range"))?;
@@ -178,9 +190,7 @@ fn count_ods_columns(bytes: &[u8], max_cells: u64) -> ConnectorResult<u64> {
         let tag = bytes
             .get(start..end)
             .ok_or_else(|| invalid_data("ODS cell tag boundary is invalid"))?;
-        if tag.starts_with(b"<table:table-cell")
-            || tag.starts_with(b"<table:covered-table-cell")
-        {
+        if tag.starts_with(b"<table:table-cell") || tag.starts_with(b"<table:covered-table-cell") {
             let repeated = attribute_u64(tag, b"table:number-columns-repeated")?.unwrap_or(1);
             if repeated == 0 || repeated > max_cells {
                 return Err(invalid_data("ODS repeated columns exceed maxSheetCells"));
@@ -249,11 +259,7 @@ fn invalid_data(message: &'static str) -> ConnectorError {
     source_error(ErrorCategory::InvalidData, false, message)
 }
 
-fn source_error(
-    category: ErrorCategory,
-    retryable: bool,
-    message: &'static str,
-) -> ConnectorError {
+fn source_error(category: ErrorCategory, retryable: bool, message: &'static str) -> ConnectorError {
     ConnectorError::with_category(category, retryable, message, Vec::new(), BTreeMap::new())
 }
 

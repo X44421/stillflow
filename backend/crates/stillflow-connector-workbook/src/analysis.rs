@@ -82,11 +82,7 @@ pub(crate) fn ensure_selection_inside_sheet(
     Ok(())
 }
 
-pub(crate) fn cell_at(
-    range: &Range<Data>,
-    row: u32,
-    column: u32,
-) -> ConnectorResult<&Data> {
+pub(crate) fn cell_at(range: &Range<Data>, row: u32, column: u32) -> ConnectorResult<&Data> {
     let start = range
         .start()
         .ok_or_else(|| invalid_configuration("workbook sheet is empty"))?;
@@ -176,14 +172,9 @@ fn find_regions(
             });
         }
         for (column_start, column_end) in true_bands(&populated_columns) {
-            let Some((trimmed, non_empty)) = trim_region(
-                range,
-                start,
-                row_start,
-                row_end,
-                column_start,
-                column_end,
-            )? else {
+            let Some((trimmed, non_empty)) =
+                trim_region(range, start, row_start, row_end, column_start, column_end)?
+            else {
                 continue;
             };
             let confidence = region_confidence(range, start, trimmed)?;
@@ -247,9 +238,9 @@ fn trim_region(
                 min_column = min_column.min(column);
                 max_row = max_row.max(row);
                 max_column = max_column.max(column);
-                non_empty = non_empty
-                    .checked_add(1)
-                    .ok_or_else(|| invalid_configuration("workbook populated-cell count overflow"))?;
+                non_empty = non_empty.checked_add(1).ok_or_else(|| {
+                    invalid_configuration("workbook populated-cell count overflow")
+                })?;
             }
         }
     }
@@ -258,7 +249,11 @@ fn trim_region(
     }
     let range = CellRange::try_new(
         CellCoordinate::new(
-            add_index(absolute_start.0, min_row, "workbook row coordinate overflow")?,
+            add_index(
+                absolute_start.0,
+                min_row,
+                "workbook row coordinate overflow",
+            )?,
             add_index(
                 absolute_start.1,
                 min_column,
@@ -266,7 +261,11 @@ fn trim_region(
             )?,
         ),
         CellCoordinate::new(
-            add_index(absolute_start.0, max_row, "workbook row coordinate overflow")?,
+            add_index(
+                absolute_start.0,
+                max_row,
+                "workbook row coordinate overflow",
+            )?,
             add_index(
                 absolute_start.1,
                 max_column,
@@ -471,16 +470,21 @@ mod tests {
             Cell::new((3, 0), Data::String("c".into())),
             Cell::new((4, 0), Data::Int(3)),
         ]);
-        let inspection = analyze_sheet(
-            &sheet,
-            &config(10),
-            &RequestContext::default(),
-        )
-        .expect("analysis");
+        let inspection =
+            analyze_sheet(&sheet, &config(10), &RequestContext::default()).expect("analysis");
         assert_eq!(inspection.region_candidates.len(), 3);
-        assert_eq!(inspection.region_candidates[0].range.start, CellCoordinate::new(0, 0));
-        assert_eq!(inspection.region_candidates[1].range.start, CellCoordinate::new(0, 2));
-        assert_eq!(inspection.region_candidates[2].range.start, CellCoordinate::new(3, 0));
+        assert_eq!(
+            inspection.region_candidates[0].range.start,
+            CellCoordinate::new(0, 0)
+        );
+        assert_eq!(
+            inspection.region_candidates[1].range.start,
+            CellCoordinate::new(0, 2)
+        );
+        assert_eq!(
+            inspection.region_candidates[2].range.start,
+            CellCoordinate::new(3, 0)
+        );
     }
 
     #[test]
@@ -491,8 +495,8 @@ mod tests {
             Cell::new((1, 0), Data::Int(1)),
             Cell::new((1, 1), Data::Float(2.0)),
         ]);
-        let inspection = analyze_sheet(&sheet, &config(10), &RequestContext::default())
-            .expect("analysis");
+        let inspection =
+            analyze_sheet(&sheet, &config(10), &RequestContext::default()).expect("analysis");
         let header = &inspection.region_candidates[0].header_candidates[0];
         assert_eq!(header.score, 100);
         assert_eq!(header.confidence, CandidateConfidence::High);
@@ -508,8 +512,8 @@ mod tests {
     #[test]
     fn marks_title_only_regions_low_and_caps_ambiguous_candidates() {
         let title = sheet(vec![Cell::new((0, 0), Data::String("title".into()))]);
-        let inspection = analyze_sheet(&title, &config(10), &RequestContext::default())
-            .expect("title analysis");
+        let inspection =
+            analyze_sheet(&title, &config(10), &RequestContext::default()).expect("title analysis");
         assert_eq!(
             inspection.region_candidates[0].confidence,
             CandidateConfidence::Low

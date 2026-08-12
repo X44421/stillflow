@@ -173,7 +173,11 @@ impl RootSet {
         max_depth: usize,
     ) -> ConnectorResult<Vec<(&AllowedRoot, Vec<String>, usize)>> {
         let Some(parent) = parent else {
-            return Ok(self.roots.iter().map(|root| (root, Vec::new(), 0)).collect());
+            return Ok(self
+                .roots
+                .iter()
+                .map(|root| (root, Vec::new(), 0))
+                .collect());
         };
         if parent.is_empty() {
             return Err(ConnectorError::invalid_configuration(
@@ -272,10 +276,7 @@ fn walk_directory(
         if file_type.is_dir() {
             if depth >= max_depth {
                 let child = directory.open_dir_nofollow(&name).map_err(|error| {
-                    path_open_error(
-                        error,
-                        "discovery refused a linked or unreadable directory",
-                    )
+                    path_open_error(error, "discovery refused a linked or unreadable directory")
                 })?;
                 if directory_may_hide_supported_asset(&child, context)? {
                     return Err(source_error(
@@ -287,10 +288,7 @@ fn walk_directory(
                 continue;
             }
             let child = directory.open_dir_nofollow(&name).map_err(|error| {
-                path_open_error(
-                    error,
-                    "discovery refused a linked or unreadable directory",
-                )
+                path_open_error(error, "discovery refused a linked or unreadable directory")
             })?;
             let mut child_parent = relative_parent.to_vec();
             child_parent.push(name);
@@ -438,9 +436,8 @@ fn open_absolute_dir_nofollow(path: &Path) -> ConnectorResult<Dir> {
                 "allowed root has an invalid absolute prefix",
             ));
         }
-        let mut directory = Dir::open_ambient_dir("/", ambient_authority()).map_err(|error| {
-            path_open_error(error, "filesystem root could not be opened")
-        })?;
+        let mut directory = Dir::open_ambient_dir("/", ambient_authority())
+            .map_err(|error| path_open_error(error, "filesystem root could not be opened"))?;
         for component in components {
             let Component::Normal(name) = component else {
                 return Err(ConnectorError::invalid_configuration(
@@ -471,9 +468,8 @@ fn open_absolute_dir_nofollow(path: &Path) -> ConnectorResult<Dir> {
         }
         let mut anchor = PathBuf::from(prefix.as_os_str());
         anchor.push("\\");
-        let mut directory = Dir::open_ambient_dir(anchor, ambient_authority()).map_err(|error| {
-            path_open_error(error, "filesystem root could not be opened")
-        })?;
+        let mut directory = Dir::open_ambient_dir(anchor, ambient_authority())
+            .map_err(|error| path_open_error(error, "filesystem root could not be opened"))?;
         for component in components {
             let Component::Normal(name) = component else {
                 return Err(ConnectorError::invalid_configuration(
@@ -591,11 +587,7 @@ fn file_identity(metadata: &Metadata, root: &str, relative: &str) -> FileIdentit
     FileIdentity::NormalizedPath(platform_comparison_key(&format!("{root}/{relative}")))
 }
 
-fn source_error(
-    category: ErrorCategory,
-    retryable: bool,
-    message: &'static str,
-) -> ConnectorError {
+fn source_error(category: ErrorCategory, retryable: bool, message: &'static str) -> ConnectorError {
     ConnectorError::with_category(
         category,
         retryable,

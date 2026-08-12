@@ -6,9 +6,7 @@ use calamine::{
     open_workbook_from_rs, Data, Dimensions, Ods, Range, Reader, SheetType, SheetVisible, Xls,
     Xlsb, Xlsx,
 };
-use stillflow_core::{
-    ConnectorError, ConnectorResult, ErrorCategory, WorkbookSheetVisibility,
-};
+use stillflow_core::{ConnectorError, ConnectorResult, ErrorCategory, WorkbookSheetVisibility};
 
 use crate::format::WorkbookFormat;
 
@@ -93,38 +91,37 @@ impl WorkbookReader {
                 )
             })?;
         let range = match &mut self.inner {
-            ReaderKind::Xls(reader) => reader.worksheet_range(name).map_err(|_| {
-                invalid_data("XLS worksheet data could not be decoded")
-            })?,
-            ReaderKind::Xlsx(reader) => reader.worksheet_range(name).map_err(|_| {
-                invalid_data("XLSX worksheet data could not be decoded")
-            })?,
-            ReaderKind::Xlsb(reader) => reader.worksheet_range(name).map_err(|_| {
-                invalid_data("XLSB worksheet data could not be decoded")
-            })?,
-            ReaderKind::Ods(reader) => reader.worksheet_range(name).map_err(|_| {
-                invalid_data("ODS worksheet data could not be decoded")
-            })?,
+            ReaderKind::Xls(reader) => reader
+                .worksheet_range(name)
+                .map_err(|_| invalid_data("XLS worksheet data could not be decoded"))?,
+            ReaderKind::Xlsx(reader) => reader
+                .worksheet_range(name)
+                .map_err(|_| invalid_data("XLSX worksheet data could not be decoded"))?,
+            ReaderKind::Xlsb(reader) => reader
+                .worksheet_range(name)
+                .map_err(|_| invalid_data("XLSB worksheet data could not be decoded"))?,
+            ReaderKind::Ods(reader) => reader
+                .worksheet_range(name)
+                .map_err(|_| invalid_data("ODS worksheet data could not be decoded"))?,
         };
         let formulas = match &mut self.inner {
-            ReaderKind::Xls(reader) => reader.worksheet_formula(name).map_err(|_| {
-                invalid_data("XLS worksheet formula metadata could not be decoded")
-            })?,
+            ReaderKind::Xls(reader) => reader
+                .worksheet_formula(name)
+                .map_err(|_| invalid_data("XLS worksheet formula metadata could not be decoded"))?,
             ReaderKind::Xlsx(reader) => reader.worksheet_formula(name).map_err(|_| {
                 invalid_data("XLSX worksheet formula metadata could not be decoded")
             })?,
             ReaderKind::Xlsb(reader) => reader.worksheet_formula(name).map_err(|_| {
                 invalid_data("XLSB worksheet formula metadata could not be decoded")
             })?,
-            ReaderKind::Ods(reader) => reader.worksheet_formula(name).map_err(|_| {
-                invalid_data("ODS worksheet formula metadata could not be decoded")
-            })?,
+            ReaderKind::Ods(reader) => reader
+                .worksheet_formula(name)
+                .map_err(|_| invalid_data("ODS worksheet formula metadata could not be decoded"))?,
         };
         let (merged, merge_metadata_available) = match &mut self.inner {
-            ReaderKind::Xls(reader) => (
-                reader.worksheet_merge_cells(name).unwrap_or_default(),
-                true,
-            ),
+            ReaderKind::Xls(reader) => {
+                (reader.worksheet_merge_cells(name).unwrap_or_default(), true)
+            }
             ReaderKind::Xlsx(reader) => {
                 let merged = reader
                     .worksheet_merge_cells(name)
@@ -166,10 +163,6 @@ fn invalid_data(message: &'static str) -> ConnectorError {
     source_error(ErrorCategory::InvalidData, false, message)
 }
 
-fn source_error(
-    category: ErrorCategory,
-    retryable: bool,
-    message: &'static str,
-) -> ConnectorError {
+fn source_error(category: ErrorCategory, retryable: bool, message: &'static str) -> ConnectorError {
     ConnectorError::with_category(category, retryable, message, Vec::new(), BTreeMap::new())
 }

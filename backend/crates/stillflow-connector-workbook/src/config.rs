@@ -104,12 +104,7 @@ impl WorkbookConfig {
             MAX_EXPANDED_ARCHIVE_BYTES,
             "maxExpandedArchiveBytes",
         )?;
-        bounded_u64(
-            raw.max_sheet_cells,
-            1,
-            MAX_SHEET_CELLS,
-            "maxSheetCells",
-        )?;
+        bounded_u64(raw.max_sheet_cells, 1, MAX_SHEET_CELLS, "maxSheetCells")?;
         bounded_usize(
             raw.max_region_candidates,
             1,
@@ -162,12 +157,7 @@ fn bounded_usize(
     Ok(())
 }
 
-fn bounded_u64(
-    value: u64,
-    minimum: u64,
-    maximum: u64,
-    field: &'static str,
-) -> ConnectorResult<()> {
+fn bounded_u64(value: u64, minimum: u64, maximum: u64, field: &'static str) -> ConnectorResult<()> {
     if !(minimum..=maximum).contains(&value) {
         return Err(ConnectorError::invalid_configuration(format!(
             "{field} is outside the supported range"
@@ -262,6 +252,9 @@ mod tests {
             CredentialRef::new("cred://local/workbooks").expect("credential reference"),
         )
         .expect_err("raw secrets must not enter connection configuration");
-        assert_eq!(error.category(), stillflow_core::ErrorCategory::InvalidConfiguration);
+        assert_eq!(
+            error.category(),
+            stillflow_core::ErrorCategory::InvalidConfiguration
+        );
     }
 }

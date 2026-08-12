@@ -10,7 +10,7 @@ use futures::stream;
 use stillflow_connectors::RawBatchStream;
 use stillflow_core::{
     BatchEnvelope, BatchEnvelopeFactory, ColumnId, ConnectorError, ConnectorResult, ErrorCategory,
-    LogicalField, LogicalSchema, LogicalType, MAX_BATCH_BYTES, RequestContext, SourceAsset,
+    LogicalField, LogicalSchema, LogicalType, RequestContext, SourceAsset, MAX_BATCH_BYTES,
 };
 
 use crate::analysis::{cell_at, enforce_sheet_bound, ensure_selection_inside_sheet};
@@ -91,9 +91,8 @@ pub(crate) fn prepare_reader(
         projection_ids,
         context,
     )?;
-    let envelope_factory = BatchEnvelopeFactory::try_new(Arc::new(schema), asset.id).map_err(
-        |_| invalid_data("workbook schema cannot establish the public batch boundary"),
-    )?;
+    let envelope_factory = BatchEnvelopeFactory::try_new(Arc::new(schema), asset.id)
+        .map_err(|_| invalid_data("workbook schema cannot establish the public batch boundary"))?;
     context.ensure_active()?;
     Ok(PreparedReader {
         context: context.clone(),
@@ -144,9 +143,10 @@ impl PreparedReader {
             .envelope_factory
             .try_build(self.sequence, batch)
             .map_err(|_| invalid_data("decoded workbook batch exceeds the public bounds"))?;
-        self.sequence = self.sequence.checked_add(1).ok_or_else(|| {
-            invalid_data("workbook batch sequence exceeded the supported range")
-        })?;
+        self.sequence = self
+            .sequence
+            .checked_add(1)
+            .ok_or_else(|| invalid_data("workbook batch sequence exceeded the supported range"))?;
         self.rows_emitted = self
             .rows_emitted
             .checked_add(envelope.row_count())
@@ -333,7 +333,9 @@ impl ColumnBuilder {
             Self::Utf8(builder) => {
                 let value = cell_text(cell)?;
                 if value.len() > MAX_CELL_TEXT_BYTES {
-                    return Err(invalid_data("workbook cell text exceeds the supported bound"));
+                    return Err(invalid_data(
+                        "workbook cell text exceeds the supported bound",
+                    ));
                 }
                 builder.append_value(value.as_str());
                 Ok(())
@@ -379,9 +381,7 @@ fn estimate_row(
                 LogicalType::Utf8 if !cell.is_empty() => cell_text(cell)?.len(),
                 LogicalType::Null => 1,
                 LogicalType::Boolean => 2,
-                LogicalType::Int64
-                | LogicalType::Float64
-                | LogicalType::Timestamp { .. } => 9,
+                LogicalType::Int64 | LogicalType::Float64 | LogicalType::Timestamp { .. } => 9,
                 _ => 16,
             };
             total
@@ -437,11 +437,7 @@ fn schema_drift(message: &'static str) -> ConnectorError {
     source_error(ErrorCategory::SchemaDrift, false, message)
 }
 
-fn source_error(
-    category: ErrorCategory,
-    retryable: bool,
-    message: &'static str,
-) -> ConnectorError {
+fn source_error(category: ErrorCategory, retryable: bool, message: &'static str) -> ConnectorError {
     ConnectorError::with_category(category, retryable, message, Vec::new(), BTreeMap::new())
 }
 

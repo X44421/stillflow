@@ -182,8 +182,7 @@ mod tests {
             "medium value",
             "a substantially longer third value",
         ]));
-        let batch = RecordBatch::try_from_iter(vec![("value", values)])
-            .expect("record batch");
+        let batch = RecordBatch::try_from_iter(vec![("value", values)]).expect("record batch");
         let two = compact_range(&batch, 0, 2).expect("two rows");
         let three = compact_range(&batch, 0, 3).expect("three rows");
         assert!(three.get_array_memory_size() > two.get_array_memory_size());
