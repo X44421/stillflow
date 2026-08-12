@@ -166,21 +166,6 @@ impl StoreAccess {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_store(
-        store: Arc<dyn ObjectStore>,
-        config: ObjectStoreConfig,
-        prefix: Option<Path>,
-    ) -> Self {
-        Self {
-            store,
-            prefix,
-            local_root: None,
-            container: "test".to_owned(),
-            config,
-        }
-    }
-
     pub(crate) fn container(&self) -> &str {
         &self.container
     }
