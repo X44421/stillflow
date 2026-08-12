@@ -1,0 +1,28 @@
+name: Object store format helper
+
+on:
+  push:
+    branches: [agent/issue-008-format-lock]
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt
+      - name: Generate lockfile
+        working-directory: backend
+        run: cargo generate-lockfile
+      - name: Format Rust
+        working-directory: backend
+        run: cargo fmt --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: object-store-formatted
+          path: |
+            backend/Cargo.lock
+            backend/Cargo.toml
+            backend/crates/stillflow-connector-object-store
+            backend/crates/stillflow-connectors/src/raw_batch_stream.rs
