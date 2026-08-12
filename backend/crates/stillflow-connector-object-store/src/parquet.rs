@@ -49,8 +49,7 @@ impl AsyncFileReader for GuardedParquetReader {
     ) -> BoxFuture<'a, parquet::errors::Result<Arc<ParquetMetaData>>> {
         async move {
             let metadata_options = options.map(|options| options.metadata_options().clone());
-            let mut reader =
-                ParquetMetaDataReader::new().with_metadata_options(metadata_options);
+            let mut reader = ParquetMetaDataReader::new().with_metadata_options(metadata_options);
             if let Some(options) = options {
                 let column_policy = options.column_index_policy();
                 let offset_policy = options.offset_index_policy();
@@ -68,11 +67,8 @@ impl AsyncFileReader for GuardedParquetReader {
     }
 }
 
-type ArrowBatchStream = Pin<
-    Box<
-        dyn Stream<Item = Result<arrow_array::RecordBatch, ParquetError>> + Send + 'static,
-    >,
->;
+type ArrowBatchStream =
+    Pin<Box<dyn Stream<Item = Result<arrow_array::RecordBatch, ParquetError>> + Send + 'static>>;
 
 pub(crate) struct PreparedParquet {
     stream: ArrowBatchStream,
@@ -110,14 +106,18 @@ impl PreparedParquet {
         let envelope = self
             .envelope_factory
             .try_build(self.sequence, batch)
-            .map_err(|_| parquet_error(
+            .map_err(|_| {
+                parquet_error(
+                    ErrorCategory::InvalidData,
+                    "decoded Parquet batch violates the public envelope bounds",
+                )
+            })?;
+        self.sequence = self.sequence.checked_add(1).ok_or_else(|| {
+            parquet_error(
                 ErrorCategory::InvalidData,
-                "decoded Parquet batch violates the public envelope bounds",
-            ))?;
-        self.sequence = self.sequence.checked_add(1).ok_or_else(|| parquet_error(
-            ErrorCategory::InvalidData,
-            "Parquet batch sequence exceeds the supported range",
-        ))?;
+                "Parquet batch sequence exceeds the supported range",
+            )
+        })?;
         Ok(Some(envelope))
     }
 
@@ -174,14 +174,15 @@ pub(crate) async fn prepare_parquet(
         builder
     };
     let stream = builder.build().map_err(map_parquet_error)?;
-    let envelope_factory = BatchEnvelopeFactory::try_new(
-        Arc::new(plan.output_schema.clone()),
-        asset.id,
-    )
-    .map_err(|_| parquet_error(
-        ErrorCategory::InvalidData,
-        "projected Parquet schema cannot establish the batch boundary",
-    ))?;
+    let envelope_factory =
+        BatchEnvelopeFactory::try_new(Arc::new(plan.output_schema.clone()), asset.id).map_err(
+            |_| {
+                parquet_error(
+                    ErrorCategory::InvalidData,
+                    "projected Parquet schema cannot establish the batch boundary",
+                )
+            },
+        )?;
     Ok(PreparedParquet {
         stream: Box::pin(stream),
         plan,

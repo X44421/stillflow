@@ -22,10 +22,12 @@ pub(crate) fn logical_schema_from_source_arrow(
             logical_field(asset_id, "", position, field.as_ref(), field.is_nullable())
         })
         .collect::<ConnectorResult<Vec<_>>>()?;
-    LogicalSchema::new(fields).map_err(|_| schema_error(
-        ErrorCategory::InvalidData,
-        "Parquet schema is outside the supported logical bounds",
-    ))
+    LogicalSchema::new(fields).map_err(|_| {
+        schema_error(
+            ErrorCategory::InvalidData,
+            "Parquet schema is outside the supported logical bounds",
+        )
+    })
 }
 
 fn logical_field(
@@ -42,10 +44,12 @@ fn logical_field(
         logical_type(asset_id, &path, field.data_type())?,
         nullable,
     )
-    .map_err(|_| schema_error(
-        ErrorCategory::InvalidData,
-        "Parquet field is outside the supported logical bounds",
-    ))
+    .map_err(|_| {
+        schema_error(
+            ErrorCategory::InvalidData,
+            "Parquet field is outside the supported logical bounds",
+        )
+    })
 }
 
 fn logical_type(
@@ -139,8 +143,7 @@ impl ProjectionPlan {
         let desired_indices = match projection {
             None => (0..full.fields.len()).collect::<Vec<_>>(),
             Some(ids) => {
-                if ids.is_empty()
-                    || ids.iter().copied().collect::<BTreeSet<_>>().len() != ids.len()
+                if ids.is_empty() || ids.iter().copied().collect::<BTreeSet<_>>().len() != ids.len()
                 {
                     return Err(ConnectorError::invalid_configuration(
                         "projection must contain unique known column ids",
@@ -151,9 +154,11 @@ impl ProjectionPlan {
                         full.fields
                             .iter()
                             .position(|field| field.id == *id)
-                            .ok_or_else(|| ConnectorError::invalid_configuration(
-                                "projection contains an unknown column id",
-                            ))
+                            .ok_or_else(|| {
+                                ConnectorError::invalid_configuration(
+                                    "projection contains an unknown column id",
+                                )
+                            })
                     })
                     .collect::<ConnectorResult<Vec<_>>>()?
             }
@@ -164,32 +169,40 @@ impl ProjectionPlan {
         let output_positions = desired_indices
             .iter()
             .map(|source_index| {
-                mask_indices.binary_search(source_index).map_err(|_| schema_error(
-                    ErrorCategory::Internal,
-                    "Parquet projection mapping is inconsistent",
-                ))
+                mask_indices.binary_search(source_index).map_err(|_| {
+                    schema_error(
+                        ErrorCategory::Internal,
+                        "Parquet projection mapping is inconsistent",
+                    )
+                })
             })
             .collect::<ConnectorResult<Vec<_>>>()?;
         let output_fields = desired_indices
             .iter()
-            .map(|index| full.fields.get(*index).cloned().ok_or_else(|| schema_error(
-                ErrorCategory::Internal,
-                "Parquet projection index is outside its schema",
-            )))
+            .map(|index| {
+                full.fields.get(*index).cloned().ok_or_else(|| {
+                    schema_error(
+                        ErrorCategory::Internal,
+                        "Parquet projection index is outside its schema",
+                    )
+                })
+            })
             .collect::<ConnectorResult<Vec<_>>>()?;
-        let output_schema = LogicalSchema::from_parts(
-            full.version,
-            output_fields,
-            full.metadata.clone(),
-        )
-        .map_err(|_| schema_error(
-            ErrorCategory::InvalidData,
-            "projected Parquet schema is invalid",
-        ))?;
-        let canonical_arrow = logical_schema_to_arrow(&output_schema).map_err(|_| schema_error(
-            ErrorCategory::InvalidData,
-            "projected Parquet schema cannot establish the Arrow boundary",
-        ))?;
+        let output_schema =
+            LogicalSchema::from_parts(full.version, output_fields, full.metadata.clone()).map_err(
+                |_| {
+                    schema_error(
+                        ErrorCategory::InvalidData,
+                        "projected Parquet schema is invalid",
+                    )
+                },
+            )?;
+        let canonical_arrow = logical_schema_to_arrow(&output_schema).map_err(|_| {
+            schema_error(
+                ErrorCategory::InvalidData,
+                "projected Parquet schema cannot establish the Arrow boundary",
+            )
+        })?;
         Ok(Self {
             output_schema,
             mask_indices,
@@ -201,41 +214,49 @@ impl ProjectionPlan {
     pub(crate) fn adapt_batch(&self, batch: RecordBatch) -> ConnectorResult<RecordBatch> {
         let mut columns = Vec::with_capacity(self.output_positions.len());
         for (output_index, input_index) in self.output_positions.iter().copied().enumerate() {
-            let source = batch.columns().get(input_index).ok_or_else(|| schema_error(
-                ErrorCategory::InvalidData,
-                "Parquet batch is missing a projected column",
-            ))?;
+            let source = batch.columns().get(input_index).ok_or_else(|| {
+                schema_error(
+                    ErrorCategory::InvalidData,
+                    "Parquet batch is missing a projected column",
+                )
+            })?;
             let target = self
                 .canonical_arrow
                 .fields()
                 .get(output_index)
-                .ok_or_else(|| schema_error(
-                    ErrorCategory::Internal,
-                    "canonical Parquet projection is inconsistent",
-                ))?;
+                .ok_or_else(|| {
+                    schema_error(
+                        ErrorCategory::Internal,
+                        "canonical Parquet projection is inconsistent",
+                    )
+                })?;
             let array = if source.data_type() == target.data_type() {
                 Arc::clone(source)
             } else {
-                cast(source, target.data_type()).map_err(|_| schema_error(
-                    ErrorCategory::SchemaDrift,
-                    "Parquet batch cannot satisfy the selected logical schema",
-                ))?
+                cast(source, target.data_type()).map_err(|_| {
+                    schema_error(
+                        ErrorCategory::SchemaDrift,
+                        "Parquet batch cannot satisfy the selected logical schema",
+                    )
+                })?
             };
             columns.push(array);
         }
         let options = RecordBatchOptions::new().with_row_count(Some(batch.num_rows()));
         RecordBatch::try_new_with_options(Arc::clone(&self.canonical_arrow), columns, &options)
-            .map_err(|_| schema_error(
-                ErrorCategory::InvalidData,
-                "Parquet batch has an invalid projected schema",
-            ))
+            .map_err(|_| {
+                schema_error(
+                    ErrorCategory::InvalidData,
+                    "Parquet batch has an invalid projected schema",
+                )
+            })
     }
 }
 
 fn validate_override(source: &LogicalSchema, target: &LogicalSchema) -> ConnectorResult<()> {
-    target.validate().map_err(|_| ConnectorError::invalid_configuration(
-        "schema override is not a valid logical schema",
-    ))?;
+    target.validate().map_err(|_| {
+        ConnectorError::invalid_configuration("schema override is not a valid logical schema")
+    })?;
     if source.fields.len() != target.fields.len()
         || source
             .fields
@@ -266,9 +287,7 @@ fn type_compatible(source: &LogicalType, target: &LogicalType) -> bool {
                     .zip(target)
                     .all(|(source, target)| field_compatible(source, target))
         }
-        (LogicalType::List(source), LogicalType::List(target)) => {
-            type_compatible(source, target)
-        }
+        (LogicalType::List(source), LogicalType::List(target)) => type_compatible(source, target),
         _ => source
             .least_upper_bound(target)
             .is_ok_and(|joined| joined == *target),

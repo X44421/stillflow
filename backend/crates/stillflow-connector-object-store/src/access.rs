@@ -18,16 +18,13 @@ use stillflow_core::{
 };
 use tokio::time::Instant;
 
-use crate::config::{
-    ObjectStoreConfig, ProviderConfig, MAX_KEY_BYTES, MAX_UPLOAD_CHUNKS,
-};
+use crate::config::{ObjectStoreConfig, ProviderConfig, MAX_KEY_BYTES, MAX_UPLOAD_CHUNKS};
 use crate::credentials::ObjectStoreCredentialResolver;
 
 const MULTIPART_CHUNK_BYTES: usize = 5 * 1024 * 1024;
 
 /// Bounded byte stream used by object reads and uploads.
-pub type ObjectByteStream =
-    Pin<Box<dyn Stream<Item = ConnectorResult<Bytes>> + Send + 'static>>;
+pub type ObjectByteStream = Pin<Box<dyn Stream<Item = ConnectorResult<Bytes>> + Send + 'static>>;
 
 /// Provider-neutral object metadata safe to keep inside the server boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,54 +111,52 @@ impl StoreAccess {
             .filter(|value| !value.is_empty())
             .map(|value| parse_relative(value, true))
             .transpose()?;
-        let (store, local_root, container): (Arc<dyn ObjectStore>, _, _) =
-            match &config.provider {
-                ProviderConfig::Local { root } => {
-                    validate_absolute_root(root)?;
-                    let store = LocalFileSystem::new_with_prefix(root).map_err(|error| {
-                        map_store_error(error, "initialize local object storage")
-                    })?;
-                    (Arc::new(store), Some(root.clone()), "local".to_owned())
+        let (store, local_root, container): (Arc<dyn ObjectStore>, _, _) = match &config.provider {
+            ProviderConfig::Local { root } => {
+                validate_absolute_root(root)?;
+                let store = LocalFileSystem::new_with_prefix(root)
+                    .map_err(|error| map_store_error(error, "initialize local object storage"))?;
+                (Arc::new(store), Some(root.clone()), "local".to_owned())
+            }
+            ProviderConfig::S3 {
+                bucket,
+                region,
+                endpoint,
+                path_style,
+                anonymous,
+                allow_http,
+            } => {
+                let mut builder = AmazonS3Builder::new()
+                    .with_bucket_name(bucket)
+                    .with_region(region)
+                    .with_virtual_hosted_style_request(!path_style)
+                    .with_allow_http(*allow_http);
+                if let Some(endpoint) = endpoint {
+                    builder = builder.with_endpoint(endpoint);
                 }
-                ProviderConfig::S3 {
-                    bucket,
-                    region,
-                    endpoint,
-                    path_style,
-                    anonymous,
-                    allow_http,
-                } => {
-                    let mut builder = AmazonS3Builder::new()
-                        .with_bucket_name(bucket)
-                        .with_region(region)
-                        .with_virtual_hosted_style_request(!path_style)
-                        .with_allow_http(*allow_http);
-                    if let Some(endpoint) = endpoint {
-                        builder = builder.with_endpoint(endpoint);
+                if *anonymous {
+                    builder = builder.with_skip_signature(true);
+                } else {
+                    let material = run_control(
+                        context,
+                        config.request_timeout,
+                        resolver.resolve_s3(connection.credential_ref()),
+                    )
+                    .await?;
+                    let (access_key, secret_key, token) = material.take_parts();
+                    builder = builder
+                        .with_access_key_id(access_key)
+                        .with_secret_access_key(secret_key);
+                    if let Some(token) = token {
+                        builder = builder.with_token(token);
                     }
-                    if *anonymous {
-                        builder = builder.with_skip_signature(true);
-                    } else {
-                        let material = run_control(
-                            context,
-                            config.request_timeout,
-                            resolver.resolve_s3(connection.credential_ref()),
-                        )
-                        .await?;
-                        let (access_key, secret_key, token) = material.take_parts();
-                        builder = builder
-                            .with_access_key_id(access_key)
-                            .with_secret_access_key(secret_key);
-                        if let Some(token) = token {
-                            builder = builder.with_token(token);
-                        }
-                    }
-                    let store = builder.build().map_err(|error| {
-                        map_store_error(error, "initialize S3-compatible object storage")
-                    })?;
-                    (Arc::new(store), None, bucket.clone())
                 }
-            };
+                let store = builder.build().map_err(|error| {
+                    map_store_error(error, "initialize S3-compatible object storage")
+                })?;
+                (Arc::new(store), None, bucket.clone())
+            }
+        };
         Ok(Self {
             store,
             prefix,
@@ -345,10 +340,7 @@ impl StoreAccess {
         validate_local_components(root, location.as_ref(), allow_missing_leaf)
     }
 
-    async fn abort_upload(
-        &self,
-        upload: &mut Box<dyn object_store::MultipartUpload>,
-    ) {
+    async fn abort_upload(&self, upload: &mut Box<dyn object_store::MultipartUpload>) {
         let _ = tokio::time::timeout(self.config.request_timeout, upload.abort()).await;
     }
 }
@@ -628,15 +620,19 @@ struct StreamState {
 }
 
 fn parse_relative(value: &str, prefix: bool) -> ConnectorResult<Path> {
-    let value = if prefix { value.trim_end_matches('/') } else { value };
+    let value = if prefix {
+        value.trim_end_matches('/')
+    } else {
+        value
+    };
     if value.is_empty()
         || value.len() > MAX_KEY_BYTES
         || value.starts_with('/')
         || (!prefix && value.ends_with('/'))
         || value.contains('\\')
-        || value.chars().any(|character| {
-            character.is_control() || matches!(character, '?' | '#')
-        })
+        || value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '?' | '#'))
         || contains_encoded_traversal(value)
         || value
             .split('/')
@@ -663,13 +659,11 @@ fn contains_encoded_traversal(value: &str) -> bool {
 }
 
 fn validate_range(range: &Range<u64>, size: u64, maximum: usize) -> ConnectorResult<()> {
-    let length = range.end.checked_sub(range.start).ok_or_else(|| {
-        ConnectorError::invalid_configuration("object byte range is invalid")
-    })?;
-    if length == 0
-        || range.end > size
-        || length > u64::try_from(maximum).unwrap_or(u64::MAX)
-    {
+    let length = range
+        .end
+        .checked_sub(range.start)
+        .ok_or_else(|| ConnectorError::invalid_configuration("object byte range is invalid"))?;
+    if length == 0 || range.end > size || length > u64::try_from(maximum).unwrap_or(u64::MAX) {
         return Err(ConnectorError::invalid_configuration(
             "object byte range is outside the supported bounds",
         ));
@@ -708,9 +702,7 @@ fn validate_absolute_root(root: &FilePath) -> ConnectorResult<()> {
             continue;
         }
         let metadata = std::fs::symlink_metadata(&current).map_err(|_| {
-            ConnectorError::invalid_configuration(
-                "local object storage root is unavailable",
-            )
+            ConnectorError::invalid_configuration("local object storage root is unavailable")
         })?;
         if metadata.file_type().is_symlink() {
             return Err(source_error(
@@ -750,10 +742,9 @@ fn validate_local_components(
                 if error.kind() == std::io::ErrorKind::NotFound
                     && allow_missing_leaf
                     && index + 1 == components.len() => {}
-            Err(error)
-                if error.kind() == std::io::ErrorKind::NotFound && allow_missing_leaf => {
-                    break;
-                }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_missing_leaf => {
+                break;
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(source_error(
                     ErrorCategory::NotFound,
@@ -814,8 +805,7 @@ fn map_store_error(error: object_store::Error, operation: &'static str) -> Conne
         | object_store::Error::NotModified { .. } => {
             (ErrorCategory::InvalidData, false, "precondition")
         }
-        object_store::Error::NotSupported { .. }
-        | object_store::Error::NotImplemented { .. } => (
+        object_store::Error::NotSupported { .. } | object_store::Error::NotImplemented { .. } => (
             ErrorCategory::UnsupportedCapability,
             false,
             "unsupported_operation",
@@ -823,9 +813,11 @@ fn map_store_error(error: object_store::Error, operation: &'static str) -> Conne
         object_store::Error::Generic { .. } => {
             (ErrorCategory::TransientSource, true, "provider_failure")
         }
-        object_store::Error::JoinError { .. } => {
-            (ErrorCategory::TransientSource, true, "provider_task_failure")
-        }
+        object_store::Error::JoinError { .. } => (
+            ErrorCategory::TransientSource,
+            true,
+            "provider_task_failure",
+        ),
         _ => (ErrorCategory::TransientSource, true, "provider_failure"),
     };
     ConnectorError::with_category(
@@ -837,11 +829,7 @@ fn map_store_error(error: object_store::Error, operation: &'static str) -> Conne
     )
 }
 
-fn source_error(
-    category: ErrorCategory,
-    retryable: bool,
-    message: &'static str,
-) -> ConnectorError {
+fn source_error(category: ErrorCategory, retryable: bool, message: &'static str) -> ConnectorError {
     ConnectorError::with_category(category, retryable, message, Vec::new(), BTreeMap::new())
 }
 
@@ -870,8 +858,7 @@ mod tests {
     #[tokio::test]
     async fn local_access_lists_ranges_streams_and_uploads() {
         let directory = tempdir().expect("tempdir");
-        std::fs::write(directory.path().join("first.csv"), b"id,name\n1,Ada\n")
-            .expect("fixture");
+        std::fs::write(directory.path().join("first.csv"), b"id,name\n1,Ada\n").expect("fixture");
         let context = RequestContext::new();
         let access = StoreAccess::open(
             &local_connection(directory.path()),
@@ -936,7 +923,11 @@ mod tests {
         token.cancel();
         let cancelled = RequestContext::with_cancellation(token);
         assert_eq!(
-            access.list("", &cancelled).await.expect_err("cancelled").category(),
+            access
+                .list("", &cancelled)
+                .await
+                .expect_err("cancelled")
+                .category(),
             ErrorCategory::Cancelled
         );
     }

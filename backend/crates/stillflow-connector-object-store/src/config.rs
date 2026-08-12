@@ -172,7 +172,10 @@ impl ObjectStoreConfig {
                 "requestTimeoutMs is outside the supported range",
             ));
         }
-        if prefix.as_ref().is_some_and(|value| value.len() > MAX_KEY_BYTES) {
+        if prefix
+            .as_ref()
+            .is_some_and(|value| value.len() > MAX_KEY_BYTES)
+        {
             return Err(ConnectorError::invalid_configuration(
                 "object storage prefix exceeds the supported length",
             ));
@@ -190,9 +193,9 @@ impl ObjectStoreConfig {
 
 fn validate_bucket(bucket: &str) -> ConnectorResult<()> {
     if !(3..=63).contains(&bucket.len())
-        || !bucket
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-'))
+        || !bucket.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
         || !bucket
             .as_bytes()
             .first()
@@ -234,7 +237,9 @@ fn validate_endpoint(endpoint: Option<&str>, allow_http: bool) -> ConnectorResul
     };
     if endpoint.len() > 2_048
         || endpoint.bytes().any(|byte| byte.is_ascii_whitespace())
-        || endpoint.chars().any(|character| matches!(character, '?' | '#' | '@'))
+        || endpoint
+            .chars()
+            .any(|character| matches!(character, '?' | '#' | '@'))
         || endpoint.ends_with('/')
     {
         return Err(ConnectorError::invalid_configuration(
@@ -282,7 +287,10 @@ fn is_development_host(host: &str) -> bool {
     }
     let mut parts = host.split('.');
     matches!(
-        (parts.next(), parts.next().and_then(|part| part.parse::<u8>().ok())),
+        (
+            parts.next(),
+            parts.next().and_then(|part| part.parse::<u8>().ok())
+        ),
         (Some("172"), Some(16..=31))
     )
 }

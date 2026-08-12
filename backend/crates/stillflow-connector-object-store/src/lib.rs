@@ -291,8 +291,7 @@ mod tests {
     async fn discovery_is_sorted_and_has_stable_ids() {
         let directory = tempdir().expect("tempdir");
         std::fs::write(directory.path().join("b.csv"), b"b\n1\n").expect("fixture");
-        std::fs::write(directory.path().join("a.ndjson"), b"{\"a\":1}\n")
-            .expect("fixture");
+        std::fs::write(directory.path().join("a.ndjson"), b"{\"a\":1}\n").expect("fixture");
         std::fs::write(directory.path().join("ignored.txt"), b"ignored").expect("fixture");
         let connection = SourceConnection::try_new(
             ConnectorKind::ObjectStore,

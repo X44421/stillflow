@@ -7,7 +7,7 @@ use stillflow_connector_local_tabular::LocalTabularConnector;
 use stillflow_connectors::{RawBatchStream, SourceConnector};
 use stillflow_core::{
     AssetLocator, AssetMetadata, ConnectorError, ConnectorKind, ConnectorResult, CredentialRef,
-    ErrorCategory, FindingSeverity, InspectionFinding, InspectRequest, PreviewData, PreviewRequest,
+    ErrorCategory, FindingSeverity, InspectRequest, InspectionFinding, PreviewData, PreviewRequest,
     ReadRequest, SourceAsset, SourceConnection,
 };
 use tempfile::TempDir;
@@ -78,12 +78,7 @@ pub(crate) async fn read_text(
     access: &StoreAccess,
     remote_request: ReadRequest,
 ) -> ConnectorResult<RawBatchStream> {
-    let staged = stage_complete(
-        access,
-        &remote_request.asset,
-        &remote_request.context,
-    )
-    .await?;
+    let staged = stage_complete(access, &remote_request.asset, &remote_request.context).await?;
     let mut local_request = remote_request;
     local_request.asset = staged.asset.clone();
     let stream = LocalTabularConnector
@@ -107,23 +102,20 @@ async fn stage_preview(
 ) -> ConnectorResult<StagedSource> {
     context.ensure_active()?;
     let maximum = access.max_preview_source_bytes();
-    let maximum_u64 = u64::try_from(maximum).map_err(|_| staging_error(
-        ErrorCategory::Internal,
-        false,
-        "remote preview byte bound exceeds the platform range",
-    ))?;
+    let maximum_u64 = u64::try_from(maximum).map_err(|_| {
+        staging_error(
+            ErrorCategory::Internal,
+            false,
+            "remote preview byte bound exceeds the platform range",
+        )
+    })?;
     let requested = info.size.min(maximum_u64);
     let source_truncated = requested < info.size;
     let bytes = if requested == 0 {
         Bytes::new()
     } else {
         access
-            .get_range_versioned(
-                &remote.locator.path,
-                0..requested,
-                info,
-                context,
-            )
+            .get_range_versioned(&remote.locator.path, 0..requested, info, context)
             .await?
     };
     let bytes = if source_truncated {
@@ -140,34 +132,48 @@ async fn stage_complete(
     context: &stillflow_core::RequestContext,
 ) -> ConnectorResult<StagedSource> {
     context.ensure_active()?;
-    let directory = tempfile::tempdir().map_err(|_| staging_error(
-        ErrorCategory::TransientSource,
-        true,
-        "temporary object staging directory could not be created",
-    ))?;
+    let directory = tempfile::tempdir().map_err(|_| {
+        staging_error(
+            ErrorCategory::TransientSource,
+            true,
+            "temporary object staging directory could not be created",
+        )
+    })?;
     let file_name = staged_file_name(&remote.locator.path)?;
     let path = directory.path().join(&file_name);
-    let mut file = tokio::fs::File::create(&path).await.map_err(|_| staging_error(
-        ErrorCategory::TransientSource,
-        true,
-        "temporary object staging file could not be created",
-    ))?;
+    let mut file = tokio::fs::File::create(&path).await.map_err(|_| {
+        staging_error(
+            ErrorCategory::TransientSource,
+            true,
+            "temporary object staging file could not be created",
+        )
+    })?;
     let mut stream = access.stream(&remote.locator.path, context).await?;
     while let Some(bytes) = stream.next().await.transpose()? {
         context.ensure_active()?;
-        file.write_all(&bytes).await.map_err(|_| staging_error(
+        file.write_all(&bytes).await.map_err(|_| {
+            staging_error(
+                ErrorCategory::TransientSource,
+                true,
+                "remote object could not be staged",
+            )
+        })?;
+    }
+    file.flush().await.map_err(|_| {
+        staging_error(
             ErrorCategory::TransientSource,
             true,
-            "remote object could not be staged",
-        ))?;
-    }
-    file.flush().await.map_err(|_| staging_error(
-        ErrorCategory::TransientSource,
-        true,
-        "temporary object staging file could not be flushed",
-    ))?;
+            "temporary object staging file could not be flushed",
+        )
+    })?;
     drop(file);
-    staged_source(directory, remote, file_name, access.max_preview_source_bytes(), false)
+    staged_source(
+        directory,
+        remote,
+        file_name,
+        access.max_preview_source_bytes(),
+        false,
+    )
 }
 
 async fn stage_bytes(
@@ -176,19 +182,23 @@ async fn stage_bytes(
     inference_bytes: usize,
     source_truncated: bool,
 ) -> ConnectorResult<StagedSource> {
-    let directory = tempfile::tempdir().map_err(|_| staging_error(
-        ErrorCategory::TransientSource,
-        true,
-        "temporary object staging directory could not be created",
-    ))?;
+    let directory = tempfile::tempdir().map_err(|_| {
+        staging_error(
+            ErrorCategory::TransientSource,
+            true,
+            "temporary object staging directory could not be created",
+        )
+    })?;
     let file_name = staged_file_name(&remote.locator.path)?;
     tokio::fs::write(directory.path().join(&file_name), bytes)
         .await
-        .map_err(|_| staging_error(
-            ErrorCategory::TransientSource,
-            true,
-            "remote object preview range could not be staged",
-        ))?;
+        .map_err(|_| {
+            staging_error(
+                ErrorCategory::TransientSource,
+                true,
+                "remote object preview range could not be staged",
+            )
+        })?;
     staged_source(
         directory,
         remote,
@@ -242,9 +252,11 @@ fn staged_file_name(remote_key: &str) -> ConnectorResult<String> {
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
-        .ok_or_else(|| ConnectorError::invalid_configuration(
-            "remote tabular object has no supported extension",
-        ))?;
+        .ok_or_else(|| {
+            ConnectorError::invalid_configuration(
+                "remote tabular object has no supported extension",
+            )
+        })?;
     if !matches!(
         extension.as_str(),
         "csv" | "tsv" | "json" | "jsonl" | "ndjson"
@@ -311,12 +323,16 @@ fn close_delimited_prefix(bytes: &[u8]) -> ConnectorResult<Vec<u8>> {
 fn close_json_array_prefix(bytes: &[u8]) -> ConnectorResult<Vec<u8>> {
     let start = bytes
         .iter()
-        .position(|byte| !byte.is_ascii_whitespace() && *byte != 0xEF && *byte != 0xBB && *byte != 0xBF)
-        .ok_or_else(|| staging_error(
-            ErrorCategory::InvalidData,
-            false,
-            "remote JSON preview range is empty",
-        ))?;
+        .position(|byte| {
+            !byte.is_ascii_whitespace() && *byte != 0xEF && *byte != 0xBB && *byte != 0xBF
+        })
+        .ok_or_else(|| {
+            staging_error(
+                ErrorCategory::InvalidData,
+                false,
+                "remote JSON preview range is empty",
+            )
+        })?;
     if bytes.get(start) != Some(&b'[') {
         return Err(staging_error(
             ErrorCategory::InvalidData,
@@ -374,11 +390,13 @@ fn close_json_array_prefix(bytes: &[u8]) -> ConnectorResult<Vec<u8>> {
     let capacity = objects
         .iter()
         .try_fold(2_usize, |total, object| total.checked_add(object.len() + 1))
-        .ok_or_else(|| staging_error(
-            ErrorCategory::InvalidData,
-            false,
-            "remote JSON preview range is too large",
-        ))?;
+        .ok_or_else(|| {
+            staging_error(
+                ErrorCategory::InvalidData,
+                false,
+                "remote JSON preview range is too large",
+            )
+        })?;
     let mut output = Vec::with_capacity(capacity);
     output.push(b'[');
     for (index, object) in objects.into_iter().enumerate() {
@@ -406,8 +424,7 @@ mod tests {
     #[test]
     fn closes_quoted_csv_ndjson_and_json_prefixes() {
         assert_eq!(
-            close_delimited_prefix(b"id,text\n1,\"hello\nworld\"\n2,partial")
-                .expect("CSV"),
+            close_delimited_prefix(b"id,text\n1,\"hello\nworld\"\n2,partial").expect("CSV"),
             b"id,text\n1,\"hello\nworld\"\n"
         );
         assert_eq!(

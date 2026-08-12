@@ -76,9 +76,9 @@ pub(crate) async fn preview_parquet(
         } else {
             compact_range(&candidate, 0, fit)?
         };
-        let envelope = factory.try_build(sequence, payload).map_err(|_| {
-            preview_error("bounded Parquet preview violated an envelope invariant")
-        })?;
+        let envelope = factory
+            .try_build(sequence, payload)
+            .map_err(|_| preview_error("bounded Parquet preview violated an envelope invariant"))?;
         sequence = sequence
             .checked_add(1)
             .ok_or_else(|| preview_error("preview batch sequence overflow"))?;

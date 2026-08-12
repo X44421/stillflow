@@ -1,5 +1,5 @@
-use stillflow_core::BatchStream;
 use futures::StreamExt;
+use stillflow_core::BatchStream;
 
 /// Envelope stream returned by connector implementations before boundary validation.
 ///
@@ -20,12 +20,9 @@ impl RawBatchStream {
     where
         G: Send + 'static,
     {
-        let stream = futures::stream::unfold(
-            (self.0, guard),
-            |(mut inner, guard)| async move {
-                inner.next().await.map(|item| (item, (inner, guard)))
-            },
-        );
+        let stream = futures::stream::unfold((self.0, guard), |(mut inner, guard)| async move {
+            inner.next().await.map(|item| (item, (inner, guard)))
+        });
         Self(Box::pin(stream))
     }
 
