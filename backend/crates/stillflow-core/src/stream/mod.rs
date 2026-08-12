@@ -161,7 +161,10 @@ impl Stream for CancellableBatchStream {
         };
         match polled {
             Poll::Ready(Some(Ok(envelope))) => match self.validate_envelope(&envelope) {
-                Ok(()) => Poll::Ready(Some(Ok(envelope))),
+                Ok(()) => match self.context.ensure_active() {
+                    Ok(()) => Poll::Ready(Some(Ok(envelope))),
+                    Err(error) => self.terminal_error(error),
+                },
                 Err(error) => self.terminal_error(error),
             },
             Poll::Ready(Some(Err(error))) => self.terminal_error(error),
@@ -396,6 +399,90 @@ mod tests {
         let first = collect_partitioned_values(vec![vec![1], vec![2, 3], vec![4]]).await;
         let second = collect_partitioned_values(vec![vec![1, 2, 3, 4]]).await;
         assert_eq!(first, second);
+    }
+
+    struct CancellingStream {
+        item: Option<BatchItem>,
+        cancellation: tokio_util::sync::CancellationToken,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl Stream for CancellingStream {
+        type Item = BatchItem;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.polls.fetch_add(1, Ordering::SeqCst);
+            self.cancellation.cancel();
+            Poll::Ready(self.item.take())
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_inner_poll_preempts_a_successful_batch() {
+        let source = Uuid::from_u128(1);
+        let token = tokio_util::sync::CancellationToken::new();
+        let polls = Arc::new(AtomicUsize::new(0));
+        let inner: BatchStream = Box::pin(CancellingStream {
+            item: Some(Ok(envelope(logical_schema(1, "value"), source, 0, vec![1]))),
+            cancellation: token.clone(),
+            polls: Arc::clone(&polls),
+        });
+        let mut wrapped = attach_request_context(
+            inner,
+            crate::RequestContext::with_cancellation(token),
+            source,
+        );
+
+        let error = wrapped
+            .next()
+            .await
+            .expect("terminal item")
+            .expect_err("cancellation wins");
+        assert_eq!(error.category(), ErrorCategory::Cancelled);
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        assert!(wrapped.next().await.is_none());
+    }
+
+    struct DeadlineCrossingStream {
+        item: Option<BatchItem>,
+        release_at: Instant,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl Stream for DeadlineCrossingStream {
+        type Item = BatchItem;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.polls.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(self.release_at.saturating_duration_since(Instant::now()));
+            Poll::Ready(self.item.take())
+        }
+    }
+
+    #[tokio::test]
+    async fn deadline_crossed_during_inner_poll_preempts_a_successful_batch() {
+        let source = Uuid::from_u128(1);
+        let deadline = Instant::now() + Duration::from_millis(100);
+        let polls = Arc::new(AtomicUsize::new(0));
+        let inner: BatchStream = Box::pin(DeadlineCrossingStream {
+            item: Some(Ok(envelope(logical_schema(1, "value"), source, 0, vec![1]))),
+            release_at: deadline + Duration::from_millis(1),
+            polls: Arc::clone(&polls),
+        });
+        let mut wrapped = attach_request_context(
+            inner,
+            crate::RequestContext::with_deadline(deadline),
+            source,
+        );
+
+        let error = wrapped
+            .next()
+            .await
+            .expect("terminal item")
+            .expect_err("deadline wins");
+        assert_eq!(error.category(), ErrorCategory::Timeout);
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        assert!(wrapped.next().await.is_none());
     }
 
     struct CountingStream {

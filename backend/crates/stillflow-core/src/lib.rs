@@ -18,9 +18,9 @@ pub mod stream;
 mod serde_tests;
 
 pub use batch::{
-    logical_schema_from_arrow, logical_schema_to_arrow, BatchEnvelope, BatchError,
-    LogicalSchemaFingerprint, BATCH_ENVELOPE_VERSION, LOGICAL_SCHEMA_FINGERPRINT_ALGORITHM,
-    MAX_BATCH_BYTES, MAX_BATCH_ROWS,
+    logical_schema_from_arrow, logical_schema_to_arrow, BatchEnvelope, BatchEnvelopeFactory,
+    BatchError, LogicalSchemaFingerprint, BATCH_ENVELOPE_VERSION,
+    LOGICAL_SCHEMA_FINGERPRINT_ALGORITHM, MAX_BATCH_BYTES, MAX_BATCH_ROWS,
 };
 pub use domain::{
     AssetKind, AssetLocator, AssetMetadata, Checkpoint, CheckpointRequest, ConnectionStatus,
@@ -36,7 +36,7 @@ pub use events::{ConnectorKind, IngestionEvent, ObjectKind, RelationshipKind};
 pub use expression::{BinaryOperator, Expr, FiniteF64, ScalarValue, SourceFilter, UnaryOperator};
 pub use logical::{
     ColumnId, LogicalError, LogicalField, LogicalSchema, LogicalType, TimeUnit,
-    LOGICAL_SCHEMA_VERSION,
+    LOGICAL_SCHEMA_VERSION, MAX_SCHEMA_FIELDS, MAX_SCHEMA_NESTING_DEPTH, MAX_SCHEMA_TEXT_BYTES,
 };
 pub use request::RequestContext;
 pub use stream::{attach_request_context, BatchItem, BatchStream};
