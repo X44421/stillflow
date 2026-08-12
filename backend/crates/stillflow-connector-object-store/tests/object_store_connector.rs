@@ -508,7 +508,7 @@ impl ObjectStoreCredentialResolver for PanicResolver {
     }
 }
 
-fn connection(fixture: &S3Fixture, anonymous: bool) -> SourceConnection {
+fn s3_connection(fixture: &S3Fixture, anonymous: bool) -> SourceConnection {
     SourceConnection::try_new(
         ConnectorKind::ObjectStore,
         "S3 fixture",
@@ -556,7 +556,7 @@ fn parquet_fixture(root: &FilePath) -> Vec<u8> {
     )
     .expect("Parquet batch");
     let properties = WriterProperties::builder()
-        .set_max_row_group_size(64)
+        .set_max_row_group_row_count(Some(64))
         .set_compression(Compression::UNCOMPRESSED)
         .build();
     let mut writer = ArrowWriter::try_new(
@@ -583,7 +583,7 @@ async fn real_s3_adapter_is_bounded_streaming_secret_safe_and_abortable() {
     let connector = ObjectStoreConnector::new(Arc::new(FixtureResolver {
         calls: Arc::clone(&calls),
     }));
-    let connection = connection(&fixture, false);
+    let connection = s3_connection(&fixture, false);
     let context = RequestContext::new();
     let access = connector
         .open_access(&connection, &context)
@@ -675,7 +675,7 @@ async fn real_s3_adapter_is_bounded_streaming_secret_safe_and_abortable() {
 
     let anonymous = ObjectStoreConnector::new(Arc::new(PanicResolver));
     anonymous
-        .open_access(&connection(&fixture, true), &RequestContext::new())
+        .open_access(&s3_connection(&fixture, true), &RequestContext::new())
         .await
         .expect("anonymous S3 adapter");
 
