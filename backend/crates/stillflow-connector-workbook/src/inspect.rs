@@ -17,9 +17,9 @@ pub(crate) fn inspect_opened(
     context: &RequestContext,
 ) -> ConnectorResult<AssetMetadata> {
     context.ensure_active()?;
-    preflight(&opened.file, opened.format, config, context)?;
+    let package = preflight(&opened.file, opened.format, config, context)?;
     let format = opened.format;
-    let mut workbook = WorkbookReader::open(opened.file, format)?;
+    let mut workbook = WorkbookReader::open(opened.file, format, package)?;
     let sheet_name = asset.locator.sheet.as_deref().ok_or_else(|| {
         stillflow_core::ConnectorError::invalid_configuration(
             "workbook asset is missing its sheet name",

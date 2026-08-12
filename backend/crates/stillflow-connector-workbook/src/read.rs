@@ -67,8 +67,8 @@ pub(crate) fn prepare_reader(
     })?;
     selection.validate()?;
     let opened = roots.open_asset(asset)?;
-    preflight(&opened.file, opened.format, config, context)?;
-    let mut workbook = WorkbookReader::open(opened.file, opened.format)?;
+    let package = preflight(&opened.file, opened.format, config, context)?;
+    let mut workbook = WorkbookReader::open(opened.file, opened.format, package)?;
     let sheet_name = asset.locator.sheet.as_deref().ok_or_else(|| {
         ConnectorError::invalid_configuration("workbook asset is missing its sheet name")
     })?;
@@ -174,15 +174,16 @@ impl PreparedReader {
             return Ok(None);
         }
         let maximum_rows = self.batch_size.min(remaining_limit);
-        let mut end = self.current_row;
+        let mut candidate = self.current_row;
+        let mut end = None;
         let mut rows = 0_usize;
         let mut bytes = 0_usize;
-        while end <= self.last_row && rows < maximum_rows {
+        while candidate <= self.last_row && rows < maximum_rows {
             let row_bytes = estimate_row(
                 &self.range,
                 self.envelope_factory.schema(),
                 &self.source_columns,
-                end,
+                candidate,
             )?;
             if row_bytes > TARGET_BATCH_BYTES {
                 return Err(invalid_data(
@@ -196,13 +197,15 @@ impl PreparedReader {
                 .checked_add(row_bytes)
                 .ok_or_else(|| invalid_data("workbook batch byte estimate overflow"))?;
             rows += 1;
-            if end == self.last_row {
+            end = Some(candidate);
+            if candidate == self.last_row {
                 break;
             }
-            end = end.checked_add(1).ok_or_else(|| {
+            candidate = candidate.checked_add(1).ok_or_else(|| {
                 invalid_data("workbook row coordinate exceeded the supported range")
             })?;
         }
+        let end = end.ok_or_else(|| invalid_data("workbook row window is empty"))?;
         Ok(Some((self.current_row, end)))
     }
 }

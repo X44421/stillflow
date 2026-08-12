@@ -9,9 +9,11 @@ use calamine::{
 use stillflow_core::{ConnectorError, ConnectorResult, ErrorCategory, WorkbookSheetVisibility};
 
 use crate::format::WorkbookFormat;
+use crate::preflight::PackageInspection;
 
 pub(crate) struct WorkbookReader {
     inner: ReaderKind,
+    unsupported_sheet_names: std::collections::BTreeSet<String>,
 }
 
 enum ReaderKind {
@@ -37,7 +39,11 @@ pub(crate) struct LoadedSheet {
 }
 
 impl WorkbookReader {
-    pub(crate) fn open(file: File, format: WorkbookFormat) -> ConnectorResult<Self> {
+    pub(crate) fn open(
+        file: File,
+        format: WorkbookFormat,
+        package: PackageInspection,
+    ) -> ConnectorResult<Self> {
         let reader = BufReader::new(file);
         let inner = match format {
             WorkbookFormat::Xls => ReaderKind::Xls(
@@ -57,7 +63,10 @@ impl WorkbookReader {
                     .map_err(|_| invalid_data("ODS workbook could not be decoded"))?,
             ),
         };
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            unsupported_sheet_names: package.unsupported_sheet_names,
+        })
     }
 
     pub(crate) fn sheets(&self) -> Vec<SheetDescriptor> {
@@ -65,7 +74,9 @@ impl WorkbookReader {
             .iter()
             .enumerate()
             .filter_map(|(ordinal, sheet)| {
-                if sheet.typ != SheetType::WorkSheet {
+                if sheet.typ != SheetType::WorkSheet
+                    || self.unsupported_sheet_names.contains(&sheet.name)
+                {
                     return None;
                 }
                 Some(SheetDescriptor {

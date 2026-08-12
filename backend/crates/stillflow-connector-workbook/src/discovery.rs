@@ -29,8 +29,8 @@ pub(crate) fn discover_sheets(
     for file in files {
         context.ensure_active()?;
         let opened = roots.open_discovered(&file)?;
-        preflight(&opened.file, opened.format, config, context)?;
-        let reader = WorkbookReader::open(opened.file, opened.format)?;
+        let package = preflight(&opened.file, opened.format, config, context)?;
+        let reader = WorkbookReader::open(opened.file, opened.format, package)?;
         for sheet in reader.sheets() {
             if assets.len() >= config.max_discovered_assets {
                 return Err(ConnectorError::with_category(

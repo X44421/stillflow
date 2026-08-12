@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read;
 
@@ -15,12 +15,17 @@ const MAX_PREFLIGHT_XML_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ODS_ROWS: u64 = 1_048_576;
 const MAX_ODS_COLUMNS: u64 = 16_384;
 
+#[derive(Debug, Default)]
+pub(crate) struct PackageInspection {
+    pub(crate) unsupported_sheet_names: BTreeSet<String>,
+}
+
 pub(crate) fn preflight(
     file: &File,
     format: WorkbookFormat,
     config: &WorkbookConfig,
     context: &RequestContext,
-) -> ConnectorResult<()> {
+) -> ConnectorResult<PackageInspection> {
     context.ensure_active()?;
     let size = file
         .metadata()
@@ -36,7 +41,7 @@ pub(crate) fn preflight(
         return Err(invalid_data("workbook exceeds maxWorkbookBytes"));
     }
     if !format.is_zip_container() {
-        return Ok(());
+        return Ok(PackageInspection::default());
     }
 
     let clone = file.try_clone().map_err(|_| {
@@ -84,6 +89,7 @@ pub(crate) fn preflight(
         }
     }
 
+    let mut inspection = PackageInspection::default();
     if let Some(index) = ods_content {
         let mut entry = archive
             .by_index(index)
@@ -99,21 +105,23 @@ pub(crate) fn preflight(
         entry
             .read_to_end(&mut bytes)
             .map_err(|_| invalid_data("ODS content entry could not be inspected"))?;
-        validate_ods_repeats(&bytes, config.max_sheet_cells, context)?;
+        inspection.unsupported_sheet_names =
+            validate_ods_repeats(&bytes, config.max_sheet_cells, context)?;
     }
-    Ok(())
+    Ok(inspection)
 }
 
 fn validate_ods_repeats(
     bytes: &[u8],
     max_cells: u64,
     context: &RequestContext,
-) -> ConnectorResult<()> {
+) -> ConnectorResult<BTreeSet<String>> {
     let mut reader = XmlReader::from_reader(bytes);
     reader.config_mut().check_end_names = true;
     let mut buffer = Vec::new();
     let mut sheet = None;
     let mut row = None;
+    let mut unsupported_sheet_names = BTreeSet::new();
 
     loop {
         context.ensure_active()?;
@@ -122,7 +130,9 @@ fn validate_ods_repeats(
             .map_err(|_| invalid_data("ODS content XML is malformed"))?
         {
             Event::Start(tag) if tag.name() == QName(b"table:table") => {
-                if sheet.replace(OdsSheetBounds::default()).is_some() {
+                let mut next = OdsSheetBounds::default();
+                next.name = attribute_string(&tag, b"table:name", reader.decoder())?;
+                if sheet.replace(next).is_some() {
                     return Err(invalid_data("ODS content contains nested sheets"));
                 }
             }
@@ -155,6 +165,13 @@ fn validate_ods_repeats(
                     )?;
                 }
             }
+            Event::Start(tag) | Event::Empty(tag)
+                if tag.name() == QName(b"table:shapes") =>
+            {
+                if let Some(sheet) = sheet.as_mut() {
+                    sheet.has_shapes = true;
+                }
+            }
             Event::End(tag) if tag.name() == QName(b"table:table-row") => {
                 if let (Some(sheet), Some(row)) = (sheet.as_mut(), row.take()) {
                     sheet.finish_row(row.bounds, row.repeats, max_cells)?;
@@ -164,7 +181,12 @@ fn validate_ods_repeats(
                 if row.is_some() {
                     return Err(invalid_data("ODS row is not closed"));
                 }
-                sheet = None;
+                let sheet = sheet
+                    .take()
+                    .ok_or_else(|| invalid_data("ODS sheet boundary is invalid"))?;
+                if sheet.has_shapes && sheet.first_materialized_row.is_none() {
+                    unsupported_sheet_names.extend(sheet.name);
+                }
             }
             Event::Eof => {
                 if sheet.is_some() || row.is_some() {
@@ -176,11 +198,13 @@ fn validate_ods_repeats(
         }
         buffer.clear();
     }
-    Ok(())
+    Ok(unsupported_sheet_names)
 }
 
 #[derive(Default)]
 struct OdsSheetBounds {
+    name: Option<String>,
+    has_shapes: bool,
     next_row: u64,
     first_materialized_row: Option<u64>,
     last_materialized_row: u64,
@@ -287,6 +311,24 @@ fn repeat_attribute(tag: &BytesStart<'_>, name: &[u8]) -> ConnectorResult<u64> {
     Ok(1)
 }
 
+fn attribute_string(
+    tag: &BytesStart<'_>,
+    name: &[u8],
+    decoder: quick_xml::encoding::Decoder,
+) -> ConnectorResult<Option<String>> {
+    for attribute in tag.attributes() {
+        let attribute =
+            attribute.map_err(|_| invalid_data("ODS element attributes are malformed"))?;
+        if attribute.key == QName(name) {
+            return attribute
+                .decode_and_unescape_value(decoder)
+                .map(|value| Some(value.into_owned()))
+                .map_err(|_| invalid_data("ODS attribute text is malformed"));
+        }
+    }
+    Ok(None)
+}
+
 fn cell_is_materialized(tag: &BytesStart<'_>) -> ConnectorResult<bool> {
     const MATERIALIZED_ATTRIBUTES: &[&[u8]] = &[
         b"office:value",
@@ -335,5 +377,13 @@ mod tests {
     fn ignores_trailing_empty_grid_padding_without_weakening_dimension_bounds() {
         let xml = br#"<table:table><table:table-row><table:table-cell office:value-type='float' office:value='1'/><table:table-cell table:number-columns-repeated='16383'/></table:table-row><table:table-row table:number-rows-repeated='1048575'><table:table-cell table:number-columns-repeated='16384'/></table:table-row></table:table>"#;
         validate_ods_repeats(xml, 1, &RequestContext::default()).expect("trailing padding");
+    }
+
+    #[test]
+    fn identifies_shape_only_ods_sheets_without_filtering_tabular_sheets_with_drawings() {
+        let xml = br#"<office:document><table:table table:name='Chart'><table:shapes/><table:table-row><table:table-cell/></table:table-row></table:table><table:table table:name='Data'><table:shapes/><table:table-row><table:table-cell office:value-type='float' office:value='1'/></table:table-row></table:table></office:document>"#;
+        let unsupported = validate_ods_repeats(xml, 10, &RequestContext::default())
+            .expect("valid shape-only sheet");
+        assert_eq!(unsupported, BTreeSet::from(["Chart".to_owned()]));
     }
 }
