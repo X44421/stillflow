@@ -165,9 +165,7 @@ fn validate_ods_repeats(
                     )?;
                 }
             }
-            Event::Start(tag) | Event::Empty(tag)
-                if tag.name() == QName(b"table:shapes") =>
-            {
+            Event::Start(tag) | Event::Empty(tag) if tag.name() == QName(b"table:shapes") => {
                 if let Some(sheet) = sheet.as_mut() {
                     sheet.has_shapes = true;
                 }
