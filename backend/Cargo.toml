@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/stillflow-api",
     "crates/stillflow-connector-local-tabular",
+    "crates/stillflow-connector-object-store",
     "crates/stillflow-connector-workbook",
     "crates/stillflow-connectors",
     "crates/stillflow-core",
@@ -23,6 +24,8 @@ publish = false
 # Internal crates. Dependency direction is strictly one-way:
 # api -> engine -> {plan, connectors, storage} -> core (no cycles).
 stillflow-api = { path = "crates/stillflow-api" }
+stillflow-connector-local-tabular = { path = "crates/stillflow-connector-local-tabular" }
+stillflow-connector-object-store = { path = "crates/stillflow-connector-object-store" }
 stillflow-connectors = { path = "crates/stillflow-connectors" }
 stillflow-core = { path = "crates/stillflow-core" }
 stillflow-engine = { path = "crates/stillflow-engine" }
@@ -35,10 +38,12 @@ arrow-cast = "59"
 arrow-schema = "59"
 arrow-select = "59"
 async-trait = "0.1"
+bytes = "1"
 calamine = { version = "=0.35.0", features = ["chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 fs2 = "0.4"
+object_store = { version = "=0.13.2", default-features = false, features = ["aws", "fs", "tokio"] }
 parquet = { version = "59", default-features = false, features = ["arrow", "snap"] }
 quick-xml = "=0.39.4"
 rusqlite = { version = "=0.32.1", features = ["bundled"] }
