@@ -135,6 +135,7 @@ impl RootSet {
                             container: Some(root_label(candidate.root_index)),
                             schema: None,
                             sheet: None,
+                            workbook_region: None,
                         },
                         discovered_at,
                     },

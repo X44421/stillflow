@@ -23,11 +23,13 @@ pub use batch::{
     LOGICAL_SCHEMA_FINGERPRINT_ALGORITHM, MAX_BATCH_BYTES, MAX_BATCH_ROWS,
 };
 pub use domain::{
-    AssetKind, AssetLocator, AssetMetadata, Checkpoint, CheckpointRequest, ConnectionStatus,
-    CredentialRef, Dataset, DatasetSnapshot, DiscoverRequest, FindingSeverity, InspectRequest,
-    InspectionFinding, PreviewData, PreviewRequest, ReadRequest, SamplingStrategy, Session,
-    SnapshotError, SnapshotStats, SourceAsset, SourceConnection, TestConnectionRequest,
-    DATASET_SNAPSHOT_VERSION,
+    AssetKind, AssetLocator, AssetMetadata, CandidateConfidence, CellCoordinate, CellRange,
+    Checkpoint, CheckpointRequest, ConnectionStatus, CredentialRef, Dataset, DatasetSnapshot,
+    DiscoverRequest, FindingSeverity, InspectRequest, InspectionFinding, PreviewData,
+    PreviewRequest, ReadRequest, SamplingStrategy, Session, SnapshotError, SnapshotStats,
+    SourceAsset, SourceConnection, TestConnectionRequest, WorkbookHeaderCandidate,
+    WorkbookHeaderSelection, WorkbookInspection, WorkbookRegionCandidate, WorkbookRegionSelection,
+    WorkbookSheetVisibility, DATASET_SNAPSHOT_VERSION,
 };
 pub use error::{
     ensure_no_secret_fields, ensure_safe_event_metadata, ConnectorError, ConnectorResult,

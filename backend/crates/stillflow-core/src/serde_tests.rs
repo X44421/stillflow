@@ -6,9 +6,10 @@ mod serde_roundtrip_tests {
     use uuid::Uuid;
 
     use crate::{
-        AssetKind, AssetLocator, Checkpoint, ColumnId, ConnectorKind, CredentialRef, Dataset,
-        DatasetSnapshot, Expr, LogicalField, LogicalSchema, LogicalType, SamplingStrategy, Session,
-        SnapshotStats, SourceAsset, SourceConnection, SourceFilter,
+        AssetKind, AssetLocator, AssetMetadata, Checkpoint, ColumnId, ConnectorKind, CredentialRef,
+        Dataset, DatasetSnapshot, Expr, LogicalField, LogicalSchema, LogicalType, SamplingStrategy,
+        Session, SnapshotStats, SourceAsset, SourceConnection, SourceFilter,
+        WorkbookHeaderSelection, WorkbookRegionSelection,
     };
 
     fn roundtrip<T>(value: &T) -> T
@@ -44,11 +45,46 @@ mod serde_roundtrip_tests {
                 container: None,
                 schema: Some("public".to_owned()),
                 sheet: None,
+                workbook_region: None,
             },
         );
         let checkpoint = Checkpoint::new(1, b"resume".to_vec());
         assert_eq!(roundtrip(&asset).name, asset.name);
         assert_eq!(roundtrip(&checkpoint).token, checkpoint.token);
+    }
+
+    #[test]
+    fn workbook_selection_roundtrips_without_changing_coordinates() {
+        let selection = WorkbookRegionSelection {
+            range: crate::CellRange::try_new(
+                crate::CellCoordinate::new(2, 1),
+                crate::CellCoordinate::new(10, 4),
+            )
+            .expect("range"),
+            header: WorkbookHeaderSelection::Row(2),
+        };
+        assert_eq!(roundtrip(&selection), selection);
+    }
+
+    #[test]
+    fn workbook_fields_are_backward_compatible_when_omitted() {
+        let locator: AssetLocator = serde_json::from_value(serde_json::json!({
+            "path": "book.xlsx",
+            "sheet": "Sheet1"
+        }))
+        .expect("legacy locator");
+        assert!(locator.workbook_region.is_none());
+
+        let metadata: AssetMetadata = serde_json::from_value(serde_json::json!({
+            "schema": LogicalSchema::empty(),
+            "format": "xlsx",
+            "sizeBytes": null,
+            "rowCount": null,
+            "modifiedAt": null,
+            "findings": []
+        }))
+        .expect("legacy metadata");
+        assert!(metadata.workbook.is_none());
     }
 
     #[test]

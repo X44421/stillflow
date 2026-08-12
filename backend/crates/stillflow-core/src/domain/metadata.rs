@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::LogicalSchema;
+use crate::{LogicalSchema, WorkbookInspection};
 
 /// Non-fatal inspection finding surfaced during schema or format analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +31,8 @@ pub struct AssetMetadata {
     pub row_count: Option<u64>,
     pub modified_at: Option<DateTime<Utc>>,
     pub findings: Vec<InspectionFinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workbook: Option<WorkbookInspection>,
 }
 
 impl AssetMetadata {
@@ -42,6 +44,7 @@ impl AssetMetadata {
             row_count: None,
             modified_at: None,
             findings: Vec::new(),
+            workbook: None,
         }
     }
 }

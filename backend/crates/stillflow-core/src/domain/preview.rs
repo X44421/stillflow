@@ -58,6 +58,9 @@ impl PreviewRequest {
 
     pub fn validate(&self) -> ConnectorResult<()> {
         self.context.ensure_active()?;
+        if let Some(selection) = &self.asset.locator.workbook_region {
+            selection.validate()?;
+        }
         if let Some(schema) = &self.schema_override {
             schema.validate().map_err(|error| {
                 ConnectorError::invalid_configuration(format!(
@@ -263,6 +266,7 @@ mod tests {
                 container: None,
                 schema: None,
                 sheet: None,
+                workbook_region: None,
             },
         )
     }
