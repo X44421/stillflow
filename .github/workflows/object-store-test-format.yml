@@ -1,0 +1,22 @@
+name: Object store test format helper
+
+on:
+  pull_request:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt
+      - name: Format object storage tests
+        working-directory: backend
+        run: cargo fmt --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: object-store-formatted-tests
+          path: |
+            backend/crates/stillflow-connector-object-store/src/access.rs
+            backend/crates/stillflow-connector-object-store/tests/object_store_connector.rs
