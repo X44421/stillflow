@@ -53,16 +53,13 @@ fn fixture_root() -> TempDir {
 }
 
 fn connection(root: &TempDir) -> SourceConnection {
-    connection_with_config(
-        root,
-        serde_json::json!({
-            "allowedRoots": [root.path().to_string_lossy()],
-            "maxSheetCells": 2_000_000
-        }),
-    )
+    connection_with_config(serde_json::json!({
+        "allowedRoots": [root.path().to_string_lossy()],
+        "maxSheetCells": 2_000_000
+    }))
 }
 
-fn connection_with_config(root: &TempDir, config: serde_json::Value) -> SourceConnection {
+fn connection_with_config(config: serde_json::Value) -> SourceConnection {
     SourceConnection::try_new(
         ConnectorKind::ExcelWorkbook,
         "fixtures",
@@ -321,13 +318,10 @@ async fn enforces_package_and_ods_expansion_bounds_before_decode() {
         &root.path().join("expanded.xlsx"),
         &[("[Content_Types].xml", b"01234567890")],
     );
-    let bounded_connection = connection_with_config(
-        &root,
-        serde_json::json!({
-            "allowedRoots": [root.path().to_string_lossy()],
-            "maxExpandedArchiveBytes": 10
-        }),
-    );
+    let bounded_connection = connection_with_config(serde_json::json!({
+        "allowedRoots": [root.path().to_string_lossy()],
+        "maxExpandedArchiveBytes": 10
+    }));
     let error = registry()
         .discover(
             &bounded_connection,
