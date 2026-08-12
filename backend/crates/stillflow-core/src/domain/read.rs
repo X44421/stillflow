@@ -5,6 +5,7 @@ use crate::request::RequestContext;
 use crate::ColumnId;
 use crate::ConnectorError;
 use crate::ConnectorResult;
+use crate::LogicalSchema;
 use crate::SourceAsset;
 use crate::SourceFilter;
 
@@ -13,6 +14,8 @@ use crate::SourceFilter;
 pub struct ReadRequest {
     pub context: RequestContext,
     pub asset: SourceAsset,
+    /// Optional caller-authorized schema used instead of source inference.
+    pub schema_override: Option<LogicalSchema>,
     pub projection: Option<Vec<ColumnId>>,
     pub filter: Option<SourceFilter>,
     pub checkpoint: Option<Checkpoint>,
@@ -27,6 +30,7 @@ impl ReadRequest {
         Self {
             context: RequestContext::default(),
             asset,
+            schema_override: None,
             projection: None,
             filter: None,
             checkpoint: None,
@@ -36,6 +40,13 @@ impl ReadRequest {
 
     pub fn validate(&self) -> ConnectorResult<()> {
         self.context.ensure_active()?;
+        if let Some(schema) = &self.schema_override {
+            schema.validate().map_err(|error| {
+                ConnectorError::invalid_configuration(format!(
+                    "invalid read schema override: {error}"
+                ))
+            })?;
+        }
         if self.batch_size < Self::MIN_BATCH_SIZE || self.batch_size > Self::MAX_BATCH_SIZE {
             return Err(ConnectorError::invalid_configuration(format!(
                 "batch_size must be between {} and {}",
@@ -104,5 +115,25 @@ mod tests {
         let mut request = ReadRequest::new(asset, 1024);
         request.projection = Some(vec![column, column]);
         request.validate().expect_err("duplicate projection");
+    }
+
+    #[test]
+    fn rejects_invalid_schema_override() {
+        let asset = SourceAsset::new(
+            uuid::Uuid::new_v4(),
+            AssetKind::File,
+            "orders.csv",
+            AssetLocator {
+                path: "/orders.csv".to_owned(),
+                container: None,
+                schema: None,
+                sheet: None,
+            },
+        );
+        let mut schema = LogicalSchema::empty();
+        schema.version += 1;
+        let mut request = ReadRequest::new(asset, 1024);
+        request.schema_override = Some(schema);
+        request.validate().expect_err("invalid schema override");
     }
 }
