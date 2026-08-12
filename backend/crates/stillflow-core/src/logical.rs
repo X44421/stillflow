@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -9,6 +9,15 @@ use crate::ensure_no_secret_fields;
 
 /// Current wire-format version for logical schemas.
 pub const LOGICAL_SCHEMA_VERSION: u16 = 1;
+
+/// Maximum version 1 nesting depth across list elements and struct fields.
+pub const MAX_SCHEMA_NESTING_DEPTH: usize = 64;
+
+/// Maximum number of logical fields, including nested struct fields.
+pub const MAX_SCHEMA_FIELDS: usize = 4_096;
+
+/// Maximum cumulative UTF-8 bytes in schema names, timezones and metadata.
+pub const MAX_SCHEMA_TEXT_BYTES: usize = 1024 * 1024;
 
 /// Stable identity of a logical column, independent of its display name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -134,15 +143,7 @@ impl LogicalType {
     }
 
     pub fn validate(&self) -> Result<(), LogicalError> {
-        match self {
-            Self::Timestamp {
-                timezone: Some(timezone),
-                ..
-            } if timezone.trim().is_empty() => Err(LogicalError::EmptyTimezone),
-            Self::List(element) => element.validate(),
-            Self::Struct(fields) => validate_fields(fields),
-            _ => Ok(()),
-        }
+        validate_type(self)
     }
 }
 
@@ -268,17 +269,13 @@ impl LogicalField {
         mut self,
         metadata: BTreeMap<String, String>,
     ) -> Result<Self, LogicalError> {
-        validate_metadata(&metadata)?;
         self.metadata = metadata;
+        self.validate()?;
         Ok(self)
     }
 
     pub fn validate(&self) -> Result<(), LogicalError> {
-        if self.name.trim().is_empty() {
-            return Err(LogicalError::EmptyColumnName(self.id));
-        }
-        self.data_type.validate()?;
-        validate_metadata(&self.metadata)
+        validate_fields(std::slice::from_ref(self))
     }
 }
 
@@ -342,8 +339,7 @@ impl LogicalSchema {
         if self.version != LOGICAL_SCHEMA_VERSION {
             return Err(LogicalError::UnsupportedSchemaVersion(self.version));
         }
-        validate_fields(&self.fields)?;
-        validate_metadata(&self.metadata)
+        validate_schema(&self.fields, &self.metadata)
     }
 
     pub fn field(&self, id: ColumnId) -> Option<&LogicalField> {
@@ -355,43 +351,199 @@ impl LogicalSchema {
         id: ColumnId,
         new_name: impl Into<String>,
     ) -> Result<(), LogicalError> {
-        let new_name = new_name.into();
-        if new_name.trim().is_empty() {
-            return Err(LogicalError::EmptyColumnName(id));
-        }
-        if self
+        let index = self
             .fields
             .iter()
-            .any(|field| field.id != id && field.name == new_name)
-        {
-            return Err(LogicalError::DuplicateColumnName(new_name));
-        }
+            .position(|field| field.id == id)
+            .ok_or(LogicalError::UnknownColumn(id))?;
         let field = self
             .fields
-            .iter_mut()
-            .find(|field| field.id == id)
+            .get_mut(index)
             .ok_or(LogicalError::UnknownColumn(id))?;
-        field.name = new_name;
+        let previous = std::mem::replace(&mut field.name, new_name.into());
+        if let Err(error) = self.validate() {
+            if let Some(field) = self.fields.iter_mut().find(|field| field.id == id) {
+                field.name = previous;
+            }
+            return Err(error);
+        }
         Ok(())
     }
 }
 
-fn validate_fields(fields: &[LogicalField]) -> Result<(), LogicalError> {
-    let mut ids = BTreeSet::new();
-    let mut names = BTreeSet::new();
-    for field in fields {
-        field.validate()?;
-        if !ids.insert(field.id) {
-            return Err(LogicalError::DuplicateColumnId(field.id));
+#[derive(Default)]
+struct SchemaBudget {
+    fields: usize,
+    text_bytes: usize,
+}
+
+impl SchemaBudget {
+    fn add_field(&mut self) -> Result<(), LogicalError> {
+        self.fields = self
+            .fields
+            .checked_add(1)
+            .ok_or(LogicalError::SchemaFieldLimitExceeded {
+                fields: usize::MAX,
+                maximum: MAX_SCHEMA_FIELDS,
+            })?;
+        if self.fields > MAX_SCHEMA_FIELDS {
+            return Err(LogicalError::SchemaFieldLimitExceeded {
+                fields: self.fields,
+                maximum: MAX_SCHEMA_FIELDS,
+            });
         }
-        if !names.insert(field.name.clone()) {
-            return Err(LogicalError::DuplicateColumnName(field.name.clone()));
+        Ok(())
+    }
+
+    fn add_text(&mut self, bytes: usize) -> Result<(), LogicalError> {
+        self.text_bytes =
+            self.text_bytes
+                .checked_add(bytes)
+                .ok_or(LogicalError::SchemaTextLimitExceeded {
+                    bytes: usize::MAX,
+                    maximum: MAX_SCHEMA_TEXT_BYTES,
+                })?;
+        if self.text_bytes > MAX_SCHEMA_TEXT_BYTES {
+            return Err(LogicalError::SchemaTextLimitExceeded {
+                bytes: self.text_bytes,
+                maximum: MAX_SCHEMA_TEXT_BYTES,
+            });
+        }
+        Ok(())
+    }
+}
+
+enum ValidationNode<'a> {
+    Type {
+        data_type: &'a LogicalType,
+        depth: usize,
+    },
+    Fields {
+        fields: &'a [LogicalField],
+        type_depth: usize,
+    },
+}
+
+fn validate_type(data_type: &LogicalType) -> Result<(), LogicalError> {
+    validate_nodes(
+        vec![ValidationNode::Type {
+            data_type,
+            depth: 1,
+        }],
+        SchemaBudget::default(),
+    )
+}
+
+fn validate_fields(fields: &[LogicalField]) -> Result<(), LogicalError> {
+    validate_nodes(
+        vec![ValidationNode::Fields {
+            fields,
+            type_depth: 1,
+        }],
+        SchemaBudget::default(),
+    )
+}
+
+fn validate_schema(
+    fields: &[LogicalField],
+    metadata: &BTreeMap<String, String>,
+) -> Result<(), LogicalError> {
+    let mut budget = SchemaBudget::default();
+    validate_metadata(metadata, &mut budget)?;
+    validate_nodes(
+        vec![ValidationNode::Fields {
+            fields,
+            type_depth: 1,
+        }],
+        budget,
+    )
+}
+
+fn validate_nodes(
+    mut stack: Vec<ValidationNode<'_>>,
+    mut budget: SchemaBudget,
+) -> Result<(), LogicalError> {
+    while let Some(node) = stack.pop() {
+        match node {
+            ValidationNode::Type { data_type, depth } => {
+                if depth > MAX_SCHEMA_NESTING_DEPTH {
+                    return Err(LogicalError::SchemaNestingDepthExceeded {
+                        depth,
+                        maximum: MAX_SCHEMA_NESTING_DEPTH,
+                    });
+                }
+                match data_type {
+                    LogicalType::Timestamp {
+                        timezone: Some(timezone),
+                        ..
+                    } => {
+                        if timezone.trim().is_empty() {
+                            return Err(LogicalError::EmptyTimezone);
+                        }
+                        budget.add_text(timezone.len())?;
+                    }
+                    LogicalType::List(element) => {
+                        let child_depth = next_depth(depth)?;
+                        stack.push(ValidationNode::Type {
+                            data_type: element,
+                            depth: child_depth,
+                        });
+                    }
+                    LogicalType::Struct(fields) => {
+                        stack.push(ValidationNode::Fields {
+                            fields,
+                            type_depth: next_depth(depth)?,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            ValidationNode::Fields { fields, type_depth } => {
+                let mut ids = HashSet::new();
+                let mut names = HashSet::new();
+                for field in fields {
+                    if field.name.trim().is_empty() {
+                        return Err(LogicalError::EmptyColumnName(field.id));
+                    }
+                    budget.add_field()?;
+                    budget.add_text(field.name.len())?;
+                    validate_metadata(&field.metadata, &mut budget)?;
+                    if !ids.insert(field.id) {
+                        return Err(LogicalError::DuplicateColumnId(field.id));
+                    }
+                    if !names.insert(field.name.as_str()) {
+                        return Err(LogicalError::DuplicateColumnName(field.name.clone()));
+                    }
+                }
+                for field in fields.iter().rev() {
+                    stack.push(ValidationNode::Type {
+                        data_type: &field.data_type,
+                        depth: type_depth,
+                    });
+                }
+            }
         }
     }
     Ok(())
 }
 
-fn validate_metadata(metadata: &BTreeMap<String, String>) -> Result<(), LogicalError> {
+fn next_depth(depth: usize) -> Result<usize, LogicalError> {
+    depth
+        .checked_add(1)
+        .ok_or(LogicalError::SchemaNestingDepthExceeded {
+            depth: usize::MAX,
+            maximum: MAX_SCHEMA_NESTING_DEPTH,
+        })
+}
+
+fn validate_metadata(
+    metadata: &BTreeMap<String, String>,
+    budget: &mut SchemaBudget,
+) -> Result<(), LogicalError> {
+    for (key, value) in metadata {
+        budget.add_text(key.len())?;
+        budget.add_text(value.len())?;
+    }
     let value = serde_json::to_value(metadata).map_err(|_| LogicalError::UnsafeMetadata)?;
     ensure_no_secret_fields(&value).map_err(|_| LogicalError::UnsafeMetadata)
 }
@@ -416,6 +568,12 @@ pub enum LogicalError {
     },
     #[error("timestamp timezone must not be empty")]
     EmptyTimezone,
+    #[error("schema nesting depth {depth} exceeds maximum {maximum}")]
+    SchemaNestingDepthExceeded { depth: usize, maximum: usize },
+    #[error("schema field count {fields} exceeds maximum {maximum}")]
+    SchemaFieldLimitExceeded { fields: usize, maximum: usize },
+    #[error("schema text uses {bytes} bytes; maximum is {maximum}")]
+    SchemaTextLimitExceeded { bytes: usize, maximum: usize },
     #[error("schema metadata contains a forbidden secret-like field or value")]
     UnsafeMetadata,
     #[error("floating-point literal must be finite")]
@@ -429,6 +587,10 @@ pub enum LogicalError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn id(value: u128) -> ColumnId {
+        ColumnId::from_uuid(Uuid::from_u128(value))
+    }
 
     fn column(value: u128, name: &str, data_type: LogicalType) -> LogicalField {
         LogicalField::new(
@@ -558,6 +720,124 @@ mod tests {
         };
         assert_eq!(fields[0].data_type, LogicalType::Int64);
         assert!(fields[0].nullable);
+    }
+
+    fn nested_list(depth: usize) -> LogicalType {
+        let mut data_type = LogicalType::Int64;
+        for _ in 1..depth {
+            data_type = LogicalType::List(Box::new(data_type));
+        }
+        data_type
+    }
+
+    #[test]
+    fn enforces_schema_nesting_depth_without_recursive_validation() {
+        nested_list(MAX_SCHEMA_NESTING_DEPTH)
+            .validate()
+            .expect("exact nesting limit");
+        assert!(matches!(
+            nested_list(MAX_SCHEMA_NESTING_DEPTH + 1).validate(),
+            Err(LogicalError::SchemaNestingDepthExceeded {
+                depth,
+                maximum: MAX_SCHEMA_NESTING_DEPTH
+            }) if depth == MAX_SCHEMA_NESTING_DEPTH + 1
+        ));
+    }
+
+    #[test]
+    fn enforces_total_field_limit_including_nested_structs() {
+        let schema_with_nested_fields = |nested_fields: usize| {
+            let nested = (1..=nested_fields)
+                .map(|value| LogicalField {
+                    id: id(u128::try_from(value).expect("field id")),
+                    name: format!("field-{value}"),
+                    data_type: LogicalType::Null,
+                    nullable: false,
+                    metadata: BTreeMap::new(),
+                })
+                .collect::<Vec<_>>();
+            LogicalSchema {
+                version: LOGICAL_SCHEMA_VERSION,
+                fields: vec![LogicalField {
+                    id: id(10_000),
+                    name: "root".to_owned(),
+                    data_type: LogicalType::Struct(nested),
+                    nullable: false,
+                    metadata: BTreeMap::new(),
+                }],
+                metadata: BTreeMap::new(),
+            }
+        };
+
+        schema_with_nested_fields(MAX_SCHEMA_FIELDS - 1)
+            .validate()
+            .expect("exact field limit");
+        assert!(matches!(
+            schema_with_nested_fields(MAX_SCHEMA_FIELDS).validate(),
+            Err(LogicalError::SchemaFieldLimitExceeded {
+                fields,
+                maximum: MAX_SCHEMA_FIELDS
+            }) if fields == MAX_SCHEMA_FIELDS + 1
+        ));
+    }
+
+    #[test]
+    fn enforces_cumulative_schema_text_limit() {
+        let exact = LogicalField {
+            id: id(1),
+            name: "x".repeat(MAX_SCHEMA_TEXT_BYTES),
+            data_type: LogicalType::Null,
+            nullable: false,
+            metadata: BTreeMap::new(),
+        };
+        LogicalSchema::new(vec![exact]).expect("exact text limit");
+
+        let excessive = LogicalField {
+            id: id(1),
+            name: "x".repeat(MAX_SCHEMA_TEXT_BYTES + 1),
+            data_type: LogicalType::Null,
+            nullable: false,
+            metadata: BTreeMap::new(),
+        };
+        assert!(matches!(
+            LogicalSchema::new(vec![excessive]),
+            Err(LogicalError::SchemaTextLimitExceeded {
+                bytes,
+                maximum: MAX_SCHEMA_TEXT_BYTES
+            }) if bytes == MAX_SCHEMA_TEXT_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn counts_timezone_and_metadata_text_bytes() {
+        let mut field_metadata = BTreeMap::new();
+        field_metadata.insert("a".to_owned(), "b".to_owned());
+        let mut schema_metadata = BTreeMap::new();
+        schema_metadata.insert("c".to_owned(), "d".to_owned());
+        let field = LogicalField {
+            id: id(1),
+            name: "x".repeat(MAX_SCHEMA_TEXT_BYTES - 7),
+            data_type: LogicalType::Timestamp {
+                unit: TimeUnit::Second,
+                timezone: Some("UTC".to_owned()),
+            },
+            nullable: false,
+            metadata: field_metadata,
+        };
+        LogicalSchema::from_parts(LOGICAL_SCHEMA_VERSION, vec![field], schema_metadata)
+            .expect("all text sources total the exact limit");
+    }
+
+    #[test]
+    fn failed_rename_restores_the_previous_valid_name() {
+        let column_id = id(1);
+        let mut schema =
+            LogicalSchema::new(vec![column(1, "value", LogicalType::Utf8)]).expect("schema");
+        assert!(matches!(
+            schema.rename_column(column_id, "x".repeat(MAX_SCHEMA_TEXT_BYTES + 1)),
+            Err(LogicalError::SchemaTextLimitExceeded { .. })
+        ));
+        assert_eq!(schema.field(column_id).expect("field").name, "value");
     }
 
     #[test]
