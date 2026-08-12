@@ -12,7 +12,7 @@ use futures::{Stream, StreamExt};
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::path::Path;
-use object_store::{GetOptions, GetRange, ObjectMeta, ObjectStore, ObjectStoreExt, PutPayload};
+use object_store::{GetOptions, GetRange, ObjectMeta, ObjectStore, PutPayload};
 use stillflow_core::{
     ConnectorError, ConnectorResult, ErrorCategory, RequestContext, SourceConnection,
 };
@@ -805,7 +805,7 @@ fn map_store_error(error: object_store::Error, operation: &'static str) -> Conne
         | object_store::Error::NotModified { .. } => {
             (ErrorCategory::InvalidData, false, "precondition")
         }
-        object_store::Error::NotSupported { .. } | object_store::Error::NotImplemented { .. } => (
+        object_store::Error::NotSupported { .. } | object_store::Error::NotImplemented => (
             ErrorCategory::UnsupportedCapability,
             false,
             "unsupported_operation",

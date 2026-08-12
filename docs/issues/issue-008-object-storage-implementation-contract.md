@@ -39,10 +39,13 @@ the domain model.
 ## 3. Accepted dependency and package boundary
 
 - Add `stillflow-connector-object-store` to the backend workspace.
-- Pin `object_store` to `=0.13.2` with `aws`, `fs` and `tokio`. This is the
-  object-store release aligned with Arrow/Parquet 59 and Rust 1.85.
-- Enable the Parquet 59 `object_store` feature only where required. Keep the
-  workspace Arrow version singular and do not add the `arrow` meta-crate.
+- Pin `object_store` to `=0.12.5` with `aws` and `fs`. This maintained release
+  supports Rust 1.64+ and therefore stays within Stillflow's Rust 1.85 MSRV.
+- Enable Parquet 59's `async` feature and provide the bounded
+  `AsyncFileReader` adapter in this crate. Do not enable Parquet's
+  `object_store` feature, because it pulls the Rust-incompatible 0.13 line.
+  Keep the workspace Arrow version singular and do not add the `arrow`
+  meta-crate.
 - Use `bytes`, `futures`, `async-trait`, `serde`, `tokio`, `tempfile` and the
   existing Stillflow crates. Do not add a second cloud SDK, HTTP client, CSV
   engine or expression engine.
@@ -54,9 +57,9 @@ the domain model.
 
 References:
 
-- https://github.com/apache/arrow-rs-object-store/tree/v0.13.2
-- https://github.com/apache/arrow-rs/tree/59.1.0/parquet
-- https://docs.rs/object_store/0.13.2/object_store/
+- https://github.com/apache/arrow-rs-object-store/tree/v0.12.5
+- https://github.com/apache/arrow-rs/tree/59.2.0/parquet
+- https://docs.rs/object_store/0.12.5/object_store/
 
 ## 4. Public adapter API
 
