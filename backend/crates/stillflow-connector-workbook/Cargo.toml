@@ -16,6 +16,7 @@ cap-fs-ext = "4.0.2"
 cap-std = "4.0.2"
 chrono.workspace = true
 futures.workspace = true
+quick-xml.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 stillflow-connectors.workspace = true

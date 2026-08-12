@@ -2481,6 +2481,7 @@ dependencies = [
  "cap-std",
  "chrono",
  "futures",
+ "quick-xml",
  "serde",
  "serde_json",
  "stillflow-connectors",

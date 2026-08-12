@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
 
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::name::QName;
+use quick_xml::Reader as XmlReader;
 use stillflow_core::{ConnectorError, ConnectorResult, ErrorCategory, RequestContext};
 use zip::ZipArchive;
 
@@ -9,6 +12,8 @@ use crate::config::WorkbookConfig;
 use crate::format::WorkbookFormat;
 
 const MAX_PREFLIGHT_XML_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_ODS_ROWS: u64 = 1_048_576;
+const MAX_ODS_COLUMNS: u64 = 16_384;
 
 pub(crate) fn preflight(
     file: &File,
@@ -104,155 +109,202 @@ fn validate_ods_repeats(
     max_cells: u64,
     context: &RequestContext,
 ) -> ConnectorResult<()> {
-    let row_open = b"<table:table-row";
-    let row_close = b"</table:table-row>";
-    let mut cursor = 0_usize;
-    let mut total_cells = 0_u64;
-    while let Some(relative_start) = find_bytes(
-        bytes
-            .get(cursor..)
-            .ok_or_else(|| invalid_data("ODS inspection cursor is invalid"))?,
-        row_open,
-    ) {
-        context.ensure_active()?;
-        let start = cursor
-            .checked_add(relative_start)
-            .ok_or_else(|| invalid_data("ODS row position overflow"))?;
-        let after_start = bytes
-            .get(start..)
-            .ok_or_else(|| invalid_data("ODS row start is invalid"))?;
-        let Some(tag_end_relative) = after_start.iter().position(|byte| *byte == b'>') else {
-            return Err(invalid_data("ODS row tag is incomplete"));
-        };
-        let tag_end = start
-            .checked_add(tag_end_relative)
-            .and_then(|value| value.checked_add(1))
-            .ok_or_else(|| invalid_data("ODS row tag position overflow"))?;
-        let row_tag = bytes
-            .get(start..tag_end)
-            .ok_or_else(|| invalid_data("ODS row tag boundary is invalid"))?;
-        let row_repeats = attribute_u64(row_tag, b"table:number-rows-repeated")?.unwrap_or(1);
-        if row_repeats == 0 || row_repeats > max_cells {
-            return Err(invalid_data("ODS repeated rows exceed maxSheetCells"));
-        }
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().check_end_names = true;
+    let mut buffer = Vec::new();
+    let mut sheet = None;
+    let mut row = None;
 
-        let remaining = bytes
-            .get(tag_end..)
-            .ok_or_else(|| invalid_data("ODS row body boundary is invalid"))?;
-        let close_relative = find_bytes(remaining, row_close).unwrap_or_else(|| {
-            remaining
-                .iter()
-                .position(|byte| *byte == b'<')
-                .unwrap_or(remaining.len())
-        });
-        let row_body = remaining
-            .get(..close_relative)
-            .ok_or_else(|| invalid_data("ODS row body is invalid"))?;
-        let columns = count_ods_columns(row_body, max_cells)?;
-        let cells = row_repeats
-            .checked_mul(columns)
-            .ok_or_else(|| invalid_data("ODS repeated-cell count overflow"))?;
-        total_cells = total_cells
-            .checked_add(cells)
-            .ok_or_else(|| invalid_data("ODS repeated-cell count overflow"))?;
-        if total_cells > max_cells {
-            return Err(invalid_data("ODS expanded cells exceed maxSheetCells"));
+    loop {
+        context.ensure_active()?;
+        match reader
+            .read_event_into(&mut buffer)
+            .map_err(|_| invalid_data("ODS content XML is malformed"))?
+        {
+            Event::Start(tag) if tag.name() == QName(b"table:table") => {
+                if sheet.replace(OdsSheetBounds::default()).is_some() {
+                    return Err(invalid_data("ODS content contains nested sheets"));
+                }
+            }
+            Event::Empty(tag) if tag.name() == QName(b"table:table") => {}
+            Event::Start(tag) if tag.name() == QName(b"table:table-row") => {
+                if sheet.is_some() {
+                    if row.is_some() {
+                        return Err(invalid_data("ODS content contains nested rows"));
+                    }
+                    row = Some(OdsOpenRow {
+                        repeats: repeat_attribute(&tag, b"table:number-rows-repeated")?,
+                        bounds: OdsRowBounds::default(),
+                    });
+                }
+            }
+            Event::Empty(tag) if tag.name() == QName(b"table:table-row") => {
+                if let Some(sheet) = sheet.as_mut() {
+                    let repeats = repeat_attribute(&tag, b"table:number-rows-repeated")?;
+                    sheet.finish_row(OdsRowBounds::default(), repeats, max_cells)?;
+                }
+            }
+            Event::Start(tag) | Event::Empty(tag)
+                if tag.name() == QName(b"table:table-cell")
+                    || tag.name() == QName(b"table:covered-table-cell") =>
+            {
+                if let Some(row) = row.as_mut() {
+                    row.bounds.push_cell(
+                        repeat_attribute(&tag, b"table:number-columns-repeated")?,
+                        cell_is_materialized(&tag)?,
+                    )?;
+                }
+            }
+            Event::End(tag) if tag.name() == QName(b"table:table-row") => {
+                if let (Some(sheet), Some(row)) = (sheet.as_mut(), row.take()) {
+                    sheet.finish_row(row.bounds, row.repeats, max_cells)?;
+                }
+            }
+            Event::End(tag) if tag.name() == QName(b"table:table") => {
+                if row.is_some() {
+                    return Err(invalid_data("ODS row is not closed"));
+                }
+                sheet = None;
+            }
+            Event::Eof => {
+                if sheet.is_some() || row.is_some() {
+                    return Err(invalid_data("ODS content XML is incomplete"));
+                }
+                break;
+            }
+            _ => {}
         }
-        cursor = tag_end
-            .checked_add(close_relative)
-            .ok_or_else(|| invalid_data("ODS inspection cursor overflow"))?;
+        buffer.clear();
     }
     Ok(())
 }
 
-fn count_ods_columns(bytes: &[u8], max_cells: u64) -> ConnectorResult<u64> {
-    let mut cursor = 0_usize;
-    let mut columns = 0_u64;
-    while let Some(relative) = find_bytes(
-        bytes
-            .get(cursor..)
-            .ok_or_else(|| invalid_data("ODS cell cursor is invalid"))?,
-        b"<table:",
-    ) {
-        let start = cursor
-            .checked_add(relative)
-            .ok_or_else(|| invalid_data("ODS cell position overflow"))?;
-        let remaining = bytes
-            .get(start..)
-            .ok_or_else(|| invalid_data("ODS cell boundary is invalid"))?;
-        let Some(end_relative) = remaining.iter().position(|byte| *byte == b'>') else {
-            return Err(invalid_data("ODS cell tag is incomplete"));
-        };
-        let end = start
-            .checked_add(end_relative)
-            .and_then(|value| value.checked_add(1))
-            .ok_or_else(|| invalid_data("ODS cell tag position overflow"))?;
-        let tag = bytes
-            .get(start..end)
-            .ok_or_else(|| invalid_data("ODS cell tag boundary is invalid"))?;
-        if tag.starts_with(b"<table:table-cell") || tag.starts_with(b"<table:covered-table-cell") {
-            let repeated = attribute_u64(tag, b"table:number-columns-repeated")?.unwrap_or(1);
-            if repeated == 0 || repeated > max_cells {
-                return Err(invalid_data("ODS repeated columns exceed maxSheetCells"));
-            }
-            columns = columns
-                .checked_add(repeated)
-                .ok_or_else(|| invalid_data("ODS repeated-column count overflow"))?;
-            if columns > max_cells {
-                return Err(invalid_data("ODS row width exceeds maxSheetCells"));
-            }
+#[derive(Default)]
+struct OdsSheetBounds {
+    next_row: u64,
+    first_materialized_row: Option<u64>,
+    last_materialized_row: u64,
+    first_materialized_column: Option<u64>,
+    last_materialized_column: u64,
+}
+
+impl OdsSheetBounds {
+    fn finish_row(
+        &mut self,
+        row: OdsRowBounds,
+        repeats: u64,
+        max_cells: u64,
+    ) -> ConnectorResult<()> {
+        if repeats == 0 {
+            return Err(invalid_data("ODS row repeat must be positive"));
         }
-        cursor = end;
+        let start = self.next_row;
+        self.next_row = self
+            .next_row
+            .checked_add(repeats)
+            .filter(|value| *value <= MAX_ODS_ROWS)
+            .ok_or_else(|| invalid_data("ODS row declarations exceed the format bound"))?;
+
+        let (Some(first_column), Some(last_column)) =
+            (row.first_materialized, row.last_materialized)
+        else {
+            return Ok(());
+        };
+        self.first_materialized_row.get_or_insert(start);
+        self.last_materialized_row = self.next_row;
+        self.first_materialized_column = Some(
+            self.first_materialized_column
+                .map_or(first_column, |existing| existing.min(first_column)),
+        );
+        self.last_materialized_column = self.last_materialized_column.max(last_column);
+
+        let rows = self
+            .last_materialized_row
+            .checked_sub(
+                self.first_materialized_row
+                    .ok_or_else(|| invalid_data("ODS row range is invalid"))?,
+            )
+            .ok_or_else(|| invalid_data("ODS row range is invalid"))?;
+        let columns = self
+            .last_materialized_column
+            .checked_sub(
+                self.first_materialized_column
+                    .ok_or_else(|| invalid_data("ODS column range is invalid"))?,
+            )
+            .ok_or_else(|| invalid_data("ODS column range is invalid"))?;
+        let cells = rows
+            .checked_mul(columns)
+            .ok_or_else(|| invalid_data("ODS repeated-cell count overflow"))?;
+        if cells > max_cells {
+            return Err(invalid_data("ODS expanded cells exceed maxSheetCells"));
+        }
+        Ok(())
     }
-    Ok(columns)
 }
 
-fn attribute_u64(tag: &[u8], name: &[u8]) -> ConnectorResult<Option<u64>> {
-    let Some(position) = find_bytes(tag, name) else {
-        return Ok(None);
-    };
-    let mut cursor = position
-        .checked_add(name.len())
-        .ok_or_else(|| invalid_data("ODS attribute position overflow"))?;
-    while tag.get(cursor).is_some_and(u8::is_ascii_whitespace) {
-        cursor += 1;
-    }
-    if tag.get(cursor) != Some(&b'=') {
-        return Err(invalid_data("ODS repeat attribute is malformed"));
-    }
-    cursor += 1;
-    while tag.get(cursor).is_some_and(u8::is_ascii_whitespace) {
-        cursor += 1;
-    }
-    let quote = *tag
-        .get(cursor)
-        .filter(|value| matches!(value, b'\'' | b'"'))
-        .ok_or_else(|| invalid_data("ODS repeat attribute is malformed"))?;
-    cursor += 1;
-    let start = cursor;
-    while tag.get(cursor).is_some_and(u8::is_ascii_digit) {
-        cursor += 1;
-    }
-    if cursor == start || tag.get(cursor) != Some(&quote) {
-        return Err(invalid_data("ODS repeat attribute is malformed"));
-    }
-    let value = std::str::from_utf8(
-        tag.get(start..cursor)
-            .ok_or_else(|| invalid_data("ODS repeat attribute boundary is invalid"))?,
-    )
-    .map_err(|_| invalid_data("ODS repeat attribute is not valid UTF-8"))?
-    .parse::<u64>()
-    .map_err(|_| invalid_data("ODS repeat attribute exceeds the numeric range"))?;
-    Ok(Some(value))
+#[derive(Default)]
+struct OdsRowBounds {
+    next_column: u64,
+    first_materialized: Option<u64>,
+    last_materialized: Option<u64>,
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
+impl OdsRowBounds {
+    fn push_cell(&mut self, repeats: u64, materialized: bool) -> ConnectorResult<()> {
+        if repeats == 0 {
+            return Err(invalid_data("ODS column repeat must be positive"));
+        }
+        let start = self.next_column;
+        self.next_column = self
+            .next_column
+            .checked_add(repeats)
+            .filter(|value| *value <= MAX_ODS_COLUMNS)
+            .ok_or_else(|| invalid_data("ODS column declarations exceed the format bound"))?;
+        if materialized {
+            self.first_materialized.get_or_insert(start);
+            self.last_materialized = Some(self.next_column);
+        }
+        Ok(())
     }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
+}
+
+struct OdsOpenRow {
+    repeats: u64,
+    bounds: OdsRowBounds,
+}
+
+fn repeat_attribute(tag: &BytesStart<'_>, name: &[u8]) -> ConnectorResult<u64> {
+    for attribute in tag.attributes() {
+        let attribute =
+            attribute.map_err(|_| invalid_data("ODS element attributes are malformed"))?;
+        if attribute.key == QName(name) {
+            return std::str::from_utf8(attribute.value.as_ref())
+                .map_err(|_| invalid_data("ODS repeat attribute is not valid UTF-8"))?
+                .parse::<u64>()
+                .map_err(|_| invalid_data("ODS repeat attribute exceeds the numeric range"));
+        }
+    }
+    Ok(1)
+}
+
+fn cell_is_materialized(tag: &BytesStart<'_>) -> ConnectorResult<bool> {
+    const MATERIALIZED_ATTRIBUTES: &[&[u8]] = &[
+        b"office:value",
+        b"office:string-value",
+        b"office:date-value",
+        b"office:time-value",
+        b"office:boolean-value",
+        b"office:value-type",
+        b"table:formula",
+    ];
+    for attribute in tag.attributes() {
+        let attribute =
+            attribute.map_err(|_| invalid_data("ODS element attributes are malformed"))?;
+        if MATERIALIZED_ATTRIBUTES.contains(&attribute.key.as_ref()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn invalid_data(message: &'static str) -> ConnectorError {
@@ -269,13 +321,19 @@ mod tests {
 
     #[test]
     fn rejects_ods_repeat_expansion_above_the_product_bound() {
-        let xml = br#"<table:table-row table:number-rows-repeated="2000"><table:table-cell table:number-columns-repeated="2000"/></table:table-row>"#;
+        let xml = br#"<table:table><table:table-row table:number-rows-repeated="2000"><table:table-cell table:number-columns-repeated="2000" office:value-type="float" office:value="1"/></table:table-row></table:table>"#;
         assert!(validate_ods_repeats(xml, 2_000_000, &RequestContext::default()).is_err());
     }
 
     #[test]
     fn accepts_small_ods_repeat_expansion() {
-        let xml = br#"<table:table-row table:number-rows-repeated='2'><table:table-cell table:number-columns-repeated='3'/></table:table-row>"#;
+        let xml = br#"<table:table><table:table-row table:number-rows-repeated='2'><table:table-cell table:number-columns-repeated='3' office:value-type='float' office:value='1'/></table:table-row></table:table>"#;
         validate_ods_repeats(xml, 10, &RequestContext::default()).expect("small repeat");
+    }
+
+    #[test]
+    fn ignores_trailing_empty_grid_padding_without_weakening_dimension_bounds() {
+        let xml = br#"<table:table><table:table-row><table:table-cell office:value-type='float' office:value='1'/><table:table-cell table:number-columns-repeated='16383'/></table:table-row><table:table-row table:number-rows-repeated='1048575'><table:table-cell table:number-columns-repeated='16384'/></table:table-row></table:table>"#;
+        validate_ods_repeats(xml, 1, &RequestContext::default()).expect("trailing padding");
     }
 }
