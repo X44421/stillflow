@@ -206,6 +206,10 @@ impl StoreAccess {
         self.config.max_preview_source_bytes
     }
 
+    pub(crate) const fn request_timeout(&self) -> std::time::Duration {
+        self.config.request_timeout
+    }
+
     pub(crate) async fn probe(&self, context: &RequestContext) -> ConnectorResult<()> {
         context.ensure_active()?;
         let mut stream = self.store.list(self.prefix.as_ref());

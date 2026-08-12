@@ -18,6 +18,10 @@ use uuid::Uuid;
 mod access;
 mod config;
 mod credentials;
+mod parquet;
+mod preview;
+mod schema;
+mod staged;
 
 pub use access::{ObjectByteStream, ObjectInfo, ObjectStorageAccess};
 pub use credentials::{ObjectStoreCredentialResolver, S3CredentialMaterial};
@@ -144,35 +148,72 @@ impl SourceConnector for ObjectStoreConnector {
 
     async fn inspect(
         &self,
-        _connection: &SourceConnection,
+        connection: &SourceConnection,
         request: InspectRequest,
     ) -> ConnectorResult<AssetMetadata> {
         request.validate()?;
-        Err(ConnectorError::for_unsupported_capability(
-            "object_tabular_inspection_pending",
-        ))
+        ensure_asset_connection(connection, &request.asset)?;
+        let access = self.access(connection, &request.context).await?;
+        ensure_asset_container(&access, &request.asset)?;
+        if is_parquet_key(&request.asset.locator.path) {
+            parquet::inspect_parquet(&access, &request.asset, &request.context).await
+        } else {
+            staged::inspect_text(&access, &request.asset, &request.context).await
+        }
     }
 
     async fn preview(
         &self,
-        _connection: &SourceConnection,
+        connection: &SourceConnection,
         request: PreviewRequest,
     ) -> ConnectorResult<PreviewData> {
         request.validate()?;
-        Err(ConnectorError::for_unsupported_capability(
-            "object_tabular_preview_pending",
-        ))
+        ensure_asset_connection(connection, &request.asset)?;
+        reject_filter(request.filter.is_some())?;
+        if request.sampling != stillflow_core::SamplingStrategy::Head {
+            return Err(ConnectorError::for_unsupported_capability(
+                "preview_sampling",
+            ));
+        }
+        let access = self.access(connection, &request.context).await?;
+        ensure_asset_container(&access, &request.asset)?;
+        if is_parquet_key(&request.asset.locator.path) {
+            preview::preview_parquet(&access, request).await
+        } else {
+            staged::preview_text(&access, request).await
+        }
     }
 
     async fn read_batches(
         &self,
-        _connection: &SourceConnection,
+        connection: &SourceConnection,
         request: ReadRequest,
     ) -> ConnectorResult<RawBatchStream> {
         request.validate()?;
-        Err(ConnectorError::for_unsupported_capability(
-            "object_tabular_read_pending",
-        ))
+        ensure_asset_connection(connection, &request.asset)?;
+        reject_filter(request.filter.is_some())?;
+        if request.checkpoint.is_some() {
+            return Err(ConnectorError::for_unsupported_capability(
+                "incremental_read",
+            ));
+        }
+        let access = self.access(connection, &request.context).await?;
+        ensure_asset_container(&access, &request.asset)?;
+        if is_parquet_key(&request.asset.locator.path) {
+            Ok(parquet::prepare_parquet(
+                &access,
+                &request.asset,
+                request.schema_override.as_ref(),
+                request.projection.as_deref(),
+                request.batch_size,
+                None,
+                &request.context,
+            )
+            .await?
+            .into_raw_stream())
+        } else {
+            staged::read_text(&access, request).await
+        }
     }
 
     async fn checkpoint(
@@ -201,6 +242,30 @@ fn ensure_asset_connection(
         ));
     }
     Ok(())
+}
+
+fn ensure_asset_container(access: &StoreAccess, asset: &SourceAsset) -> ConnectorResult<()> {
+    if asset.locator.container.as_deref() != Some(access.container()) {
+        return Err(ConnectorError::invalid_configuration(
+            "asset container does not match the object storage connection",
+        ));
+    }
+    Ok(())
+}
+
+fn reject_filter(present: bool) -> ConnectorResult<()> {
+    if present {
+        Err(ConnectorError::for_unsupported_capability(
+            "predicate_pushdown",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn is_parquet_key(key: &str) -> bool {
+    key.rsplit_once('.')
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("parquet"))
 }
 
 fn is_supported_tabular_key(key: &str) -> bool {
