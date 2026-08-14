@@ -178,8 +178,8 @@ The accepted sequence is:
    the frozen Issue #6 contract. Workbook #7 and object-store #8 follow the same
    connector boundary.
 6. **Engine E1 — execution contract**: Issue #46 docs-only freeze of deterministic
-   single-source Polars execution. Stop for architecture review. Do not start
-   the executor in the same PR.
+   single-source Polars execution. PR #47 remains unapproved until revision R1
+   passes a second architecture review. Do not start the executor in the same PR.
 7. **Engine E2 — streaming executor**: after E1 approval, rebuild from latest
    `main`. `LogicalPlan` → bounded `BatchStream` → atomic Snapshot. No
    Dependabot mix-in. No Join/Union/DuckDB/SQLx/API.
