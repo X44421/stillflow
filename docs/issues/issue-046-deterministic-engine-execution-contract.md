@@ -1,13 +1,14 @@
 # Issue #46 Implementation Contract: deterministic single-source execution
 
-> Status: Frozen (revision R1)
+> Status: Frozen (revision R2)
 > Risk: High
 > Issue: #46
 > Parent: #3
 > Authorized base: `main@1021103238bba89b4a457891eb4484582f5077a9`
 > Last updated: 2026-08-14
-> Review: PR #47 requested changes; this revision resolves the E2-blocking
-> interface contradictions. E2 must not start until R1 is approved.
+> Review: PR #47 remains Request changes. R2 closes three implementation
+> blockers from the second architecture review. E2 must not start until R2
+> is approved.
 
 This document freezes the physical execution boundary. It does not authorize
 runtime code except the additive `ConnectorRegistry` method named in
@@ -72,8 +73,8 @@ Documentation of:
 - ColumnId, display-name, `LogicalSchema`, and Arrow schema propagation,
   including the four schema stages in section 12.
 - Bidirectional Polars 0.46 ↔ Arrow 59 FFI ownership.
-- Determinism, peak memory, canonical rebatching, cancellation, identity
-  injection, and sanitized errors.
+- Determinism, pre-Polars execution chunking, peak memory, canonical
+  rebatching, cancellation, identity injection, and sanitized errors.
 - Public engine API, dependency arrows, and stop conditions.
 - Objective acceptance tests that E2 must automate.
 
@@ -204,7 +205,8 @@ E2 may add to `stillflow-engine` only:
 
 - workspace crates: `stillflow-plan`, `stillflow-storage`;
 - already-approved workspace third-party crates:
-  `tokio`, `tokio-util`, `futures`, `thiserror`, `uuid`, `chrono`;
+  `tokio` (including `sync` for the per-instance `Semaphore` run gate),
+  `tokio-util`, `futures`, `thiserror`, `uuid`, `chrono`;
 - Arrow FFI crates matching the connector pair:
   `arrow-array` workspace with feature `ffi`,
   `arrow-schema` workspace with feature `ffi`,
@@ -231,6 +233,12 @@ polars = { version = "0.46", default-features = false, features = [
 Those features are the closed set required for Expr evaluation, UTF-8
 `strip_chars` / `contains`, and the version-1 logical type matrix. IO features
 (`csv`, `json`, `parquet`) are forbidden on the engine crate.
+
+`EngineError` must not depend on `serde` / `serde_json`. The public sanitised
+event/API surface is `stillflow_core::SanitizedErrorSummary`, which already
+serializes in `stillflow-core`. E2 may add `serde_json` as a **dev-dependency
+only** for tests that serialize `sanitized_summary()`. Production
+`stillflow-engine` must not add `serde` or `serde_json`.
 
 E2 must not add DuckDB, SQLx, Axum, the `arrow` meta crate, or unrelated
 version bumps. Lockfile changes are limited to the newly declared engine
@@ -282,6 +290,11 @@ pub const MAX_ENGINE_PEAK_BYTES: usize =
 pub const MAX_ENGINE_CONCURRENT_RUNS: u16 = 4;
 pub const ENGINE_DEFAULT_DEADLINE: Duration = Duration::from_secs(15 * 60);
 pub const ENGINE_MAX_DEADLINE: Duration = Duration::from_secs(30 * 60);
+pub const MAX_BOOL_UTF8_BYTES: usize = 5;
+pub const MAX_INT_UTF8_BYTES: usize = 20;
+pub const MAX_FLOAT_UTF8_BYTES: usize = 32;
+pub const MAX_DATE32_UTF8_BYTES: usize = 10;
+pub const MAX_TIMESTAMP_UTF8_BYTES: usize = 35;
 
 pub struct ExecutionIdentities {
     pub snapshot_id: Uuid,
@@ -304,7 +317,10 @@ pub struct ExecutionRequest<'a> {
     pub store: &'a SnapshotStore,
 }
 
-pub struct ExecutionEngine { /* registry only */ }
+pub struct ExecutionEngine {
+    registry: ConnectorRegistry,
+    run_gate: tokio::sync::Semaphore,
+}
 
 impl ExecutionEngine {
     pub fn new(registry: ConnectorRegistry) -> Self;
@@ -323,17 +339,35 @@ impl ExecutionEngine {
         request: ExecutionRequest<'_>,
     ) -> Result<SnapshotManifest, EngineError>;
 }
+
+impl EngineError {
+    pub fn category(&self) -> ErrorCategory;
+    pub fn retryable(&self) -> bool;
+    pub fn sanitized_summary(&self) -> SanitizedErrorSummary;
+}
 ```
+
+`new` constructs a `Semaphore` with `MAX_ENGINE_CONCURRENT_RUNS` permits.
+`ExecutionEngine` is registry **plus** that per-instance run gate. A
+registry-only engine cannot implement the concurrency contract.
 
 `preflight` is async because schema resolution may call
 `ConnectorRegistry::inspect`. It receives `RequestContext` and must call
 `context.ensure_active()` before inspect and before returning success.
+A dry-run `preflight` does **not** acquire the run gate.
 
-`materialize` must call `preflight` internally with the request's plan,
-connection, asset, schema override, and context. It must not accept a
-`PreparedPlan` argument and must not reuse a caller-held `PreparedPlan` to
-skip validation. A dry-run caller may invoke `preflight` alone; that result
-is informational only.
+`materialize` must, in this order:
+
+1. Apply the default deadline if absent, then `context.ensure_active()`.
+2. `try_acquire` one run-gate permit. Do not await a permit. Failure is
+   `EngineError::Busy` with inspect count 0 and connector `read_batches` poll
+   count 0.
+3. Hold the permit until `commit` returns or the run aborts (including
+   cancellation, timeout, and `Drop` of the in-flight future).
+4. Call `preflight` internally with the request's plan, connection, asset,
+   schema override, and context. It must not accept a `PreparedPlan` argument
+   and must not reuse a caller-held `PreparedPlan` to skip validation.
+5. Open the connector stream, chunk, transform, rebatch, and publish.
 
 `PreparedPlan` is a validated, schema-propagated, engine-owned compilation of
 the linear plan. It must not contain Polars `DataFrame` values, DuckDB
@@ -343,7 +377,10 @@ connections, credentials, or source cell values. E3 preview must reuse
 `ExecutionEngine` must be `Send + Sync`. Concurrent `materialize` calls on one
 instance are capped by `MAX_ENGINE_CONCURRENT_RUNS` and also by
 `stillflow-storage::MAX_ACTIVE_PUBLISHERS` (8). Exceeding the engine cap
-returns a typed busy error without opening a connector stream.
+returns `Busy` without inspect or stream I/O.
+
+`EngineError` is not `Serialize`. Tests and later API/event code serialize
+`sanitized_summary()` only.
 
 ## 8. Scan binding
 
@@ -424,8 +461,9 @@ in listed order. Multiple `ApplyRules` nodes are allowed.
 
 Secret-safe labels: `ensure_no_secret_fields(Value::String(output_label))`
 must succeed. Failure is `InvalidPlan` before inspect or stream I/O.
-`output_label` must not appear in `EngineError` Display/Debug/serde payloads
-or event metadata. Correlation uses the Materialize `PlanNodeId` only.
+`output_label` must not appear in `EngineError` Display/Debug payloads,
+`sanitized_summary()`, or event metadata. Correlation uses the Materialize
+`PlanNodeId` only.
 
 ## 10. Operator semantics
 
@@ -438,8 +476,11 @@ order of the Snapshot.
 Reads connector envelopes whose schema is the **expected connector schema**
 (section 12.2). After optional in-engine projection, the Scan **output
 schema** is `Scan.projection` applied to the authorized source schema.
-Connector stream sequences start at 0. Engine output sequences are assigned
-after canonical rebatching and also start at 0.
+Connector stream sequences start at 0.
+
+The engine must **not** lower a full connector envelope through Polars.
+Section 14.2 splits each envelope into execution chunks first. Engine output
+sequences are assigned after canonical rebatching and also start at 0.
 
 ### 10.2 Project
 
@@ -695,8 +736,9 @@ A run is deterministic when all of the following hold.
    logical output rows and an identical output `LogicalSchema`.
 2. Changing only the connector's input batch partitioning must not change
    those logical rows, the schema, or `SnapshotStats.row_count`. With a fixed
-   `batch_size`, canonical rebatching (section 14.2) also keeps output
-   envelope boundaries and therefore `partition_count` unchanged.
+   `batch_size`, the execution chunker (section 14.2) plus canonical rebatching
+   (section 14.4) also keep output envelope boundaries and therefore
+   `partition_count` unchanged.
 3. The engine must not read random number generators, system clocks, locale,
    process id, or unordered `HashMap` iteration to decide row values, column
    order, envelope sequence, or fingerprints.
@@ -716,10 +758,22 @@ Every limit below is a hard ceiling. Exceeding it fails the run with a typed
 error. No unbounded collect, prefetch queue, or full-source materialization
 is authorized.
 
+E2 must not send a whole connector envelope through Polars and split afterwards.
+Output expansion is predicted and chunked **before** Polars allocation:
+
+```text
+Connector envelope
+  → deterministic execution chunker
+  → Polars transform of one chunk
+  → canonical rebatcher
+  → SnapshotWriter
+```
+
 | Resource | Ceiling | Source |
 | --- | --- | --- |
 | Input envelope rows | `MAX_BATCH_ROWS` = 65,536 | `stillflow-core` |
 | Input envelope Arrow bytes | `MAX_BATCH_BYTES` = 64 MiB | `stillflow-core` |
+| Execution-chunk Polars working set | `MAX_BATCH_BYTES` | this contract |
 | Output envelope rows | `MAX_BATCH_ROWS` | same |
 | Output envelope Arrow bytes | `MAX_BATCH_BYTES` | same |
 | Request `batch_size` | `1..=ReadRequest::MAX_BATCH_SIZE` (65,536) | `stillflow-core` |
@@ -755,34 +809,126 @@ with an explicit peak:
 ```text
 peak ≤ MAX_ENGINE_PEAK_BYTES = 133 MiB
 live columnar buffers ≤ 2
+each Polars working DataFrame ≤ MAX_BATCH_BYTES
 ```
 
 The two live columnar buffers are the only `MAX_BATCH_BYTES`-class payloads
 allowed at once. Permitted pairs are:
 
-- input envelope + Polars chunk of that envelope; or
-- Polars chunk + remainder builder; or
+- connector envelope + current execution-chunk Polars frame; or
+- Polars frame + remainder builder; or
 - remainder builder + output envelope being appended.
 
 `MAX_OPERATOR_STATE_BYTES` (5 MiB) is compiled expressions, working schemas,
-ColumnId maps, and C ABI structs. It does **not** include Polars chunks or
-envelopes. Durable snapshot partitions are the storage crate's concern and
-remain subject to the snapshot byte ceiling.
+ColumnId maps, expansion-prediction tables, and C ABI structs. It does **not**
+include Polars chunks or envelopes. Durable snapshot partitions are the
+storage crate's concern and remain subject to the snapshot byte ceiling.
 
-The input envelope must be dropped before a remainder flush allocates an
+The connector envelope must be dropped before a remainder flush allocates an
 output envelope. The Polars chunk must be dropped before the next connector
-poll.
+poll or the next execution chunk.
 
 If `RequestContext` has no deadline, the engine applies
 `ENGINE_DEFAULT_DEADLINE` from the start of `materialize`. A caller-supplied
 deadline longer than `ENGINE_MAX_DEADLINE` is rejected in preflight.
 
-### 14.2 Canonical rebatching
+### 14.2 Deterministic execution chunker
 
-Byte accounting uses `RecordBatch::get_array_memory_size()`.
+The chunker runs on each connector envelope **before** Arrow→Polars import of
+that subset. It must not call Polars to measure size.
 
-Let `pack_limit` be `batch_size` rows. Incoming transformed rows feed one
-remainder builder.
+**Slice accounting** (not `get_array_memory_size` of a shared parent):
+
+For a row slice `[i, i + k)` of one array:
+
+- validity: `ceil(k / 8)` bytes if a bitmap exists, else 0;
+- fixed-width values: `k * slot_size`;
+- variable-width values: `offsets[i + k] - offsets[i]` data bytes plus
+  `(k + 1) * offset_slot_size`;
+- nested list/struct: the same rules applied recursively to child arrays
+  over the sliced element range.
+
+A zero-copy Arrow slice that shares a parent buffer does **not** count the
+unused parent bytes a second time. Shared parent bytes already counted in
+the live connector envelope remain attributed to that envelope until it is
+dropped. Temporary Polars allocations count as the Polars working DataFrame
+of the current chunk (section 14.3). FFI C ABI structs count against
+`MAX_FFI_SCRATCH_BYTES`, not as a third columnar buffer.
+
+**Algorithm**, deterministic maximum feasible prefix:
+
+Let `n` be the envelope row count and `offset` the first unconsumed row
+(initially 0). While `offset < n`:
+
+1. Let `predict(k)` be the peak Polars working-set upper bound from
+   section 14.3 for rows `[offset, offset + k)`.
+2. If `predict(1) > MAX_BATCH_BYTES`, fail with `BoundExceeded` **before**
+   Arrow→Polars import and before any `with_columns` / `lit` materialization.
+   Never split a row by column.
+3. Let `k` be the largest integer in `1..=(n - offset)` such that
+   `predict(k) <= MAX_BATCH_BYTES`.
+4. Import only that slice into Polars, transform it, export it, feed the
+   canonical rebatcher, then drop the Polars frame before the next slice.
+
+Identical input rows, plan, and `batch_size` therefore still produce identical
+output envelope boundaries: the chunker is a function of schema, literals, and
+Arrow offsets, not of wall-clock or hashmap order.
+
+### 14.3 Predicted expansion before allocation
+
+`predict(k)` is the maximum, over every pipeline step after Scan projection,
+of `passthrough_slice_bytes(k) + new_column_bytes(k)` at that step. It is an
+upper bound. If a later actual Polars frame exceeds `MAX_BATCH_BYTES`, that is
+`EngineError::Internal` (the predictor under-estimated) and the frame is
+dropped without append.
+
+**Passthrough columns** (Project, Filter, Rename, Drop, Trim, Cast that does
+not widen to Utf8/Binary, FilterRows): `passthrough_slice_bytes(k)` uses
+section 14.2 slice accounting of the surviving columns. Trim never increases
+UTF-8 bytes.
+
+**New or widened columns** use closed per-value ceilings. `new_column_bytes(k)`
+is `k * per_value + validity_bytes(k)` unless a tighter slice-based bound
+below applies.
+
+| Producer | Per-value UTF-8/Binary ceiling |
+| --- | --- |
+| `Literal(Utf8 \| Binary)` | exact byte length of the literal |
+| `Literal` numeric/bool/null | physical slot size of the result type |
+| `Column` Utf8/Binary | slice accounting of that column (exact) |
+| `Cast` to Boolean | 1 byte physical |
+| `Cast` to integer/float/date/timestamp | physical slot size |
+| `Cast` to Utf8 from Boolean | `MAX_BOOL_UTF8_BYTES` = 5 |
+| `Cast` to Utf8 from any integer | `MAX_INT_UTF8_BYTES` = 20 |
+| `Cast` to Utf8 from float | `MAX_FLOAT_UTF8_BYTES` = 32 |
+| `Cast` to Utf8 from Date32 | `MAX_DATE32_UTF8_BYTES` = 10 |
+| `Cast` to Utf8 from Timestamp | `MAX_TIMESTAMP_UTF8_BYTES` = 35 |
+| `Cast` to Utf8 from Utf8 | input slice accounting |
+| `Cast` to Utf8 from Binary, List, or Struct | preflight `TypeError` |
+| `Cast` to Binary from non-Binary | preflight `TypeError` |
+| `DeriveColumn` | bound of its expression, then bound of the declared `data_type` if that cast can widen |
+| `ReplaceLiteral` to Utf8/Binary | for the slice, `k * max(max_input_value_bytes_in_slice, len(to))` |
+| `ReplaceLiteral` to Null | no extra payload |
+| `FillNull` Utf8/Binary | `input_slice_bytes + null_count(slice) * len(value)` using the validity bitmap; `value = Null` is already a preflight `TypeError` |
+| `Coalesce` | max of arms |
+| Boolean comparisons, `And`/`Or`, `IsNull`, `Contains` | 1 byte physical |
+
+`null_count(slice)` and `max_input_value_bytes_in_slice` are read from Arrow
+offset/validity buffers only. They must not copy cell contents into logs.
+
+Sequential `ApplyRules` accumulate: after a Derive, the next step's
+passthrough includes the new column at its predicted width. `predict(k)` is
+the max over these steps, so a 2 KiB derived UTF-8 literal on 65,536 rows
+(`k * 2048 ≈ 128 MiB`) cannot select `k = 65,536`. The chunker must pick
+`k <= floor(MAX_BATCH_BYTES / 2048)` (and still fit passthrough bytes).
+
+### 14.4 Canonical rebatching
+
+Byte accounting for **output envelopes** uses
+`RecordBatch::get_array_memory_size()`, matching `BatchEnvelope`.
+
+Let `pack_limit` be `batch_size` rows. Incoming transformed execution chunks
+feed one remainder builder.
 
 For each incoming row-group `G` with `n` rows, in order:
 
@@ -863,20 +1009,74 @@ zero partitions and zero stored bytes, matching `SnapshotStats` conservation.
 All engine failures are typed. Production paths return `EngineError`; they do
 not panic, `unwrap`, or `expect`.
 
-`EngineError` must map to `ErrorCategory` and a sanitized user message.
+`EngineError` is an internal typed failure. It must **not** implement
+`Serialize` / `Deserialize`. The frozen public surface is:
+
+```rust
+impl EngineError {
+    pub fn category(&self) -> ErrorCategory;
+    pub fn retryable(&self) -> bool;
+    pub fn sanitized_summary(&self) -> SanitizedErrorSummary;
+}
+```
+
+`sanitized_summary()` must call `SanitizedErrorSummary::try_new(category,
+retryable, message)` using a message that already excludes forbidden content.
+E2 must not emit events that carry `EngineError` itself. Any event, log line,
+or later API body uses `SanitizedErrorSummary` only. T13/T18/T35 serialize
+that summary (and optional event metadata wrapping it), not `EngineError`.
+
+`Display` is the sanitized user message. `Debug` may include variant name,
+node id, column id, counts, and limits. Neither Display, Debug, nor
+`sanitized_summary().message()` may contain cell values, `output_label`,
+credentials, paths, SQL, or Polars backtraces.
+
 Allowed message contents: node id, column id, field name, operator/rule kind,
 logical type names, counts, limits, batch sequence, row offset.
 
-Forbidden in errors, events, logs, metadata, `Display`, `Debug`, and serde:
+### 16.1 Category and retryability
 
-- raw cell values;
-- `Materialize.output_label`;
-- credentials or `CredentialRef` internals beyond the already-safe `cred://`
-  display form already accepted by core;
-- full filesystem paths, object URLs, SQL, or connection config dumps;
-- Polars/DuckDB engine backtraces that embed values.
+| `EngineError` | `ErrorCategory` | `retryable` |
+| --- | --- | --- |
+| `UnsupportedOperator` | `UnsupportedCapability` | false |
+| `UnsupportedRule` | `UnsupportedCapability` | false |
+| `UnsupportedCapability` | `UnsupportedCapability` | false |
+| `SourceBinding` | `InvalidConfiguration` | false |
+| `InvalidPlan` | `InvalidConfiguration` | false |
+| `UnknownColumn` | `InvalidConfiguration` | false |
+| `TypeError` | `InvalidData` | false |
+| `CastFailure` | `InvalidData` | false |
+| `Arithmetic` | `InvalidData` | false |
+| `SchemaDrift` | `SchemaDrift` | false |
+| `BoundExceeded` | `InvalidData` | false |
+| `Ffi` | `Internal` | false |
+| `Cancelled` | `Cancelled` | false |
+| `Timeout` | `Timeout` | true |
+| `Busy` | `RateLimited` | true |
+| `Connector(inner)` | `inner.category()` | `inner.retryable()` |
+| `Storage(inner)` | section 16.2 | section 16.2 |
 
-Suggested variants (names may differ; semantics must exist and be tested):
+Names of variants may differ; each row must exist and be tested.
+
+### 16.2 Storage mapping
+
+| `StorageError` | `ErrorCategory` | `retryable` |
+| --- | --- | --- |
+| `Busy` | `RateLimited` | true |
+| `NotFound` | `NotFound` | false |
+| `SchemaDrift` | `SchemaDrift` | false |
+| `InvalidConfiguration`, `InvalidDraft`, `UnsupportedStorageVersion`, `AlreadyExists`, `InvalidTimestampOrder`, `InvalidManifest`, `Snapshot` | `InvalidConfiguration` | false |
+| `Sequence`, `LineageMismatch`, `EnvelopeLimitExceeded`, `PartitionLimitExceeded`, `RowLimitExceeded`, `StoredByteLimitExceeded` | `InvalidData` | false |
+| `ArithmeticOverflow`, `Integrity`, `Io`, `Database`, `Parquet`, `Serialization`, `Batch`, `ActivityState` | `Internal` | false |
+
+Storage user messages are the existing `Display` strings. They already omit
+cell values and credentials. The engine must not append paths or IO details
+beyond that `Display`.
+
+`Connector` wrappers reuse `ConnectorError::sanitized_summary()` category,
+retryable flag, and message.
+
+### 16.3 Required variants
 
 - `UnsupportedOperator`
 - `UnsupportedRule`
@@ -888,17 +1088,16 @@ Suggested variants (names may differ; semantics must exist and be tested):
 - `CastFailure`
 - `Arithmetic`
 - `SchemaDrift`
-- `BoundExceeded` (rows, bytes, nodes, time, concurrency, live buffers)
+- `BoundExceeded` (rows, bytes, nodes, time, concurrency, live buffers, predicted expansion)
 - `Ffi`
 - `Cancelled`
 - `Timeout`
 - `Busy`
-- `Storage` (wrapper around `StorageError` without leaking paths)
-- `Connector` (wrapper around `ConnectorError`)
+- `Storage`
+- `Connector`
 
 `EngineError` must not implement `Display` by forwarding unsanitized
-third-party strings. Connector and storage wrappers reuse those crates'
-already-sanitized user messages.
+third-party strings.
 
 ## 17. E2 vertical slice
 
@@ -908,7 +1107,8 @@ implements one vertical path only:
 ```text
 Connector BatchStream
   -> LogicalPlan preflight (async, with RequestContext)
-  -> Stateless Polars lowering
+  -> deterministic execution chunker
+  -> Stateless Polars lowering of one chunk
   -> Canonical output batching
   -> BatchEnvelopeFactory
   -> SnapshotWriter
@@ -916,7 +1116,8 @@ Connector BatchStream
 ```
 
 E2 tests must cover the table in section 19.2. E2 must not implement the
-remaining rule kinds, Preview HTTP, or job runtime.
+remaining rule kinds, Preview HTTP, or job runtime. E2 must not lower a full
+connector envelope through Polars before chunking.
 
 ## 18. Implementation checklist
 
@@ -927,13 +1128,16 @@ This checklist is for the later E2 PR. This docs PR only records it.
 3. Add Polars 0.46 / `polars-arrow` 0.46 / Arrow FFI crates as specified.
 4. Implement private bidirectional FFI bridge with size/alignment asserts and
    partial-import cleanup.
-5. Implement `EngineError` and sanitization, excluding `output_label`.
+5. Implement `EngineError` with `category` / `retryable` / `sanitized_summary`
+   only. Do not serialize `EngineError`.
 6. Implement async `preflight` with context, inspect, and capability checks.
-7. Implement `materialize` so it always re-runs `preflight`.
+7. Implement the per-instance run gate and `materialize` so it `try_acquire`
+   before preflight/inspect and always re-runs `preflight`.
 8. Implement Scan read through `ConnectorRegistry` only, with the four schema
    stages.
-9. Implement stateless lowering for the five nodes and eight rules.
-10. Implement canonical rebatching (section 14.2) and one
+9. Implement the execution chunker (section 14.2–14.3) and stateless lowering
+   for the five nodes and eight rules.
+10. Implement canonical rebatching (section 14.4) and one
     `BatchEnvelopeFactory`.
 11. Construct `SnapshotDraft` from injected identities, including lineage,
     quality_score, and `started_at`.
@@ -957,7 +1161,8 @@ This checklist is for the later E2 PR. This docs PR only records it.
 
 The sanitization sentinel is the UTF-8 string
 `STILLFLOW_SENTINEL_CELL_VALUE_9f3c2a`. It must appear as a cell value in the
-failing fixture and must not appear in any public error surface.
+failing fixture and must not appear in `EngineError` Display/Debug,
+`sanitized_summary()` JSON, or event metadata wrapping that summary.
 
 | ID | Criterion | Automated evidence |
 | --- | --- | --- |
@@ -973,18 +1178,18 @@ failing fixture and must not appear in any public error surface.
 | T10 | Cancel during lowering publishes nothing | same |
 | T11 | Cancel after append, before commit, publishes nothing | same |
 | T12 | Deadline before commit publishes nothing | `Timeout` + no manifest |
-| T13 | Cast `Error` fails without embedding the cell sentinel | sentinel absent from `Display`, `Debug`, serde JSON, and event metadata |
+| T13 | Cast `Error` fails without embedding the cell sentinel | sentinel absent from `EngineError` Display/Debug and from `serde_json` of `sanitized_summary()` and of a constructed event metadata map; `EngineError` itself does not implement Serialize |
 | T14 | Cast `SetNull` writes null and continues | null count |
 | T15 | Trim / ReplaceLiteral / FillNull / DropColumn / Rename / DeriveColumn / FilterRows match fixtures | golden logical rows |
 | T16 | Unknown `ColumnId` is `UnknownColumn` | typed error |
 | T17 | Incomparable `Expr` types are `TypeError` at preflight | no stream |
-| T18 | Division by zero is `Arithmetic` without the cell sentinel | typed error + T13 surfaces |
+| T18 | Division by zero is `Arithmetic` without the cell sentinel | same surfaces as T13; `category() == InvalidData` and `retryable() == false` |
 | T19 | Engine crate does not depend on adapter crates | `cargo tree -p stillflow-engine` stdout contains none of `stillflow-connector-local-tabular`, `stillflow-connector-workbook`, `stillflow-connector-object-store` |
 | T20 | `stillflow-engine` depends on plan, connectors, storage, core | `cargo tree -p stillflow-engine` |
 | T21 | Injected snapshot/session/dataset ids, `created_at`, `started_at`, lineage, and quality_score appear unchanged | manifest equality |
 | T22 | Engine does not call `Uuid::new_v4` / `Utc::now` on the materialize path | source grep of engine runtime excluding tests |
-| T23 | Peak live buffers and bytes | instrumented live-buffer counter `<= 2` while streaming `>= 4` batches; test allocator or equivalent accounts `<= MAX_ENGINE_PEAK_BYTES`; grep forbids collecting the full connector stream. Source grep alone is not sufficient |
-| T24 | Concurrent fifth run on one engine is `Busy` | semaphore test |
+| T23 | Peak live buffers and bytes, including expansion | instrumented live-buffer counter `<= 2` while streaming `>= 4` batches; test allocator `<= MAX_ENGINE_PEAK_BYTES`; grep forbids collecting the full connector stream **and** forbids importing a full envelope into Polars when `predict(n) > MAX_BATCH_BYTES`. Source grep alone is not sufficient. Adversarial fixtures in T37 |
+| T24 | Fifth concurrent `materialize` on one engine is `Busy` | four in-flight runs hold the gate; fifth returns `category() == RateLimited`, `retryable() == true`; mock inspect count 0 and read poll count 0 |
 | T25 | Empty source commits a zero-row snapshot | stats conservation |
 | T26 | `cargo fmt --all -- --check` | CI |
 | T27 | `cargo clippy --workspace --all-targets -- -D warnings` | CI |
@@ -995,8 +1200,12 @@ failing fixture and must not appear in any public error surface.
 | T32 | No `ColumnProjection`: connector full-width schema accepted; Scan output is projected | schema fingerprints of connector vs Scan output differ; rows match projection |
 | T33 | `ReplaceLiteral` with `to = Null` makes the field nullable | output schema + null row |
 | T34 | Integer `8 / 3 == 2` (toward-zero); `Int8 MIN / -1` is `Arithmetic` | fixtures |
-| T35 | Secret-like `output_label` is `InvalidPlan`; successful errors omit the label | preflight + Display/Debug/serde |
+| T35 | Secret-like `output_label` is `InvalidPlan`; successful errors omit the label | preflight + Display/Debug + `sanitized_summary()` JSON |
 | T36 | Mid-schema Arrow→Polars import failure releases all exports and publishes nothing | drop counters + no manifest |
+| T37 | Derive a 2 KiB UTF-8 literal over a 65,536-row connector batch | snapshot has 65,536 rows; live Polars frame never exceeds `MAX_BATCH_BYTES`; peak `<= MAX_ENGINE_PEAK_BYTES`; chunker `k < 65,536` |
+| T38 | `ReplaceLiteral` to a 2 KiB string and `FillNull` with a 2 KiB string over 65,536 rows | same peak/chunker assertions as T37; logical values match |
+| T39 | Single-row predicted expansion `> MAX_BATCH_BYTES` fails before Polars import | mock FFI/Polars import count 0; `BoundExceeded`; no snapshot |
+| T40 | Section 16.1 mapping | table-driven: each variant's `category()` and `retryable()`; `Busy` is RateLimited/true; `Timeout` is Timeout/true; `Cancelled` is Cancelled/false |
 
 ## 20. Stop conditions
 
@@ -1012,7 +1221,10 @@ Stop and return to contract review if implementation needs:
 - Join/Union/Validate/Deduplicate execution;
 - a compatibility shim;
 - Dependabot or unrelated lockfile edits;
-- a message that includes a cell value, credential, or `output_label`.
+- a message that includes a cell value, credential, or `output_label`;
+- serializing `EngineError` instead of `SanitizedErrorSummary`;
+- lowering a full connector envelope through Polars when predicted expansion
+  exceeds `MAX_BATCH_BYTES`.
 
 ## 21. Known risks
 
@@ -1023,8 +1235,11 @@ Stop and return to contract review if implementation needs:
   are skipped. Preflight uniqueness is mandatory.
 - Canonical rebatching interacts with `MAX_BATCH_BYTES`. A single wide row
   that exceeds the byte cap fails; it must not be silently split by column.
-- RSS measurements are noisy. T23's primary evidence is the live-buffer
-  counter and test allocator, not host RSS.
+- Variable-width Derive/Replace/FillNull can expand far beyond the connector
+  envelope. The execution chunker is mandatory; “transform then split” cannot
+  meet `MAX_ENGINE_PEAK_BYTES`.
+- RSS measurements are noisy. T23/T37 primary evidence is the live-buffer
+  counter, predicted-k assertions, and test allocator, not host RSS.
 - `MAX_ENGINE_CONCURRENT_RUNS` is lower than storage publisher capacity so
   tests can saturate the engine cap without depending on storage busy errors.
 - SQL Connector #9 and DuckDB #10 remain outside this contract. They must not

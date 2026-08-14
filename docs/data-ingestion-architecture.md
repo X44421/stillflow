@@ -443,7 +443,7 @@ API payloads refer to object IDs and credential references. Large RecordBatch st
 Contract: [`issue-046-deterministic-engine-execution-contract.md`](issues/issue-046-deterministic-engine-execution-contract.md).
 
 - E1: freeze the single-source execution contract. Docs-only; stop for review.
-- E2: `LogicalPlan` → bounded `BatchStream` → atomic Snapshot through Polars.
+- E2: `LogicalPlan` → execution chunks → Polars → bounded `BatchStream` → atomic Snapshot. Do not transform a whole connector envelope and split afterwards.
 - E3: node-level Preview using the same lowering, with row/byte/time ceilings.
 - E4: `Validate`, Rejected Rows, and `Deduplicate`.
 - E5: job runtime and Axum Preview / Run / Status / Cancel.
