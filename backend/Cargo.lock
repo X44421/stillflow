@@ -3247,8 +3247,26 @@ dependencies = [
 name = "stillflow-engine"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-cast",
+ "arrow-data",
+ "arrow-schema",
+ "arrow-select",
+ "async-trait",
+ "chrono",
+ "futures",
+ "polars",
+ "polars-arrow",
+ "serde_json",
  "stillflow-connectors",
  "stillflow-core",
+ "stillflow-plan",
+ "stillflow-storage",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]

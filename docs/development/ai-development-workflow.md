@@ -177,16 +177,13 @@ The accepted sequence is:
 5. **PR4 — local tabular**: CSV, TSV, JSON, NDJSON, and Parquet connector under
    the frozen Issue #6 contract. Workbook #7 and object-store #8 follow the same
    connector boundary.
-6. **Engine E1 — execution contract**: Issue #46 docs-only freeze of deterministic
-   single-source Polars execution. PR #47 remains unapproved until revision R3
-   passes a fourth architecture review. Do not start the executor in the same PR.
-   E2, once approved, must chunk before Polars; live engine memory is connector
-   envelope + complete Polars working set + canonical remainder + 5 MiB state
-   (peak 197 MiB). It must not transform a whole connector envelope and split
-   afterwards.
-7. **Engine E2 — streaming executor**: after E1 approval, rebuild from latest
-   `main`. Connector envelope → execution chunker → Polars → canonical
-   rebatcher → atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API.
+6. **Engine E1 — execution contract**: Issue #46 docs-only freeze, approved at
+   `32f1c53` and merged in PR #47. Live engine memory is connector envelope +
+   complete Polars working set + canonical remainder + 5 MiB state (peak 197 MiB).
+7. **Engine E2 — streaming executor**: Issue #48, from latest `main` after #47.
+   Connector envelope → execution chunker → Polars → canonical rebatcher →
+   atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API. Do not
+   continue the E1 contract branch.
 8. **Engine E3–E5**: node-level Preview, Validate/Rejected Rows/Deduplicate, then
    job runtime and Axum. DuckDB (#10) and SQL Connector (#9, Post-MVP) stay
    outside this sequence until their own contracts.

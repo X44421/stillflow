@@ -1,19 +1,20 @@
 # Issue #46 Implementation Contract: deterministic single-source execution
 
-> Status: Frozen (revision R3)
+> Status: Frozen (revision R3, approved)
 > Risk: High
-> Issue: #46
+> Issue: #46 (contract), #48 (E2 implementation)
 > Parent: #3
-> Authorized base: `main@1021103238bba89b4a457891eb4484582f5077a9`
+> Authorized base: `main@4b652047dcc7253c09ec4e375cb6184d509cacdd`
+> Approved SHA: `32f1c53d9903f66aeaca1c2676c0b81abfb2a702`
 > Last updated: 2026-08-14
-> Review: PR #47 remains Request changes. R3 corrects the live-buffer
-> lifecycle so a split connector envelope, a Polars working set, and a
-> canonical remainder can coexist. Run-gate and sanitized-error contracts
-> from R2 stay frozen. E2 must not start until R3 is approved.
+> Review: PR #47 merged. R3 nits applied here before E2: one
+> `PredictedColumn.nullable` field, and `MAX_LIVE_COLUMNAR_PAYLOADS`.
+> E2 also records workspace `arrow-select` / `arrow-cast` in §6.3.
 
-This document freezes the physical execution boundary. It does not authorize
-runtime code except the additive `ConnectorRegistry` method named in
-section 6.4, which is implemented only in the later E2 PR.
+This document freezes the physical execution boundary. Engine E2 (#48)
+implements it from merged `main`. The authorized post-approval nits are
+`PredictedColumn.nullable`, `MAX_LIVE_COLUMNAR_PAYLOADS`, and the two
+Arrow crates already used by connectors.
 
 ## 1. Objective
 
@@ -35,8 +36,8 @@ crate.
   cherry-picked.
 - Dependabot branches are read-only. Engine branches must not mix Dependabot
   version or lockfile updates.
-- This PR is docs-only. It must not modify Rust sources, `Cargo.toml`,
-  `Cargo.lock`, frontend files, or CI workflows.
+- PR #47 was docs-only. E2 (#48) may change `stillflow-engine` and add
+  `ConnectorRegistry::capabilities` as named in sections 6.3, 6.4, and 7.
 
 ## 3. Risk and compatibility
 
@@ -212,6 +213,10 @@ E2 may add to `stillflow-engine` only:
   `arrow-array` workspace with feature `ffi`,
   `arrow-schema` workspace with feature `ffi`,
   `arrow-data = "59"`;
+- already-approved workspace Arrow crates required to keep remainder and
+  export on the canonical Arrow 59 types:
+  `arrow-select` (canonical remainder concat),
+  `arrow-cast` (Polars Utf8View → canonical Utf8 after C ABI export);
 - `polars-arrow = "0.46"`;
 - `polars` version `0.46` with `default-features = false` and **exactly**
   these features:
@@ -220,9 +225,9 @@ E2 may add to `stillflow-engine` only:
 polars = { version = "0.46", default-features = false, features = [
     "lazy",
     "strings",
+    "regex",
     "dtype-u8",
     "dtype-u16",
-    "dtype-u32",
     "dtype-i8",
     "dtype-i16",
     "dtype-date",
@@ -232,7 +237,10 @@ polars = { version = "0.46", default-features = false, features = [
 ```
 
 Those features are the closed set required for Expr evaluation, UTF-8
-`strip_chars` / `contains`, and the version-1 logical type matrix. IO features
+`strip_chars` / `contains`, and the version-1 logical type matrix. Polars 0.46
+does not expose `dtype-u32`; `UInt32` is available without that feature. The
+`regex` feature is required for `Expr::Contains` literal substring matching.
+IO features
 (`csv`, `json`, `parquet`) are forbidden on the engine crate.
 
 `EngineError` must not depend on `serde` / `serde_json`. The public sanitised
@@ -280,13 +288,13 @@ pub const MAX_PLAN_NODES: usize = 64;
 pub const MAX_RULES_PER_NODE: usize = 256;
 pub const MAX_EXPR_NODES: usize = 1_024;
 pub const MAX_EXPR_DEPTH: usize = 64;
-pub const MAX_LIVE_COLUMNAR_BUFFERS: u8 = 3;
+pub const MAX_LIVE_COLUMNAR_PAYLOADS: u8 = 3;
 pub const MAX_COMPILED_PLAN_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_FFI_SCRATCH_BYTES: usize = 1024 * 1024;
 pub const MAX_OPERATOR_STATE_BYTES: usize =
     MAX_COMPILED_PLAN_BYTES + MAX_FFI_SCRATCH_BYTES; // 5 MiB
 pub const MAX_ENGINE_PEAK_BYTES: usize =
-    (MAX_LIVE_COLUMNAR_BUFFERS as usize) * MAX_BATCH_BYTES
+    (MAX_LIVE_COLUMNAR_PAYLOADS as usize) * MAX_BATCH_BYTES
         + MAX_OPERATOR_STATE_BYTES; // 197 MiB
 pub const MAX_ENGINE_CONCURRENT_RUNS: u16 = 4;
 pub const ENGINE_DEFAULT_DEADLINE: Duration = Duration::from_secs(15 * 60);
@@ -809,7 +817,7 @@ remainder builder, not a second copy.
 | Canonical remainder | `MAX_BATCH_BYTES` | this contract |
 | Output envelope (moved remainder) | `MAX_BATCH_BYTES` | same |
 | Request `batch_size` | `1..=ReadRequest::MAX_BATCH_SIZE` (65,536) | `stillflow-core` |
-| Simultaneously live columnar payloads | `MAX_LIVE_COLUMNAR_BUFFERS` = 3 | this contract |
+| Simultaneously live columnar payloads | `MAX_LIVE_COLUMNAR_PAYLOADS` = 3 | this contract |
 | Compiled plan + maps | `MAX_COMPILED_PLAN_BYTES` = 4 MiB | this contract |
 | FFI scratch (C ABI structs, not buffers) | `MAX_FFI_SCRATCH_BYTES` = 1 MiB | this contract |
 | Operator extra state | `MAX_OPERATOR_STATE_BYTES` = 5 MiB | compiled plan + FFI scratch + predicted-column table |
@@ -920,9 +928,9 @@ schema, one entry per `ColumnId`:
 
 ```text
 PredictedColumn {
-    id, name, data_type, nullable,
+    id, name, data_type,
+    nullable,                 // working-schema flag; section 11.4 inference updates this
     max_value_bytes,          // per-value data ceiling for Utf8/Binary; 0 for fixed-width
-    nullability,              // as in section 11.4
     origin: Source { ordinal } | Derived
 }
 ```
