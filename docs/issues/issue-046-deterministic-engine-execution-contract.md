@@ -1,14 +1,15 @@
 # Issue #46 Implementation Contract: deterministic single-source execution
 
-> Status: Frozen (revision R2)
+> Status: Frozen (revision R3)
 > Risk: High
 > Issue: #46
 > Parent: #3
 > Authorized base: `main@1021103238bba89b4a457891eb4484582f5077a9`
 > Last updated: 2026-08-14
-> Review: PR #47 remains Request changes. R2 closes three implementation
-> blockers from the second architecture review. E2 must not start until R2
-> is approved.
+> Review: PR #47 remains Request changes. R3 corrects the live-buffer
+> lifecycle so a split connector envelope, a Polars working set, and a
+> canonical remainder can coexist. Run-gate and sanitized-error contracts
+> from R2 stay frozen. E2 must not start until R3 is approved.
 
 This document freezes the physical execution boundary. It does not authorize
 runtime code except the additive `ConnectorRegistry` method named in
@@ -279,22 +280,22 @@ pub const MAX_PLAN_NODES: usize = 64;
 pub const MAX_RULES_PER_NODE: usize = 256;
 pub const MAX_EXPR_NODES: usize = 1_024;
 pub const MAX_EXPR_DEPTH: usize = 64;
-pub const MAX_LIVE_COLUMNAR_BUFFERS: u8 = 2;
+pub const MAX_LIVE_COLUMNAR_BUFFERS: u8 = 3;
 pub const MAX_COMPILED_PLAN_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_FFI_SCRATCH_BYTES: usize = 1024 * 1024;
 pub const MAX_OPERATOR_STATE_BYTES: usize =
     MAX_COMPILED_PLAN_BYTES + MAX_FFI_SCRATCH_BYTES; // 5 MiB
 pub const MAX_ENGINE_PEAK_BYTES: usize =
     (MAX_LIVE_COLUMNAR_BUFFERS as usize) * MAX_BATCH_BYTES
-        + MAX_OPERATOR_STATE_BYTES; // 133 MiB
+        + MAX_OPERATOR_STATE_BYTES; // 197 MiB
 pub const MAX_ENGINE_CONCURRENT_RUNS: u16 = 4;
 pub const ENGINE_DEFAULT_DEADLINE: Duration = Duration::from_secs(15 * 60);
 pub const ENGINE_MAX_DEADLINE: Duration = Duration::from_secs(30 * 60);
 pub const MAX_BOOL_UTF8_BYTES: usize = 5;
 pub const MAX_INT_UTF8_BYTES: usize = 20;
 pub const MAX_FLOAT_UTF8_BYTES: usize = 32;
-pub const MAX_DATE32_UTF8_BYTES: usize = 10;
-pub const MAX_TIMESTAMP_UTF8_BYTES: usize = 35;
+pub const UTF8_VIEW_SLOT_BYTES: usize = 16;
+pub const UTF8_OFFSET_SLOT_BYTES: usize = 4;
 
 pub struct ExecutionIdentities {
     pub snapshot_id: Uuid,
@@ -528,7 +529,7 @@ lineage ids, or quality scores.
 | Rule | Schema effect | Runtime |
 | --- | --- | --- |
 | `Rename { column, to }` | same id; name becomes `to`; names remain unique | Polars `rename` |
-| `Cast { column, data_type, on_failure }` | field type becomes `data_type`; `SetNull` forces `nullable = true`; `Error` keeps prior nullability | strict cast; see 11.5 |
+| `Cast { column, data_type, on_failure }` | field type becomes `data_type`; `SetNull` forces `nullable = true`; `Error` keeps prior nullability | Date32/Timestamp → Utf8 is preflight `TypeError`; otherwise strict cast; see 11.5 |
 | `Trim { column }` | unchanged; column must be `Utf8` | Unicode whitespace trim; null stays null |
 | `ReplaceLiteral { column, from, to }` | if `to` is `Null`, field becomes nullable; otherwise unchanged | exact replacement; `from`/`to` must be type-compatible with the column; `from = Null` replaces nulls |
 | `FillNull { column, value }` | field becomes non-nullable when `value` is non-null | fill nulls only; `value = Null` is a preflight `TypeError` |
@@ -585,8 +586,12 @@ types skip that cast.
 | `Binary { Divide, Modulo }` | see 11.5 | see 11.5 |
 | `Binary { Contains }` | both `Utf8`; case-sensitive substring | `Boolean` |
 | `IsNull { e, negated }` | `is_null` / `is_not_null` | `Boolean` |
-| `Cast { e, data_type }` | explicit cast with `Error` policy | `data_type` |
+| `Cast { e, data_type }` | explicit cast with `Error` policy; Date32/Timestamp → Utf8 is preflight `TypeError` | `data_type` |
 | `Coalesce { exprs }` | first non-null; each arm LUB-cast to the combined LUB | LUB type |
+
+These six `Literal` arms are the complete `ScalarValue` surface. There is no
+`Binary`, `Date32`, or `Timestamp` variant, so those literals cannot appear
+in a plan.
 
 Comparable pairs are those for which version-1 `least_upper_bound` succeeds,
 plus Boolean/Utf8/Binary/Date32/Timestamp equality with identical types.
@@ -632,6 +637,17 @@ batch. It must not include the cell value.
 
 `CastFailurePolicy::SetNull`: unrepresentable values become null; the field
 is nullable. The run continues.
+
+E2 pauses `Cast` from `Date32` or `Timestamp` to `Utf8` (rule or `Expr`).
+Date32 years fall outside `YYYY-MM-DD`, and Timestamp timezone strings are
+unbounded, so a 10/35-byte ceiling is not a sound physical bound. Preflight
+returns `TypeError`. Utf8 → Date32/Timestamp casts remain authorized under
+the `Error` / `SetNull` policies. Binary has no `ScalarValue` variant;
+`Literal(Binary)` does not exist. `FillNull` on a Binary column, and
+`ReplaceLiteral` whose `from`/`to` is a non-null Binary value, are preflight
+`TypeError`. Binary columns may only be projected, dropped, or passed
+through. `ReplaceLiteral` on Binary may use `from = Null` and `to = Null`
+only.
 
 **Divide and modulo result types**
 
@@ -769,19 +785,35 @@ Connector envelope
   → SnapshotWriter
 ```
 
+### 14.1 Live payloads and peak
+
+Live engine memory is exactly this set:
+
+```text
+connector envelope
+  + complete Polars working set
+  + canonical remainder
+  + bounded non-columnar state
+```
+
+Those three columnar payloads may coexist. That is required when one envelope
+is split into two or more execution chunks while a remainder from the first
+chunk is still held. Remainder → output envelope is a **move/freeze** of the
+remainder builder, not a second copy.
+
 | Resource | Ceiling | Source |
 | --- | --- | --- |
 | Input envelope rows | `MAX_BATCH_ROWS` = 65,536 | `stillflow-core` |
 | Input envelope Arrow bytes | `MAX_BATCH_BYTES` = 64 MiB | `stillflow-core` |
-| Execution-chunk Polars working set | `MAX_BATCH_BYTES` | this contract |
-| Output envelope rows | `MAX_BATCH_ROWS` | same |
-| Output envelope Arrow bytes | `MAX_BATCH_BYTES` | same |
+| Complete Polars working set (old + new + temporary) | `MAX_BATCH_BYTES` | this contract |
+| Canonical remainder | `MAX_BATCH_BYTES` | this contract |
+| Output envelope (moved remainder) | `MAX_BATCH_BYTES` | same |
 | Request `batch_size` | `1..=ReadRequest::MAX_BATCH_SIZE` (65,536) | `stillflow-core` |
-| Simultaneously live columnar buffers | `MAX_LIVE_COLUMNAR_BUFFERS` = 2 | this contract |
+| Simultaneously live columnar payloads | `MAX_LIVE_COLUMNAR_BUFFERS` = 3 | this contract |
 | Compiled plan + maps | `MAX_COMPILED_PLAN_BYTES` = 4 MiB | this contract |
 | FFI scratch (C ABI structs, not buffers) | `MAX_FFI_SCRATCH_BYTES` = 1 MiB | this contract |
-| Operator extra state | `MAX_OPERATOR_STATE_BYTES` = 5 MiB | compiled plan + FFI scratch only |
-| Peak live engine bytes | `MAX_ENGINE_PEAK_BYTES` = 133 MiB | `2 * 64 MiB + 5 MiB` |
+| Operator extra state | `MAX_OPERATOR_STATE_BYTES` = 5 MiB | compiled plan + FFI scratch + predicted-column table |
+| Peak live **engine** bytes | `MAX_ENGINE_PEAK_BYTES` = 197 MiB | `3 * 64 MiB + 5 MiB` |
 | Plan nodes | `MAX_PLAN_NODES` = 64 | this contract |
 | Rules per `ApplyRules` | `MAX_RULES_PER_NODE` = 256 | this contract |
 | Expr nodes | `MAX_EXPR_NODES` = 1,024 | this contract |
@@ -801,32 +833,39 @@ Connector envelope
 Memory law for one `materialize` call:
 
 ```text
-O(input_batch + canonical_output_batch + bounded_operator_state)
+O(connector_envelope + polars_working_set + remainder + bounded_operator_state)
+peak ≤ MAX_ENGINE_PEAK_BYTES = 197 MiB
+live columnar payloads ≤ 3
+each of those three ≤ MAX_BATCH_BYTES
 ```
 
-with an explicit peak:
+Permitted coexistence (the T37 case):
 
-```text
-peak ≤ MAX_ENGINE_PEAK_BYTES = 133 MiB
-live columnar buffers ≤ 2
-each Polars working DataFrame ≤ MAX_BATCH_BYTES
-```
+- unconsumed connector envelope
+- complete Polars working set of the current execution chunk
+- canonical remainder from previous chunks of this or a prior envelope
 
-The two live columnar buffers are the only `MAX_BATCH_BYTES`-class payloads
-allowed at once. Permitted pairs are:
-
-- connector envelope + current execution-chunk Polars frame; or
-- Polars frame + remainder builder; or
-- remainder builder + output envelope being appended.
+Forbidden: a fourth `MAX_BATCH_BYTES`-class copy. Flushing remainder to an
+output envelope **moves** the remainder allocation; after the move the
+remainder builder is empty. `SnapshotWriter::append` may then borrow that
+one envelope. Parquet encode buffers allocated inside `stillflow-storage`
+are **not** part of `MAX_ENGINE_PEAK_BYTES`. T23's engine allocator must
+exclude them; T44 measures them in a separate phase.
 
 `MAX_OPERATOR_STATE_BYTES` (5 MiB) is compiled expressions, working schemas,
-ColumnId maps, expansion-prediction tables, and C ABI structs. It does **not**
-include Polars chunks or envelopes. Durable snapshot partitions are the
-storage crate's concern and remain subject to the snapshot byte ceiling.
+ColumnId maps, the predicted-column table (section 14.3), and C ABI structs.
+It does not include the three columnar payloads.
 
-The connector envelope must be dropped before a remainder flush allocates an
-output envelope. The Polars chunk must be dropped before the next connector
-poll or the next execution chunk.
+Lifecycle:
+
+1. Hold the connector envelope until every execution chunk from it has been
+   transformed and fed to the rebatcher, then drop it.
+2. Hold at most one Polars working set. Drop it before importing the next
+   chunk. Do not drop the envelope or the remainder to make room for Polars.
+3. Remainder survives across chunks and across envelopes until it is moved
+   into an output envelope or the stream ends.
+4. After `append` returns, drop the output envelope. Do not keep remainder
+   and output as two allocations.
 
 If `RequestContext` has no deadline, the engine applies
 `ENGINE_DEFAULT_DEADLINE` from the start of `materialize`. A caller-supplied
@@ -837,23 +876,22 @@ deadline longer than `ENGINE_MAX_DEADLINE` is rejected in preflight.
 The chunker runs on each connector envelope **before** Arrow→Polars import of
 that subset. It must not call Polars to measure size.
 
-**Slice accounting** (not `get_array_memory_size` of a shared parent):
+**Source-slice accounting** (not `get_array_memory_size` of a shared parent):
 
-For a row slice `[i, i + k)` of one array:
+For a row slice `[i, i + k)` of one **source** Arrow array:
 
-- validity: `ceil(k / 8)` bytes if a bitmap exists, else 0;
+- validity: `(k + 7) / 8` bytes if a bitmap exists, else 0;
 - fixed-width values: `k * slot_size`;
-- variable-width values: `offsets[i + k] - offsets[i]` data bytes plus
-  `(k + 1) * offset_slot_size`;
+- Utf8/Binary values: `utf8_physical_bytes(k, offsets[i + k] - offsets[i])`
+  defined in section 14.3;
 - nested list/struct: the same rules applied recursively to child arrays
   over the sliced element range.
 
 A zero-copy Arrow slice that shares a parent buffer does **not** count the
 unused parent bytes a second time. Shared parent bytes already counted in
 the live connector envelope remain attributed to that envelope until it is
-dropped. Temporary Polars allocations count as the Polars working DataFrame
-of the current chunk (section 14.3). FFI C ABI structs count against
-`MAX_FFI_SCRATCH_BYTES`, not as a third columnar buffer.
+dropped. The Polars working set is a separate payload and is bounded by
+`predict(k)`.
 
 **Algorithm**, deterministic maximum feasible prefix:
 
@@ -869,63 +907,136 @@ Let `n` be the envelope row count and `offset` the first unconsumed row
    `predict(k) <= MAX_BATCH_BYTES`.
 4. Import only that slice into Polars, transform it, export it, feed the
    canonical rebatcher, then drop the Polars frame before the next slice.
+   The envelope and remainder remain live.
 
 Identical input rows, plan, and `batch_size` therefore still produce identical
-output envelope boundaries: the chunker is a function of schema, literals, and
-Arrow offsets, not of wall-clock or hashmap order.
+output envelope boundaries: the chunker is a function of schema, literals,
+predicted-column state, and Arrow offsets, not of wall-clock or hashmap order.
 
 ### 14.3 Predicted expansion before allocation
 
+The engine maintains an ordered **predicted-column table** for the working
+schema, one entry per `ColumnId`:
+
+```text
+PredictedColumn {
+    id, name, data_type, nullable,
+    max_value_bytes,          // per-value data ceiling for Utf8/Binary; 0 for fixed-width
+    nullability,              // as in section 11.4
+    origin: Source { ordinal } | Derived
+}
+```
+
+Source columns use Arrow offset/validity buffers of the current envelope
+slice. Derived columns **do not** have source offsets. After `DeriveColumn`,
+later Trim/Replace/FillNull/Cast on that id use `max_value_bytes` and
+`nullable` from this table only. Drop removes the entry. Rename changes
+`name` only.
+
+UTF-8/Binary physical size, including view, offset, and validity overhead:
+
+```text
+utf8_physical_bytes(k, data_bytes) =
+    data_bytes
+    + k * UTF8_VIEW_SLOT_BYTES          // 16; Polars 0.46 Utf8View/BinaryView
+    + (k + 1) * UTF8_OFFSET_SLOT_BYTES  // 4; Arrow Utf8 i32 offsets during FFI
+    + (k + 7) / 8                       // validity
+```
+
+Fixed-width physical size:
+
+```text
+fixed_physical_bytes(k, slot) = k * slot + (k + 7) / 8
+```
+
 `predict(k)` is the maximum, over every pipeline step after Scan projection,
-of `passthrough_slice_bytes(k) + new_column_bytes(k)` at that step. It is an
-upper bound. If a later actual Polars frame exceeds `MAX_BATCH_BYTES`, that is
+of:
+
+```text
+predict_step(k) = live_before(k) + temporary_allocation(k) + live_after(k)
+predict(k)      = max over steps of predict_step(k)
+```
+
+That sum is the complete Polars working-set bound for one chunk and must be
+`<= MAX_BATCH_BYTES`. It is not a tight Polars measurement; it is a strict
+upper bound that covers old-frame / new-frame coexistence.
+
+`live_before` is the sum of `column_physical_bytes` for every column in the
+working schema at the start of the step. `temporary_allocation` is every new
+array Polars may allocate before dropping the old ones (replacement
+operators keep the old column live until the new array exists). `live_after`
+is the working schema after the step.
+
+If an actual Polars working set exceeds `MAX_BATCH_BYTES`, that is
 `EngineError::Internal` (the predictor under-estimated) and the frame is
 dropped without append.
 
-**Passthrough columns** (Project, Filter, Rename, Drop, Trim, Cast that does
-not widen to Utf8/Binary, FilterRows): `passthrough_slice_bytes(k)` uses
-section 14.2 slice accounting of the surviving columns. Trim never increases
-UTF-8 bytes.
+**Column physical bytes**
 
-**New or widened columns** use closed per-value ceilings. `new_column_bytes(k)`
-is `k * per_value + validity_bytes(k)` unless a tighter slice-based bound
-below applies.
-
-| Producer | Per-value UTF-8/Binary ceiling |
+| Column origin | Bytes for `k` rows |
 | --- | --- |
-| `Literal(Utf8 \| Binary)` | exact byte length of the literal |
-| `Literal` numeric/bool/null | physical slot size of the result type |
-| `Column` Utf8/Binary | slice accounting of that column (exact) |
-| `Cast` to Boolean | 1 byte physical |
-| `Cast` to integer/float/date/timestamp | physical slot size |
+| Source, fixed-width | `fixed_physical_bytes(k, slot)` |
+| Source, Utf8/Binary | `utf8_physical_bytes(k, offsets[i+k]-offsets[i])` |
+| Derived, fixed-width | `fixed_physical_bytes(k, slot)` |
+| Derived, Utf8/Binary | `utf8_physical_bytes(k, k * max_value_bytes)` |
+
+**`temporary_allocation` by operator**
+
+| Step | `temporary_allocation(k)` |
+| --- | --- |
+| Rename | 0 (metadata only) |
+| Project / Drop | 0 if zero-copy column pointers; otherwise the physical size of kept columns (never more than `live_before`) |
+| Filter / FilterRows | `live_before` (worst-case copy of surviving rows; `live_after ≤ live_before`) |
+| Trim | new Utf8 array using the **input** column's `data_bytes` ceiling (trim does not grow) plus view/offset/validity |
+| Cast to fixed-width | `fixed_physical_bytes(k, dest_slot)` |
+| Cast to Utf8 from Boolean / integer / float / Utf8 | `utf8_physical_bytes(k, k * per_value_ceiling)` |
+| Cast to Utf8 from Date32, Timestamp, Binary, List, Struct | preflight `TypeError` |
+| Cast to Binary from non-Binary | preflight `TypeError` |
+| DeriveColumn | physical size of the new column from its expression bound |
+| ReplaceLiteral to Utf8 | `utf8_physical_bytes(k, k * max(input_max_value_bytes, len(to)))` |
+| ReplaceLiteral to Null | 0 extra data; validity may be rewritten: `(k + 7) / 8` |
+| FillNull Utf8 | `utf8_physical_bytes(k, input_data_bytes + null_count * len(value))` |
+| FillNull numeric/bool | `fixed_physical_bytes(k, slot)` |
+| FillNull Binary | preflight `TypeError` |
+
+Per-value UTF-8 data ceilings (`max_value_bytes` after the step):
+
+| Producer | `max_value_bytes` |
+| --- | --- |
+| `Literal(Utf8)` | exact UTF-8 length |
+| `Literal` numeric/bool/null | 0 (fixed-width result) |
+| `Column` Utf8 source | `max` value length in the current Arrow slice |
+| `Column` Utf8 derived | that column's `max_value_bytes` |
 | `Cast` to Utf8 from Boolean | `MAX_BOOL_UTF8_BYTES` = 5 |
 | `Cast` to Utf8 from any integer | `MAX_INT_UTF8_BYTES` = 20 |
 | `Cast` to Utf8 from float | `MAX_FLOAT_UTF8_BYTES` = 32 |
-| `Cast` to Utf8 from Date32 | `MAX_DATE32_UTF8_BYTES` = 10 |
-| `Cast` to Utf8 from Timestamp | `MAX_TIMESTAMP_UTF8_BYTES` = 35 |
-| `Cast` to Utf8 from Utf8 | input slice accounting |
-| `Cast` to Utf8 from Binary, List, or Struct | preflight `TypeError` |
-| `Cast` to Binary from non-Binary | preflight `TypeError` |
-| `DeriveColumn` | bound of its expression, then bound of the declared `data_type` if that cast can widen |
-| `ReplaceLiteral` to Utf8/Binary | for the slice, `k * max(max_input_value_bytes_in_slice, len(to))` |
-| `ReplaceLiteral` to Null | no extra payload |
-| `FillNull` Utf8/Binary | `input_slice_bytes + null_count(slice) * len(value)` using the validity bitmap; `value = Null` is already a preflight `TypeError` |
+| `Cast` to Utf8 from Utf8 | input `max_value_bytes` |
 | `Coalesce` | max of arms |
-| Boolean comparisons, `And`/`Or`, `IsNull`, `Contains` | 1 byte physical |
+| Boolean comparisons, `And`/`Or`, `IsNull`, `Contains` | 0 (1-byte Boolean column) |
 
-`null_count(slice)` and `max_input_value_bytes_in_slice` are read from Arrow
-offset/validity buffers only. They must not copy cell contents into logs.
+`null_count` for a **source** Utf8 column is read from the Arrow validity
+bitmap of the slice. For a **derived** column, `null_count` is `k` if
+`nullable` else `0` (conservative). `input_max_value_bytes` for a derived
+Utf8 column is its table `max_value_bytes`, never an Arrow offset.
 
-Sequential `ApplyRules` accumulate: after a Derive, the next step's
-passthrough includes the new column at its predicted width. `predict(k)` is
-the max over these steps, so a 2 KiB derived UTF-8 literal on 65,536 rows
-(`k * 2048 ≈ 128 MiB`) cannot select `k = 65,536`. The chunker must pick
-`k <= floor(MAX_BATCH_BYTES / 2048)` (and still fit passthrough bytes).
+After each step the table is updated: Derive appends an entry; Drop removes
+one; Trim does not increase `max_value_bytes`; ReplaceLiteral to Utf8 sets
+`max_value_bytes = max(old, len(to))` and `to = Null` sets `nullable = true`;
+FillNull Utf8 sets `nullable = false` and
+`max_value_bytes = max(old, len(value))`.
+
+A 2 KiB derived UTF-8 literal on 65,536 rows therefore cannot select
+`k = 65,536`, because `predict_step` includes `live_before + utf8_physical_bytes(k, k * 2048)`
+and that exceeds `MAX_BATCH_BYTES`. The chunker must pick a smaller `k`.
+Remainder from the first chunk remains live while the second chunk's Polars
+frame is built (three payloads).
 
 ### 14.4 Canonical rebatching
 
-Byte accounting for **output envelopes** uses
-`RecordBatch::get_array_memory_size()`, matching `BatchEnvelope`.
+Byte accounting for the **remainder builder** uses the same
+`utf8_physical_bytes` / `fixed_physical_bytes` rules, not a second copy of
+the Polars frame. Export from Polars into the remainder may append by move of
+finished arrays.
 
 Let `pack_limit` be `batch_size` rows. Incoming transformed execution chunks
 feed one remainder builder.
@@ -937,15 +1048,17 @@ For each incoming row-group `G` with `n` rows, in order:
    `bytes(remainder concatenated with G[0..k]) <= MAX_BATCH_BYTES`.
 2. If `k > 0`, append `G[0..k]` to remainder. If remainder now meets
    `pack_limit` rows or cannot accept another row of `G` without exceeding
-   the byte cap, flush remainder as one output envelope (sequence += 1),
+   the byte cap, **freeze/move** remainder into one output envelope
+   (sequence += 1), append it, drop that envelope after `append` returns,
    then continue with `G[k..]` against an empty remainder.
-3. If `k == 0` and remainder is non-empty, flush remainder, then retry `G`
-   against the empty remainder.
+3. If `k == 0` and remainder is non-empty, freeze/move remainder, then retry
+   `G` against the empty remainder.
 4. If `k == 0` and remainder is empty, the next single row exceeds
    `MAX_BATCH_BYTES`. Fail with `BoundExceeded`. Never split a row by
    column.
 
-After the stream ends, flush a non-empty remainder as the final envelope.
+After the stream ends, freeze/move a non-empty remainder as the final
+envelope.
 
 This search for `k` is deterministic (maximum feasible prefix). It does not
 use sampling, hash order, or wall-clock.
@@ -1152,7 +1265,8 @@ This checklist is for the later E2 PR. This docs PR only records it.
 - No Rust runtime file, `Cargo.toml`, `Cargo.lock`, frontend file, or workflow
   file is modified.
 - Every memory, row, byte, time, and concurrency limit in section 14 has an
-  explicit numeric ceiling, including `MAX_ENGINE_PEAK_BYTES`.
+  explicit numeric ceiling, including three live columnar payloads and
+  `MAX_ENGINE_PEAK_BYTES` = 197 MiB.
 - Every criterion in section 19.2 is written so E2 can automate it.
 - Dependency arrows in section 6.1 match ADR-001 and `AGENTS.md`.
 - Work stops after architecture review. E2 does not start in this PR.
@@ -1188,7 +1302,7 @@ failing fixture and must not appear in `EngineError` Display/Debug,
 | T20 | `stillflow-engine` depends on plan, connectors, storage, core | `cargo tree -p stillflow-engine` |
 | T21 | Injected snapshot/session/dataset ids, `created_at`, `started_at`, lineage, and quality_score appear unchanged | manifest equality |
 | T22 | Engine does not call `Uuid::new_v4` / `Utc::now` on the materialize path | source grep of engine runtime excluding tests |
-| T23 | Peak live buffers and bytes, including expansion | instrumented live-buffer counter `<= 2` while streaming `>= 4` batches; test allocator `<= MAX_ENGINE_PEAK_BYTES`; grep forbids collecting the full connector stream **and** forbids importing a full envelope into Polars when `predict(n) > MAX_BATCH_BYTES`. Source grep alone is not sufficient. Adversarial fixtures in T37 |
+| T23 | Peak live payloads and engine bytes, including expansion | instrumented live-payload counter `<= 3` while streaming `>= 4` batches and while one envelope is split into `>= 2` chunks with remainder retained; engine test allocator `<= MAX_ENGINE_PEAK_BYTES` (197 MiB) and excludes `SnapshotWriter` Parquet encode/write scratch; grep forbids collecting the full connector stream **and** forbids importing a full envelope into Polars when `predict(n) > MAX_BATCH_BYTES`. Source grep alone is not sufficient. Adversarial fixtures in T37/T41 |
 | T24 | Fifth concurrent `materialize` on one engine is `Busy` | four in-flight runs hold the gate; fifth returns `category() == RateLimited`, `retryable() == true`; mock inspect count 0 and read poll count 0 |
 | T25 | Empty source commits a zero-row snapshot | stats conservation |
 | T26 | `cargo fmt --all -- --check` | CI |
@@ -1202,10 +1316,15 @@ failing fixture and must not appear in `EngineError` Display/Debug,
 | T34 | Integer `8 / 3 == 2` (toward-zero); `Int8 MIN / -1` is `Arithmetic` | fixtures |
 | T35 | Secret-like `output_label` is `InvalidPlan`; successful errors omit the label | preflight + Display/Debug + `sanitized_summary()` JSON |
 | T36 | Mid-schema Arrow→Polars import failure releases all exports and publishes nothing | drop counters + no manifest |
-| T37 | Derive a 2 KiB UTF-8 literal over a 65,536-row connector batch | snapshot has 65,536 rows; live Polars frame never exceeds `MAX_BATCH_BYTES`; peak `<= MAX_ENGINE_PEAK_BYTES`; chunker `k < 65,536` |
+| T37 | Derive a 2 KiB UTF-8 literal over a 65,536-row connector batch | snapshot has 65,536 rows; live Polars working set never exceeds `MAX_BATCH_BYTES`; chunker `k < 65,536`; envelope + Polars working set + remainder may be live together; peak `<= MAX_ENGINE_PEAK_BYTES`; no fourth `MAX_BATCH_BYTES` copy |
 | T38 | `ReplaceLiteral` to a 2 KiB string and `FillNull` with a 2 KiB string over 65,536 rows | same peak/chunker assertions as T37; logical values match |
 | T39 | Single-row predicted expansion `> MAX_BATCH_BYTES` fails before Polars import | mock FFI/Polars import count 0; `BoundExceeded`; no snapshot |
 | T40 | Section 16.1 mapping | table-driven: each variant's `category()` and `retryable()`; `Busy` is RateLimited/true; `Timeout` is Timeout/true; `Cancelled` is Cancelled/false |
+| T41 | One connector envelope is split into at least two execution chunks while remainder from the first chunk is still live | live-payload counter shows envelope + Polars working set + remainder together; no fourth `MAX_BATCH_BYTES` copy; snapshot `row_count` matches input |
+| T42 | DeriveColumn, then Drop the source column, then Trim and ReplaceLiteral on the derived column | logical rows match fixture; predictor uses `PredictedColumn` width/nullability, not source Arrow offsets; peak `<= MAX_ENGINE_PEAK_BYTES` |
+| T43 | UTF-8 values whose data bytes sit exactly on the predicted byte cap, including view/offset/validity overhead | chunker `k` satisfies `predict(k) <= MAX_BATCH_BYTES < predict(k+1)` (or `BoundExceeded` with import count 0 when `predict(1)` exceeds the cap) |
+| T44 | Allocator peaks measured in three isolated phases | (a) Polars working set of one chunk; (b) remainder builder / freeze-move; (c) storage `append` Parquet encode. `(a)+(b)+5 MiB <= MAX_ENGINE_PEAK_BYTES`; (c) is recorded and excluded from the engine ceiling |
+| T45 | `Cast` Date32 or Timestamp → Utf8 (rule or `Expr`) | preflight `TypeError`; mock inspect/read counts 0; no snapshot |
 
 ## 20. Stop conditions
 
@@ -1224,7 +1343,9 @@ Stop and return to contract review if implementation needs:
 - a message that includes a cell value, credential, or `output_label`;
 - serializing `EngineError` instead of `SanitizedErrorSummary`;
 - lowering a full connector envelope through Polars when predicted expansion
-  exceeds `MAX_BATCH_BYTES`.
+  exceeds `MAX_BATCH_BYTES`;
+- a two-buffer / 133 MiB peak, or dropping the connector envelope before its
+  last execution chunk in order to keep a 2-slot columnar budget.
 
 ## 21. Known risks
 
@@ -1238,8 +1359,18 @@ Stop and return to contract review if implementation needs:
 - Variable-width Derive/Replace/FillNull can expand far beyond the connector
   envelope. The execution chunker is mandatory; “transform then split” cannot
   meet `MAX_ENGINE_PEAK_BYTES`.
-- RSS measurements are noisy. T23/T37 primary evidence is the live-buffer
-  counter, predicted-k assertions, and test allocator, not host RSS.
+- A two-buffer / 133 MiB model cannot implement T37: a split envelope, the
+  current Polars working set, and a canonical remainder must coexist. Peak
+  engine bytes are therefore `3 * 64 MiB + 5 MiB`. Remainder → output is
+  move/freeze; a fourth `MAX_BATCH_BYTES` copy is `Internal`.
+- `predict(k)` is `live_before + temporary_allocation + live_after` per step.
+  Derived columns use `PredictedColumn` width/nullability, never source Arrow
+  offsets.
+- Date32/Timestamp → Utf8 is paused until a proven maximum format length
+  exists for the full physical domain. E2 must not invent a 10/35-byte cap.
+- RSS measurements are noisy. T23/T37/T41/T44 primary evidence is the
+  live-payload counter, predicted-k assertions, and phased test allocator,
+  not host RSS.
 - `MAX_ENGINE_CONCURRENT_RUNS` is lower than storage publisher capacity so
   tests can saturate the engine cap without depending on storage busy errors.
 - SQL Connector #9 and DuckDB #10 remain outside this contract. They must not

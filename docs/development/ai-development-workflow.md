@@ -178,10 +178,12 @@ The accepted sequence is:
    the frozen Issue #6 contract. Workbook #7 and object-store #8 follow the same
    connector boundary.
 6. **Engine E1 — execution contract**: Issue #46 docs-only freeze of deterministic
-   single-source Polars execution. PR #47 remains unapproved until revision R2
-   passes a third architecture review. Do not start the executor in the same PR.
-   E2, once approved, must chunk before Polars; it must not transform a whole
-   connector envelope and split afterwards.
+   single-source Polars execution. PR #47 remains unapproved until revision R3
+   passes a fourth architecture review. Do not start the executor in the same PR.
+   E2, once approved, must chunk before Polars; live engine memory is connector
+   envelope + complete Polars working set + canonical remainder + 5 MiB state
+   (peak 197 MiB). It must not transform a whole connector envelope and split
+   afterwards.
 7. **Engine E2 — streaming executor**: after E1 approval, rebuild from latest
    `main`. Connector envelope → execution chunker → Polars → canonical
    rebatcher → atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API.
