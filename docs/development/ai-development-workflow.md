@@ -1,7 +1,7 @@
 # Contract-first development workflow
 
 > Status: Accepted
-> Last updated: 2026-08-07
+> Last updated: 2026-08-14
 
 This workflow separates architectural decisions from implementation so parallel
 or automated work cannot silently invent incompatible public contracts.
@@ -175,9 +175,21 @@ The accepted sequence is:
 4. **PR3 — storage**: SQLite metadata, immutable Parquet partitions, atomic
    snapshots, recovery and garbage-collection rules.
 5. **PR4 — local tabular**: CSV, TSV, JSON, NDJSON, and Parquet connector under
-   the frozen Issue #6 contract.
-6. **PR5+ — physical execution and API**: Polars lowering, DuckDB bounded preview,
-   job orchestration and transport boundaries.
+   the frozen Issue #6 contract. Workbook #7 and object-store #8 follow the same
+   connector boundary.
+6. **Engine E1 — execution contract**: Issue #46 docs-only freeze of deterministic
+   single-source Polars execution. PR #47 remains unapproved until revision R3
+   passes a fourth architecture review. Do not start the executor in the same PR.
+   E2, once approved, must chunk before Polars; live engine memory is connector
+   envelope + complete Polars working set + canonical remainder + 5 MiB state
+   (peak 197 MiB). It must not transform a whole connector envelope and split
+   afterwards.
+7. **Engine E2 — streaming executor**: after E1 approval, rebuild from latest
+   `main`. Connector envelope → execution chunker → Polars → canonical
+   rebatcher → atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API.
+8. **Engine E3–E5**: node-level Preview, Validate/Rejected Rows/Deduplicate, then
+   job runtime and Axum. DuckDB (#10) and SQL Connector (#9, Post-MVP) stay
+   outside this sequence until their own contracts.
 
 Do not pull work forward merely because a downstream type is convenient. A
 temporary placeholder must remain private and must not become a public contract.
