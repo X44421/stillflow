@@ -2,7 +2,7 @@
 
 > Status: Accepted
 > Scope: Backend and data contracts only
-> Last updated: 2026-08-07
+> Last updated: 2026-08-14
 
 ## 1. Decision summary
 
@@ -438,17 +438,35 @@ API payloads refer to object IDs and credential references. Large RecordBatch st
 - Range-aware Parquet and bounded text sampling.
 - Credential references and sanitized events.
 
-### Phase 1C — Databases
+### Phase 1C — Deterministic engine (current)
+
+Contract: [`issue-046-deterministic-engine-execution-contract.md`](issues/issue-046-deterministic-engine-execution-contract.md).
+
+- E1: freeze the single-source execution contract. Docs-only; stop for review.
+- E2: `LogicalPlan` → bounded `BatchStream` → atomic Snapshot through Polars.
+- E3: node-level Preview using the same lowering, with row/byte/time ceilings.
+- E4: `Validate`, Rejected Rows, and `Deduplicate`.
+- E5: job runtime and Axum Preview / Run / Status / Cancel.
+
+Phase 1C does not execute `Join` / `Union`, SQL connectors, DuckDB, or
+arbitrary engine code. Engine branches must not mix Dependabot updates.
+
+### Phase 1D — DuckDB preview SQL (after Engine)
+
+- Native DuckDB preview SQL, federation, and temporary materialization.
+- Explicit Polars/DuckDB conversion tests.
+- DuckDB must not define a second cleaning-rule language.
+
+SQLite metadata plus immutable Parquet partitions and atomic manifests already
+shipped in storage #28. End-to-end import/clean/preview/snapshot is completed
+by Engine E2–E5, not by re-implementing storage.
+
+### Post-MVP — Databases
+
+SQL Connector #9 is explicitly Post-MVP and must not block Engine work.
 
 - PostgreSQL, MySQL/MariaDB and SQLite control-plane support through SQLx.
 - Discovery, inspection, bounded preview and chunked Arrow reads.
-
-### Phase 1D — Preview and materialization
-
-- Native DuckDB preview SQL and local materialization.
-- Explicit Polars/DuckDB conversion tests.
-- SQLite metadata plus immutable Parquet partitions and atomic manifests.
-- End-to-end import, clean, preview and snapshot flow.
 
 ### Phase 2 — Document data
 
@@ -467,15 +485,20 @@ API payloads refer to object IDs and credential references. Large RecordBatch st
 - Local CSV, TSV, JSON, NDJSON, Parquet and Excel fixtures can be discovered,
   inspected, previewed and imported.
 - S3-compatible objects can be inspected and previewed without unconditional full download.
-- PostgreSQL, MySQL/MariaDB and SQLite can be tested, discovered and previewed using bounded queries.
 - Connector output crosses the public boundary as versioned envelopes around
   bounded Arrow 59 RecordBatches.
-- Polars cleaning and DuckDB preview produce compatible schemas for supported types.
+- The Engine E1 contract is frozen before Polars runtime work begins.
+- After E1 approval, a single-source deterministic Polars path materializes an
+  atomic Snapshot without partial publication.
 - Imports register Dataset and Snapshot objects with lineage and sanitized events.
 - Cancellation, timeouts and typed failures are covered by tests.
 - Credentials are absent from logs, events and persisted domain objects.
 - Backend tests and the existing frontend build pass.
 - No existing Workspace layout, component styling or design token changes are included.
+
+PostgreSQL, MySQL/MariaDB and SQLite discovery/preview are Post-MVP (#9) and
+are not Phase 1 exit criteria. DuckDB preview SQL (#10) follows the Polars
+executor and must not redefine cleaning rules.
 
 ## 19. Architectural decisions
 
@@ -504,6 +527,7 @@ ConnectorX adds operational and compatibility cost before a bulk-read bottleneck
 
 ## 20. References
 
+- [Engine E1 execution contract](issues/issue-046-deterministic-engine-execution-contract.md)
 - [Polars IO](https://docs.pola.rs/user-guide/io/)
 - [Calamine](https://docs.rs/calamine)
 - [Apache Arrow object_store](https://docs.rs/object_store)
