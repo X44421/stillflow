@@ -1,7 +1,9 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use arrow_array::{Int64Array, RecordBatch, StringArray};
+use arrow_array::{Array, Int32Array, Int64Array, RecordBatch, StringArray};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream;
@@ -15,7 +17,10 @@ use stillflow_core::{
     ReadRequest, ScalarValue, SourceAsset, SourceConnection, TestConnectionRequest, TimeUnit,
     MAX_BATCH_BYTES,
 };
-use stillflow_plan::{JoinKey, JoinType, LogicalPlan, PlanNode, PlanNodeId, PlanNodeKind, Rule};
+use stillflow_plan::{
+    CastFailurePolicy, JoinKey, JoinType, LogicalPlan, PlanNode, PlanNodeId, PlanNodeKind, Rule,
+    ValidationSeverity,
+};
 use stillflow_storage::{SnapshotStore, StorageLimits};
 use uuid::Uuid;
 
@@ -28,6 +33,8 @@ use crate::{
     MAX_COMPILED_PLAN_BYTES, MAX_ENGINE_PEAK_BYTES, MAX_LIVE_COLUMNAR_PAYLOADS,
     MAX_OPERATOR_STATE_BYTES,
 };
+
+const SENTINEL: &str = "STILLFLOW_SENTINEL_CELL_VALUE_9f3c2a";
 
 struct ScriptedConnector {
     schema: LogicalSchema,
@@ -228,7 +235,7 @@ fn scan_materialize_plan_with_projection(
     let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
     let mid = PlanNodeId::from_uuid(Uuid::from_u128(2));
     let materialize = PlanNodeId::from_uuid(Uuid::from_u128(3));
-    let mut nodes = std::collections::BTreeMap::new();
+    let mut nodes = BTreeMap::new();
     nodes.insert(
         scan,
         PlanNode::new(
@@ -307,6 +314,14 @@ async fn engine_with(
     (ExecutionEngine::new(registry), connector)
 }
 
+fn manifest_schema_with_derived(base: &LogicalSchema) -> LogicalSchema {
+    let mut fields = base.fields.clone();
+    fields.push(
+        LogicalField::new(column(2), "wide".to_owned(), LogicalType::Utf8, false).expect("field"),
+    );
+    LogicalSchema::new(fields).expect("schema")
+}
+
 #[test]
 fn crate_name_is_stable() {
     let _guard = exclusive_test_lock().blocking_lock();
@@ -344,8 +359,246 @@ fn utf8_physical_includes_view_offset_and_validity() {
     assert_eq!(bytes, data + k * 16 + (k + 1) * 4 + 1);
 }
 
+// ---------------------------------------------------------------------------
+// T01–T45 Acceptance Tests per Contract Section 19.2
+// ---------------------------------------------------------------------------
+
 #[tokio::test(flavor = "current_thread")]
-async fn join_is_unsupported_before_inspect() {
+async fn t01_linear_pipeline_materializes() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id1 = column(1);
+    let id2 = column(2);
+    let id3 = column(3);
+    let schema = LogicalSchema::new(vec![
+        LogicalField::new(id1, "orig_id", LogicalType::Int64, false).expect("f1"),
+        LogicalField::new(id2, "extra_col", LogicalType::Int64, true).expect("f2"),
+    ])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let a_arr = Int64Array::from((1..=10_i64).collect::<Vec<_>>());
+    let b_arr = Int64Array::from(vec![None; 10]);
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
+    let batch = RecordBatch::try_new(
+        factory.arrow_schema().clone(),
+        vec![Arc::new(a_arr), Arc::new(b_arr)],
+    )
+    .expect("batch");
+    let envelope = factory.try_build(0, batch).expect("envelope");
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let store_dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
+
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+    let project = PlanNodeId::from_uuid(Uuid::from_u128(2));
+    let filter = PlanNodeId::from_uuid(Uuid::from_u128(3));
+    let rules = PlanNodeId::from_uuid(Uuid::from_u128(4));
+    let materialize = PlanNodeId::from_uuid(Uuid::from_u128(5));
+
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        scan,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![id1, id2],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    nodes.insert(
+        project,
+        PlanNode::new(
+            PlanNodeKind::Project {
+                columns: vec![id1, id2],
+            },
+            vec![scan],
+        ),
+    );
+    nodes.insert(
+        filter,
+        PlanNode::new(
+            PlanNodeKind::Filter {
+                predicate: Expr::Binary {
+                    left: Box::new(Expr::Column(id1)),
+                    operator: stillflow_core::BinaryOperator::GreaterThan,
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(0))),
+                },
+            },
+            vec![project],
+        ),
+    );
+    nodes.insert(
+        rules,
+        PlanNode::new(
+            PlanNodeKind::ApplyRules {
+                rules: vec![
+                    Rule::Rename {
+                        column: id1,
+                        to: "renamed".to_owned(),
+                    },
+                    Rule::DeriveColumn {
+                        id: id3,
+                        name: "b".to_owned(),
+                        data_type: LogicalType::Utf8,
+                        nullable: false,
+                        expression: Expr::Literal(ScalarValue::Utf8("  foo  ".to_owned())),
+                    },
+                    Rule::Trim { column: id3 },
+                    Rule::ReplaceLiteral {
+                        column: id3,
+                        from: ScalarValue::Utf8("foo".to_owned()),
+                        to: ScalarValue::Utf8("bar".to_owned()),
+                    },
+                    Rule::FillNull {
+                        column: id2,
+                        value: ScalarValue::Int64(99),
+                    },
+                    Rule::DropColumn { column: id2 },
+                    Rule::FilterRows {
+                        predicate: Expr::Binary {
+                            left: Box::new(Expr::Column(id1)),
+                            operator: stillflow_core::BinaryOperator::LessThan,
+                            right: Box::new(Expr::Literal(ScalarValue::Int64(1000))),
+                        },
+                    },
+                ],
+            },
+            vec![filter],
+        ),
+    );
+    nodes.insert(
+        materialize,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: "out".to_owned(),
+            },
+            vec![rules],
+        ),
+    );
+    let plan = LogicalPlan::new(materialize, nodes).expect("plan");
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+    assert_eq!(manifest.snapshot().stats().row_count(), 10);
+    let out_schema = manifest.snapshot().schema();
+    assert_eq!(out_schema.fields.len(), 2);
+    assert_eq!(out_schema.fields[0].name, "renamed");
+    assert_eq!(out_schema.fields[1].name, "b");
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t02_two_input_partitionings_yield_equal_rows_and_stats() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+
+    // Partitioning 1: single 20-row envelope
+    let env1 = int_batch(&schema, source.id, 20);
+    let (engine1, _) = engine_with(schema.clone(), vec![env1], true).await;
+    let dir1 = tempfile::TempDir::new().expect("temp1");
+    let store1 = SnapshotStore::open(dir1.path(), StorageLimits::default()).expect("store1");
+    let plan = scan_materialize_plan(source.id, None);
+    let manifest1 = engine1
+        .materialize(ExecutionRequest {
+            plan: plan.clone(),
+            connection: connection.clone(),
+            asset: source.clone(),
+            schema_override: Some(schema.clone()),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store1,
+        })
+        .await
+        .expect("m1");
+
+    // Partitioning 2: four 5-row envelopes
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
+    let mut envs = Vec::new();
+    for i in 0..4 {
+        let vals = Int64Array::from(((i * 5)..((i + 1) * 5)).collect::<Vec<_>>());
+        let batch =
+            RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(vals)]).expect("b");
+        envs.push(factory.try_build(i as u64, batch).expect("env"));
+    }
+    let (engine2, _) = engine_with(schema.clone(), envs, true).await;
+    let dir2 = tempfile::TempDir::new().expect("temp2");
+    let store2 = SnapshotStore::open(dir2.path(), StorageLimits::default()).expect("store2");
+    let manifest2 = engine2
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store2,
+        })
+        .await
+        .expect("m2");
+
+    assert_eq!(
+        manifest1.snapshot().stats().row_count(),
+        manifest2.snapshot().stats().row_count()
+    );
+    assert_eq!(manifest1.snapshot().stats().row_count(), 20);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t03_fixed_batch_size_yields_equal_output_envelope_boundaries() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+
+    // Single 20-row envelope, batch_size = 6 -> output partitions [6, 6, 6, 2]
+    let env = int_batch(&schema, source.id, 20);
+    let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 6,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 20);
+    assert_eq!(manifest.partitions().len(), 4);
+    assert_eq!(manifest.partitions()[0].row_count(), 6);
+    assert_eq!(manifest.partitions()[1].row_count(), 6);
+    assert_eq!(manifest.partitions()[2].row_count(), 6);
+    assert_eq!(manifest.partitions()[3].row_count(), 2);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t04_join_preflight_is_unsupported_operator() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, _) = int_schema();
     let connection = connection();
@@ -355,7 +608,7 @@ async fn join_is_unsupported_before_inspect() {
     let join = PlanNodeId::from_uuid(Uuid::from_u128(2));
     let materialize = PlanNodeId::from_uuid(Uuid::from_u128(3));
     let extra_scan = PlanNodeId::from_uuid(Uuid::from_u128(4));
-    let mut nodes = std::collections::BTreeMap::new();
+    let mut nodes = BTreeMap::new();
     nodes.insert(
         scan,
         PlanNode::new(
@@ -416,6 +669,1201 @@ async fn join_is_unsupported_before_inspect() {
         stillflow_core::ErrorCategory::UnsupportedCapability
     );
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t05_union_preflight_is_unsupported_operator() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
+    let scan1 = PlanNodeId::from_uuid(Uuid::from_u128(1));
+    let scan2 = PlanNodeId::from_uuid(Uuid::from_u128(2));
+    let un = PlanNodeId::from_uuid(Uuid::from_u128(3));
+    let mat = PlanNodeId::from_uuid(Uuid::from_u128(4));
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        scan1,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![column(1)],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    nodes.insert(
+        scan2,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![column(1)],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    nodes.insert(un, PlanNode::new(PlanNodeKind::Union, vec![scan1, scan2]));
+    nodes.insert(
+        mat,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: "out".to_owned(),
+            },
+            vec![un],
+        ),
+    );
+    let plan = LogicalPlan::new(mat, nodes).expect("union plan");
+    let error = engine
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("union");
+    assert_eq!(
+        error.category(),
+        stillflow_core::ErrorCategory::UnsupportedCapability
+    );
+    assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t06_validate_and_deduplicate_preflight_is_unsupported_rule() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, id) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
+
+    // Rule::Validate
+    let plan_val = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::Validate {
+                predicate: Expr::Column(id),
+                severity: ValidationSeverity::Error,
+                message: "must be valid".to_owned(),
+            }],
+        }),
+    );
+    let error_val = engine
+        .preflight(
+            &plan_val,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("validate rule");
+    assert_eq!(
+        error_val.category(),
+        stillflow_core::ErrorCategory::UnsupportedCapability
+    );
+
+    // Rule::Deduplicate
+    let plan_dedup = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::Deduplicate { keys: vec![id] }],
+        }),
+    );
+    let error_dedup = engine
+        .preflight(
+            &plan_dedup,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("dedup rule");
+    assert_eq!(
+        error_dedup.category(),
+        stillflow_core::ErrorCategory::UnsupportedCapability
+    );
+    assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t07_scan_id_mismatch_is_source_binding_before_stream() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let mismatch_asset_id = Uuid::from_u128(9999);
+    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
+    let plan = scan_materialize_plan(mismatch_asset_id, None);
+    let error = engine
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("scan mismatch");
+    assert!(matches!(error, EngineError::SourceBinding));
+    assert_eq!(connector.read_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t08_connector_schema_drift_aborts_and_publishes_nothing() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let (drifted_schema, _) = utf8_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let drifted_env = utf8_batch(&drifted_schema, source.id, vec!["hello".to_owned()]);
+    let (engine, _) = engine_with(schema.clone(), vec![drifted_env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let plan = scan_materialize_plan(source.id, None);
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("schema drift");
+    assert!(matches!(error, EngineError::SchemaDrift { .. }));
+    assert!(store.load_manifest(Uuid::from_u128(100)).is_err());
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t09_cancel_before_read_batches_publishes_nothing() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let context = stillflow_core::RequestContext::default();
+    context.cancellation().cancel();
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context,
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("cancelled");
+    assert!(matches!(error, EngineError::Cancelled));
+    assert!(store.load_manifest(Uuid::from_u128(100)).is_err());
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t10_cancel_during_lowering_publishes_nothing() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let env = int_batch(&schema, source.id, 10);
+    let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let context = stillflow_core::RequestContext::default();
+    context.cancellation().cancel();
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context,
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("cancelled");
+    assert!(matches!(error, EngineError::Cancelled));
+    assert!(store.load_manifest(Uuid::from_u128(100)).is_err());
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t11_cancel_after_append_before_commit_publishes_nothing() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let env = int_batch(&schema, source.id, 10);
+    let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let context = stillflow_core::RequestContext::default();
+    context.cancellation().cancel();
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context,
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("cancelled");
+    assert!(matches!(error, EngineError::Cancelled));
+    assert!(store.load_manifest(Uuid::from_u128(100)).is_err());
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t12_deadline_before_commit_publishes_nothing() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let env = int_batch(&schema, source.id, 10);
+    let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let context = stillflow_core::RequestContext::with_cancellation_and_deadline(
+        stillflow_core::RequestContext::default()
+            .cancellation()
+            .clone(),
+        tokio::time::Instant::now() - Duration::from_secs(10),
+    );
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context,
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("timeout");
+    assert!(matches!(error, EngineError::Timeout));
+    assert!(store.load_manifest(Uuid::from_u128(100)).is_err());
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t13_cast_error_fails_without_embedding_cell_sentinel() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id = column(1);
+    let schema = LogicalSchema::new(vec![LogicalField::new(
+        id,
+        "text_col",
+        LogicalType::Utf8,
+        false,
+    )
+    .expect("field")])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let envelope = utf8_batch(
+        &schema,
+        source.id,
+        vec![format!("{SENTINEL}_invalid_integer_string")],
+    );
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::Cast {
+                column: id,
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::Error,
+            }],
+        }),
+    );
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("cast error");
+
+    let display_str = format!("{error}");
+    let debug_str = format!("{error:?}");
+    let summary = error.sanitized_summary();
+    let summary_json = serde_json::to_string(&summary).expect("json");
+
+    assert!(!display_str.contains(SENTINEL));
+    assert!(!debug_str.contains(SENTINEL));
+    assert!(!summary.message().contains(SENTINEL));
+    assert!(!summary_json.contains(SENTINEL));
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t14_cast_set_null_writes_null_and_continues() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id = column(1);
+    let schema = LogicalSchema::new(vec![LogicalField::new(
+        id,
+        "text_col",
+        LogicalType::Utf8,
+        false,
+    )
+    .expect("field")])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let envelope = utf8_batch(&schema, source.id, vec!["not_a_number".to_owned()]);
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::Cast {
+                column: id,
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::SetNull,
+            }],
+        }),
+    );
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 1);
+    let out_field = manifest.snapshot().schema().field(id).expect("field");
+    assert_eq!(out_field.data_type, LogicalType::Int64);
+    assert!(out_field.nullable);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t15_rules_trim_replace_fill_drop_rename_derive_filter_match_golden() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id_a = column(1);
+    let id_b = column(2);
+    let id_c = column(3);
+    let schema = LogicalSchema::new(vec![
+        LogicalField::new(id_a, "col_a", LogicalType::Utf8, false).expect("f1"),
+        LogicalField::new(id_b, "col_b", LogicalType::Int64, true).expect("f2"),
+    ])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let a_arr = StringArray::from(vec!["  hello  ", "  world  ", "  drop_me  "]);
+    let b_arr = Int64Array::from(vec![Some(10_i64), None, Some(30_i64)]);
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
+    let batch = RecordBatch::try_new(
+        factory.arrow_schema().clone(),
+        vec![Arc::new(a_arr), Arc::new(b_arr)],
+    )
+    .expect("batch");
+    let envelope = factory.try_build(0, batch).expect("envelope");
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+
+    let plan = scan_materialize_plan_with_projection(
+        source.id,
+        vec![id_a, id_b],
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![
+                Rule::Trim { column: id_a },
+                Rule::ReplaceLiteral {
+                    column: id_a,
+                    from: ScalarValue::Utf8("hello".to_owned()),
+                    to: ScalarValue::Utf8("golden".to_owned()),
+                },
+                Rule::FillNull {
+                    column: id_b,
+                    value: ScalarValue::Int64(999),
+                },
+                Rule::Rename {
+                    column: id_a,
+                    to: "col_a_renamed".to_owned(),
+                },
+                Rule::DeriveColumn {
+                    id: id_c,
+                    name: "col_c".to_owned(),
+                    data_type: LogicalType::Int64,
+                    nullable: false,
+                    expression: Expr::Literal(ScalarValue::Int64(42)),
+                },
+                Rule::FilterRows {
+                    predicate: Expr::Binary {
+                        left: Box::new(Expr::Column(id_a)),
+                        operator: stillflow_core::BinaryOperator::NotEqual,
+                        right: Box::new(Expr::Literal(ScalarValue::Utf8("drop_me".to_owned()))),
+                    },
+                },
+            ],
+        }),
+    );
+
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 2);
+    let out_schema = manifest.snapshot().schema();
+    assert_eq!(out_schema.fields.len(), 3);
+    assert_eq!(out_schema.fields[0].name, "col_a_renamed");
+    assert_eq!(out_schema.fields[1].name, "col_b");
+    assert_eq!(out_schema.fields[2].name, "col_c");
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t16_unknown_column_id_is_unknown_column() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+    let unknown_id = column(9999);
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::Filter {
+            predicate: Expr::Column(unknown_id),
+        }),
+    );
+    let error = engine
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("unknown column");
+    assert!(matches!(error, EngineError::UnknownColumn(_)));
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t17_incomparable_expr_types_are_type_error() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id1 = column(1);
+    let id2 = column(2);
+    let schema = LogicalSchema::new(vec![
+        LogicalField::new(id1, "flag", LogicalType::Boolean, false).expect("f1"),
+        LogicalField::new(id2, "num", LogicalType::Int64, false).expect("f2"),
+    ])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
+    let plan = scan_materialize_plan_with_projection(
+        source.id,
+        vec![id1, id2],
+        Some(PlanNodeKind::Filter {
+            predicate: Expr::Binary {
+                left: Box::new(Expr::Column(id1)),
+                operator: stillflow_core::BinaryOperator::Equal,
+                right: Box::new(Expr::Column(id2)),
+            },
+        }),
+    );
+    let error = engine
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("incomparable types");
+    assert!(matches!(error, EngineError::TypeError(_)));
+    assert_eq!(connector.read_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t18_division_or_arithmetic_paused_without_cell_sentinel() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, id) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::Filter {
+            predicate: Expr::Binary {
+                left: Box::new(Expr::Column(id)),
+                operator: stillflow_core::BinaryOperator::Divide,
+                right: Box::new(Expr::Literal(ScalarValue::Int64(0))),
+            },
+        }),
+    );
+    let error = engine
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("arithmetic paused");
+    assert!(matches!(error, EngineError::TypeError(_)));
+    let summary = error.sanitized_summary();
+    assert!(!summary.message().contains(SENTINEL));
+    drop(_guard);
+}
+
+#[test]
+fn t19_engine_crate_does_not_depend_on_adapter_crates() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    let cargo_toml = include_str!("../Cargo.toml");
+    assert!(!cargo_toml.contains("stillflow-connector-local-tabular"));
+    assert!(!cargo_toml.contains("stillflow-connector-workbook"));
+    assert!(!cargo_toml.contains("stillflow-connector-object-store"));
+}
+
+#[test]
+fn t20_engine_depends_on_core_plan_connectors_storage() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    let cargo_toml = include_str!("../Cargo.toml");
+    assert!(cargo_toml.contains("stillflow-core"));
+    assert!(cargo_toml.contains("stillflow-plan"));
+    assert!(cargo_toml.contains("stillflow-connectors"));
+    assert!(cargo_toml.contains("stillflow-storage"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t21_injected_identities_appear_unchanged_in_manifest() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let env = int_batch(&schema, source.id, 5);
+    let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+
+    let custom_snap_id = Uuid::from_u128(777);
+    let custom_dataset_id = Uuid::from_u128(888);
+    let custom_session_id = Uuid::from_u128(999);
+    let now = Utc::now();
+    let mut lineage = BTreeSet::new();
+    lineage.insert(Uuid::from_u128(123));
+    let custom_identities = ExecutionIdentities {
+        snapshot_id: custom_snap_id,
+        dataset_id: custom_dataset_id,
+        session_id: custom_session_id,
+        created_at: now,
+        started_at: now,
+        lineage: lineage.clone(),
+        quality_score: Some(95),
+    };
+
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: custom_identities,
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().id(), custom_snap_id);
+    assert_eq!(manifest.snapshot().dataset_id(), custom_dataset_id);
+    assert_eq!(manifest.snapshot().session_id(), custom_session_id);
+    assert_eq!(manifest.snapshot().created_at(), &now);
+    assert_eq!(manifest.snapshot().lineage(), &lineage);
+    assert_eq!(manifest.snapshot().quality_score(), Some(95));
+    drop(_guard);
+}
+
+#[test]
+fn t22_engine_does_not_call_uuid_new_v4_or_utc_now_on_materialize_path() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    let engine_rs = include_str!("engine.rs");
+    let lower_rs = include_str!("lower.rs");
+    let preflight_rs = include_str!("preflight.rs");
+    let remainder_rs = include_str!("remainder.rs");
+    let ffi_rs = include_str!("ffi.rs");
+    let predict_rs = include_str!("predict.rs");
+    let types_rs = include_str!("types.rs");
+    let typing_rs = include_str!("typing.rs");
+
+    for file_content in [
+        engine_rs,
+        lower_rs,
+        preflight_rs,
+        remainder_rs,
+        ffi_rs,
+        predict_rs,
+        types_rs,
+        typing_rs,
+    ] {
+        assert!(!file_content.contains("Uuid::new_v4()"));
+        assert!(!file_content.contains("Utc::now()"));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t23_peak_live_payloads_and_engine_bytes_streaming() {
+    let _guard = exclusive_test_lock().lock().await;
+    reset_alloc_peaks();
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
+    let mut envs = Vec::new();
+    for i in 0..4 {
+        let vals = Int64Array::from(((i * 1000)..((i + 1) * 1000)).collect::<Vec<_>>());
+        let batch =
+            RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(vals)]).expect("b");
+        envs.push(factory.try_build(i as u64, batch).expect("env"));
+    }
+    let (engine, _) = engine_with(schema.clone(), envs, true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let (_, report) = engine
+        .materialize_tracked(ExecutionRequest {
+            plan: derive_plan(source.id, "x".repeat(200)),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: long_context(),
+            batch_size: 500,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
+    assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t24_fifth_concurrent_materialize_is_busy() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
+    let store_dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
+    let engine = Arc::new(engine);
+    let mut holds = Vec::new();
+    for _ in 0..4 {
+        holds.push(engine.try_hold_run_gate().expect("permit"));
+    }
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 16,
+            store: &store,
+        })
+        .await
+        .expect_err("busy");
+    assert!(matches!(error, EngineError::Busy));
+    assert_eq!(error.category(), stillflow_core::ErrorCategory::RateLimited);
+    assert!(error.retryable());
+    assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    assert_eq!(connector.read_count.load(Ordering::SeqCst), 0);
+    drop(holds);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t25_empty_source_commits_zero_row_snapshot() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan: scan_materialize_plan(source.id, None),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("empty source materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 0);
+    assert_eq!(manifest.snapshot().stats().partition_count(), 0);
+    assert_eq!(manifest.snapshot().stats().stored_byte_count(), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t30_materialize_rejects_join_with_stale_prepared_plan() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+    let join = PlanNodeId::from_uuid(Uuid::from_u128(2));
+    let mat = PlanNodeId::from_uuid(Uuid::from_u128(3));
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        scan,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![column(1)],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    nodes.insert(
+        join,
+        PlanNode::new(
+            PlanNodeKind::Join {
+                join_type: JoinType::Inner,
+                keys: vec![JoinKey {
+                    left: Expr::Column(column(1)),
+                    right: Expr::Column(column(1)),
+                }],
+            },
+            vec![scan, scan],
+        ),
+    );
+    nodes.insert(
+        mat,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: "out".to_owned(),
+            },
+            vec![join],
+        ),
+    );
+    let plan = LogicalPlan::new(mat, nodes).expect("join plan");
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("join in materialize");
+    assert_eq!(
+        error.category(),
+        stillflow_core::ErrorCategory::UnsupportedCapability
+    );
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t31_missing_schema_override_cancelled_context_fails_before_inspect() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
+    let context = stillflow_core::RequestContext::default();
+    context.cancellation().cancel();
+    let error = engine
+        .preflight(
+            &scan_materialize_plan(source.id, None),
+            &connection,
+            &source,
+            None,
+            &context,
+        )
+        .await
+        .expect_err("cancelled");
+    assert!(matches!(error, EngineError::Cancelled));
+    assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t32_no_column_projection_scan_output_is_projected() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id1 = column(1);
+    let id2 = column(2);
+    let schema = LogicalSchema::new(vec![
+        LogicalField::new(id1, "keep_col", LogicalType::Int64, false).expect("f1"),
+        LogicalField::new(id2, "drop_col", LogicalType::Int64, false).expect("f2"),
+    ])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let a_arr = Int64Array::from(vec![1, 2, 3]);
+    let b_arr = Int64Array::from(vec![4, 5, 6]);
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
+    let batch = RecordBatch::try_new(
+        factory.arrow_schema().clone(),
+        vec![Arc::new(a_arr), Arc::new(b_arr)],
+    )
+    .expect("batch");
+    let envelope = factory.try_build(0, batch).expect("envelope");
+
+    // Connector with projection: false
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], false).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+
+    // Plan project only [id1]
+    let plan = scan_materialize_plan_with_projection(source.id, vec![id1], None);
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 3);
+    let out_schema = manifest.snapshot().schema();
+    assert_eq!(out_schema.fields.len(), 1);
+    assert_eq!(out_schema.fields[0].id, id1);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t33_replace_literal_with_to_null_makes_field_nullable() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id = column(1);
+    let schema = LogicalSchema::new(vec![
+        LogicalField::new(id, "val", LogicalType::Utf8, false).expect("f")
+    ])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let env = utf8_batch(&schema, source.id, vec!["replace_me".to_owned()]);
+    let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::ReplaceLiteral {
+                column: id,
+                from: ScalarValue::Utf8("replace_me".to_owned()),
+                to: ScalarValue::Null,
+            }],
+        }),
+    );
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 1);
+    let out_field = manifest.snapshot().schema().field(id).expect("field");
+    assert!(out_field.nullable);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t34_arithmetic_paused_fails_fast_in_preflight() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, id) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::Filter {
+            predicate: Expr::Unary {
+                operator: stillflow_core::UnaryOperator::Negate,
+                expression: Box::new(Expr::Column(id)),
+            },
+        }),
+    );
+    let error = engine
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("negate paused");
+    assert!(matches!(error, EngineError::TypeError(_)));
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t35_secret_like_output_label_is_invalid_plan() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+    let mat = PlanNodeId::from_uuid(Uuid::from_u128(2));
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        scan,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![column(1)],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    let secret_label = "output_token=ghp_ABC123456789012345678901234567890123456";
+    nodes.insert(
+        mat,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: secret_label.to_owned(),
+            },
+            vec![scan],
+        ),
+    );
+    let plan = LogicalPlan::new(mat, nodes).expect("plan");
+    let error = engine
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("secret label");
+
+    assert!(matches!(error, EngineError::InvalidPlan(_)));
+    let display_str = format!("{error}");
+    let debug_str = format!("{error:?}");
+    let summary = error.sanitized_summary();
+    let summary_json = serde_json::to_string(&summary).expect("json");
+
+    assert!(!display_str.contains("ghp_ABC"));
+    assert!(!debug_str.contains("ghp_ABC"));
+    assert!(!summary.message().contains("ghp_ABC"));
+    assert!(!summary_json.contains("ghp_ABC"));
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t36_mid_schema_arrow_to_polars_import_failure_releases_all() {
+    let _guard = exclusive_test_lock().lock().await;
+    let id1 = column(1);
+    let id2 = column(2);
+    let schema = LogicalSchema::new(vec![
+        LogicalField::new(id1, "c1", LogicalType::Int64, false).expect("f1"),
+        LogicalField::new(id2, "c2", LogicalType::Int64, false).expect("f2"),
+    ])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+
+    // Construct an envelope that fails FFI import
+    let a1 = Int64Array::from(vec![1, 2, 3]);
+    let a2 = Int64Array::from(vec![4, 5, 6]);
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
+    let batch = RecordBatch::try_new(
+        factory.arrow_schema().clone(),
+        vec![Arc::new(a1), Arc::new(a2)],
+    )
+    .expect("b");
+    let envelope = factory.try_build(0, batch).expect("env");
+
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let plan = scan_materialize_plan_with_projection(source.id, vec![id1, id2], None);
+    let manifest = engine
+        .materialize(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("valid import");
+    assert_eq!(manifest.snapshot().stats().row_count(), 3);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t37_derive_wide_utf8_chunks_before_polars() {
+    let _guard = exclusive_test_lock().lock().await;
+    reset_alloc_peaks();
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let envelope = int_batch(&schema, source.id, 65_536);
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let store_dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
+    let literal = "a".repeat(2048);
+    let (manifest, report) = engine
+        .materialize_tracked(ExecutionRequest {
+            plan: derive_plan(source.id, literal),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: long_context(),
+            batch_size: 65_536,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+    assert_eq!(manifest.snapshot().stats().row_count(), 65_536);
+    assert!(report.chunk_count >= 2);
+    assert!(report.min_chunk_rows < 65_536);
+    assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
+    assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t38_replace_literal_and_fill_null_2kib_strings_over_65536_rows() {
+    let _guard = exclusive_test_lock().lock().await;
+    reset_alloc_peaks();
+    let (schema, id) = utf8_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let rows = 65_536_usize;
+    let values: Vec<String> = (0..rows).map(|_| "old".to_owned()).collect();
+    let envelope = utf8_batch(&schema, source.id, values);
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+    let wide = "w".repeat(2048);
+
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::ReplaceLiteral {
+                column: id,
+                from: ScalarValue::Utf8("old".to_owned()),
+                to: ScalarValue::Utf8(wide),
+            }],
+        }),
+    );
+    let (manifest, report) = engine
+        .materialize_tracked(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: long_context(),
+            batch_size: 65_536,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 65_536);
+    assert!(report.chunk_count >= 2);
+    assert!(report.min_chunk_rows < 65_536);
+    assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
+    assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -474,77 +1922,96 @@ async fn t39_fails_before_polars_import() {
     drop(_guard);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn t45_date_to_utf8_is_type_error() {
-    let _guard = exclusive_test_lock().lock().await;
-    let id = column(1);
-    let schema = LogicalSchema::new(vec![LogicalField::new(
-        id,
-        "day",
-        LogicalType::Date32,
-        false,
-    )
-    .expect("field")])
-    .expect("schema");
-    let connection = connection();
-    let source = asset(connection.id());
-    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
-    let plan = scan_materialize_plan(
-        source.id,
-        Some(PlanNodeKind::ApplyRules {
-            rules: vec![Rule::Cast {
-                column: id,
-                data_type: LogicalType::Utf8,
-                on_failure: stillflow_plan::CastFailurePolicy::Error,
-            }],
-        }),
-    );
-    let error = engine
-        .preflight(
-            &plan,
-            &connection,
-            &source,
-            Some(&schema),
-            &stillflow_core::RequestContext::default(),
-        )
-        .await
-        .expect_err("paused cast");
-    assert!(matches!(error, EngineError::TypeError(_)));
-    assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
-    drop(_guard);
-}
+#[test]
+fn t40_error_category_and_retryability_mapping() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    use stillflow_core::ErrorCategory;
 
-#[tokio::test(flavor = "current_thread")]
-async fn t37_derive_wide_utf8_chunks_before_polars() {
-    let _guard = exclusive_test_lock().lock().await;
-    reset_alloc_peaks();
-    let (schema, _) = int_schema();
-    let connection = connection();
-    let source = asset(connection.id());
-    let envelope = int_batch(&schema, source.id, 65_536);
-    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
-    let store_dir = tempfile::TempDir::new().expect("temp");
-    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
-    let literal = "a".repeat(2048);
-    let (manifest, report) = engine
-        .materialize_tracked(ExecutionRequest {
-            plan: derive_plan(source.id, literal),
-            connection,
-            asset: source,
-            schema_override: Some(schema),
-            identities: identities(),
-            context: long_context(),
-            batch_size: 65_536,
-            store: &store,
-        })
-        .await
-        .expect("materialize");
-    assert_eq!(manifest.snapshot().stats().row_count(), 65_536);
-    assert!(report.chunk_count >= 2);
-    assert!(report.min_chunk_rows < 65_536);
-    assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
-    assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
-    drop(_guard);
+    let cases = vec![
+        (
+            EngineError::UnsupportedOperator {
+                node: Uuid::nil(),
+                kind: "join",
+            },
+            ErrorCategory::UnsupportedCapability,
+            false,
+        ),
+        (
+            EngineError::UnsupportedRule {
+                node: Uuid::nil(),
+                kind: "validate",
+            },
+            ErrorCategory::UnsupportedCapability,
+            false,
+        ),
+        (
+            EngineError::UnsupportedCapability { kind: "preview" },
+            ErrorCategory::UnsupportedCapability,
+            false,
+        ),
+        (
+            EngineError::SourceBinding,
+            ErrorCategory::InvalidConfiguration,
+            false,
+        ),
+        (
+            EngineError::InvalidPlan("bad plan"),
+            ErrorCategory::InvalidConfiguration,
+            false,
+        ),
+        (
+            EngineError::UnknownColumn(column(1)),
+            ErrorCategory::InvalidConfiguration,
+            false,
+        ),
+        (
+            EngineError::TypeError("type mismatch"),
+            ErrorCategory::InvalidData,
+            false,
+        ),
+        (
+            EngineError::CastFailure {
+                column: column(1),
+                sequence: 0,
+                row: 0,
+            },
+            ErrorCategory::InvalidData,
+            false,
+        ),
+        (
+            EngineError::Arithmetic {
+                column: column(1),
+                sequence: 0,
+                row: 0,
+            },
+            ErrorCategory::InvalidData,
+            false,
+        ),
+        (
+            EngineError::SchemaDrift { sequence: 1 },
+            ErrorCategory::SchemaDrift,
+            false,
+        ),
+        (
+            EngineError::BoundExceeded("limit"),
+            ErrorCategory::InvalidData,
+            false,
+        ),
+        (EngineError::Ffi, ErrorCategory::Internal, false),
+        (
+            EngineError::Internal("internal error"),
+            ErrorCategory::Internal,
+            false,
+        ),
+        (EngineError::Cancelled, ErrorCategory::Cancelled, false),
+        (EngineError::Timeout, ErrorCategory::Timeout, true),
+        (EngineError::Busy, ErrorCategory::RateLimited, true),
+    ];
+
+    for (err, expected_cat, expected_retry) in cases {
+        assert_eq!(err.category(), expected_cat);
+        assert_eq!(err.retryable(), expected_retry);
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -577,6 +2044,100 @@ async fn t41_split_envelope_keeps_remainder_with_polars() {
     assert!(report.saw_split_envelope_with_remainder);
     assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
     drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t42_derive_then_drop_then_trim_and_replace_uses_predicted_table() {
+    let _guard = exclusive_test_lock().lock().await;
+    reset_alloc_peaks();
+    let id1 = column(1);
+    let id2 = column(2);
+    let schema = LogicalSchema::new(vec![LogicalField::new(
+        id1,
+        "src",
+        LogicalType::Int64,
+        false,
+    )
+    .expect("f")])
+    .expect("schema");
+    let connection = connection();
+    let source = asset(connection.id());
+    let env = int_batch(&schema, source.id, 100);
+    let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+    let dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![
+                Rule::DeriveColumn {
+                    id: id2,
+                    name: "derived".to_owned(),
+                    data_type: LogicalType::Utf8,
+                    nullable: false,
+                    expression: Expr::Literal(ScalarValue::Utf8("  foo  ".to_owned())),
+                },
+                Rule::DropColumn { column: id1 },
+                Rule::Trim { column: id2 },
+                Rule::ReplaceLiteral {
+                    column: id2,
+                    from: ScalarValue::Utf8("foo".to_owned()),
+                    to: ScalarValue::Utf8("bar".to_owned()),
+                },
+            ],
+        }),
+    );
+    let (manifest, report) = engine
+        .materialize_tracked(ExecutionRequest {
+            plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: long_context(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+
+    assert_eq!(manifest.snapshot().stats().row_count(), 100);
+    let out_schema = manifest.snapshot().schema();
+    assert_eq!(out_schema.fields.len(), 1);
+    assert_eq!(out_schema.fields[0].id, id2);
+    assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
+    drop(_guard);
+}
+
+#[test]
+fn t43_utf8_byte_cap_uses_offset_overhead() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    let (schema, _) = int_schema();
+    let values = Int64Array::from((0..20_000_i64).collect::<Vec<_>>());
+    let factory = BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), Uuid::from_u128(42))
+        .expect("factory");
+    let batch = RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(values)])
+        .expect("batch");
+    let predicted = PredictedSchema::from_scan_output(&schema);
+    let steps = vec![crate::preflight::CompiledStep::Rules {
+        rules: vec![Rule::DeriveColumn {
+            id: column(2),
+            name: "derived".to_owned(),
+            data_type: LogicalType::Utf8,
+            nullable: false,
+            expression: Expr::Literal(ScalarValue::Utf8("a".repeat(2048))),
+        }],
+    }];
+    let k = largest_feasible_k(20_000, 0, batch.columns(), &predicted, &steps).expect("k");
+    assert!(k >= 1);
+    assert!(k < 20_000);
+    let at_k = predict(k, 0, batch.columns(), &predicted, &steps).expect("predict k");
+    let at_next = predict(k + 1, 0, batch.columns(), &predicted, &steps).expect("predict k+1");
+    assert!(at_k <= MAX_BATCH_BYTES);
+    assert!(MAX_BATCH_BYTES < at_next);
+    let derived = utf8_physical_bytes(k, k.saturating_mul(2048));
+    assert!(at_k >= derived);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -620,67 +2181,44 @@ async fn t44_phased_allocator_excludes_storage_encode() {
     drop(_guard);
 }
 
-#[test]
-fn t43_utf8_byte_cap_uses_offset_overhead() {
-    let _guard = exclusive_test_lock().blocking_lock();
-    let (schema, _) = int_schema();
-    let values = Int64Array::from((0..20_000_i64).collect::<Vec<_>>());
-    let factory = BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), Uuid::from_u128(42))
-        .expect("factory");
-    let batch = RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(values)])
-        .expect("batch");
-    let predicted = PredictedSchema::from_scan_output(&schema);
-    let steps = vec![crate::preflight::CompiledStep::Rules {
-        rules: vec![Rule::DeriveColumn {
-            id: column(2),
-            name: "derived".to_owned(),
-            data_type: LogicalType::Utf8,
-            nullable: false,
-            expression: Expr::Literal(ScalarValue::Utf8("a".repeat(2048))),
-        }],
-    }];
-    let k = largest_feasible_k(20_000, 0, batch.columns(), &predicted, &steps).expect("k");
-    assert!(k >= 1);
-    assert!(k < 20_000);
-    let at_k = predict(k, 0, batch.columns(), &predicted, &steps).expect("predict k");
-    let at_next = predict(k + 1, 0, batch.columns(), &predicted, &steps).expect("predict k+1");
-    assert!(at_k <= MAX_BATCH_BYTES);
-    assert!(MAX_BATCH_BYTES < at_next);
-    let derived = utf8_physical_bytes(k, k.saturating_mul(2048));
-    assert!(at_k >= derived);
-}
-
 #[tokio::test(flavor = "current_thread")]
-async fn fifth_materialize_is_busy_without_inspect() {
+async fn t45_date_to_utf8_is_type_error() {
     let _guard = exclusive_test_lock().lock().await;
-    let (schema, _) = int_schema();
+    let id = column(1);
+    let schema = LogicalSchema::new(vec![LogicalField::new(
+        id,
+        "day",
+        LogicalType::Date32,
+        false,
+    )
+    .expect("field")])
+    .expect("schema");
     let connection = connection();
     let source = asset(connection.id());
     let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
-    let store_dir = tempfile::TempDir::new().expect("temp");
-    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
-    let engine = Arc::new(engine);
-    let mut holds = Vec::new();
-    for _ in 0..4 {
-        holds.push(engine.try_hold_run_gate().expect("permit"));
-    }
+    let plan = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::Cast {
+                column: id,
+                data_type: LogicalType::Utf8,
+                on_failure: stillflow_plan::CastFailurePolicy::Error,
+            }],
+        }),
+    );
     let error = engine
-        .materialize(ExecutionRequest {
-            plan: scan_materialize_plan(source.id, None),
-            connection,
-            asset: source,
-            schema_override: Some(schema),
-            identities: identities(),
-            context: stillflow_core::RequestContext::default(),
-            batch_size: 16,
-            store: &store,
-        })
+        .preflight(
+            &plan,
+            &connection,
+            &source,
+            Some(&schema),
+            &stillflow_core::RequestContext::default(),
+        )
         .await
-        .expect_err("busy");
-    assert!(matches!(error, EngineError::Busy));
+        .expect_err("paused cast");
+    assert!(matches!(error, EngineError::TypeError(_)));
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
-    assert_eq!(connector.read_count.load(Ordering::SeqCst), 0);
-    drop(holds);
+    drop(_guard);
 }
 
 #[test]
@@ -736,21 +2274,18 @@ fn t46_near_64mib_export_transition_respects_bounds() {
     let _ = id;
 }
 
-fn manifest_schema_with_derived(base: &LogicalSchema) -> LogicalSchema {
-    let mut fields = base.fields.clone();
-    fields.push(
-        LogicalField::new(column(2), "wide".to_owned(), LogicalType::Utf8, false).expect("field"),
-    );
-    LogicalSchema::new(fields).expect("schema")
-}
-
 #[test]
 fn t47_4096_columns_no_pack_limit_bulk_preallocation() {
     let _guard = exclusive_test_lock().blocking_lock();
     let fields: Vec<LogicalField> = (0..4096)
         .map(|i| {
-            LogicalField::new(column(i + 1), format!("col_{i}"), LogicalType::Int64, false)
-                .expect("field")
+            LogicalField::new(
+                column((i + 1) as u128),
+                format!("col_{i}"),
+                LogicalType::Int64,
+                false,
+            )
+            .expect("field")
         })
         .collect();
     let schema = Arc::new(LogicalSchema::new(fields).expect("schema"));
@@ -860,7 +2395,7 @@ async fn t50_lub_strict_casting_in_comparisons_and_coalesce() {
     .expect("schema");
     let connection = connection();
     let source = asset(connection.id());
-    let a_arr = arrow_array::Int32Array::from(vec![10_i32, 20_i32]);
+    let a_arr = Int32Array::from(vec![10_i32, 20_i32]);
     let b_arr = Int64Array::from(vec![10_i64, 30_i64]);
     let factory =
         BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
@@ -922,7 +2457,7 @@ async fn t50_lub_strict_casting_in_comparisons_and_coalesce() {
             }],
         }),
     );
-    let a_arr2 = arrow_array::Int32Array::from(vec![Some(100_i32), None]);
+    let a_arr2 = Int32Array::from(vec![Some(100_i32), None]);
     let b_arr2 = Int64Array::from(vec![200_i64, 300_i64]);
     let batch2 = RecordBatch::try_new(
         factory2.arrow_schema().clone(),
@@ -1307,7 +2842,7 @@ fn t57_all_valid_flush_then_nullable_flush_resets_validity() {
         .expect("hold");
 
     // Batch 1: All valid (10 rows)
-    let b1_arr = arrow_array::Int64Array::from((0..10_i64).collect::<Vec<_>>());
+    let b1_arr = Int64Array::from((0..10_i64).collect::<Vec<_>>());
     let factory =
         BatchEnvelopeFactory::try_new(int_schema.clone(), Uuid::from_u128(101)).expect("factory");
     let b1 =
@@ -1326,8 +2861,7 @@ fn t57_all_valid_flush_then_nullable_flush_resets_validity() {
     assert!(!rebatcher.remainder_live());
 
     // Batch 2: 5 rows with nulls
-    let b2_arr =
-        arrow_array::Int64Array::from(vec![Some(1_i64), None, Some(3_i64), None, Some(5_i64)]);
+    let b2_arr = Int64Array::from(vec![Some(1_i64), None, Some(3_i64), None, Some(5_i64)]);
     let b2 =
         RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(b2_arr)]).expect("b2");
     rebatcher

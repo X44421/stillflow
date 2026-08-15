@@ -278,7 +278,9 @@ fn predict_rule(
                 return Err(EngineError::TypeError("trim requires a utf8 column"));
             }
             let temporary = utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes));
-            Ok((temporary, live_before, next))
+            next.column_mut(*column)?.origin = ColumnOrigin::Derived;
+            let live_after = column_physical_sum(&next, arrays, offset, k)?;
+            Ok((temporary, live_after, next))
         }
         Rule::DeriveColumn {
             id,
@@ -316,6 +318,7 @@ fn predict_rule(
             to,
         } => {
             let current = next.column_mut(*column)?;
+            current.origin = ColumnOrigin::Derived;
             match (to, &current.data_type) {
                 (ScalarValue::Null, _) => {
                     current.nullable = true;
@@ -343,6 +346,7 @@ fn predict_rule(
         }
         Rule::FillNull { column, value } => {
             let current = next.column_mut(*column)?;
+            current.origin = ColumnOrigin::Derived;
             match (value, &current.data_type) {
                 (ScalarValue::Null, _) => {
                     Err(EngineError::TypeError("fill-null value must not be null"))
@@ -393,6 +397,7 @@ fn predict_rule(
                 ));
             }
             let current = next.column_mut(*column)?;
+            current.origin = ColumnOrigin::Derived;
             current.data_type = data_type.clone();
             if matches!(on_failure, stillflow_plan::CastFailurePolicy::SetNull) {
                 current.nullable = true;
