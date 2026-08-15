@@ -10,7 +10,8 @@ use stillflow_plan::{CastFailurePolicy, LogicalPlan, PlanNodeId, PlanNodeKind, R
 
 use crate::error::{deadline_too_long, map_context_error, EngineError};
 use crate::{
-    ENGINE_MAX_DEADLINE, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_PLAN_NODES, MAX_RULES_PER_NODE,
+    ENGINE_MAX_DEADLINE, MAX_COMPILED_PLAN_BYTES, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_PLAN_NODES,
+    MAX_RULES_PER_NODE,
 };
 
 #[derive(Debug, Clone)]
@@ -50,11 +51,17 @@ pub(crate) async fn preflight(
 
     plan.validate()
         .map_err(|_| EngineError::InvalidPlan("logical plan failed validation"))?;
+    if compiled_plan_bytes(plan) > MAX_COMPILED_PLAN_BYTES {
+        return Err(EngineError::BoundExceeded(
+            "compiled plan exceeds MAX_COMPILED_PLAN_BYTES",
+        ));
+    }
     for (node_id, node) in &plan.nodes {
         if matches!(node.kind, PlanNodeKind::Join { .. } | PlanNodeKind::Union) {
             return Err(EngineError::unsupported_operator(*node_id, &node.kind));
         }
     }
+    reject_paused_plan_exprs(plan)?;
     connection
         .validate()
         .map_err(|_| EngineError::SourceBinding)?;
@@ -152,6 +159,7 @@ pub(crate) async fn preflight(
     let _ = scan_id;
     let authorized =
         authorized_source_schema(registry, connection, asset, schema_override, context).await?;
+    reject_paused_schema(&authorized)?;
     for id in &scan_projection {
         if authorized.field(*id).is_none() {
             return Err(EngineError::UnknownColumn(*id));
@@ -164,7 +172,9 @@ pub(crate) async fn preflight(
         authorized.clone()
     };
     let scan_output = project_schema(&authorized, &scan_projection)?;
+    reject_paused_schema(&scan_output)?;
     let materialize_schema = propagate_schema(&scan_output, &steps)?;
+    reject_paused_schema(&materialize_schema)?;
 
     Ok(PreparedPlan {
         push_projection,
@@ -280,6 +290,106 @@ fn validate_output_label(label: &str) -> Result<(), EngineError> {
     Ok(())
 }
 
+fn reject_paused_schema(schema: &LogicalSchema) -> Result<(), EngineError> {
+    for field in &schema.fields {
+        crate::typing::reject_paused_type(&field.data_type)?;
+    }
+    Ok(())
+}
+
+fn reject_paused_plan_exprs(plan: &LogicalPlan) -> Result<(), EngineError> {
+    for node in plan.nodes.values() {
+        match &node.kind {
+            PlanNodeKind::Scan {
+                predicate: Some(predicate),
+                ..
+            } => crate::typing::reject_paused_expr(predicate)?,
+            PlanNodeKind::Scan { .. } => {}
+            PlanNodeKind::Filter { predicate } => {
+                crate::typing::reject_paused_expr(predicate)?;
+            }
+            PlanNodeKind::ApplyRules { rules } => {
+                for rule in rules {
+                    reject_paused_rule_exprs(rule)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn reject_paused_rule_exprs(rule: &Rule) -> Result<(), EngineError> {
+    match rule {
+        Rule::DeriveColumn {
+            expression,
+            data_type,
+            ..
+        } => {
+            crate::typing::reject_paused_type(data_type)?;
+            crate::typing::reject_paused_expr(expression)
+        }
+        Rule::FilterRows { predicate } => crate::typing::reject_paused_expr(predicate),
+        Rule::Cast { data_type, .. } => crate::typing::reject_paused_type(data_type),
+        _ => Ok(()),
+    }
+}
+
+fn compiled_plan_bytes(plan: &LogicalPlan) -> usize {
+    let mut bytes = plan.nodes.len().saturating_mul(64);
+    for node in plan.nodes.values() {
+        bytes = bytes.saturating_add(match &node.kind {
+            PlanNodeKind::Materialize { output_label } => output_label.len(),
+            PlanNodeKind::Filter { predicate } => expr_bytes(predicate),
+            PlanNodeKind::Scan { predicate, .. } => predicate.as_ref().map_or(0, expr_bytes),
+            PlanNodeKind::ApplyRules { rules } => rules.iter().map(rule_bytes).sum(),
+            PlanNodeKind::Project { columns } => columns.len().saturating_mul(16),
+            _ => 0,
+        });
+    }
+    bytes
+}
+
+fn rule_bytes(rule: &Rule) -> usize {
+    match rule {
+        Rule::Rename { to, .. } => to.len(),
+        Rule::DeriveColumn {
+            name, expression, ..
+        } => name.len().saturating_add(expr_bytes(expression)),
+        Rule::ReplaceLiteral { from, to, .. } => {
+            literal_bytes(from).saturating_add(literal_bytes(to))
+        }
+        Rule::FillNull { value, .. } => literal_bytes(value),
+        Rule::FilterRows { predicate } => expr_bytes(predicate),
+        Rule::Validate {
+            predicate, message, ..
+        } => expr_bytes(predicate).saturating_add(message.len()),
+        Rule::Trim { .. }
+        | Rule::DropColumn { .. }
+        | Rule::Cast { .. }
+        | Rule::Deduplicate { .. } => 0,
+    }
+}
+
+fn expr_bytes(expr: &Expr) -> usize {
+    match expr {
+        Expr::Literal(value) => literal_bytes(value),
+        Expr::Unary { expression, .. }
+        | Expr::IsNull { expression, .. }
+        | Expr::Cast { expression, .. } => expr_bytes(expression),
+        Expr::Binary { left, right, .. } => expr_bytes(left).saturating_add(expr_bytes(right)),
+        Expr::Coalesce { expressions } => expressions.iter().map(expr_bytes).sum(),
+        Expr::Column(_) => 16,
+    }
+}
+
+fn literal_bytes(value: &ScalarValue) -> usize {
+    match value {
+        ScalarValue::Utf8(text) => text.len(),
+        _ => 8,
+    }
+}
+
 async fn authorized_source_schema(
     registry: &ConnectorRegistry,
     connection: &SourceConnection,
@@ -304,6 +414,7 @@ async fn authorized_source_schema(
         )
         .await
         .map_err(EngineError::from_connector)?;
+    context.ensure_active().map_err(map_context_error)?;
     metadata
         .schema
         .validate()
@@ -341,7 +452,7 @@ fn propagate_schema(
         match step {
             CompiledStep::Project { columns } => schema = project_schema(&schema, columns)?,
             CompiledStep::Filter { predicate } => {
-                validate_expr(predicate, &schema)?;
+                crate::typing::require_boolean(predicate, &schema)?;
             }
             CompiledStep::Rules { rules } => {
                 for rule in rules {
@@ -393,6 +504,7 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
             data_type,
             on_failure,
         } => {
+            crate::typing::reject_paused_type(data_type)?;
             reject_paused_cast(
                 &schema
                     .field(*column)
@@ -463,6 +575,13 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
             expression,
         } => {
             validate_expr(expression, &schema)?;
+            let inferred = crate::typing::type_check_expr(expression, &schema)?;
+            crate::typing::reject_paused_type(data_type)?;
+            if !matches!(inferred, LogicalType::Null) && inferred != *data_type {
+                return Err(EngineError::TypeError(
+                    "derived column type does not match the typed expression",
+                ));
+            }
             if schema.field(*id).is_some() || schema.fields.iter().any(|field| field.name == *name)
             {
                 return Err(EngineError::InvalidPlan(
@@ -470,8 +589,8 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
                 ));
             }
             reject_paused_cast_in_expr(expression, &schema)?;
-            let inferred = infer_nullability(expression, &schema)?;
-            if !*nullable && inferred {
+            let nullable_inferred = infer_nullability(expression, &schema)?;
+            if !*nullable && nullable_inferred {
                 return Err(EngineError::TypeError(
                     "derived column nullability is narrower than the expression",
                 ));
@@ -485,10 +604,17 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
                 .map_err(|_| EngineError::InvalidPlan("derive produced an invalid schema"))
         }
         Rule::FilterRows { predicate } => {
-            validate_expr(predicate, &schema)?;
+            crate::typing::require_boolean(predicate, &schema)?;
             Ok(schema)
         }
-        Rule::Validate { .. } | Rule::Deduplicate { .. } => unreachable!("rejected in preflight"),
+        Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
+            node: uuid::Uuid::nil(),
+            kind: "validate",
+        }),
+        Rule::Deduplicate { .. } => Err(EngineError::UnsupportedRule {
+            node: uuid::Uuid::nil(),
+            kind: "deduplicate",
+        }),
     }
 }
 
@@ -512,7 +638,7 @@ fn reject_paused_cast_in_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(),
             expression,
             data_type,
         } => {
-            let from = expr_type(expression, schema)?;
+            let from = crate::typing::type_check_expr(expression, schema)?;
             reject_paused_cast(&from, data_type)?;
             reject_paused_cast_in_expr(expression, schema)
         }
@@ -619,28 +745,4 @@ fn infer_nullability(expr: &Expr, schema: &LogicalSchema) -> Result<bool, Engine
             all_nullable
         }
     })
-}
-
-fn expr_type(expr: &Expr, schema: &LogicalSchema) -> Result<LogicalType, EngineError> {
-    match expr {
-        Expr::Column(id) => Ok(schema
-            .field(*id)
-            .ok_or(EngineError::UnknownColumn(*id))?
-            .data_type
-            .clone()),
-        Expr::Literal(ScalarValue::Boolean(_)) => Ok(LogicalType::Boolean),
-        Expr::Literal(ScalarValue::Int64(_)) => Ok(LogicalType::Int64),
-        Expr::Literal(ScalarValue::UInt64(_)) => Ok(LogicalType::UInt64),
-        Expr::Literal(ScalarValue::Float64(_)) => Ok(LogicalType::Float64),
-        Expr::Literal(ScalarValue::Utf8(_)) => Ok(LogicalType::Utf8),
-        Expr::Literal(ScalarValue::Null) => Ok(LogicalType::Null),
-        Expr::Cast { data_type, .. } => Ok(data_type.clone()),
-        Expr::IsNull { .. } => Ok(LogicalType::Boolean),
-        Expr::Unary { expression, .. } => expr_type(expression, schema),
-        Expr::Binary { left, .. } => expr_type(left, schema),
-        Expr::Coalesce { expressions } => expressions
-            .first()
-            .map(|expr| expr_type(expr, schema))
-            .unwrap_or(Ok(LogicalType::Null)),
-    }
 }

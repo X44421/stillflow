@@ -84,6 +84,13 @@ impl ExecutionEngine {
             );
         }
         context.ensure_active().map_err(map_context_error)?;
+        if request.batch_size < ReadRequest::MIN_BATCH_SIZE
+            || request.batch_size > ReadRequest::MAX_BATCH_SIZE
+        {
+            return Err(EngineError::BoundExceeded(
+                "batch_size is outside 1..=65536",
+            ));
+        }
         if context
             .remaining()
             .is_some_and(|remaining| remaining > ENGINE_MAX_DEADLINE)
@@ -249,6 +256,7 @@ fn consume_envelope(
         )?;
         let slice = envelope.payload().slice(offset, k);
         offset += k;
+        crate::memory::set_alloc_phase(crate::memory::AllocatorPhase::Polars);
         let frame = record_batch_to_dataframe(&slice)?;
         let working_bytes = frame.estimated_size();
         tracker.hold_polars(working_bytes.max(slice.get_array_memory_size()))?;
@@ -258,11 +266,16 @@ fn consume_envelope(
                 "polars working set exceeded MAX_BATCH_BYTES",
             ));
         }
-        let transformed = crate::lower::transform(frame, &prepared.scan_output, &prepared.steps)?;
+        let (transformed, deferred) =
+            crate::lower::transform(frame, &prepared.scan_output, &prepared.steps)?;
         let transformed_bytes = transformed.estimated_size();
         tracker.hold_polars(transformed_bytes)?;
-        let batch =
-            dataframe_to_record_batch(transformed, &prepared.materialize_schema, output_schema)?;
+        let batch = dataframe_to_record_batch(
+            transformed,
+            &prepared.materialize_schema,
+            output_schema,
+            &deferred,
+        )?;
         tracker.drop_polars()?;
         rebatcher.push(batch, tracker, |envelope, tracker| {
             append_envelope(writer, envelope, tracker, context)

@@ -1,2 +1,8 @@
 [resolver]
 incompatible-rust-versions = "fallback"
+
+# Polars + Arrow debug builds spawn one rustc per codegen unit. Uncapped
+# jobs exhaust RAM on Windows (machine freeze) and GitHub runners (exit 143
+# during test compile). Keep this cap for local and CI.
+[build]
+jobs = 2

@@ -44,10 +44,14 @@ pub(crate) fn polars_data_type(
         LogicalType::Date32 => DataType::Date,
         LogicalType::Timestamp { unit, timezone } => DataType::Datetime(
             match unit {
-                TimeUnit::Second => PolarsTimeUnit::Milliseconds,
                 TimeUnit::Millisecond => PolarsTimeUnit::Milliseconds,
                 TimeUnit::Microsecond => PolarsTimeUnit::Microseconds,
                 TimeUnit::Nanosecond => PolarsTimeUnit::Nanoseconds,
+                TimeUnit::Second => {
+                    return Err(crate::error::EngineError::TypeError(
+                        "timestamp second unit is paused",
+                    ));
+                }
             },
             timezone.clone().map(TimeZone::from_string),
         ),

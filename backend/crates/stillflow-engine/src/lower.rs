@@ -1,6 +1,7 @@
-use polars::prelude::{col, lit, when, DataFrame, Expr as PolarsExpr, IntoLazy, NULL};
+use polars::prelude::{col, lit, when, DataFrame, DataType, Expr as PolarsExpr, IntoLazy, NULL};
 use stillflow_core::{
-    BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, ScalarValue, UnaryOperator,
+    BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue,
+    UnaryOperator,
 };
 use stillflow_plan::{CastFailurePolicy, Rule};
 
@@ -12,9 +13,10 @@ pub(crate) fn transform(
     frame: DataFrame,
     schema: &LogicalSchema,
     steps: &[CompiledStep],
-) -> Result<DataFrame, EngineError> {
+) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
     let mut frame = frame;
     let mut schema = schema.clone();
+    let mut deferred = Vec::new();
     for step in steps {
         match step {
             CompiledStep::Project { columns } => {
@@ -22,6 +24,7 @@ pub(crate) fn transform(
                 frame = frame
                     .select(names.iter().map(String::as_str))
                     .map_err(|_| EngineError::UnknownColumn(columns[0]))?;
+                deferred.retain(|(name, _)| names.iter().any(|keep| keep == name));
                 schema = crate::preflight::project_schema(&schema, columns)?;
             }
             CompiledStep::Filter { predicate } => {
@@ -34,22 +37,28 @@ pub(crate) fn transform(
             }
             CompiledStep::Rules { rules } => {
                 for rule in rules {
-                    frame = apply_rule(frame, &mut schema, rule)?;
+                    frame = apply_rule(frame, &mut schema, &mut deferred, rule)?;
                 }
             }
         }
     }
-    Ok(frame)
+    Ok((frame, deferred))
 }
 
 fn apply_rule(
     frame: DataFrame,
     schema: &mut LogicalSchema,
+    deferred: &mut Vec<(String, ScalarValue)>,
     rule: &Rule,
 ) -> Result<DataFrame, EngineError> {
     match rule {
         Rule::Rename { column, to } => {
             let from = field_name(schema, *column)?;
+            for (name, _) in deferred.iter_mut() {
+                if name == &from {
+                    *name = to.clone();
+                }
+            }
             let renamed = frame
                 .lazy()
                 .rename([from.as_str()], [to.as_str()], true)
@@ -62,6 +71,7 @@ fn apply_rule(
         }
         Rule::DropColumn { column } => {
             let name = field_name(schema, *column)?;
+            deferred.retain(|(deferred_name, _)| deferred_name != &name);
             let dropped = frame
                 .drop(name.as_str())
                 .map_err(|_| EngineError::UnknownColumn(*column))?;
@@ -94,13 +104,45 @@ fn apply_rule(
             nullable,
             expression,
         } => {
-            let expr = lower_expr(expression, schema)?;
-            let dtype = polars_data_type(data_type)?;
-            let derived = frame
-                .lazy()
-                .with_column(expr.cast(dtype).alias(name.as_str()))
-                .collect()
-                .map_err(|_| EngineError::TypeError("derive-column failed"))?;
+            let derived = match expression {
+                Expr::Literal(value)
+                    if matches!(data_type, LogicalType::Utf8)
+                        && matches!(value, ScalarValue::Utf8(_) | ScalarValue::Null) =>
+                {
+                    let height = frame.height();
+                    let mut derived = frame;
+                    derived
+                        .with_column(polars::prelude::Column::full_null(
+                            name.as_str().into(),
+                            height,
+                            &DataType::Null,
+                        ))
+                        .map_err(|_| EngineError::TypeError("derive-column failed"))?;
+                    deferred.push((name.clone(), value.clone()));
+                    derived
+                }
+                Expr::Literal(value) => {
+                    let height = frame.height();
+                    let mut derived = frame;
+                    derived
+                        .with_column(polars::prelude::Column::new_scalar(
+                            name.as_str().into(),
+                            literal_scalar(value)?,
+                            height,
+                        ))
+                        .map_err(|_| EngineError::TypeError("derive-column failed"))?;
+                    derived
+                }
+                _ => {
+                    let expr = lower_expr(expression, schema)?;
+                    let dtype = polars_data_type(data_type)?;
+                    frame
+                        .lazy()
+                        .with_column(expr.cast(dtype).alias(name.as_str()))
+                        .collect()
+                        .map_err(|_| EngineError::TypeError("derive-column failed"))?
+                }
+            };
             let mut fields = schema.fields.clone();
             fields.push(
                 LogicalField::new(*id, name.clone(), data_type.clone(), *nullable)
@@ -198,10 +240,11 @@ fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsExpr, EngineE
         } => lower_expr(expression, schema)?.not(),
         Expr::Unary {
             operator: UnaryOperator::Negate,
-            expression,
+            ..
         } => {
-            let inner = lower_expr(expression, schema)?;
-            lit(0) - inner
+            return Err(EngineError::TypeError(
+                "checked arithmetic is paused until overflow semantics are implemented",
+            ));
         }
         Expr::Binary {
             left,
@@ -219,12 +262,20 @@ fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsExpr, EngineE
                 BinaryOperator::GreaterThanOrEqual => left.gt_eq(right),
                 BinaryOperator::And => left.and(right),
                 BinaryOperator::Or => left.or(right),
-                BinaryOperator::Add => left + right,
-                BinaryOperator::Subtract => left - right,
-                BinaryOperator::Multiply => left * right,
-                BinaryOperator::Divide => left / right,
-                BinaryOperator::Modulo => left % right,
-                BinaryOperator::Contains => left.str().contains_literal(right),
+                BinaryOperator::Add
+                | BinaryOperator::Subtract
+                | BinaryOperator::Multiply
+                | BinaryOperator::Divide
+                | BinaryOperator::Modulo => {
+                    return Err(EngineError::TypeError(
+                        "checked arithmetic is paused until overflow semantics are implemented",
+                    ));
+                }
+                BinaryOperator::Contains => {
+                    return Err(EngineError::TypeError(
+                        "contains is paused until the regex polars feature is approved",
+                    ));
+                }
             }
         }
         Expr::IsNull {
@@ -269,5 +320,17 @@ fn literal(value: &ScalarValue) -> Result<PolarsExpr, EngineError> {
         ScalarValue::UInt64(value) => lit(*value),
         ScalarValue::Float64(value) => lit(value.get()),
         ScalarValue::Utf8(value) => lit(value.clone()),
+    })
+}
+
+fn literal_scalar(value: &ScalarValue) -> Result<polars::prelude::Scalar, EngineError> {
+    use polars::prelude::{AnyValue, DataType, Scalar};
+    Ok(match value {
+        ScalarValue::Null => Scalar::new(DataType::Null, AnyValue::Null),
+        ScalarValue::Boolean(value) => Scalar::from(*value),
+        ScalarValue::Int64(value) => Scalar::from(*value),
+        ScalarValue::UInt64(value) => Scalar::from(*value),
+        ScalarValue::Float64(value) => Scalar::from(value.get()),
+        ScalarValue::Utf8(value) => Scalar::from(polars::prelude::PlSmallStr::from(value.as_str())),
     })
 }

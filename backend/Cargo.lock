@@ -3248,10 +3248,9 @@ name = "stillflow-engine"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
- "arrow-cast",
+ "arrow-buffer",
  "arrow-data",
  "arrow-schema",
- "arrow-select",
  "async-trait",
  "chrono",
  "futures",

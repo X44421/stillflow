@@ -198,10 +198,13 @@ impl fmt::Debug for EngineError {
 }
 
 fn fallback_summary() -> SanitizedErrorSummary {
-    match SanitizedErrorSummary::try_new(ErrorCategory::Internal, false, "engine failure") {
-        Ok(summary) => summary,
-        Err(_) => unreachable!("static engine summary is secret-free"),
+    for message in ["engine failure", "internal error", "error"] {
+        if let Ok(summary) = SanitizedErrorSummary::try_new(ErrorCategory::Internal, false, message)
+        {
+            return summary;
+        }
     }
+    stillflow_core::ConnectorError::for_unsupported_capability("internal").sanitized_summary()
 }
 
 fn operator_kind_name(kind: &PlanNodeKind) -> &'static str {

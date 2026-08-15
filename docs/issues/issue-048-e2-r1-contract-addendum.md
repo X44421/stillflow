@@ -66,6 +66,7 @@ These are proposed, not approved:
 | Do **not** add `regex` | `Expr::Contains` / `contains_literal` needs it | Preflight `TypeError`: Contains is paused |
 | Do **not** add `arrow-select` | Concat allocated a fourth columnar payload | Remainder uses `arrow-array` builders already covered by R3 |
 | Do **not** add `arrow-cast` | Utf8View → Utf8 can use `StringBuilder` | Engine-owned conversion, no extra crate |
+| Add `arrow-buffer = "59"` | Remainder Utf8/Binary freeze must **move** exact `Vec` buffers into `StringArray`/`BinaryArray`. `arrow-array` builders use `MutableBuffer`, which doubles capacity and makes `get_array_memory_size` exceed `MAX_BATCH_BYTES` | Direct dep on the Arrow 59 substrate already pulled by `arrow-array` / `arrow-data`. Not `arrow-select` or `arrow-cast`. |
 
 `serde_json` remains a **dev-dependency only**. Production
 `stillflow-engine` must not depend on `serde` / `serde_json`.
@@ -98,9 +99,10 @@ Rules:
 3. Incoming remains counted until every row has been appended into the
    remainder builder or the incoming handle is dropped.
 4. Remainder is a **builder** whose unfinished buffers are one payload.
-   Append copies values into those buffers. It must not allocate a
-   finished concatenated `RecordBatch` while previous remainder arrays
-   and incoming arrays are both live.
+   Append copies values into those buffers. Variable-width columns use
+   exact `Vec` growth (`reserve_exact` + `shrink_to_fit`) and freeze by
+   moving those buffers into a canonical array. Do not use
+   `arrow-array` byte builders whose `MutableBuffer` doubles capacity.
 5. Freeze/move finishes the builder into one output envelope (move of
    builder buffers). `SnapshotWriter::append` may borrow that envelope.
    After `append` returns, drop it. The builder is empty.
@@ -231,7 +233,7 @@ import path.
 Stop and return to contract review if implementation needs:
 
 - `arrow-select`, `arrow-cast`, polars `regex`, or any crate absent from
-  R3 §6.3 except the proposed `dtype-u32` omission;
+  R3 §6.3 except the proposed `dtype-u32` omission and `arrow-buffer = "59"`;
 - a fourth live columnar payload;
 - `concat` of remainder + incoming into a new finished batch while both
   sources remain live;

@@ -12,6 +12,7 @@ mod predict;
 mod preflight;
 mod remainder;
 mod types;
+mod typing;
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -73,6 +74,41 @@ pub struct ExecutionRequest<'a> {
 pub fn crate_name() -> &'static str {
     "stillflow-engine"
 }
+
+#[cfg(test)]
+#[allow(unsafe_code)]
+mod test_alloc {
+    use std::alloc::{GlobalAlloc, Layout, System};
+
+    pub struct PhasedAlloc;
+
+    unsafe impl GlobalAlloc for PhasedAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            crate::memory::record_alloc(layout.size());
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            crate::memory::record_dealloc(layout.size());
+            unsafe { System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            crate::memory::record_alloc(layout.size());
+            unsafe { System.alloc_zeroed(layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            crate::memory::record_dealloc(layout.size());
+            crate::memory::record_alloc(new_size);
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static TEST_ALLOC: test_alloc::PhasedAlloc = test_alloc::PhasedAlloc;
 
 #[cfg(test)]
 mod tests;

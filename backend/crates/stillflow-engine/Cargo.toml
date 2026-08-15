@@ -8,16 +8,14 @@ publish.workspace = true
 
 [dependencies]
 arrow-array = { workspace = true, features = ["ffi"] }
-arrow-cast.workspace = true
+arrow-buffer = "59"
 arrow-data = "59"
 arrow-schema = { workspace = true, features = ["ffi"] }
-arrow-select.workspace = true
 chrono.workspace = true
 futures.workspace = true
 polars = { version = "0.46", default-features = false, features = [
     "lazy",
     "strings",
-    "regex",
     "dtype-u8",
     "dtype-u16",
     "dtype-i8",

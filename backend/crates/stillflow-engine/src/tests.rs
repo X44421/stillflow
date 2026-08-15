@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use arrow_array::{Int64Array, RecordBatch};
+use arrow_array::{Int64Array, RecordBatch, StringArray};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::stream;
@@ -13,16 +13,19 @@ use stillflow_core::{
     ConnectionStatus, ConnectorKind, ConnectorResult, CredentialRef, DiscoverRequest, Expr,
     InspectRequest, LogicalField, LogicalSchema, LogicalType, PreviewData, PreviewRequest,
     ReadRequest, ScalarValue, SourceAsset, SourceConnection, TestConnectionRequest,
+    MAX_BATCH_BYTES,
 };
 use stillflow_plan::{JoinKey, JoinType, LogicalPlan, PlanNode, PlanNodeId, PlanNodeKind, Rule};
 use stillflow_storage::{SnapshotStore, StorageLimits};
 use uuid::Uuid;
 
 use crate::error::EngineError;
-use crate::predict::{largest_feasible_k, utf8_physical_bytes, PredictedSchema};
+use crate::ffi::{ffi_import_count, reset_ffi_import_count};
+use crate::predict::{largest_feasible_k, predict, utf8_physical_bytes, PredictedSchema};
 use crate::{
-    crate_name, ExecutionEngine, ExecutionIdentities, ExecutionRequest, MAX_ENGINE_PEAK_BYTES,
-    MAX_LIVE_COLUMNAR_PAYLOADS,
+    crate_name, ExecutionEngine, ExecutionIdentities, ExecutionRequest, ENGINE_MAX_DEADLINE,
+    MAX_COMPILED_PLAN_BYTES, MAX_ENGINE_PEAK_BYTES, MAX_LIVE_COLUMNAR_PAYLOADS,
+    MAX_OPERATOR_STATE_BYTES,
 };
 
 struct ScriptedConnector {
@@ -166,6 +169,46 @@ fn identities() -> ExecutionIdentities {
     }
 }
 
+fn long_context() -> stillflow_core::RequestContext {
+    stillflow_core::RequestContext::with_cancellation_and_deadline(
+        stillflow_core::RequestContext::default()
+            .cancellation()
+            .clone(),
+        tokio::time::Instant::now() + ENGINE_MAX_DEADLINE,
+    )
+}
+
+fn exclusive_materialize() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    &LOCK
+}
+
+fn utf8_schema() -> (LogicalSchema, ColumnId) {
+    let id = column(1);
+    let schema = LogicalSchema::new(vec![LogicalField::new(
+        id,
+        "text",
+        LogicalType::Utf8,
+        false,
+    )
+    .expect("field")])
+    .expect("schema");
+    (schema, id)
+}
+
+fn utf8_batch(
+    schema: &LogicalSchema,
+    asset_id: Uuid,
+    values: Vec<String>,
+) -> stillflow_core::BatchEnvelope {
+    let array = StringArray::from(values);
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), asset_id).expect("factory");
+    let batch =
+        RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(array)]).expect("batch");
+    factory.try_build(0, batch).expect("envelope")
+}
+
 fn int_batch(schema: &LogicalSchema, asset_id: Uuid, rows: i64) -> stillflow_core::BatchEnvelope {
     let values: Vec<i64> = (0..rows).collect();
     let array = Int64Array::from(values);
@@ -289,7 +332,7 @@ fn utf8_physical_includes_view_offset_and_validity() {
     assert_eq!(bytes, data + k * 16 + (k + 1) * 4 + 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn join_is_unsupported_before_inspect() {
     let (schema, _) = int_schema();
     let connection = connection();
@@ -362,35 +405,61 @@ async fn join_is_unsupported_before_inspect() {
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
 }
 
-#[tokio::test]
-async fn t39_single_row_predicted_expansion_fails_before_import() {
+#[tokio::test(flavor = "current_thread")]
+async fn t39_fails_before_polars_import() {
     let (schema, _) = int_schema();
     let connection = connection();
     let source = asset(connection.id());
-    let huge = "x".repeat(stillflow_core::MAX_BATCH_BYTES + 1);
     let envelope = int_batch(&schema, source.id, 1);
     let (engine, connector) = engine_with(schema.clone(), vec![envelope], true).await;
     let store_dir = tempfile::TempDir::new().expect("temp");
     let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
+    reset_ffi_import_count();
+    let huge = "x".repeat(MAX_OPERATOR_STATE_BYTES + 1);
+    assert!(huge.len() > MAX_COMPILED_PLAN_BYTES);
     let error = engine
         .materialize(ExecutionRequest {
             plan: derive_plan(source.id, huge),
-            connection,
-            asset: source,
-            schema_override: Some(schema),
+            connection: connection.clone(),
+            asset: source.clone(),
+            schema_override: None,
             identities: identities(),
             context: stillflow_core::RequestContext::default(),
             batch_size: 64,
             store: &store,
         })
         .await
-        .expect_err("bound");
+        .expect_err("operator state");
     assert!(matches!(error, EngineError::BoundExceeded(_)));
+    assert_eq!(ffi_import_count(), 0);
+    assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    assert_eq!(connector.read_count.load(Ordering::SeqCst), 0);
+
+    let (text_schema, _) = utf8_schema();
+    let wide = "w".repeat(33 * 1024 * 1024);
+    let envelope = utf8_batch(&text_schema, source.id, vec![wide]);
+    let (engine, connector) = engine_with(text_schema.clone(), vec![envelope], true).await;
+    reset_ffi_import_count();
+    let error = engine
+        .materialize(ExecutionRequest {
+            plan: derive_plan(source.id, "ab".repeat(1024)),
+            connection,
+            asset: source,
+            schema_override: Some(text_schema),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store,
+        })
+        .await
+        .expect_err("predicted expansion");
+    assert!(matches!(error, EngineError::BoundExceeded(_)));
+    assert_eq!(ffi_import_count(), 0);
     assert_eq!(connector.read_count.load(Ordering::SeqCst), 1);
     assert!(store.load_manifest(Uuid::from_u128(100)).is_err());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn t45_date_to_utf8_is_type_error() {
     let id = column(1);
     let schema = LogicalSchema::new(vec![LogicalField::new(
@@ -428,8 +497,9 @@ async fn t45_date_to_utf8_is_type_error() {
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
 }
 
-#[tokio::test]
-async fn t37_t41_t44_split_envelope_keeps_remainder() {
+#[tokio::test(flavor = "current_thread")]
+async fn t37_derive_wide_utf8_chunks_before_polars() {
+    let _guard = exclusive_materialize().lock().await;
     let (schema, _) = int_schema();
     let connection = connection();
     let source = asset(connection.id());
@@ -445,7 +515,7 @@ async fn t37_t41_t44_split_envelope_keeps_remainder() {
             asset: source,
             schema_override: Some(schema),
             identities: identities(),
-            context: stillflow_core::RequestContext::default(),
+            context: long_context(),
             batch_size: 65_536,
             store: &store,
         })
@@ -454,22 +524,79 @@ async fn t37_t41_t44_split_envelope_keeps_remainder() {
     assert_eq!(manifest.snapshot().stats().row_count(), 65_536);
     assert!(report.chunk_count >= 2);
     assert!(report.min_chunk_rows < 65_536);
-    assert!(report.saw_split_envelope_with_remainder);
     assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
     assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t41_split_envelope_keeps_remainder_with_polars() {
+    let _guard = exclusive_materialize().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let envelope = int_batch(&schema, source.id, 65_536);
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let store_dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
+    let literal = "a".repeat(2048);
+    let (manifest, report) = engine
+        .materialize_tracked(ExecutionRequest {
+            plan: derive_plan(source.id, literal),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: long_context(),
+            batch_size: 65_536,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
+    assert_eq!(manifest.snapshot().stats().row_count(), 65_536);
+    assert!(report.chunk_count >= 2);
+    assert!(report.saw_split_envelope_with_remainder);
+    assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn t44_phased_allocator_excludes_storage_encode() {
+    let _guard = exclusive_materialize().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let envelope = int_batch(&schema, source.id, 65_536);
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+    let store_dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
+    let literal = "a".repeat(2048);
+    let (_, report) = engine
+        .materialize_tracked(ExecutionRequest {
+            plan: derive_plan(source.id, literal),
+            connection,
+            asset: source,
+            schema_override: Some(schema),
+            identities: identities(),
+            context: long_context(),
+            batch_size: 65_536,
+            store: &store,
+        })
+        .await
+        .expect("materialize");
     assert!(report.polars_phase_peak > 0);
     assert!(report.remainder_phase_peak > 0);
+    assert!(report.storage_append_phase_peak > 0);
     let engine_phases = report
         .polars_phase_peak
         .saturating_add(report.remainder_phase_peak)
-        .saturating_add(crate::MAX_OPERATOR_STATE_BYTES);
+        .saturating_add(MAX_OPERATOR_STATE_BYTES);
     assert!(engine_phases <= MAX_ENGINE_PEAK_BYTES);
+    assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
 }
 
 #[test]
 fn t43_utf8_byte_cap_uses_offset_overhead() {
     let (schema, _) = int_schema();
-    let values = Int64Array::from(vec![1_i64, 2, 3]);
+    let values = Int64Array::from((0..20_000_i64).collect::<Vec<_>>());
     let factory = BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), Uuid::from_u128(42))
         .expect("factory");
     let batch = RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(values)])
@@ -481,15 +608,21 @@ fn t43_utf8_byte_cap_uses_offset_overhead() {
             name: "derived".to_owned(),
             data_type: LogicalType::Utf8,
             nullable: false,
-            expression: Expr::Literal(ScalarValue::Utf8("abcd".repeat(16))),
+            expression: Expr::Literal(ScalarValue::Utf8("a".repeat(2048))),
         }],
     }];
-    let k = largest_feasible_k(3, 0, batch.columns(), &predicted, &steps).expect("k");
+    let k = largest_feasible_k(20_000, 0, batch.columns(), &predicted, &steps).expect("k");
     assert!(k >= 1);
-    assert!(k <= 3);
+    assert!(k < 20_000);
+    let at_k = predict(k, 0, batch.columns(), &predicted, &steps).expect("predict k");
+    let at_next = predict(k + 1, 0, batch.columns(), &predicted, &steps).expect("predict k+1");
+    assert!(at_k <= MAX_BATCH_BYTES);
+    assert!(MAX_BATCH_BYTES < at_next);
+    let derived = utf8_physical_bytes(k, k.saturating_mul(2048));
+    assert!(at_k >= derived);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn fifth_materialize_is_busy_without_inspect() {
     let (schema, _) = int_schema();
     let connection = connection();

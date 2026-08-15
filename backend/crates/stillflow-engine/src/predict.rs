@@ -1,5 +1,7 @@
-use arrow_array::Array;
-use stillflow_core::{ColumnId, Expr, LogicalSchema, LogicalType, ScalarValue, MAX_BATCH_BYTES};
+use arrow_array::{Array, ListArray, StringArray, StructArray};
+use stillflow_core::{
+    ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue, MAX_BATCH_BYTES,
+};
 use stillflow_plan::Rule;
 
 use crate::error::EngineError;
@@ -88,15 +90,34 @@ pub(crate) fn predict(
     refresh_source_widths(&mut working, arrays, offset, k)?;
     let mut peak = 0_usize;
     let mut live_before = column_physical_sum(&working, arrays, offset, k)?;
+    peak = peak.max(live_before);
     for step in steps {
-        let (temporary, live_after, next) =
-            predict_step(k, offset, arrays, &working, live_before, step)?;
-        let step_peak = live_before
-            .saturating_add(temporary)
-            .saturating_add(live_after);
-        peak = peak.max(step_peak);
-        working = next;
-        live_before = live_after;
+        match step {
+            crate::preflight::CompiledStep::Rules { rules } => {
+                for rule in rules {
+                    let (temporary, live_after, next) =
+                        predict_rule(k, offset, arrays, &working, live_before, rule)?;
+                    peak = peak.max(
+                        live_before
+                            .saturating_add(temporary)
+                            .saturating_add(live_after),
+                    );
+                    working = next;
+                    live_before = live_after;
+                }
+            }
+            other => {
+                let (temporary, live_after, next) =
+                    predict_step(k, offset, arrays, &working, live_before, other)?;
+                peak = peak.max(
+                    live_before
+                        .saturating_add(temporary)
+                        .saturating_add(live_after),
+                );
+                working = next;
+                live_before = live_after;
+            }
+        }
     }
     Ok(peak.max(live_before))
 }
@@ -171,8 +192,7 @@ fn column_physical_bytes(
         )),
         (ColumnOrigin::Source { ordinal }, None) => {
             let array = arrays.get(*ordinal).ok_or(EngineError::Ffi)?;
-            let data_bytes = variable_data_bytes(array.as_ref(), offset, k)?;
-            Ok(utf8_physical_bytes(k, data_bytes))
+            nested_or_variable_bytes(array.as_ref(), offset, k, &column.data_type)
         }
         (ColumnOrigin::Derived, Some(slot)) => Ok(fixed_physical_bytes(k, slot)),
         (ColumnOrigin::Derived, None) => Ok(utf8_physical_bytes(
@@ -207,17 +227,10 @@ fn predict_step(
             Ok((live_before, live_before, working.clone()))
         }
         crate::preflight::CompiledStep::Rules { rules } => {
-            let mut next = working.clone();
-            let mut temporary = 0_usize;
-            let mut live = live_before;
-            for rule in rules {
-                let (rule_temp, after, updated) =
-                    predict_rule(k, offset, arrays, &next, live, rule)?;
-                temporary = temporary.max(rule_temp);
-                live = after;
-                next = updated;
-            }
-            Ok((temporary, live, next))
+            let _ = rules;
+            Err(EngineError::Internal(
+                "apply-rules must be expanded per rule in predict",
+            ))
         }
     }
 }
@@ -288,24 +301,26 @@ fn predict_rule(
             match (to, &current.data_type) {
                 (ScalarValue::Null, _) => {
                     current.nullable = true;
-                    Ok((k.div_ceil(8), live_before, next))
+                    let live_after = column_physical_sum(&next, arrays, offset, k)?;
+                    Ok((k.div_ceil(8), live_after, next))
                 }
                 (ScalarValue::Utf8(value), LogicalType::Utf8) => {
                     current.max_value_bytes = current.max_value_bytes.max(value.len());
                     let temporary =
                         utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes));
-                    Ok((temporary, live_before, next))
+                    let live_after = column_physical_sum(&next, arrays, offset, k)?;
+                    Ok((temporary, live_after, next))
                 }
                 (ScalarValue::Utf8(_), _) | (_, LogicalType::Binary) => Err(
                     EngineError::TypeError("replace literal is not authorized for this type"),
                 ),
-                _ => Ok((
-                    fixed_slot_bytes(&current.data_type)
+                _ => {
+                    let temporary = fixed_slot_bytes(&current.data_type)
                         .map(|slot| fixed_physical_bytes(k, slot))
-                        .unwrap_or(0),
-                    live_before,
-                    next,
-                )),
+                        .unwrap_or(0);
+                    let live_after = column_physical_sum(&next, arrays, offset, k)?;
+                    Ok((temporary, live_after, next))
+                }
             }
         }
         Rule::FillNull { column, value } => {
@@ -322,17 +337,16 @@ fn predict_rule(
                     current.max_value_bytes = current.max_value_bytes.max(value.len());
                     let temporary =
                         utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes));
-                    Ok((temporary, live_before, next))
+                    let live_after = column_physical_sum(&next, arrays, offset, k)?;
+                    Ok((temporary, live_after, next))
                 }
                 _ => {
                     current.nullable = false;
-                    Ok((
-                        fixed_slot_bytes(&current.data_type)
-                            .map(|slot| fixed_physical_bytes(k, slot))
-                            .unwrap_or(0),
-                        live_before,
-                        next,
-                    ))
+                    let temporary = fixed_slot_bytes(&current.data_type)
+                        .map(|slot| fixed_physical_bytes(k, slot))
+                        .unwrap_or(0);
+                    let live_after = column_physical_sum(&next, arrays, offset, k)?;
+                    Ok((temporary, live_after, next))
                 }
             }
         }
@@ -365,7 +379,8 @@ fn predict_rule(
                 Some(slot) => fixed_physical_bytes(k, slot),
                 None => utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes)),
             };
-            Ok((temporary, live_before, next))
+            let live_after = column_physical_sum(&next, arrays, offset, k)?;
+            Ok((temporary, live_after, next))
         }
         Rule::FilterRows { .. } => Ok((live_before, live_before, next)),
         Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
@@ -437,6 +452,68 @@ fn data_type_of_cast_source(
     }
 }
 
+fn nested_or_variable_bytes(
+    array: &dyn Array,
+    offset: usize,
+    k: usize,
+    data_type: &LogicalType,
+) -> Result<usize, EngineError> {
+    if let Some(slot) = fixed_slot_bytes(data_type) {
+        return Ok(fixed_physical_bytes(k, slot));
+    }
+    match data_type {
+        LogicalType::List(inner) => list_physical_bytes(array, offset, k, inner),
+        LogicalType::Struct(fields) => struct_physical_bytes(array, offset, k, fields),
+        _ => Ok(utf8_physical_bytes(
+            k,
+            variable_data_bytes(array, offset, k)?,
+        )),
+    }
+}
+
+fn list_physical_bytes(
+    array: &dyn Array,
+    offset: usize,
+    k: usize,
+    inner: &LogicalType,
+) -> Result<usize, EngineError> {
+    let list = array
+        .as_any()
+        .downcast_ref::<ListArray>()
+        .ok_or(EngineError::Ffi)?;
+    let end = offset.saturating_add(k).min(list.len());
+    let offsets = list.value_offsets();
+    let child_start = offsets[offset] as usize;
+    let child_end = offsets[end] as usize;
+    let child_k = child_end.saturating_sub(child_start);
+    let child = nested_or_variable_bytes(list.values().as_ref(), child_start, child_k, inner)?;
+    Ok(k.div_ceil(8)
+        .saturating_add(k.saturating_add(1).saturating_mul(4))
+        .saturating_add(child))
+}
+
+fn struct_physical_bytes(
+    array: &dyn Array,
+    offset: usize,
+    k: usize,
+    fields: &[LogicalField],
+) -> Result<usize, EngineError> {
+    let structure = array
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .ok_or(EngineError::Ffi)?;
+    let mut total = k.div_ceil(8);
+    for (field, child) in fields.iter().zip(structure.columns()) {
+        total = total.saturating_add(nested_or_variable_bytes(
+            child.as_ref(),
+            offset,
+            k,
+            &field.data_type,
+        )?);
+    }
+    Ok(total)
+}
+
 fn max_variable_width(
     array: &dyn Array,
     offset: usize,
@@ -456,6 +533,15 @@ fn max_variable_width(
 
 fn variable_data_bytes(array: &dyn Array, offset: usize, k: usize) -> Result<usize, EngineError> {
     let end = offset.saturating_add(k).min(array.len());
+    if let Some(utf8) = array.as_any().downcast_ref::<StringArray>() {
+        if k == 0 || end <= offset {
+            return Ok(0);
+        }
+        let offsets = utf8.value_offsets();
+        let start = offsets[offset] as usize;
+        let stop = offsets[end] as usize;
+        return Ok(stop.saturating_sub(start));
+    }
     let mut total = 0_usize;
     for index in offset..end {
         total = total.saturating_add(value_width(array, index));
