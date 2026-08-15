@@ -289,11 +289,10 @@ fn consume_envelope(
 fn append_envelope(
     writer: &mut SnapshotWriter,
     envelope: BatchEnvelope,
-    tracker: &mut MemoryTracker,
+    _tracker: &mut MemoryTracker,
     context: &RequestContext,
 ) -> Result<(), EngineError> {
     context.ensure_active().map_err(map_context_error)?;
-    tracker.record_storage_append(envelope.byte_count());
     let _storage_phase = crate::memory::enter_phase(crate::memory::AllocatorPhase::StorageAppend);
     writer.append(&envelope).map_err(EngineError::from_storage)
 }

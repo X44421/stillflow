@@ -688,8 +688,6 @@ fn validate_literal_for_column(
 }
 
 fn validate_expr_iterative(expr: &Expr) -> Result<(), EngineError> {
-    expr.validate_shape()
-        .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
     let mut nodes = 0_usize;
     let mut max_depth = 0_usize;
     let mut stack = vec![(expr, 1_usize)];
@@ -702,19 +700,46 @@ fn validate_expr_iterative(expr: &Expr) -> Result<(), EngineError> {
             ));
         }
         match current {
-            Expr::Unary { expression, .. }
-            | Expr::IsNull { expression, .. }
-            | Expr::Cast { expression, .. } => stack.push((expression, depth + 1)),
+            Expr::Column(_) => {}
+            Expr::Literal(ScalarValue::Utf8(value)) => {
+                Expr::Literal(ScalarValue::Utf8(value.clone()))
+                    .validate_shape()
+                    .map_err(|_| {
+                        EngineError::InvalidPlan("literal contains prohibited secret pattern")
+                    })?;
+            }
+            Expr::Literal(ScalarValue::Float64(value)) => {
+                if !value.get().is_finite() {
+                    return Err(EngineError::InvalidPlan("float literal is not finite"));
+                }
+            }
+            Expr::Literal(_) => {}
+            Expr::Unary { expression, .. } | Expr::IsNull { expression, .. } => {
+                stack.push((expression, depth + 1));
+            }
+            Expr::Cast {
+                expression,
+                data_type,
+            } => {
+                data_type
+                    .validate()
+                    .map_err(|_| EngineError::InvalidPlan("cast target data type is invalid"))?;
+                stack.push((expression, depth + 1));
+            }
             Expr::Binary { left, right, .. } => {
                 stack.push((left, depth + 1));
                 stack.push((right, depth + 1));
             }
             Expr::Coalesce { expressions } => {
+                if expressions.is_empty() {
+                    return Err(EngineError::InvalidPlan(
+                        "coalesce expression list is empty",
+                    ));
+                }
                 for expr in expressions {
                     stack.push((expr, depth + 1));
                 }
             }
-            Expr::Column(_) | Expr::Literal(_) => {}
         }
     }
     Ok(())
@@ -737,6 +762,9 @@ fn validate_plan_exprs_iterative(plan: &LogicalPlan) -> Result<(), EngineError> 
                             validate_expr_iterative(expression)?;
                         }
                         Rule::FilterRows { predicate } => {
+                            validate_expr_iterative(predicate)?;
+                        }
+                        Rule::Validate { predicate, .. } => {
                             validate_expr_iterative(predicate)?;
                         }
                         _ => {}

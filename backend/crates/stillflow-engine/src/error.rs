@@ -49,7 +49,7 @@ pub enum EngineError {
     Timeout,
     #[error("engine is busy")]
     Busy,
-    #[error("engine internal invariant failed")]
+    #[error("{0}")]
     Internal(&'static str),
     #[error("{0}")]
     Connector(ConnectorError),
@@ -90,6 +90,9 @@ impl EngineError {
     }
 
     pub fn sanitized_summary(&self) -> SanitizedErrorSummary {
+        if should_force_fallback() {
+            return fallback_summary();
+        }
         let message = self.to_string();
         match SanitizedErrorSummary::try_new(self.category(), self.retryable(), message) {
             Ok(summary) => summary,
@@ -194,6 +197,27 @@ impl fmt::Debug for EngineError {
                 .field("retryable", &storage_retryable(inner))
                 .finish(),
         }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FORCE_FALLBACK_SUMMARY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_force_fallback_summary(force: bool) {
+    FORCE_FALLBACK_SUMMARY.with(|cell| cell.set(force));
+}
+
+fn should_force_fallback() -> bool {
+    #[cfg(test)]
+    {
+        FORCE_FALLBACK_SUMMARY.with(|cell| cell.get())
+    }
+    #[cfg(not(test))]
+    {
+        false
     }
 }
 

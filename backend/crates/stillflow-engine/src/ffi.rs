@@ -108,16 +108,18 @@ pub(crate) fn dataframe_to_record_batch(
             .map_err(|_| EngineError::Ffi);
     }
 
+    let mut frame = frame;
     let mut extracted: Vec<Option<ArrayRef>> = Vec::with_capacity(logical_schema.fields.len());
     for field in &logical_schema.fields {
         if deferred.iter().any(|(name, _)| name == field.name.as_str()) {
+            let _ = frame.drop_in_place(field.name.as_str());
             extracted.push(None);
             continue;
         }
         let column = frame
-            .column(field.name.as_str())
+            .drop_in_place(field.name.as_str())
             .map_err(|_| EngineError::Internal("polars column missing during export"))?;
-        extracted.push(Some(column_to_arrow(column, &field.data_type)?));
+        extracted.push(Some(column_to_arrow(&column, &field.data_type)?));
     }
     drop(frame);
 

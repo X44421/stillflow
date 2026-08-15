@@ -228,14 +228,9 @@ impl MemoryTracker {
                 "canonical remainder exceeded MAX_BATCH_BYTES",
             ));
         }
-        set_alloc_phase(AllocatorPhase::Remainder);
         self.remainder_live = bytes > 0;
         self.remainder_bytes = bytes;
         self.refresh()
-    }
-
-    pub(crate) fn record_storage_append(&mut self, bytes: usize) {
-        self.report.storage_append_phase_peak = self.report.storage_append_phase_peak.max(bytes);
     }
 
     fn live_payloads(&self) -> u8 {

@@ -176,7 +176,6 @@ mod test_alloc {
             let raw_ptr = unsafe { ptr.sub(header_size) };
             let header = unsafe { std::ptr::read(raw_ptr.cast::<AllocHeader>()) };
             if header.magic == MAGIC {
-                crate::memory::record_realloc_phase(header.phase, header.user_size, new_size);
                 let old_raw_size = layout.size().saturating_add(header_size);
                 let raw_align = layout.align().max(HEADER_ALIGN);
                 let Ok(old_raw_layout) = Layout::from_size_align(old_raw_size, raw_align) else {
@@ -187,6 +186,7 @@ mod test_alloc {
                 if new_raw_ptr.is_null() {
                     return new_raw_ptr;
                 }
+                crate::memory::record_realloc_phase(header.phase, header.user_size, new_size);
                 let new_header = AllocHeader {
                     magic: MAGIC,
                     phase: header.phase,

@@ -16,7 +16,6 @@ use stillflow_core::{
 
 use crate::error::EngineError;
 use crate::memory::{AllocatorPhase, MemoryTracker};
-use crate::predict::{fixed_physical_bytes, utf8_physical_bytes};
 
 pub(crate) struct CanonicalRebatcher {
     factory: BatchEnvelopeFactory,
@@ -52,9 +51,6 @@ impl CanonicalRebatcher {
     }
 
     pub(crate) fn remainder_bytes(&self) -> usize {
-        if self.rows == 0 {
-            return 0;
-        }
         self.sinks
             .iter()
             .map(|sink| sink.allocated_capacity_bytes())
@@ -73,15 +69,6 @@ impl CanonicalRebatcher {
         while remaining.num_rows() > 0 {
             let k = self.max_prefix(&remaining)?;
             if k == 0 {
-                if self.remainder_live() {
-                    self.flush(&mut publish, tracker)?;
-                    continue;
-                }
-                return Err(EngineError::BoundExceeded(
-                    "a single transformed row exceeds MAX_BATCH_BYTES",
-                ));
-            }
-            if !self.can_reserve_for(&remaining, k)? {
                 if self.remainder_live() {
                     self.flush(&mut publish, tracker)?;
                     continue;
@@ -122,22 +109,25 @@ impl CanonicalRebatcher {
         if incoming.num_columns() != self.sinks.len() {
             return Err(EngineError::Internal("remainder column mismatch"));
         }
-        let total_current_cap = self.remainder_bytes();
-        let mut total_resulting_cap = 0_usize;
+        let mut sum_subsequent_old = self.remainder_bytes();
+        let mut sum_prior_new = 0_usize;
         for (sink, array) in self.sinks.iter().zip(incoming.columns()) {
-            let sink_current_cap = sink.allocated_capacity_bytes();
-            let other_live_cap = total_current_cap.saturating_sub(sink_current_cap);
+            let old_cap = sink.allocated_capacity_bytes();
+            sum_subsequent_old = sum_subsequent_old.saturating_sub(old_cap);
             let (transient_peak, new_cap) =
                 sink.calculate_growth_peak_and_new_capacity(array.as_ref(), k);
-            if other_live_cap.saturating_add(transient_peak) > MAX_BATCH_BYTES {
+            let step_peak = sum_prior_new
+                .saturating_add(transient_peak)
+                .saturating_add(sum_subsequent_old);
+            if step_peak > MAX_BATCH_BYTES {
                 return Ok(false);
             }
-            total_resulting_cap = total_resulting_cap.saturating_add(new_cap);
-            if total_resulting_cap > MAX_BATCH_BYTES {
+            sum_prior_new = sum_prior_new.saturating_add(new_cap);
+            if sum_prior_new.saturating_add(sum_subsequent_old) > MAX_BATCH_BYTES {
                 return Ok(false);
             }
         }
-        Ok(true)
+        Ok(sum_prior_new <= MAX_BATCH_BYTES)
     }
 
     fn max_prefix(&self, incoming: &RecordBatch) -> Result<usize, EngineError> {
@@ -152,30 +142,13 @@ impl CanonicalRebatcher {
         }
         while low < high {
             let mid = low + (high - low).div_ceil(2);
-            if self.fits_prefix(incoming, mid) {
+            if self.can_reserve_for(incoming, mid)? {
                 low = mid;
             } else {
                 high = mid - 1;
             }
         }
         Ok(low)
-    }
-
-    fn fits_prefix(&self, incoming: &RecordBatch, k: usize) -> bool {
-        self.rows.saturating_add(k) <= self.pack_limit
-            && self.predicted_bytes_with(incoming, k) <= MAX_BATCH_BYTES
-    }
-
-    fn predicted_bytes_with(&self, incoming: &RecordBatch, k: usize) -> usize {
-        incoming
-            .columns()
-            .iter()
-            .zip(self.sinks.iter())
-            .map(|(array, sink)| {
-                sink.allocated_capacity_bytes()
-                    .saturating_add(incoming_physical_bytes(array.as_ref(), k))
-            })
-            .fold(0_usize, usize::saturating_add)
     }
 
     fn append_rows(&mut self, incoming: &RecordBatch, k: usize) -> Result<(), EngineError> {
@@ -535,8 +508,6 @@ impl VariableBytes {
     fn finish_parts(
         &mut self,
     ) -> Result<(OffsetBuffer<i32>, Buffer, Option<NullBuffer>), EngineError> {
-        self.offsets.shrink_to_fit();
-        self.values.shrink_to_fit();
         let offsets = OffsetBuffer::new(ScalarBuffer::from(std::mem::take(&mut self.offsets)));
         let values = Buffer::from_vec(std::mem::take(&mut self.values));
         let nulls = if self.all_valid {
@@ -561,37 +532,6 @@ impl VariableBytes {
             .map(|array| Arc::new(array) as ArrayRef)
             .map_err(|_| EngineError::Internal("remainder freeze produced invalid binary"))
     }
-}
-
-fn incoming_physical_bytes(array: &dyn Array, k: usize) -> usize {
-    let end = k.min(array.len());
-    if let Some(utf8) = array.as_any().downcast_ref::<StringArray>() {
-        return utf8_physical_bytes(end, utf8_range_bytes(utf8, 0, end));
-    }
-    if let Some(binary) = array.as_any().downcast_ref::<BinaryArray>() {
-        let mut data = 0_usize;
-        for index in 0..end {
-            if !binary.is_null(index) {
-                data = data.saturating_add(binary.value(index).len());
-            }
-        }
-        return utf8_physical_bytes(end, data);
-    }
-    if matches!(array.data_type(), arrow_schema::DataType::Null) {
-        return end.div_ceil(8);
-    }
-    let slot = match array.data_type() {
-        arrow_schema::DataType::Boolean
-        | arrow_schema::DataType::Int8
-        | arrow_schema::DataType::UInt8 => 1,
-        arrow_schema::DataType::Int16 | arrow_schema::DataType::UInt16 => 2,
-        arrow_schema::DataType::Int32
-        | arrow_schema::DataType::UInt32
-        | arrow_schema::DataType::Float32
-        | arrow_schema::DataType::Date32 => 4,
-        _ => 8,
-    };
-    fixed_physical_bytes(end, slot)
 }
 
 fn utf8_range_bytes(array: &StringArray, offset: usize, k: usize) -> usize {
