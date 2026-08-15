@@ -123,8 +123,8 @@ pub const PREVIEW_MAX_SOURCE_ROWS_SCANNED: usize = 100_000;
 pub const PREVIEW_MAX_SOURCE_BYTES_SCANNED: usize = MAX_BATCH_BYTES; // 64 MiB
 pub const PREVIEW_DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
 pub const PREVIEW_MAX_DEADLINE: Duration = Duration::from_secs(30);
-pub const PREVIEW_MAX_CONCURRENT_REQUESTS: usize =
-    MAX_ENGINE_CONCURRENT_RUNS as usize;
+pub const PREVIEW_MAX_CONCURRENT_REQUESTS: u16 =
+    MAX_ENGINE_CONCURRENT_RUNS;
 pub const PREVIEW_RESPONSE_MAX_BYTES: usize = PREVIEW_MAX_BYTE_LIMIT;
 pub const PREVIEW_PEAK_ENGINE_BYTES: usize =
     MAX_BATCH_BYTES + MAX_BATCH_BYTES + PREVIEW_RESPONSE_MAX_BYTES
@@ -186,10 +186,10 @@ impl ExecutionEngine {
 }
 ```
 
-`PREVIEW_MAX_CONCURRENT_REQUESTS` is a direct alias of the E2 run-gate
-capacity `MAX_ENGINE_CONCURRENT_RUNS`; no literal `4` is repeated in the
-public contract. E3 must not create a second semaphore or any other
-admission-control primitive.
+`PREVIEW_MAX_CONCURRENT_REQUESTS` is a direct, same-type alias of the E2
+run-gate capacity `MAX_ENGINE_CONCURRENT_RUNS`; no cast and no literal `4`
+appear in the public contract. E3 must not create a second semaphore or any
+other admission-control primitive.
 
 `PREVIEW_PEAK_ENGINE_BYTES` is a hard ceiling. The three columnar payloads
 are one connector envelope (`<= MAX_BATCH_BYTES`), one current export
