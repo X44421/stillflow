@@ -1,4 +1,4 @@
-# Issue #48 E2-R1 Contract Addendum
+# Issue #48 E2-R1A Contract Addendum
 
 > Status: **Proposed** (not approved)
 > Risk: High
@@ -8,8 +8,9 @@
 > Implementation PR: #49 (draft)
 > Branch: `agent/issue-048-deterministic-engine-executor`
 > Last updated: 2026-08-15
-> Review: Request changes on `15536eca`. This document is the proposed
-> delta. It is not frozen. Do not treat any line as “already approved.”
+> Review: Request changes on `c3de55a`. This document is the proposed
+> delta revision E2-R1A (docs-only). It is not frozen. Do not treat any line
+> as “already approved.”
 
 This addendum does **not** replace the frozen R3 contract. Architecture
 must approve a SHA of this file before those deltas are considered
@@ -19,19 +20,43 @@ and must keep the PR draft.
 Do not open or continue the E1 contract branch. Do not expand remaining
 operators (T01–T36 / T38 / T40 / T42) in this revision.
 
+---
+
 ## 1. Objective
 
-Record every contract change required to correct `15536eca` without
-silently editing frozen R3:
+Record every contract change and explicit specification required to resolve
+the P0 and P1 review blockers raised on `c3de55a` without silently editing
+frozen R3:
 
-1. retract unapproved dependency edits;
-2. make remainder a true append/freeze builder;
-3. make `predict(k)` per-rule and nested-aware;
-4. make T37 / T39 / T41 / T43 / T44 independent and objective;
-5. close type-checking gaps, or pause unimplemented paths;
-6. eliminate production panics and context gaps.
+1. **Polars → Arrow export transition & memory bounds**: Formally amend R3
+   §6.2.1 to authorize engine-owned typed column conversion in place of C ABI
+   export, bound the export transition peak memory, and incorporate export copy
+   accounting into `predict(k)`.
+2. **Remainder builder capacity, transients, & timezone preservation**: Define
+   capacity tracking (`builder_allocated_capacity_bytes`), dynamic allocation
+   growth without unmetered pack_limit over-allocation, transient reallocation
+   bounds, mandatory 64 MiB payload check in `hold_incoming`, and preservation
+   of timezone metadata in timestamp sinks.
+3. **Phased test allocator & objective memory verification**: Specify real
+   process-wide / multi-threaded allocation accounting across stages, replace
+   counter simulation with actual RAII phase guards spanning `writer.append`,
+   and preserve correct `realloc` diff accounting.
+4. **Iterative typed compilation, LUB casts, & type boundaries**: Define
+   iterative AST validation preceding type checking, mandatory explicit LUB
+   strict-casting for binary operations and Coalesce, typed-null derivation
+   preserving the target physical logical type, 32-byte prediction for Float → Utf8
+   casts, and complete Binary type cast boundaries.
+5. **Workspace build & test profile governance**: Explicitly specify the
+   `backend/.cargo/config.toml` (`jobs = 2`) and `backend/Cargo.toml`
+   (`[profile.test]` `debug = 0`, `codegen-units = 4`) workspace configuration
+   changes as proposed deltas.
+6. **Sanitized error fallback category**: Fix fallback summary category
+   resolution to guarantee `Internal` rather than forwarding unmatched
+   unsupported-capability structures.
 
-## 2. What R3 actually authorized
+---
+
+## 2. What R3 Actually Authorized
 
 [#47 approval](https://github.com/X44421/stillflow/pull/47#issuecomment-5294143308)
 and [#48](https://github.com/X44421/stillflow/issues/48) authorized only:
@@ -50,201 +75,232 @@ R3 §6.3 at `32f1c53` authorizes engine dependencies:
   `dtype-i16`, `dtype-date`, `dtype-datetime`, `dtype-struct`.
 
 R3 does **not** authorize `arrow-select`, `arrow-cast`, or polars
-`regex`. Labeling those as “already-approved workspace crates” in
-`15536eca` was a contract violation.
+`regex`. Labeling those as “already-approved workspace crates” was a contract
+violation.
 
 The frozen Issue #46 file on this branch must match R3 plus the two
 nits. Proposed deltas live only here.
 
-## 3. Proposed dependency deltas
+---
+
+## 3. Proposed Dependency & Build Configuration Deltas
 
 These are proposed, not approved:
 
-| Change | Why | E2-R1 behavior until this SHA is approved |
-| --- | --- | --- |
-| Remove `dtype-u32` from the Polars feature list | Polars 0.46 does not expose that feature; `UInt32` is always available | Omit the feature so the crate compiles. This is a factual correction that still needs review. |
-| Do **not** add `regex` | `Expr::Contains` / `contains_literal` needs it | Preflight `TypeError`: Contains is paused |
-| Do **not** add `arrow-select` | Concat allocated a fourth columnar payload | Remainder uses `arrow-array` builders already covered by R3 |
-| Do **not** add `arrow-cast` | Utf8View → Utf8 can use `StringBuilder` | Engine-owned conversion, no extra crate |
-| Add `arrow-buffer = "59"` | Remainder Utf8/Binary freeze must **move** exact `Vec` buffers into `StringArray`/`BinaryArray`. `arrow-array` builders use `MutableBuffer`, which doubles capacity and makes `get_array_memory_size` exceed `MAX_BATCH_BYTES` | Direct dep on the Arrow 59 substrate already pulled by `arrow-array` / `arrow-data`. Not `arrow-select` or `arrow-cast`. |
+| Change | Location | Why | E2-R1A behavior until this SHA is approved |
+| --- | --- | --- | --- |
+| Remove `dtype-u32` from Polars features | `backend/crates/stillflow-engine/Cargo.toml` | Polars 0.46 does not expose that feature; `UInt32` is always built-in | Omit feature so crate compiles. Factual correction requiring review. |
+| Do **not** add `regex` | `backend/crates/stillflow-engine/Cargo.toml` | `Expr::Contains` / `contains_literal` needs it | Preflight `TypeError`: `Contains` is paused. |
+| Do **not** add `arrow-select` | `backend/crates/stillflow-engine/Cargo.toml` | `concat` allocates a fourth columnar payload | Remainder uses incremental builder append. |
+| Do **not** add `arrow-cast` | `backend/crates/stillflow-engine/Cargo.toml` | Utf8View → Utf8 handled by engine conversion | Engine-owned conversion, no extra crate. |
+| Add `arrow-buffer = "59"` | `backend/crates/stillflow-engine/Cargo.toml` | Remainder Utf8/Binary freeze moves exact `Vec` buffers into `StringArray`/`BinaryArray` | Direct dep on Arrow 59 substrate already pulled by `arrow-array`/`arrow-data`. |
+| Set `jobs = 2` | `backend/.cargo/config.toml` | Windows RAM exhaustion during parallel rustc debug builds & CI exit 143 | Explicitly capped compiler jobs. |
+| Set `[profile.test]` `debug = 0`, `codegen-units = 4` | `backend/Cargo.toml` | Polars/Arrow test linking consumes multi-GB peak RAM with full DWARF | Lean test profile avoids OOM/hangs. |
 
 `serde_json` remains a **dev-dependency only**. Production
 `stillflow-engine` must not depend on `serde` / `serde_json`.
 
-If architecture later authorizes `regex` so Contains can run, that is a
-new approved SHA of this addendum, not a silent Cargo.toml edit.
+---
 
-## 4. Remainder: append/freeze (normative)
+## 4. Polars → Arrow Export Transition (§6.2.1 Amendment)
 
-R3 §14.1 already forbids a fourth `MAX_BATCH_BYTES`-class copy and
-requires remainder → output to be **move/freeze**. `15536eca` violated
-that by `arrow_select::concat` while existing remainder arrays and the
-incoming batch were both live, and by dropping the Polars tracker slot
-before the exported batch was counted.
+### 4.1 Specification Amendment
 
+Frozen R3 §6.2.1 assumed C ABI export (`export_array_to_c` / `export_field_to_c`)
+from Polars into Arrow 59. In Polars 0.46, C ABI export produces `Utf8View` arrays
+and non-canonical structures that do not match canonical Arrow 59 representations
+without secondary conversions.
+
+E2-R1A formally amends §6.2.1 as follows:
+
+1. **Export Mechanism**: Polars → Arrow 59 export is executed via engine-owned
+   stateless typed column extraction (`dataframe_to_record_batch`).
+2. **Column Extraction Lifecycle**:
+   - Columns are extracted individually from the `DataFrame`.
+   - To avoid holding the entire `DataFrame` simultaneously with all newly
+     allocated Arrow arrays, columns must be extracted sequentially or by moving
+     series out of the frame.
+   - For constant literal derived columns (e.g. wide UTF-8 literals), the engine
+     defers allocation: Polars evaluates metadata/shape, and the engine
+     constructs the canonical `StringArray` directly with exact offset buffers,
+     avoiding duplicated materialization in both Polars and Arrow.
+3. **Export Memory Bound & Predictor Law**:
+   During export transition, both the Polars frame (or remaining columns) and the
+   newly extracted Arrow arrays coexist temporarily in memory before the Polars
+   frame is completely dropped.
+   - The export copy memory is bounded by `live_after(k)`.
+   - The chunker prediction formula must explicitly account for export transition:
+     ```text
+     predict_step(k) = live_before(k) + temporary_allocation(k) + live_after(k)
+     predict_export(k) = live_after(k) [Polars frame] + live_after(k) [Arrow batch]
+     predict_chunk(k) = max(max_steps(predict_step(k)), predict_export(k))
+     ```
+   - `predict_chunk(k)` must be `<= MAX_BATCH_BYTES` (64 MiB).
+
+---
+
+## 5. Remainder: Builder Capacity, Reallocation, & Timezone Retention
+
+### 5.1 Append / Freeze Model & Memory Law
+
+Frozen R3 §14.1 and E2-R1 §4 forbid a fourth `MAX_BATCH_BYTES`-class payload.
 Live columnar payloads remain at most three:
 
 ```text
 connector envelope
-  + (complete Polars working set XOR incoming canonical chunk)
+  + (Polars working set XOR incoming canonical chunk)
   + remainder builder
 ```
 
-Rules:
+### 5.2 Capacity Accounting vs Allocated Overhead
 
-1. Import a predicted slice into Polars. That working set is one payload.
-2. Export to a canonical Arrow batch, then **drop the Polars frame**.
-   The exported batch becomes the incoming canonical payload (same slot,
-   not a fourth slot).
-3. Incoming remains counted until every row has been appended into the
-   remainder builder or the incoming handle is dropped.
-4. Remainder is a **builder** whose unfinished buffers are one payload.
-   Append copies values into those buffers. Variable-width columns use
-   exact `Vec` growth (`reserve_exact` + `shrink_to_fit`) and freeze by
-   moving those buffers into a canonical array. Do not use
-   `arrow-array` byte builders whose `MutableBuffer` doubles capacity.
-5. Freeze/move finishes the builder into one output envelope (move of
-   builder buffers). `SnapshotWriter::append` may borrow that envelope.
-   After `append` returns, drop it. The builder is empty.
-6. If the next incoming prefix does not fit, freeze/move the current
-   remainder first, then retry against an empty builder.
-7. Storage Parquet encode remains excluded from `MAX_ENGINE_PEAK_BYTES`.
+1. **Allocated Capacity Accounting**:
+   - `remainder_bytes()` must measure the **allocated capacity** of all builder
+     buffers (`capacity * slot_bytes` for fixed-width; `capacity_bytes` of values
+     + offsets + validity for variable-width), not merely `rows * slot_bytes`.
+   - Over-allocation at construction (e.g. pre-allocating `pack_limit` rows across
+     4,096 columns) is strictly forbidden. Builders must initialize with zero or
+     minimal capacity and grow dynamically.
+2. **Transient Reallocation Bounds**:
+   - When variable-width builders (`VariableBytes`) grow, reallocation must use
+     bounded geometric or exact growth such that total allocated capacity plus
+     transient reallocation buffer does not exceed `MAX_BATCH_BYTES`.
+   - `hold_incoming(bytes)` must explicitly assert `bytes <= MAX_BATCH_BYTES`.
+3. **Timestamp Timezone Preservation**:
+   - `ColumnSink::Timestamp` must store both `TimeUnit` (Millisecond,
+     Microsecond, Nanosecond) and `Option<String>` timezone.
+   - Freezing a timestamp sink must produce a `TimestampArray` retaining the
+     exact schema `timezone` metadata. Dropping timezone during freeze is a contract
+     violation.
+4. **Single-Row Overflow**:
+   - If `k == 0` when incoming is pushed into an empty remainder builder, the
+     single row exceeds `MAX_BATCH_BYTES`. Fail immediately with
+     `BoundExceeded`.
 
-Forbidden: `concat` (or equivalent) that yields `envelope + incoming +
-old remainder + new remainder`.
+---
 
-## 5. Predictor
+## 6. Phased Test Allocator & Objective Verification (T44)
 
-`predict(k)` is the maximum over **every node and every rule**, not over
-a collapsed `ApplyRules` step:
+T44 must provide rigorous, non-simulated runtime evidence of isolated memory
+peaks:
 
-```text
-predict_step(k) = live_before(k) + temporary_allocation(k) + live_after(k)
-predict(k)      = max over steps of predict_step(k)
-```
+1. **Real RAII Scopes Across Worker Threads**:
+   - The test global allocator must track allocations across all threads spawned
+     during execution (e.g., Rayon/Polars worker pools and Tokio runtime threads).
+   - Global atomic phase tracking or thread-inherited context must ensure that
+     background Polars threads are attributed to `AllocatorPhase::Polars`.
+2. **Accurate Realloc Accounting**:
+   - `realloc(ptr, layout, new_size)` must record net memory change atomically
+     without negative under-counting before system reallocation.
+3. **Enclosing Actual Storage Append**:
+   - `AllocatorPhase::StorageAppend` must actively wrap the invocation of
+     `writer.append(&envelope)` (Parquet encoding and I/O), not a simulated
+     dummy allocation.
+   - The phase must switch to `StorageAppend` before calling `writer.append` and
+     revert to `Idle` or the enclosing phase only after `writer.append` returns.
+4. **Assertion Law**:
+   - Peak Polars phase allocation `(a)` + Peak Remainder phase allocation `(b)` +
+     `MAX_OPERATOR_STATE_BYTES` (5 MiB) must be `<= MAX_ENGINE_PEAK_BYTES`
+     (197 MiB).
+   - Storage append peak `(c)` is recorded and verified to be excluded from the
+     engine peak budget.
 
-After each rule, `live_before` for the next rule is that rule’s
-`live_after`.
+---
 
-ReplaceLiteral, FillNull, and Cast **must recompute** `live_after` from
-the updated `PredictedColumn` table (type, `nullable`,
-`max_value_bytes`). Returning the previous `live_before` as `live_after`
-is incorrect when width or nullability changes.
+## 7. Typed Compilation, LUB Casts, & Type Boundaries
 
-Source slices bill the logical range `[offset, offset + k)`:
+### 7.1 Iterative AST Validation Preceding Type Checking
 
-- validity `(k + 7) / 8` if a bitmap is required;
-- fixed-width `k * slot`;
-- Utf8/Binary `utf8_physical_bytes(k, offsets[i+k] - offsets[i])`
-  (or equivalent per-value sum when offsets are unavailable);
-- List: the same rules on the child array over the sliced element
-  range;
-- Struct: the sum of children over the same row range.
+- Prior to recursive type evaluation, `validate_expr` must verify node count
+  (`<= MAX_EXPR_NODES`) and nesting depth (`<= MAX_EXPR_DEPTH`) iteratively
+  using an explicit stack.
+- If limits are exceeded, return `BoundExceeded` / `InvalidPlan` immediately
+  without triggering deep stack recursion.
 
-A zero-copy Arrow slice must not bill unused parent bytes a second time.
-Those parent bytes stay attributed to the live connector envelope.
+### 7.2 LUB Strict-Casting in Lowering
 
-## 6. Operator-state accounting
+- When evaluating binary comparisons (`Equal`, `NotEqual`, `Lt`, `Le`, `Gt`,
+  `Ge`), arithmetic, or `Coalesce`:
+  - If operand types differ but possess a valid Least Upper Bound `T`, lowering
+    must emit explicit `.strict_cast(polars_data_type(T))` on the mismatched
+    operand(s) before applying the operator.
+  - Relying on implicit Polars coercion is forbidden.
 
-Utf8 (and other) literals in the plan count toward
-`MAX_OPERATOR_STATE_BYTES` (5 MiB). A Derive literal of
-`MAX_BATCH_BYTES + 1` must fail `BoundExceeded` in preflight before
-inspect/import. T39 must not smuggle a 64 MiB literal through as “just
-predicted expansion.”
+### 7.3 Typed Null Derivation
 
-## 7. Typed compilation and pauses
+- `Rule::DeriveColumn` with `Expr::Literal(ScalarValue::Null)` must construct a
+  column matching the declared target `LogicalType` (e.g., full-null `Int32`,
+  `Utf8`, etc.), **not** `DataType::Null`.
 
-Preflight must type-check expressions against the working schema:
+### 7.4 Prediction for Float → Utf8 Cast
 
-- `Filter` / `FilterRows` predicates are Boolean;
-- comparisons use R3 comparable / ordered rules and LUB;
-- arithmetic uses R3 LUB and result types;
-- `And` / `Or` require Boolean operands;
-- `Contains` requires Utf8 operands (when not paused);
-- unknown columns remain `UnknownColumn`.
+- `Rule::Cast` or `Expr::Cast` from `Float32` or `Float64` to `LogicalType::Utf8`
+  must bill `MAX_FLOAT_UTF8_BYTES` = 32 bytes per row in `predict(k)` and
+  `PredictedColumn.max_value_bytes`.
 
-E2-R1 **pauses** these paths with preflight `TypeError` (inspect count 0,
-read count 0) until a later approved addendum implements them correctly:
+### 7.5 Binary Type Cast Boundaries
+
+- Explicit `Cast` to or from `LogicalType::Binary` is authorized only for
+  identity `Binary -> Binary`.
+- Any cast from non-Binary to Binary, or Binary to non-Binary, must fail at
+  preflight with `TypeError("cast to/from binary is not authorized")`.
+
+---
+
+## 8. Summary of Paused Execution Paths (E2-R1A)
+
+E2-R1A continues to pause the following paths with preflight `TypeError`
+(inspect count 0, read count 0):
 
 | Path | Reason |
 | --- | --- |
-| `Expr::Contains` | polars `regex` is not an approved R3 dependency |
-| `Add` / `Subtract` / `Multiply` / `Divide` / `Modulo` / `Negate` | checked overflow and toward-zero integer division are not yet implemented at row granularity |
-| `Timestamp { unit: Second, .. }` in schema or expr | Polars 0.46 has no second unit; silent `Second → Milliseconds` is forbidden |
-| `Date32` / `Timestamp` → `Utf8` | already paused in R3 |
-| `List` / `Struct` in a transforming plan | remainder builders and nested execution are not in this slice |
+| `Expr::Contains` | Polars `regex` feature is not an approved R3 dependency |
+| `Add` / `Subtract` / `Multiply` / `Divide` / `Modulo` / `Negate` | Checked overflow and toward-zero integer division semantics not implemented at row granularity |
+| `Timestamp { unit: Second, .. }` | Polars 0.46 has no second unit; silent scaling is forbidden |
+| `Date32` / `Timestamp` → `Utf8` | Paused per R3 pending provable formatting width bounds |
+| `List` / `Struct` transforming execution | Nested builders and nested execution postponed |
+| Non-Binary ↔ Binary casts | Disallowed type conversions |
 
-`Timestamp` millisecond / microsecond / nanosecond remain authorized.
-Passthrough of nested types without rules may be paused with the same
-`TypeError` rather than silently corrupting remainder accounting.
+---
 
-Authorized in this slice when type-checked: `Scan`, `Project`, `Filter`
-(Boolean predicates without paused ops), `ApplyRules` of Rename, Cast
-(non-paused), Trim, ReplaceLiteral, FillNull, DropColumn, DeriveColumn,
-FilterRows, and `Materialize`.
+## 9. Panic Freedom & Sanitized Error Fallback
 
-## 8. Panic, context, and `batch_size`
+1. **Zero Panic Paths**:
+   - Production code must contain zero `unwrap()`, `expect()`, or `unreachable!()`.
+   - `Rule::Validate` and `Rule::Deduplicate` arms must return
+     `EngineError::UnsupportedRule`.
+2. **Sanitized Error Fallback**:
+   - `fallback_summary()` must directly construct `SanitizedErrorSummary` with
+     `ErrorCategory::Internal`, `retryable: false`, and a static sanitized
+     message. It must not delegate to a synthetic connector error that could
+     yield `ErrorCategory::UnsupportedCapability`.
 
-Production engine paths must not use `unreachable!`, `unwrap`, or
-`expect`. `sanitized_summary` fallback must use nested `try_new` on
-static secret-free literals, then `ConnectorError::sanitized_summary`
-of a typed internal failure — never `unreachable!`.
+---
 
-Validate / Deduplicate schema arms return `UnsupportedRule`.
+## 10. Test Matrix & Acceptance Evidence
 
-After `inspect` returns, call `context.ensure_active()` again before
-using the inspected schema.
+| ID | Focus | Acceptance Evidence |
+| --- | --- | --- |
+| T37 | Execution Chunker | 2 KiB UTF-8 Derive over 65,536 input rows; snapshot `row_count == 65_536`; chunker `k < 65_536`; live Polars working set `<= MAX_BATCH_BYTES`; peak engine bytes `<= MAX_ENGINE_PEAK_BYTES`; live payloads `<= 3`. |
+| T39 | Operator State & Expansion | FFI import counter is 0; `BoundExceeded`; no snapshot. Covers (a) literal exceeding 5 MiB operator state, and (b) `predict(1) > MAX_BATCH_BYTES` with literal fitting in 5 MiB. |
+| T41 | Remainder Coexistence | One envelope split into `>= 2` chunks while remainder from the first chunk is live together with envelope + Polars; live payloads `<= 3`; snapshot row_count matches input. |
+| T43 | Exact Cap Boundary | Chosen `k` satisfies `predict(k) <= MAX_BATCH_BYTES < predict(k+1)`, using view/offset/validity overhead formula. |
+| T44 | Phased Memory Allocation | Real phased allocator records (a) Polars working set, (b) remainder builder/freeze, (c) storage append wrapping `writer.append`. Asserts `(a)+(b)+5 MiB <= MAX_ENGINE_PEAK_BYTES` and `(c)` excluded. |
+| T45 | Paused Cast | Cast `Date32` or `Timestamp` to `Utf8` fails preflight with `TypeError`. |
 
-`ExecutionRequest.batch_size` must be in
-`ReadRequest::MIN_BATCH_SIZE..=ReadRequest::MAX_BATCH_SIZE` (`1..=65_536`)
-before `read_batches` and before constructing the remainder pack limit.
+---
 
-## 9. Tests (independent)
+## 11. Non-Goals for E2-R1A
 
-Each ID is its own `#[test]` / `#[tokio::test]`. A shared helper is
-allowed; merging T37+T41+T44 into one assertion function is not.
+- Implementing remaining operators T01–T36, T38, T40, T42.
+- Unpausing arithmetic, regex `Contains`, or nested `List`/`Struct` transforms.
+- Join / Union execution, Validate / Deduplicate runtime.
+- Frontend, API, DuckDB, or SQLx integration.
 
-| ID | Evidence |
-| --- | --- |
-| T37 | 2 KiB UTF-8 Derive over 65,536 input rows; snapshot `row_count == 65_536`; chunker `k < 65_536`; live Polars working set `<= MAX_BATCH_BYTES`; peak engine bytes `<= MAX_ENGINE_PEAK_BYTES`; live payloads `<= 3` |
-| T39 | FFI import counter is 0; `BoundExceeded`; no snapshot. Cover (a) a literal that exceeds 5 MiB operator state, and (b) `predict(1) > MAX_BATCH_BYTES` with a literal that fits in 5 MiB |
-| T41 | one envelope split into `>= 2` chunks while remainder from the first chunk is live together with envelope + Polars; live payloads `<= 3`; snapshot row_count matches input |
-| T43 | chosen `k` satisfies `predict(k) <= MAX_BATCH_BYTES < predict(k+1)`, using the view/offset/validity formula, or `BoundExceeded` with import count 0 when `predict(1)` exceeds the cap |
-| T44 | a **phased test allocator** (not a handwritten peak field) records (a) Polars, (b) remainder builder/freeze, (c) storage append. `(a)+(b)+5 MiB <= MAX_ENGINE_PEAK_BYTES`; (c) is recorded and excluded from the engine ceiling |
+---
 
-The phased allocator is a `#[global_allocator]` used only in
-`stillflow-engine` lib tests, with a thread-local phase. Idle/fixture
-allocations are not attributed to (a)/(b)/(c).
+## 12. Approval Binding
 
-T39’s FFI import counter increments only inside the engine Arrow→Polars
-import path.
-
-## 10. Non-goals for E2-R1
-
-- Remaining operators and tests T01–T36, T38, T40, T42, T45 beyond
-  keeping the existing Date32→Utf8 pause.
-- Join / Union execution, Validate / Deduplicate, Preview HTTP, DuckDB,
-  SQLx, API, frontend, Dependabot.
-- New public types beyond R3 §7.
-- A new contract branch.
-
-## 11. Stop conditions
-
-Stop and return to contract review if implementation needs:
-
-- `arrow-select`, `arrow-cast`, polars `regex`, or any crate absent from
-  R3 §6.3 except the proposed `dtype-u32` omission and `arrow-buffer = "59"`;
-- a fourth live columnar payload;
-- `concat` of remainder + incoming into a new finished batch while both
-  sources remain live;
-- `Second → Milliseconds` without this addendum’s pause;
-- production `unreachable!` / `unwrap` / `expect`;
-- expanding paused Contains / arithmetic / nested types without a new
-  approved SHA.
-
-## 12. Approval binding
-
-Architecture approval of E2-R1 binds the git SHA that contains this
-file as **Proposed** at the time of the review comment. Implementation
-commits on #49 after that SHA must match this text. Until approval,
-#49 stays draft.
+Architecture approval of E2-R1A binds the git SHA containing this document as
+**Proposed**. Implementation commits on #49 following approval must strictly
+conform to this text. Until approval, PR #49 remains in draft.
