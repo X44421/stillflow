@@ -621,7 +621,14 @@ must not fail immediately. It must:
 3. Keep the source scan counters unchanged: those raw rows were already
    charged to `source_rows_scanned` / `source_bytes_scanned` on first
    admission and must never be charged again by a retry.
-4. Repeat until a feasible `(n', p')` is found. Only when
+4. Every attempt, including failed and in-flight retries, obeys the peak
+   law of section 10.3. The export strategy must pre-check each allocation
+   before allocating it; it must not create a transition that would push
+   the sum above `PREVIEW_PEAK_ENGINE_BYTES`, and it must stop the attempt
+   before allocating the copy that would violate
+   `export_prefix_transition(n, p) <= MAX_BATCH_BYTES`. Artifacts already
+   allocated remain counted until dropped.
+5. Repeat until a feasible `(n', p')` is found. Only when
    `n' = 1` and `p' = 1` is still infeasible may `preview` return
    `EngineError::BoundExceeded`.
 
