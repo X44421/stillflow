@@ -6,15 +6,15 @@
 > Parent: #3
 > Authorized base: `main@4b652047dcc7253c09ec4e375cb6184d509cacdd`
 > Approved SHA: `32f1c53d9903f66aeaca1c2676c0b81abfb2a702`
-> Last updated: 2026-08-14
-> Review: PR #47 merged. R3 nits applied here before E2: one
-> `PredictedColumn.nullable` field, and `MAX_LIVE_COLUMNAR_PAYLOADS`.
-> E2 also records workspace `arrow-select` / `arrow-cast` in §6.3.
+> Last updated: 2026-08-15
+> Review: PR #47 merged. The only authorized post-approval nits are one
+> `PredictedColumn.nullable` field and `MAX_LIVE_COLUMNAR_PAYLOADS`.
+> Unapproved `15536eca` edits to §6.3 were retracted. Proposed E2-R1
+> deltas live in `docs/issues/issue-048-e2-r1-contract-addendum.md`.
 
 This document freezes the physical execution boundary. Engine E2 (#48)
-implements it from merged `main`. The authorized post-approval nits are
-`PredictedColumn.nullable`, `MAX_LIVE_COLUMNAR_PAYLOADS`, and the two
-Arrow crates already used by connectors.
+implements it from merged `main`. Do not add dependencies, pauses, or
+resource-model changes here unless they are the two authorized nits.
 
 ## 1. Objective
 
@@ -36,8 +36,9 @@ crate.
   cherry-picked.
 - Dependabot branches are read-only. Engine branches must not mix Dependabot
   version or lockfile updates.
-- PR #47 was docs-only. E2 (#48) may change `stillflow-engine` and add
-  `ConnectorRegistry::capabilities` as named in sections 6.3, 6.4, and 7.
+- This frozen document stays R3 plus the two authorized nits. E2 runtime
+  belongs on #49. Proposed resource/dependency deltas belong in the E2-R1
+  addendum, marked Proposed, not in this file.
 
 ## 3. Risk and compatibility
 
@@ -213,10 +214,6 @@ E2 may add to `stillflow-engine` only:
   `arrow-array` workspace with feature `ffi`,
   `arrow-schema` workspace with feature `ffi`,
   `arrow-data = "59"`;
-- already-approved workspace Arrow crates required to keep remainder and
-  export on the canonical Arrow 59 types:
-  `arrow-select` (canonical remainder concat),
-  `arrow-cast` (Polars Utf8View → canonical Utf8 after C ABI export);
 - `polars-arrow = "0.46"`;
 - `polars` version `0.46` with `default-features = false` and **exactly**
   these features:
@@ -225,9 +222,9 @@ E2 may add to `stillflow-engine` only:
 polars = { version = "0.46", default-features = false, features = [
     "lazy",
     "strings",
-    "regex",
     "dtype-u8",
     "dtype-u16",
+    "dtype-u32",
     "dtype-i8",
     "dtype-i16",
     "dtype-date",
@@ -237,11 +234,12 @@ polars = { version = "0.46", default-features = false, features = [
 ```
 
 Those features are the closed set required for Expr evaluation, UTF-8
-`strip_chars` / `contains`, and the version-1 logical type matrix. Polars 0.46
-does not expose `dtype-u32`; `UInt32` is available without that feature. The
-`regex` feature is required for `Expr::Contains` literal substring matching.
-IO features
+`strip_chars` / `contains`, and the version-1 logical type matrix. IO features
 (`csv`, `json`, `parquet`) are forbidden on the engine crate.
+
+Proposed E2-R1 corrections (`dtype-u32` omission, paused Contains without
+`regex`, no `arrow-select` / `arrow-cast`) are in the Issue #48 addendum.
+They are not authorized by this frozen section.
 
 `EngineError` must not depend on `serde` / `serde_json`. The public sanitised
 event/API surface is `stillflow_core::SanitizedErrorSummary`, which already

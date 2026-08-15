@@ -183,7 +183,10 @@ The accepted sequence is:
 7. **Engine E2 — streaming executor**: Issue #48, from latest `main` after #47.
    Connector envelope → execution chunker → Polars → canonical rebatcher →
    atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API. Do not
-   continue the E1 contract branch.
+   continue the E1 contract branch. `15536eca` is Request changes; E2-R1
+   proposed deltas are `docs/issues/issue-048-e2-r1-contract-addendum.md`
+   on draft PR #49. Do not expand remaining operators until that addendum
+   is approved.
 8. **Engine E3–E5**: node-level Preview, Validate/Rejected Rows/Deduplicate, then
    job runtime and Axum. DuckDB (#10) and SQL Connector (#9, Post-MVP) stay
    outside this sequence until their own contracts.
