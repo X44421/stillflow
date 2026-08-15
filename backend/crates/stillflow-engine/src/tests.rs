@@ -1137,3 +1137,136 @@ fn t54_fallback_error_sanitization_is_always_internal() {
     assert_eq!(summary_forced.message(), "internal error");
     drop(_guard);
 }
+
+#[test]
+fn t55_near_64mib_boolean_and_nullable_remainder_freeze_respects_bounds() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    reset_alloc_peaks();
+
+    // 1. Test near-64 MiB nullable Int64 remainder freeze (120 columns x 65,536 rows)
+    let num_cols = 120_usize;
+    let rows = 65_536_usize;
+    let fields: Vec<LogicalField> = (0..num_cols)
+        .map(|i| {
+            LogicalField::new(
+                column((i + 1) as u128),
+                format!("c_{i}"),
+                LogicalType::Int64,
+                true,
+            )
+            .expect("field")
+        })
+        .collect();
+    let schema = Arc::new(LogicalSchema::new(fields).expect("schema"));
+    let mut columns: Vec<arrow_array::ArrayRef> = Vec::with_capacity(num_cols);
+    for _ in 0..num_cols {
+        let mut builder = arrow_array::builder::Int64Builder::with_capacity(rows);
+        for row in 0..rows {
+            if row % 2 == 0 {
+                builder.append_value(row as i64);
+            } else {
+                builder.append_null();
+            }
+        }
+        columns.push(Arc::new(builder.finish()));
+    }
+    let factory =
+        BatchEnvelopeFactory::try_new(schema.clone(), Uuid::from_u128(999)).expect("factory");
+    let batch = RecordBatch::try_new(factory.arrow_schema().clone(), columns).expect("batch");
+
+    let mut tracker = crate::memory::MemoryTracker::new();
+    let mut rebatcher = {
+        let _guard = crate::memory::enter_phase(crate::memory::AllocatorPhase::Remainder);
+        crate::remainder::CanonicalRebatcher::new(schema.clone(), Uuid::from_u128(999), rows)
+            .expect("rebatcher")
+    };
+    tracker
+        .hold_remainder(rebatcher.remainder_bytes())
+        .expect("hold remainder");
+
+    let mut published = Vec::new();
+    rebatcher
+        .push(batch, &mut tracker, |envelope, _| {
+            published.push(envelope);
+            Ok(())
+        })
+        .expect("push");
+    rebatcher
+        .finish(&mut tracker, |envelope, _| {
+            published.push(envelope);
+            Ok(())
+        })
+        .expect("finish");
+
+    let (_, remainder_peak, _) = crate::memory::alloc_peaks();
+    assert!(remainder_peak > 0);
+    assert!(remainder_peak <= MAX_BATCH_BYTES);
+    assert_eq!(published.len(), 1);
+    assert_eq!(published[0].payload().num_rows(), rows);
+    assert_eq!(published[0].payload().num_columns(), num_cols);
+
+    // 2. Test near-60 MiB nullable Boolean remainder freeze (3,700 columns x 65,536 rows)
+    reset_alloc_peaks();
+    let num_bool_cols = 3_700_usize;
+    let bool_fields: Vec<LogicalField> = (0..num_bool_cols)
+        .map(|i| {
+            LogicalField::new(
+                column((i + 1) as u128),
+                format!("b_{i}"),
+                LogicalType::Boolean,
+                true,
+            )
+            .expect("field")
+        })
+        .collect();
+    let bool_schema = Arc::new(LogicalSchema::new(bool_fields).expect("bool schema"));
+    let mut bool_columns: Vec<arrow_array::ArrayRef> = Vec::with_capacity(num_bool_cols);
+    for _ in 0..num_bool_cols {
+        let mut builder = arrow_array::builder::BooleanBuilder::with_capacity(rows);
+        for row in 0..rows {
+            if row % 2 == 0 {
+                builder.append_value(row % 4 == 0);
+            } else {
+                builder.append_null();
+            }
+        }
+        bool_columns.push(Arc::new(builder.finish()));
+    }
+    let bool_factory =
+        BatchEnvelopeFactory::try_new(bool_schema.clone(), Uuid::from_u128(998)).expect("factory");
+    let bool_batch =
+        RecordBatch::try_new(bool_factory.arrow_schema().clone(), bool_columns).expect("batch");
+
+    let mut bool_tracker = crate::memory::MemoryTracker::new();
+    let mut bool_rebatcher = {
+        let _guard = crate::memory::enter_phase(crate::memory::AllocatorPhase::Remainder);
+        crate::remainder::CanonicalRebatcher::new(bool_schema.clone(), Uuid::from_u128(998), rows)
+            .expect("bool rebatcher")
+    };
+    bool_tracker
+        .hold_remainder(bool_rebatcher.remainder_bytes())
+        .expect("hold bool remainder");
+
+    let mut bool_published = Vec::new();
+    bool_rebatcher
+        .push(bool_batch, &mut bool_tracker, |envelope, _| {
+            bool_published.push(envelope);
+            Ok(())
+        })
+        .expect("push bool");
+    bool_rebatcher
+        .finish(&mut bool_tracker, |envelope, _| {
+            bool_published.push(envelope);
+            Ok(())
+        })
+        .expect("finish bool");
+
+    let (_, bool_remainder_peak, _) = crate::memory::alloc_peaks();
+    assert!(bool_remainder_peak > 0);
+    assert!(bool_remainder_peak <= MAX_BATCH_BYTES);
+    assert_eq!(bool_published.len(), 1);
+    assert_eq!(bool_published[0].payload().num_rows(), rows);
+    assert_eq!(bool_published[0].payload().num_columns(), num_bool_cols);
+
+    drop(_guard);
+}

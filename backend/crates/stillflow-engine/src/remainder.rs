@@ -101,6 +101,7 @@ impl CanonicalRebatcher {
         if self.remainder_live() {
             self.flush(&mut publish, tracker)?;
         }
+        drop(self);
         tracker.hold_remainder(0)?;
         Ok(())
     }
@@ -334,9 +335,9 @@ impl ColumnSink {
         }
     }
 
-    fn finish(&mut self, rows: usize) -> Result<ArrayRef, EngineError> {
+    fn finish(&mut self, _rows: usize) -> Result<ArrayRef, EngineError> {
         Ok(match self {
-            Self::Null => Arc::new(NullArray::new(rows)),
+            Self::Null => Arc::new(NullArray::new(_rows)),
             Self::Boolean(b) => b.finish()?,
             Self::Int8(b) => b.finish()?,
             Self::Int16(b) => b.finish()?,
@@ -379,9 +380,64 @@ impl ColumnSink {
     }
 }
 
+#[derive(Default)]
+struct BitPackedSink {
+    bytes: Vec<u8>,
+    bit_len: usize,
+}
+
+impl BitPackedSink {
+    fn new() -> Self {
+        Self {
+            bytes: Vec::new(),
+            bit_len: 0,
+        }
+    }
+
+    fn allocated_capacity_bytes(&self) -> usize {
+        self.bytes.capacity()
+    }
+
+    fn calculate_growth_peak_and_new_capacity(&self, additional_bits: usize) -> (usize, usize) {
+        let cur_cap_bytes = self.bytes.capacity();
+        let needed_bytes = self.bit_len.saturating_add(additional_bits).div_ceil(8);
+        if needed_bytes > cur_cap_bytes {
+            (cur_cap_bytes.saturating_add(needed_bytes), needed_bytes)
+        } else {
+            (cur_cap_bytes, cur_cap_bytes)
+        }
+    }
+
+    fn prepare_append(&mut self, additional_bits: usize) {
+        let needed_bytes = self.bit_len.saturating_add(additional_bits).div_ceil(8);
+        if needed_bytes > self.bytes.len() {
+            self.bytes.reserve_exact(needed_bytes - self.bytes.len());
+        }
+    }
+
+    fn append_bit(&mut self, bit: bool) {
+        let byte_idx = self.bit_len / 8;
+        let bit_idx = self.bit_len % 8;
+        if bit_idx == 0 {
+            self.bytes.push(0);
+        }
+        if bit {
+            self.bytes[byte_idx] |= 1 << bit_idx;
+        }
+        self.bit_len += 1;
+    }
+
+    fn finish(&mut self) -> BooleanBuffer {
+        let len = self.bit_len;
+        let buffer = Buffer::from_vec(std::mem::take(&mut self.bytes));
+        self.bit_len = 0;
+        BooleanBuffer::new(buffer, 0, len)
+    }
+}
+
 struct ExactPrimitiveSink<T: arrow_array::ArrowPrimitiveType> {
     values: Vec<T::Native>,
-    validity: Vec<bool>,
+    validity: BitPackedSink,
     all_valid: bool,
 }
 
@@ -389,7 +445,7 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
     fn new() -> Self {
         Self {
             values: Vec::new(),
-            validity: Vec::new(),
+            validity: BitPackedSink::new(),
             all_valid: true,
         }
     }
@@ -398,16 +454,11 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
         self.values
             .capacity()
             .saturating_mul(std::mem::size_of::<T::Native>())
-            .saturating_add(
-                self.validity
-                    .capacity()
-                    .saturating_mul(std::mem::size_of::<bool>()),
-            )
+            .saturating_add(self.validity.allocated_capacity_bytes())
     }
 
     fn calculate_growth_peak_and_new_capacity(&self, k: usize) -> (usize, usize) {
         let val_slot = std::mem::size_of::<T::Native>();
-        let bool_slot = std::mem::size_of::<bool>();
         let cur_val_cap = self.values.capacity();
         let needed_val = self.values.len().saturating_add(k);
         let cur_val_bytes = cur_val_cap.saturating_mul(val_slot);
@@ -418,15 +469,8 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
             (cur_val_bytes, cur_val_bytes)
         };
 
-        let cur_validity_cap = self.validity.capacity();
-        let needed_validity = self.validity.len().saturating_add(k);
-        let cur_validity_bytes = cur_validity_cap.saturating_mul(bool_slot);
-        let (validity_transient, new_validity_bytes) = if needed_validity > cur_validity_cap {
-            let new_bytes = needed_validity.saturating_mul(bool_slot);
-            (cur_validity_bytes.saturating_add(new_bytes), new_bytes)
-        } else {
-            (cur_validity_bytes, cur_validity_bytes)
-        };
+        let (validity_transient, new_validity_bytes) =
+            self.validity.calculate_growth_peak_and_new_capacity(k);
 
         (
             val_transient.saturating_add(validity_transient),
@@ -436,7 +480,7 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
 
     fn prepare_append(&mut self, k: usize) {
         self.values.reserve_exact(k);
-        self.validity.reserve_exact(k);
+        self.validity.prepare_append(k);
     }
 
     fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
@@ -449,10 +493,10 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
         for index in 0..len {
             if values.is_null(index) {
                 self.all_valid = false;
-                self.validity.push(false);
+                self.validity.append_bit(false);
                 self.values.push(T::Native::default());
             } else {
-                self.validity.push(true);
+                self.validity.append_bit(true);
                 self.values.push(values.value(index));
             }
         }
@@ -464,67 +508,47 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
         let nulls = if self.all_valid {
             None
         } else {
-            Some(NullBuffer::from(std::mem::take(&mut self.validity)))
+            let validity_buf = self.validity.finish();
+            Some(NullBuffer::new(validity_buf))
         };
-        *self = Self::new();
+        self.all_valid = true;
         Ok(Arc::new(PrimitiveArray::<T>::new(values, nulls)))
     }
 }
 
 struct ExactBooleanSink {
-    values: Vec<bool>,
-    validity: Vec<bool>,
+    values: BitPackedSink,
+    validity: BitPackedSink,
     all_valid: bool,
 }
 
 impl ExactBooleanSink {
     fn new() -> Self {
         Self {
-            values: Vec::new(),
-            validity: Vec::new(),
+            values: BitPackedSink::new(),
+            validity: BitPackedSink::new(),
             all_valid: true,
         }
     }
 
     fn allocated_capacity_bytes(&self) -> usize {
-        (self
-            .values
-            .capacity()
-            .saturating_add(self.validity.capacity()))
-        .saturating_mul(std::mem::size_of::<bool>())
+        self.values
+            .allocated_capacity_bytes()
+            .saturating_add(self.validity.allocated_capacity_bytes())
     }
 
     fn calculate_growth_peak_and_new_capacity(&self, k: usize) -> (usize, usize) {
-        let bool_slot = std::mem::size_of::<bool>();
-        let cur_val_cap = self.values.capacity();
-        let needed_val = self.values.len().saturating_add(k);
-        let cur_val_bytes = cur_val_cap.saturating_mul(bool_slot);
-        let (val_transient, new_val_bytes) = if needed_val > cur_val_cap {
-            let new_bytes = needed_val.saturating_mul(bool_slot);
-            (cur_val_bytes.saturating_add(new_bytes), new_bytes)
-        } else {
-            (cur_val_bytes, cur_val_bytes)
-        };
-
-        let cur_validity_cap = self.validity.capacity();
-        let needed_validity = self.validity.len().saturating_add(k);
-        let cur_validity_bytes = cur_validity_cap.saturating_mul(bool_slot);
-        let (validity_transient, new_validity_bytes) = if needed_validity > cur_validity_cap {
-            let new_bytes = needed_validity.saturating_mul(bool_slot);
-            (cur_validity_bytes.saturating_add(new_bytes), new_bytes)
-        } else {
-            (cur_validity_bytes, cur_validity_bytes)
-        };
-
+        let (val_transient, val_new) = self.values.calculate_growth_peak_and_new_capacity(k);
+        let (valid_transient, valid_new) = self.validity.calculate_growth_peak_and_new_capacity(k);
         (
-            val_transient.saturating_add(validity_transient),
-            new_val_bytes.saturating_add(new_validity_bytes),
+            val_transient.saturating_add(valid_transient),
+            val_new.saturating_add(valid_new),
         )
     }
 
     fn prepare_append(&mut self, k: usize) {
-        self.values.reserve_exact(k);
-        self.validity.reserve_exact(k);
+        self.values.prepare_append(k);
+        self.validity.prepare_append(k);
     }
 
     fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
@@ -537,32 +561,33 @@ impl ExactBooleanSink {
         for index in 0..len {
             if values.is_null(index) {
                 self.all_valid = false;
-                self.validity.push(false);
-                self.values.push(false);
+                self.validity.append_bit(false);
+                self.values.append_bit(false);
             } else {
-                self.validity.push(true);
-                self.values.push(values.value(index));
+                self.validity.append_bit(true);
+                self.values.append_bit(values.value(index));
             }
         }
         Ok(())
     }
 
     fn finish(&mut self) -> Result<ArrayRef, EngineError> {
-        let values = BooleanBuffer::from_iter(std::mem::take(&mut self.values));
+        let values_buf = self.values.finish();
         let nulls = if self.all_valid {
             None
         } else {
-            Some(NullBuffer::from(std::mem::take(&mut self.validity)))
+            let validity_buf = self.validity.finish();
+            Some(NullBuffer::new(validity_buf))
         };
-        *self = Self::new();
-        Ok(Arc::new(BooleanArray::new(values, nulls)))
+        self.all_valid = true;
+        Ok(Arc::new(BooleanArray::new(values_buf, nulls)))
     }
 }
 
 struct VariableBytes {
     offsets: Vec<i32>,
     values: Vec<u8>,
-    validity: Vec<bool>,
+    validity: BitPackedSink,
     all_valid: bool,
     data_bytes: usize,
 }
@@ -572,7 +597,7 @@ impl VariableBytes {
         Self {
             offsets: vec![0],
             values: Vec::new(),
-            validity: Vec::new(),
+            validity: BitPackedSink::new(),
             all_valid: true,
             data_bytes: 0,
         }
@@ -583,11 +608,7 @@ impl VariableBytes {
             .capacity()
             .saturating_mul(4)
             .saturating_add(self.values.capacity())
-            .saturating_add(
-                self.validity
-                    .capacity()
-                    .saturating_mul(std::mem::size_of::<bool>()),
-            )
+            .saturating_add(self.validity.allocated_capacity_bytes())
     }
 
     fn calculate_growth_peak_and_new_capacity(
@@ -607,15 +628,8 @@ impl VariableBytes {
             (cur_offsets_bytes, cur_offsets_bytes)
         };
 
-        let cur_validity_cap = self.validity.capacity();
-        let needed_validity = self.validity.len().saturating_add(k);
-        let cur_validity_bytes = cur_validity_cap.saturating_mul(std::mem::size_of::<bool>());
-        let (validity_transient, new_validity_bytes) = if needed_validity > cur_validity_cap {
-            let new_bytes = needed_validity.saturating_mul(std::mem::size_of::<bool>());
-            (cur_validity_bytes.saturating_add(new_bytes), new_bytes)
-        } else {
-            (cur_validity_bytes, cur_validity_bytes)
-        };
+        let (validity_transient, new_validity_bytes) =
+            self.validity.calculate_growth_peak_and_new_capacity(k);
 
         let cur_values_cap = self.values.capacity();
         let needed_values = self.values.len().saturating_add(additional_data);
@@ -639,7 +653,7 @@ impl VariableBytes {
 
     fn prepare_append(&mut self, rows: usize, data_bytes: usize) {
         self.offsets.reserve_exact(rows);
-        self.validity.reserve_exact(rows);
+        self.validity.prepare_append(rows);
         self.values.reserve_exact(data_bytes);
     }
 
@@ -647,11 +661,11 @@ impl VariableBytes {
         match payload {
             None => {
                 self.all_valid = false;
-                self.validity.push(false);
+                self.validity.append_bit(false);
             }
             Some(bytes) => {
                 self.values.extend_from_slice(bytes);
-                self.validity.push(true);
+                self.validity.append_bit(true);
                 self.data_bytes = self.data_bytes.saturating_add(bytes.len());
             }
         }
@@ -669,7 +683,8 @@ impl VariableBytes {
         let nulls = if self.all_valid {
             None
         } else {
-            Some(NullBuffer::from(std::mem::take(&mut self.validity)))
+            let validity_buf = self.validity.finish();
+            Some(NullBuffer::new(validity_buf))
         };
         *self = Self::new();
         Ok((offsets, values, nulls))
