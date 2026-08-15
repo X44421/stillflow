@@ -50,6 +50,23 @@ impl PredictedSchema {
         Self { columns }
     }
 
+    pub(crate) fn to_logical_schema(&self) -> Result<LogicalSchema, EngineError> {
+        let fields = self
+            .columns
+            .iter()
+            .map(|col| {
+                LogicalField::new(
+                    col.id,
+                    col.name.clone(),
+                    col.data_type.clone(),
+                    col.nullable,
+                )
+                .map_err(|_| EngineError::Internal("invalid field in predicted schema"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        LogicalSchema::new(fields).map_err(|_| EngineError::Internal("invalid predicted schema"))
+    }
+
     fn column(&self, id: ColumnId) -> Result<&PredictedColumn, EngineError> {
         self.columns
             .iter()
@@ -119,7 +136,7 @@ pub(crate) fn predict(
             }
         }
     }
-    let predict_export = live_before.saturating_add(live_before);
+    let predict_export = predict_export_transition(&working, arrays, offset, k)?;
     Ok(peak.max(predict_export))
 }
 
@@ -425,17 +442,21 @@ fn expression_max_value_bytes(
         Expr::Column(id) => working.column(*id)?.max_value_bytes,
         Expr::Cast {
             data_type: LogicalType::Utf8,
-            ..
-        } => match data_type_of_cast_source(working, expression)? {
-            LogicalType::Boolean => MAX_BOOL_UTF8_BYTES,
-            LogicalType::Float32 | LogicalType::Float64 => MAX_FLOAT_UTF8_BYTES,
-            LogicalType::Date32 | LogicalType::Timestamp { .. } => {
-                return Err(EngineError::TypeError(
-                    "cast from date32 or timestamp to utf8 is paused",
-                ));
+            expression: inner,
+        } => {
+            let schema = working.to_logical_schema()?;
+            let src_type = crate::typing::type_check_expr(inner, &schema)?;
+            match src_type {
+                LogicalType::Boolean => MAX_BOOL_UTF8_BYTES,
+                LogicalType::Float32 | LogicalType::Float64 => MAX_FLOAT_UTF8_BYTES,
+                LogicalType::Date32 | LogicalType::Timestamp { .. } => {
+                    return Err(EngineError::TypeError(
+                        "cast from date32 or timestamp to utf8 is paused",
+                    ));
+                }
+                _ => MAX_INT_UTF8_BYTES,
             }
-            _ => MAX_INT_UTF8_BYTES,
-        },
+        }
         Expr::Cast { .. } => 0,
         Expr::Coalesce { expressions } => {
             let mut width = 0_usize;
@@ -448,24 +469,32 @@ fn expression_max_value_bytes(
     })
 }
 
-fn data_type_of_cast_source(
-    working: &PredictedSchema,
-    expression: &Expr,
-) -> Result<LogicalType, EngineError> {
-    match expression {
-        Expr::Cast { expression, .. } => match expression.as_ref() {
-            Expr::Column(id) => Ok(working.column(*id)?.data_type.clone()),
-            Expr::Literal(ScalarValue::Boolean(_)) => Ok(LogicalType::Boolean),
-            Expr::Literal(ScalarValue::Int64(_)) => Ok(LogicalType::Int64),
-            Expr::Literal(ScalarValue::UInt64(_)) => Ok(LogicalType::UInt64),
-            Expr::Literal(ScalarValue::Float64(_)) => Ok(LogicalType::Float64),
-            Expr::Literal(ScalarValue::Utf8(_)) => Ok(LogicalType::Utf8),
-            Expr::Literal(ScalarValue::Null) => Ok(LogicalType::Null),
-            other => data_type_of_cast_source(working, other),
-        },
-        Expr::Column(id) => Ok(working.column(*id)?.data_type.clone()),
-        _ => Ok(LogicalType::Utf8),
+fn predict_export_transition(
+    schema: &PredictedSchema,
+    arrays: &[arrow_array::ArrayRef],
+    offset: usize,
+    k: usize,
+) -> Result<usize, EngineError> {
+    let mut total_polars_bytes = 0_usize;
+    for col in &schema.columns {
+        total_polars_bytes =
+            total_polars_bytes.saturating_add(column_physical_bytes(col, arrays, offset, k)?);
     }
+    let mut max_transition_peak = total_polars_bytes;
+    let mut finished_arrow = 0_usize;
+    let mut remaining_polars = total_polars_bytes;
+    for col in &schema.columns {
+        let col_bytes = column_physical_bytes(col, arrays, offset, k)?;
+        remaining_polars = remaining_polars.saturating_sub(col_bytes);
+        let builder_transient = col_bytes.saturating_mul(2);
+        let current_transition = remaining_polars
+            .saturating_add(finished_arrow)
+            .saturating_add(builder_transient);
+        max_transition_peak = max_transition_peak.max(current_transition);
+        finished_arrow = finished_arrow.saturating_add(col_bytes);
+    }
+    max_transition_peak = max_transition_peak.max(finished_arrow);
+    Ok(max_transition_peak)
 }
 
 fn nested_or_variable_bytes(

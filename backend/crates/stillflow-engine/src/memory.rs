@@ -79,79 +79,47 @@ pub(crate) fn alloc_peaks() -> (usize, usize, usize) {
 }
 
 #[cfg(test)]
-pub(crate) fn record_alloc(size: usize) {
-    match current_alloc_phase() {
-        AllocatorPhase::Idle => {}
-        AllocatorPhase::Polars => add_live_atomic(&POLARS_LIVE, &POLARS_PEAK, size),
-        AllocatorPhase::Remainder => add_live_atomic(&REMAINDER_LIVE, &REMAINDER_PEAK, size),
-        AllocatorPhase::StorageAppend => add_live_atomic(&STORAGE_LIVE, &STORAGE_PEAK, size),
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn record_dealloc(size: usize) {
-    match current_alloc_phase() {
-        AllocatorPhase::Idle => {}
-        AllocatorPhase::Polars => sub_live_atomic(&POLARS_LIVE, size),
-        AllocatorPhase::Remainder => {
-            sub_live_with_fallback(&REMAINDER_LIVE, &POLARS_LIVE, size);
-        }
-        AllocatorPhase::StorageAppend => {
-            sub_live_with_fallback(&STORAGE_LIVE, &REMAINDER_LIVE, size);
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn record_realloc(old_size: usize, new_size: usize) {
-    match current_alloc_phase() {
-        AllocatorPhase::Idle => {}
-        AllocatorPhase::Polars => {
-            realloc_live_atomic(&POLARS_LIVE, &POLARS_PEAK, old_size, new_size)
-        }
-        AllocatorPhase::Remainder => {
-            realloc_live_atomic(&REMAINDER_LIVE, &REMAINDER_PEAK, old_size, new_size)
-        }
-        AllocatorPhase::StorageAppend => {
-            realloc_live_atomic(&STORAGE_LIVE, &STORAGE_PEAK, old_size, new_size)
-        }
-    }
-}
-
-#[cfg(test)]
-fn add_live_atomic(live: &AtomicUsize, peak: &AtomicUsize, size: usize) {
+pub(crate) fn record_alloc_phase(phase: u8, size: usize) {
+    let (live, peak) = match phase {
+        1 => (&POLARS_LIVE, &POLARS_PEAK),
+        2 => (&REMAINDER_LIVE, &REMAINDER_PEAK),
+        3 => (&STORAGE_LIVE, &STORAGE_PEAK),
+        _ => return,
+    };
     let next = live.fetch_add(size, Ordering::SeqCst).saturating_add(size);
     peak.fetch_max(next, Ordering::SeqCst);
 }
 
 #[cfg(test)]
-fn realloc_live_atomic(live: &AtomicUsize, peak: &AtomicUsize, old_size: usize, new_size: usize) {
-    let current = live.load(Ordering::SeqCst);
-    let transient = current.saturating_add(new_size);
-    peak.fetch_max(transient, Ordering::SeqCst);
-    if new_size >= old_size {
-        live.fetch_add(new_size - old_size, Ordering::SeqCst);
-    } else {
-        sub_live_atomic(live, old_size - new_size);
-    }
-}
-
-#[cfg(test)]
-fn sub_live_atomic(live: &AtomicUsize, size: usize) {
+pub(crate) fn record_dealloc_phase(phase: u8, size: usize) {
+    let live = match phase {
+        1 => &POLARS_LIVE,
+        2 => &REMAINDER_LIVE,
+        3 => &STORAGE_LIVE,
+        _ => return,
+    };
     let _ = live.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
         Some(val.saturating_sub(size))
     });
 }
 
 #[cfg(test)]
-fn sub_live_with_fallback(primary: &AtomicUsize, fallback: &AtomicUsize, size: usize) {
-    let prev = primary.load(Ordering::SeqCst);
-    if prev >= size {
-        primary.fetch_sub(size, Ordering::SeqCst);
+pub(crate) fn record_realloc_phase(phase: u8, old_size: usize, new_size: usize) {
+    let (live, peak) = match phase {
+        1 => (&POLARS_LIVE, &POLARS_PEAK),
+        2 => (&REMAINDER_LIVE, &REMAINDER_PEAK),
+        3 => (&STORAGE_LIVE, &STORAGE_PEAK),
+        _ => return,
+    };
+    let current = live.load(Ordering::SeqCst);
+    let transient = current.saturating_add(new_size);
+    peak.fetch_max(transient, Ordering::SeqCst);
+    if new_size >= old_size {
+        live.fetch_add(new_size - old_size, Ordering::SeqCst);
     } else {
-        primary.store(0, Ordering::SeqCst);
-        let remaining = size - prev;
-        sub_live_atomic(fallback, remaining);
+        let _ = live.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+            Some(val.saturating_sub(old_size - new_size))
+        });
     }
 }
 

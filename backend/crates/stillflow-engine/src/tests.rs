@@ -599,11 +599,13 @@ async fn t44_phased_allocator_excludes_storage_encode() {
     assert!(report.remainder_phase_peak > 0);
     assert!(report.storage_append_phase_peak > 0);
     assert!(envelope_bytes <= MAX_BATCH_BYTES);
-    let engine_phases = report
-        .polars_phase_peak
+    assert!(report.polars_phase_peak <= MAX_BATCH_BYTES);
+    assert!(report.remainder_phase_peak <= MAX_BATCH_BYTES);
+    let total_live_engine = envelope_bytes
+        .saturating_add(report.polars_phase_peak)
         .saturating_add(report.remainder_phase_peak)
         .saturating_add(MAX_OPERATOR_STATE_BYTES);
-    assert!(engine_phases <= MAX_ENGINE_PEAK_BYTES);
+    assert!(total_live_engine <= MAX_ENGINE_PEAK_BYTES);
     assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
 }
 
@@ -671,7 +673,7 @@ async fn fifth_materialize_is_busy_without_inspect() {
 #[test]
 fn t46_near_64mib_export_transition_respects_bounds() {
     let (schema, id) = int_schema();
-    let values = Int64Array::from((0..10_000_i64).collect::<Vec<_>>());
+    let values = Int64Array::from((0..20_000_i64).collect::<Vec<_>>());
     let factory = BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), Uuid::from_u128(42))
         .expect("factory");
     let batch = RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(values)])
@@ -686,9 +688,12 @@ fn t46_near_64mib_export_transition_respects_bounds() {
             expression: Expr::Literal(ScalarValue::Utf8("z".repeat(3000))),
         }],
     }];
-    let k = largest_feasible_k(10_000, 0, batch.columns(), &predicted, &steps).expect("k");
+    let k = largest_feasible_k(20_000, 0, batch.columns(), &predicted, &steps).expect("k");
+    assert!((1..20_000).contains(&k));
     let peak = predict(k, 0, batch.columns(), &predicted, &steps).expect("predict");
     assert!(peak <= MAX_BATCH_BYTES);
+    let peak_next = predict(k + 1, 0, batch.columns(), &predicted, &steps).expect("predict next");
+    assert!(peak_next > MAX_BATCH_BYTES);
     let _ = id;
 }
 
@@ -828,9 +833,9 @@ async fn t50_lub_strict_casting_in_comparisons_and_coalesce() {
     let manifest = engine
         .materialize(ExecutionRequest {
             plan,
-            connection,
-            asset: source,
-            schema_override: Some(schema),
+            connection: connection.clone(),
+            asset: source.clone(),
+            schema_override: Some(schema.clone()),
             identities: identities(),
             context: stillflow_core::RequestContext::default(),
             batch_size: 64,
@@ -839,6 +844,61 @@ async fn t50_lub_strict_casting_in_comparisons_and_coalesce() {
         .await
         .expect("materialize");
     assert_eq!(manifest.snapshot().stats().row_count(), 1);
+
+    // Also test Coalesce with mixed Int32 and Int64
+    let schema2 = LogicalSchema::new(vec![
+        LogicalField::new(id1, "a", LogicalType::Int32, true).expect("f1"),
+        LogicalField::new(id2, "b", LogicalType::Int64, false).expect("f2"),
+    ])
+    .expect("schema2");
+    let factory2 =
+        BatchEnvelopeFactory::try_new(Arc::new(schema2.clone()), source.id).expect("factory2");
+    let coalesce_plan = scan_materialize_plan_with_projection(
+        source.id,
+        vec![id1, id2],
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::DeriveColumn {
+                id: column(3),
+                name: "c".to_owned(),
+                data_type: LogicalType::Int64,
+                nullable: false,
+                expression: Expr::Coalesce {
+                    expressions: vec![Expr::Column(id1), Expr::Column(id2)],
+                },
+            }],
+        }),
+    );
+    let a_arr2 = arrow_array::Int32Array::from(vec![Some(100_i32), None]);
+    let b_arr2 = Int64Array::from(vec![200_i64, 300_i64]);
+    let batch2 = RecordBatch::try_new(
+        factory2.arrow_schema().clone(),
+        vec![Arc::new(a_arr2), Arc::new(b_arr2)],
+    )
+    .expect("batch2");
+    let envelope2 = factory2.try_build(0, batch2).expect("envelope2");
+    let (engine2, _) = engine_with(schema2.clone(), vec![envelope2], true).await;
+    let store_dir2 = tempfile::TempDir::new().expect("temp");
+    let store2 = SnapshotStore::open(store_dir2.path(), StorageLimits::default()).expect("store");
+    let manifest2 = engine2
+        .materialize(ExecutionRequest {
+            plan: coalesce_plan,
+            connection,
+            asset: source,
+            schema_override: Some(schema2),
+            identities: identities(),
+            context: stillflow_core::RequestContext::default(),
+            batch_size: 64,
+            store: &store2,
+        })
+        .await
+        .expect("materialize coalesce");
+    assert_eq!(manifest2.snapshot().stats().row_count(), 2);
+    let c_field = manifest2
+        .snapshot()
+        .schema()
+        .field(column(3))
+        .expect("c field");
+    assert_eq!(c_field.data_type, LogicalType::Int64);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -913,6 +973,23 @@ fn t52_float_to_utf8_prediction_bound() {
     let cost = predict(k, 0, batch.columns(), &predicted, &steps).expect("predict");
     let min_utf8_expected = utf8_physical_bytes(k, k.saturating_mul(crate::MAX_FLOAT_UTF8_BYTES));
     assert!(cost >= min_utf8_expected);
+
+    // Also test nested expression cast: Expr::Cast(Float -> Utf8)
+    let nested_steps = vec![crate::preflight::CompiledStep::Rules {
+        rules: vec![Rule::DeriveColumn {
+            id: column(2),
+            name: "str_val".to_owned(),
+            data_type: LogicalType::Utf8,
+            nullable: false,
+            expression: Expr::Cast {
+                expression: Box::new(Expr::Column(id)),
+                data_type: LogicalType::Utf8,
+            },
+        }],
+    }];
+    let nested_cost =
+        predict(k, 0, batch.columns(), &predicted, &nested_steps).expect("predict nested");
+    assert!(nested_cost >= min_utf8_expected);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -948,8 +1025,32 @@ async fn t53_binary_cast_rejection() {
             &stillflow_core::RequestContext::default(),
         )
         .await
-        .expect_err("binary cast");
+        .expect_err("binary to utf8 cast");
     assert!(matches!(error, EngineError::TypeError(_)));
+
+    // Reverse: Cast Int64 to Binary
+    let (int_schema, int_id) = int_schema();
+    let plan_reverse = scan_materialize_plan(
+        source.id,
+        Some(PlanNodeKind::ApplyRules {
+            rules: vec![Rule::Cast {
+                column: int_id,
+                data_type: LogicalType::Binary,
+                on_failure: stillflow_plan::CastFailurePolicy::Error,
+            }],
+        }),
+    );
+    let error_rev = engine
+        .preflight(
+            &plan_reverse,
+            &connection,
+            &source,
+            Some(&int_schema),
+            &stillflow_core::RequestContext::default(),
+        )
+        .await
+        .expect_err("int64 to binary cast");
+    assert!(matches!(error_rev, EngineError::TypeError(_)));
 }
 
 #[test]
@@ -957,4 +1058,8 @@ fn t54_fallback_error_sanitization_is_always_internal() {
     let summary = crate::error::EngineError::Internal("test internal").sanitized_summary();
     assert_eq!(summary.category, stillflow_core::ErrorCategory::Internal);
     assert!(!summary.retryable);
+
+    let summary2 = crate::error::EngineError::Ffi.sanitized_summary();
+    assert_eq!(summary2.category, stillflow_core::ErrorCategory::Internal);
+    assert!(!summary2.retryable);
 }

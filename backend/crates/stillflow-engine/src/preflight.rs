@@ -49,9 +49,9 @@ pub(crate) async fn preflight(
         return Err(deadline_too_long(Duration::from_secs(0)));
     }
 
+    validate_plan_exprs_iterative(plan)?;
     plan.validate()
         .map_err(|_| EngineError::InvalidPlan("logical plan failed validation"))?;
-    validate_plan_exprs_iterative(plan)?;
     if compiled_plan_bytes(plan) > MAX_COMPILED_PLAN_BYTES {
         return Err(EngineError::BoundExceeded(
             "compiled plan exceeds MAX_COMPILED_PLAN_BYTES",

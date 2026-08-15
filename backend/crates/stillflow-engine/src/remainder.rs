@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow_array::builder::{BooleanBuilder, PrimitiveBuilder};
+use arrow_array::builder::{ArrayBuilder, BooleanBuilder, PrimitiveBuilder};
 use arrow_array::types::{
     Date32Type, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type,
     TimestampMicrosecondType, TimestampMillisecondType, TimestampNanosecondType, UInt16Type,
@@ -81,8 +81,7 @@ impl CanonicalRebatcher {
                     "a single transformed row exceeds MAX_BATCH_BYTES",
                 ));
             }
-            let required_bytes = self.predicted_bytes_with(&remaining, k);
-            if required_bytes > MAX_BATCH_BYTES {
+            if !self.can_reserve_for(&remaining, k)? {
                 if self.remainder_live() {
                     self.flush(&mut publish, tracker)?;
                     continue;
@@ -117,6 +116,28 @@ impl CanonicalRebatcher {
             self.flush(&mut publish, tracker)?;
         }
         Ok(())
+    }
+
+    fn can_reserve_for(&self, incoming: &RecordBatch, k: usize) -> Result<bool, EngineError> {
+        if incoming.num_columns() != self.sinks.len() {
+            return Err(EngineError::Internal("remainder column mismatch"));
+        }
+        let total_current_cap = self.remainder_bytes();
+        let mut total_resulting_cap = 0_usize;
+        for (sink, array) in self.sinks.iter().zip(incoming.columns()) {
+            let sink_current_cap = sink.allocated_capacity_bytes();
+            let other_live_cap = total_current_cap.saturating_sub(sink_current_cap);
+            let (transient_peak, new_cap) =
+                sink.calculate_growth_peak_and_new_capacity(array.as_ref(), k);
+            if other_live_cap.saturating_add(transient_peak) > MAX_BATCH_BYTES {
+                return Ok(false);
+            }
+            total_resulting_cap = total_resulting_cap.saturating_add(new_cap);
+            if total_resulting_cap > MAX_BATCH_BYTES {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn max_prefix(&self, incoming: &RecordBatch) -> Result<usize, EngineError> {
@@ -331,6 +352,34 @@ impl ColumnSink {
         }
     }
 
+    fn calculate_growth_peak_and_new_capacity(
+        &self,
+        array: &dyn Array,
+        k: usize,
+    ) -> (usize, usize) {
+        match self {
+            Self::Null => (0, 0),
+            Self::Boolean(b) => boolean_growth(b, k),
+            Self::Int8(b) => primitive_growth(b, k),
+            Self::UInt8(b) => primitive_growth(b, k),
+            Self::Int16(b) => primitive_growth(b, k),
+            Self::UInt16(b) => primitive_growth(b, k),
+            Self::Int32(b) => primitive_growth(b, k),
+            Self::UInt32(b) => primitive_growth(b, k),
+            Self::Float32(b) => primitive_growth(b, k),
+            Self::Date32(b) => primitive_growth(b, k),
+            Self::Int64(b) => primitive_growth(b, k),
+            Self::UInt64(b) => primitive_growth(b, k),
+            Self::Float64(b) => primitive_growth(b, k),
+            Self::TimestampMs(b, _) => primitive_growth(b, k),
+            Self::TimestampUs(b, _) => primitive_growth(b, k),
+            Self::TimestampNs(b, _) => primitive_growth(b, k),
+            Self::Utf8(sink) | Self::Binary(sink) => {
+                sink.calculate_growth_peak_and_new_capacity(array, k)
+            }
+        }
+    }
+
     fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
         let slice = array.slice(0, k);
         match self {
@@ -410,6 +459,53 @@ impl VariableBytes {
             .saturating_mul(4)
             .saturating_add(self.values.capacity())
             .saturating_add(self.validity.capacity().div_ceil(8))
+    }
+
+    fn calculate_growth_peak_and_new_capacity(
+        &self,
+        array: &dyn Array,
+        k: usize,
+    ) -> (usize, usize) {
+        let additional_data = array_data_bytes_for_slice(array, k);
+
+        let cur_offsets_cap = self.offsets.capacity();
+        let needed_offsets = self.offsets.len().saturating_add(k);
+        let cur_offsets_bytes = cur_offsets_cap.saturating_mul(4);
+        let (offsets_transient, new_offsets_bytes) = if needed_offsets > cur_offsets_cap {
+            let new_bytes = needed_offsets.saturating_mul(4);
+            (cur_offsets_bytes.saturating_add(new_bytes), new_bytes)
+        } else {
+            (cur_offsets_bytes, cur_offsets_bytes)
+        };
+
+        let cur_validity_cap = self.validity.capacity();
+        let needed_validity = self.validity.len().saturating_add(k);
+        let cur_validity_bytes = cur_validity_cap.div_ceil(8);
+        let (validity_transient, new_validity_bytes) = if needed_validity > cur_validity_cap {
+            let new_bytes = needed_validity.div_ceil(8);
+            (cur_validity_bytes.saturating_add(new_bytes), new_bytes)
+        } else {
+            (cur_validity_bytes, cur_validity_bytes)
+        };
+
+        let cur_values_cap = self.values.capacity();
+        let needed_values = self.values.len().saturating_add(additional_data);
+        let cur_values_bytes = cur_values_cap;
+        let (values_transient, new_values_bytes) = if needed_values > cur_values_cap {
+            let new_bytes = needed_values;
+            (cur_values_bytes.saturating_add(new_bytes), new_bytes)
+        } else {
+            (cur_values_bytes, cur_values_bytes)
+        };
+
+        (
+            offsets_transient
+                .saturating_add(validity_transient)
+                .saturating_add(values_transient),
+            new_offsets_bytes
+                .saturating_add(new_validity_bytes)
+                .saturating_add(new_values_bytes),
+        )
     }
 
     fn prepare_append(&mut self, rows: usize, data_bytes: usize) {
@@ -506,6 +602,81 @@ fn utf8_range_bytes(array: &StringArray, offset: usize, k: usize) -> usize {
     let start = offsets[offset] as usize;
     let end = offsets[offset + k] as usize;
     end.saturating_sub(start)
+}
+
+fn boolean_growth(builder: &BooleanBuilder, k: usize) -> (usize, usize) {
+    let cur_items = builder.len();
+    let cur_cap = builder.capacity();
+    let cur_cap_bytes = cur_cap.div_ceil(8).saturating_mul(2);
+    let needed_items = cur_items.saturating_add(k);
+    if needed_items > cur_cap {
+        let new_cap_bytes = needed_items.div_ceil(8).saturating_mul(2);
+        (cur_cap_bytes.saturating_add(new_cap_bytes), new_cap_bytes)
+    } else {
+        (cur_cap_bytes, cur_cap_bytes)
+    }
+}
+
+fn primitive_growth<T: arrow_array::ArrowPrimitiveType>(
+    builder: &PrimitiveBuilder<T>,
+    k: usize,
+) -> (usize, usize) {
+    let slot = std::mem::size_of::<T::Native>();
+    let cur_items = builder.len();
+    let cur_cap = builder.capacity();
+    let cur_cap_bytes = cur_cap
+        .saturating_mul(slot)
+        .saturating_add(cur_cap.div_ceil(8));
+    let needed_items = cur_items.saturating_add(k);
+    if needed_items > cur_cap {
+        let new_cap_bytes = needed_items
+            .saturating_mul(slot)
+            .saturating_add(needed_items.div_ceil(8));
+        (cur_cap_bytes.saturating_add(new_cap_bytes), new_cap_bytes)
+    } else {
+        (cur_cap_bytes, cur_cap_bytes)
+    }
+}
+
+fn array_data_bytes_for_slice(array: &dyn Array, k: usize) -> usize {
+    let end = k.min(array.len());
+    if let Some(utf8) = array.as_any().downcast_ref::<StringArray>() {
+        return utf8_range_bytes(utf8, 0, end);
+    }
+    if let Some(binary) = array.as_any().downcast_ref::<BinaryArray>() {
+        let mut data = 0_usize;
+        for i in 0..end {
+            if !binary.is_null(i) {
+                data = data.saturating_add(binary.value(i).len());
+            }
+        }
+        return data;
+    }
+    if let Some(view) = array
+        .as_any()
+        .downcast_ref::<arrow_array::StringViewArray>()
+    {
+        let mut data = 0_usize;
+        for i in 0..end {
+            if !view.is_null(i) {
+                data = data.saturating_add(view.value(i).len());
+            }
+        }
+        return data;
+    }
+    if let Some(large) = array
+        .as_any()
+        .downcast_ref::<arrow_array::LargeStringArray>()
+    {
+        let mut data = 0_usize;
+        for i in 0..end {
+            if !large.is_null(i) {
+                data = data.saturating_add(large.value(i).len());
+            }
+        }
+        return data;
+    }
+    0
 }
 
 fn append_bool(builder: &mut BooleanBuilder, array: &dyn Array) -> Result<(), EngineError> {
