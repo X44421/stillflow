@@ -340,17 +340,21 @@ Two preview surfaces remain distinct:
   `PreviewData`) is the existing connector diagnostic and is unchanged.
 - Engine node-level Preview (Issue #50) executes a validated E2 logical plan
   only through one caller-selected `target_node_id`. It returns the earliest
-  deterministic prefix and reports `rows_truncated`, `bytes_truncated`, and
-  `source_exhausted`. It never creates a Snapshot and never calls
-  `SnapshotWriter`.
+  deterministic prefix and reports `rows_truncated`, `bytes_truncated`,
+  `scan_truncated`, and observed `source_exhausted`. Its raw input scan is
+  bounded by 100,000 rows and 64 MiB. It never creates a Snapshot and never
+  calls `SnapshotWriter`.
 
 Defaults and ceilings:
 
 - Default engine node-level Preview: 1,000 rows / 8 MiB.
 - Maximum engine node-level Preview: 10,000 rows / 50 MiB.
 - Preview deadline: 30 s.
-- Preview shares the E2 run gate: 4 concurrent requests; the fifth is
-  `Busy`.
+- Preview raw input scan: maximum 100,000 rows and 64 MiB per request;
+  exceeding either bound reports `scan_truncated` instead of scanning the
+  full source.
+- Preview shares the E2 run gate: `MAX_ENGINE_CONCURRENT_RUNS` concurrent
+  requests; the next request is `Busy`.
 - Column projection is mandatory when the caller selects columns.
 - Remote byte reads use ranges when supported.
 - Every result reports whether rows or bytes were truncated.
@@ -466,8 +470,9 @@ Contract: [`issue-046-deterministic-engine-execution-contract.md`](issues/issue-
   Request changes until architecture approval binds the contract SHA. It
   must not be based on or modify PR #49.
 - E3 runtime: node-level Preview using the same E2 preflight, typing,
-  lowering, chunker, and sanitized errors, with frozen row/byte/deadline/
-  concurrency ceilings and the P01–P15 acceptance matrix.
+  lowering, chunker, and sanitized errors, with frozen output row/byte,
+  input scan row/byte, deadline, concurrency, and allocated-capacity
+  ceilings and the P01–P15 acceptance matrix.
 - E4: `Validate`, Rejected Rows, and `Deduplicate`.
 - E5: job runtime and Axum Preview / Run / Status / Cancel.
 

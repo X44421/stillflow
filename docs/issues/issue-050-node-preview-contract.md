@@ -1,7 +1,8 @@
 # Issue #50 Implementation Contract: node-level Preview (E3-C0)
 
 > Status: Frozen for architecture review (not approved)
-> Revision: C0
+> Revision: C0-R1
+> Supersedes: C0 at `a57589edc160739130b3d5375134c003613b9d0e`
 > Risk: High
 > Issue: #50
 > Parent contract: Issue #46 revision R3, merged at
@@ -9,9 +10,11 @@
 > Authorized base: `main@4b65204cfdb69c73389fba77cf4fd9715e94cba`
 > Branch: `agent/issue-050-node-preview-contract`
 > Last updated: 2026-08-15
-> Review: Keep the PR draft and Request changes. Architecture approval binds
-> exactly one commit SHA of this file. Runtime implementation starts only
-> after that approval.
+> Review: PR #51 remains draft with Request changes. C0 at
+> `a57589edc160739130b3d5375134c003613b9d0e` was not approved. This C0-R1
+> revision resolves P0-1/P0-2/P0-3; architecture approval binds exactly one
+> new commit SHA of this file. Runtime implementation starts only after
+> that approval.
 
 This document freezes the public contract and objective acceptance matrix for
 Engine E3-C0 node-level Preview. It does **not** authorize any Rust runtime
@@ -72,7 +75,8 @@ Documentation of:
 - Reuse of E2 preflight, typing, lowering, chunker, rebatching accounting,
   and sanitized errors.
 - Exact row, byte, deadline, and concurrency ceilings.
-- Deterministic earliest-prefix truncation and the three reporting fields.
+- Deterministic earliest-prefix truncation and the four reporting flags plus
+  two source-scan counters.
 - Preview response-buffer memory model and peak law.
 - Read-only guarantees: no Snapshot, no `SnapshotWriter`, no generated IDs or
   timestamps, no partial-result publication.
@@ -115,9 +119,12 @@ pub const PREVIEW_MAX_ROW_LIMIT: usize = 10_000;
 pub const PREVIEW_DEFAULT_BYTE_LIMIT: usize = 8 * 1024 * 1024;
 pub const PREVIEW_MAX_BYTE_LIMIT: usize = 50 * 1024 * 1024;
 pub const PREVIEW_DEFAULT_BATCH_SIZE: usize = 1_024;
+pub const PREVIEW_MAX_SOURCE_ROWS_SCANNED: usize = 100_000;
+pub const PREVIEW_MAX_SOURCE_BYTES_SCANNED: usize = MAX_BATCH_BYTES; // 64 MiB
 pub const PREVIEW_DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
 pub const PREVIEW_MAX_DEADLINE: Duration = Duration::from_secs(30);
-pub const PREVIEW_MAX_CONCURRENT_REQUESTS: usize = 4;
+pub const PREVIEW_MAX_CONCURRENT_REQUESTS: usize =
+    MAX_ENGINE_CONCURRENT_RUNS as usize;
 pub const PREVIEW_RESPONSE_MAX_BYTES: usize = PREVIEW_MAX_BYTE_LIMIT;
 pub const PREVIEW_PEAK_ENGINE_BYTES: usize =
     MAX_BATCH_BYTES + MAX_BATCH_BYTES + PREVIEW_RESPONSE_MAX_BYTES
@@ -163,8 +170,11 @@ pub struct PreviewResult {
     pub batches: Vec<BatchEnvelope>,
     pub rows_returned: usize,
     pub bytes_returned: usize,
+    pub source_rows_scanned: usize,
+    pub source_bytes_scanned: usize,
     pub rows_truncated: bool,
     pub bytes_truncated: bool,
+    pub scan_truncated: bool,
     pub source_exhausted: bool,
 }
 
@@ -176,14 +186,15 @@ impl ExecutionEngine {
 }
 ```
 
-`PREVIEW_MAX_CONCURRENT_REQUESTS` is a documented alias of the E2 run-gate
-capacity `MAX_ENGINE_CONCURRENT_RUNS` (4). E3 must not create a second
-semaphore or any other admission-control primitive.
+`PREVIEW_MAX_CONCURRENT_REQUESTS` is a direct alias of the E2 run-gate
+capacity `MAX_ENGINE_CONCURRENT_RUNS`; no literal `4` is repeated in the
+public contract. E3 must not create a second semaphore or any other
+admission-control primitive.
 
 `PREVIEW_PEAK_ENGINE_BYTES` is a hard ceiling. The three columnar payloads
-are one connector envelope (`<= MAX_BATCH_BYTES`), one complete Polars
-working set (`<= MAX_BATCH_BYTES`), and the preview response buffer
-(`<= PREVIEW_RESPONSE_MAX_BYTES`). Operator state is
+are one connector envelope (`<= MAX_BATCH_BYTES`), one current export
+transition (`<= MAX_BATCH_BYTES`), and the preview response allocated
+capacity (`<= PREVIEW_RESPONSE_MAX_BYTES`). Operator state is
 `<= MAX_OPERATOR_STATE_BYTES`.
 
 ### 6.1 Request field contracts
@@ -199,6 +210,10 @@ working set (`<= MAX_BATCH_BYTES`), and the preview response buffer
 | `batch_size` | `1..=ReadRequest::MAX_BATCH_SIZE` (65,536) |
 | `row_limit` | `1..=PREVIEW_MAX_ROW_LIMIT`; `0` is invalid |
 | `byte_limit` | `1..=PREVIEW_MAX_BYTE_LIMIT`; `0` is invalid |
+
+Input scan caps are fixed public constants, not request fields:
+`PREVIEW_MAX_SOURCE_ROWS_SCANNED = 100_000` and
+`PREVIEW_MAX_SOURCE_BYTES_SCANNED = MAX_BATCH_BYTES` (64 MiB).
 
 `PreviewRequest` must not contain `SnapshotStore`, identities, sampling
 strategy, warnings, checkpoint, or a caller-held `PreparedPlan`.
@@ -217,12 +232,21 @@ in-memory response must be dropped before returning that error.
 | `batches` | Ordered from sequence 0; each is a validated `BatchEnvelope` for the target schema and bound `SourceAsset.id`; contiguous sequences; each envelope obeys `MAX_BATCH_ROWS` / `MAX_BATCH_BYTES` |
 | `rows_returned` | `sum(envelope.row_count())`; `<= row_limit` |
 | `bytes_returned` | `sum(envelope.byte_count())`; `<= byte_limit` |
-| `rows_truncated` | `true` iff the source contains more than `row_limit` rows; section 9.3 |
-| `bytes_truncated` | `true` iff the byte cap removed at least one row from the row-limited prefix; section 9.3 |
-| `source_exhausted` | `true` iff both truncation fields are false; all source rows were returned |
+| `source_rows_scanned` | Raw connector rows passed to target lowering; `<= PREVIEW_MAX_SOURCE_ROWS_SCANNED` |
+| `source_bytes_scanned` | Sum of full `envelope.byte_count()` for every envelope from which any raw row was passed to lowering; `<= PREVIEW_MAX_SOURCE_BYTES_SCANNED` |
+| `rows_truncated` | `true` iff lowering the observed scanned prefix produced more than `row_limit` target-output rows before terminal `None` or scan-cap stop; section 9.3 |
+| `bytes_truncated` | `true` iff the byte cap removed at least one target-output row from the row-limited prefix of the observed scanned output; section 9.3 |
+| `scan_truncated` | `true` iff input scanning stopped because of a source row/byte cap before terminal `None`; section 9.3 |
+| `source_exhausted` | `true` iff the connector stream returned terminal `None`; it is observed, never derived from the other flags |
 
 An empty source is a valid result: zero batches, zero rows, zero bytes,
-`rows_truncated = false`, `bytes_truncated = false`, `source_exhausted = true`.
+zero scanned rows/bytes, all truncation fields false,
+`source_exhausted = true`.
+
+`source_exhausted` may be `true` together with `bytes_truncated = true`
+when the byte cap excluded rows but the connector stream was then polled to
+terminal `None`. It cannot be `true` together with `rows_truncated` or
+`scan_truncated`.
 
 Neither `PreviewRequest` nor `PreviewResult` implements `serde::Serialize`.
 The batch payload remains the versioned `BatchEnvelope` boundary; no Polars
@@ -237,8 +261,9 @@ The only authorized E3 deltas are:
 
 1. a private preview target argument threaded through the same preflight;
 2. cutoff of the compiled step prefix at the target;
-3. a bounded preview response accumulator and the three reporting fields;
-4. preview-specific limits in section 8.
+3. a bounded preview response accumulator, the four reporting flags, and
+   the two source-scan counters;
+4. preview-specific output and input-scan limits in section 8.
 
 E3 must not re-implement or fork any of the following:
 
@@ -264,15 +289,17 @@ in section 13. No TBD value is permitted.
 | --- | --- | --- | --- |
 | Preview rows returned | 10,000 | 1,000 | this contract |
 | Preview bytes returned | 50 MiB | 8 MiB | this contract |
-| Preview response buffer | `byte_limit` (max 50 MiB) | 8 MiB | this contract |
 | Preview deadline | 30 s | 30 s | this contract |
-| Preview concurrent requests | 4 | 4 | shared E2 run gate |
+| Preview concurrent requests | `MAX_ENGINE_CONCURRENT_RUNS` | same | shared E2 run gate |
+| Source rows scanned per preview | 100,000 | same | this contract |
+| Source bytes scanned per preview | 64 MiB | same | this contract |
 | `batch_size` | 65,536 | 1,024 | E2 / `ReadRequest` |
 | Input envelope rows | 65,536 | — | `stillflow-core` |
 | Input envelope Arrow bytes | 64 MiB | — | `stillflow-core` |
-| Complete Polars working set | 64 MiB | — | Issue #46 §14.1 |
+| Current export transition | 64 MiB | — | Issue #46 §14.3 and section 10 |
+| Preview response allocated capacity | `byte_limit` (max 50 MiB) | 8 MiB | this contract |
 | Live columnar payloads | 3 | 3 | Issue #46 §14.1 |
-| Operator state | 5 MiB | — | Issue #46 §14.1 |
+| Operator state (including response metadata) | 5 MiB | — | Issue #46 §14.1 |
 | Preview peak engine bytes | 183 MiB | — | section 10 |
 | Plan nodes / rules / expr nodes / expr depth | 64 / 256 / 1,024 / 64 | — | Issue #46 §7 |
 | Schema fields / depth / text | 4,096 / 64 / 1 MiB | — | #30 |
@@ -319,30 +346,77 @@ after E2 `linearize` and before `ConnectorRegistry::capabilities` /
 A plan whose root is not `Materialize` is already an E2 `InvalidPlan`; E3
 must not invent a fragment-plan preflight path.
 
-### 9.3 Truncation law
+### 9.3 Input scan bound and truncation law
 
-Let `S` be the ordered target output row sequence for the complete source,
-and let `Q` be the longest prefix of `S` with at most `row_limit` rows. Let
-`P` be the longest prefix of `Q` with aggregate `BatchEnvelope.byte_count()`
-at most `byte_limit`.
+Preview has two bounded stages: a raw input scan and target-output
+accumulation. The complete target output of the underlying source is never
+materialized and never used as the semantic object for flags. Flags are
+operational: they describe only what this `preview` call observed.
 
-- If the first row of `S` alone has `byte_count() > byte_limit`, `preview`
+**Input scan bounds**
+
+- `source_rows_scanned` counts raw connector rows actually passed to target
+  lowering. It must never exceed `PREVIEW_MAX_SOURCE_ROWS_SCANNED`
+  (100,000).
+- Before any raw row of a connector envelope is passed to lowering, the
+  full `envelope.byte_count()` is charged to `source_bytes_scanned`. If the
+  charge would exceed `PREVIEW_MAX_SOURCE_BYTES_SCANNED`
+  (`MAX_BATCH_BYTES`, 64 MiB), that envelope is not consumed and scanning
+  stops.
+- Row cap: the implementation consumes the earliest raw-row prefix of the
+  current envelope whose row count fits the remaining source-row budget.
+  If only part of an envelope is consumed because the row budget reaches
+  zero, scanning stops. The full envelope byte charge above is still
+  recorded.
+- At an exact source-row or source-byte boundary, the implementation must
+  poll the stream one lookahead time: `Some` means `scan_truncated = true`
+  and stop without consuming that envelope; terminal `None` means
+  `source_exhausted = true` and `scan_truncated = false`.
+
+**Target-output truncation**
+
+Let `T` be the ordered target-output row sequence produced by lowering the
+observed scanned raw-row prefix with the E2 prefix steps. Let `Q` be the
+longest prefix of `T` with at most `row_limit` rows. Let `P` be the longest
+prefix of `Q` with aggregate public `BatchEnvelope.byte_count()` at most
+`byte_limit`.
+
+- If the first row of `T` alone has `byte_count() > byte_limit`, `preview`
   returns `EngineError::BoundExceeded` and no `PreviewResult`.
-- Otherwise `preview` returns exactly `P`, in source order.
-- `rows_truncated = true` iff `S` has more than `row_limit` rows.
+- Otherwise `preview` returns exactly `P`, in target-output order.
+- `rows_truncated = true` iff lowering the observed scanned prefix produced
+  at least `row_limit + 1` target-output rows before terminal `None` or a
+  scan-cap stop.
 - `bytes_truncated = true` iff `bytes(Q) > byte_limit`.
-- `source_exhausted = true` iff `rows_truncated == false` and
-  `bytes_truncated == false`.
+- `scan_truncated = true` iff input scanning stopped because of a source
+  row/byte cap before terminal `None`.
+- `source_exhausted = true` iff the connector stream returned terminal
+  `None`. It is never derived from the other flags.
+
+**Deterministic flag-completion lookahead**
+
+After `P` is closed by the byte cap, or when the row cap is reached exactly
+at a lowering boundary, the implementation must continue scanning and
+lowering discarded target-output rows only until the first of:
+
+1. terminal `None` is observed → `source_exhausted = true`;
+2. the lowering of the observed scan produces target-output row
+   `row_limit + 1` → `rows_truncated = true`;
+3. a source row/byte cap closes the scan → `scan_truncated = true`.
+
+This lookahead counts **target-output rows**, never raw source rows. It is
+bounded by the input scan caps, so a highly selective `Filter` /
+`FilterRows` / `Scan.predicate` cannot turn Preview into a hidden full
+import. Cancellation and deadline checks from section 13.2 remain active
+during this lookahead.
+
+`source_exhausted` may therefore be `true` together with
+`bytes_truncated = true` when the stream was polled to terminal `None`
+after byte truncation. It cannot be `true` together with `rows_truncated`
+or `scan_truncated`.
 
 This law defines the deterministic earliest prefix. Sampling, reservoir,
 random selection, and reordering are forbidden.
-
-To compute `rows_truncated` without unbounded work, the implementation may
-continue polling the connector stream after the returned prefix is closed by
-the byte cap, but only to count source rows until it has observed
-`row_limit + 1` source rows or the stream returns `None`. Such lookahead
-must not lower rows through Polars, must retain at most one connector
-envelope at a time, and must not grow the response buffer.
 
 ### 9.4 Target node execution
 
@@ -374,6 +448,7 @@ For each successful `preview`:
 Connector BatchStream
   -> shared E2 preflight with target cutoff
   -> open read_batches exactly once
+  -> bounded raw input scan (section 9.3)
   -> deterministic E2 execution chunker
   -> E2 Polars lowering of only the prefix steps
   -> E2 Arrow export and BatchEnvelopeFactory for the target schema
@@ -385,46 +460,129 @@ There is no canonical remainder for a future Snapshot and no
 `SnapshotWriter`. The response accumulator replaces the remainder slot in
 the three-payload memory law.
 
-### 10.1 Live payloads
+### 10.1 Public bytes vs allocated capacity
 
-At every instant of one `preview` call:
-
-```text
-live payloads <= 3
-
-connector envelope            <= MAX_BATCH_BYTES  (64 MiB)
-complete Polars working set   <= MAX_BATCH_BYTES  (64 MiB)
-preview response buffer       <= byte_limit       (<= 50 MiB)
-
-operator state                <= MAX_OPERATOR_STATE_BYTES (5 MiB)
-peak                         <= PREVIEW_PEAK_ENGINE_BYTES (183 MiB)
-```
-
-The preview response buffer is the union of every finalized
-`BatchEnvelope` in the result plus the in-progress response builder. At
-every append/freeze boundary:
+Public `bytes_returned` remains
+`sum(envelope.byte_count())`. The memory proof must use a different, exact
+quantity:
 
 ```text
-bytes_returned + in_progress_builder_bytes <= byte_limit
+response_allocated_capacity =
+    sum of the capacities of every unique backing allocation owned by
+    finalized response BatchEnvelope payloads
+    + sum of current allocated capacities of every in-progress response
+      builder buffer
 ```
 
-Freezing the in-progress builder into a `BatchEnvelope` is move/freeze, not
-a second copy. The E2 predictor bound (`predict(k) <= MAX_BATCH_BYTES`)
-continues to include transformation and export-transition temporaries; E3
+Rules for `response_allocated_capacity`:
+
+1. Each validity, offset, data, and child-array backing allocation is
+   counted exactly once at its actual allocated capacity as recorded by the
+   builder/allocator that produced it. `RecordBatch::get_array_memory_size()`
+   is **not** sufficient evidence for this law.
+2. `Vec<BatchEnvelope>` structs, envelope headers, `Arc<LogicalSchema>`,
+   Arrow schema/metadata, compiled-plan objects, maps, and other
+   non-columnar metadata are charged to `MAX_OPERATOR_STATE_BYTES` (5 MiB),
+   not to the response payload.
+3. Prefix slices must not retain an oversized parent buffer. When only a
+   prefix of an exported Arrow chunk enters the response, the response must
+   own a compacted allocation for exactly that prefix; a zero-copy slice
+   that keeps the full parent buffer alive is forbidden. Any transient copy
+   used for that compaction is part of `current_export_transition` below.
+4. Freezing the in-progress builder into a `BatchEnvelope` is move/freeze:
+   the backing allocations change owner, but are not duplicated or counted
+   twice.
+
+### 10.2 Coexistence and peak law
+
+At every instant of one `preview` call the live columnar payloads are at
+most three:
+
+```text
+connector envelope allocated capacity   <= MAX_BATCH_BYTES        (64 MiB)
+current export transition               <= MAX_BATCH_BYTES        (64 MiB)
+response allocated capacity             <= byte_limit             (<= 50 MiB)
+
+operator state (including response metadata) <= MAX_OPERATOR_STATE_BYTES
+peak                                          <= PREVIEW_PEAK_ENGINE_BYTES (183 MiB)
+```
+
+`current_export_transition(k)` is the E2 predictor bound for the current
+execution chunk of `k` rows, including the remaining Polars columns, the
+extracted canonical Arrow columns, and any compaction/export realloc
+transients. It must satisfy the E2 `predict(k) <= MAX_BATCH_BYTES` law and
 must not add an export copy outside that bound.
 
-### 10.2 Chunking and accumulation
+### 10.3 Response-aware prefix selection and builder realloc law
 
-- Each connector envelope is split by the E2 deterministic chunker before
-  Arrow-to-Polars import. A full envelope whose `predict(n)` exceeds
+Let `k` be a candidate number of target-output rows to move from the
+current export chunk into the response.
+
+1. E2 chunker constraint:
+   `predict(k) <= MAX_BATCH_BYTES`.
+2. Response capacity constraint, checked **before** any builder reserve or
+   reallocation:
+
+   ```text
+   other_response_capacity + old_capacity + requested_new_capacity <= byte_limit
+   ```
+
+   where `other_response_capacity` is `response_allocated_capacity`
+   excluding the buffer being grown, `old_capacity` is that buffer's
+   current allocated capacity, and `requested_new_capacity` is the exact
+   capacity requested for the append. This law bounds the
+   `old + new` realloc transient inside the response bound.
+3. `predict_preview(k)` is the peak of the append transition:
+
+   ```text
+   predict_preview(k) =
+       current_export_transition(k)
+       + response_allocated_capacity_after(k)
+       + builder_realloc_transient(k)
+   ```
+
+   where `response_allocated_capacity_after(k)` includes the new buffer
+   capacities and `builder_realloc_transient(k)` is the capacity of old
+   buffers still live during reallocation (zero when no reallocation
+   occurs).
+
+The implementation must choose the largest feasible `k` for the current
+chunk such that both constraints hold. When only part of the response byte
+budget remains, the response-aware prefix is smaller than the E2 chunker
+prefix; this is `response_fit(k)` selection. If no `k >= 1` can satisfy the
+response capacity constraint and the response is empty, fail with
+`EngineError::BoundExceeded`. If the response is non-empty, stop with
+`bytes_truncated = true` and do not append the non-fitting row.
+
+The peak law then has this exact sum:
+
+```text
+connector envelope allocated capacity
++ current_export_transition(k)
++ response_allocated_capacity_after(k)
++ builder_realloc_transient(k)
++ operator state
+<= PREVIEW_PEAK_ENGINE_BYTES
+```
+
+Because the response terms obey
+`other_response_capacity + old_capacity + requested_new_capacity <=
+byte_limit`, the response contribution including its realloc transient is
+at most `byte_limit`; the other two columnar terms are each at most
+`MAX_BATCH_BYTES`, and operator state is at most
+`MAX_OPERATOR_STATE_BYTES`. Therefore 183 MiB remains the proven ceiling.
+
+### 10.4 Chunking and accumulation
+
+- Each consumed connector envelope is split by the E2 deterministic chunker
+  before Arrow-to-Polars import. A full envelope whose `predict(n)` exceeds
   `MAX_BATCH_BYTES` must never be imported as one frame.
 - A single row with E2 `predict(1) > MAX_BATCH_BYTES` is
   `EngineError::BoundExceeded` before Polars import, exactly as E2 T39.
-- Transformed chunks are fed to the preview accumulator in order.
-- The accumulator builds target-schema `BatchEnvelope`s whose total rows and
-  bytes obey the truncation law. It must use the E2 byte-accounting
-  functions for capacity checks and `BatchEnvelope.byte_count()` for the
-  public returned-byte count.
+- Transformed chunks are fed to the preview accumulator in order; the
+  accumulator applies the response-aware prefix law of section 10.3.
+- The accumulator uses E2 byte-accounting functions for capacity planning
+  and `BatchEnvelope.byte_count()` only for the public returned-byte count.
 - The accumulator must not materialize the full source and must not create a
   fourth `MAX_BATCH_BYTES`-class payload.
 
@@ -482,8 +640,10 @@ The only I/O is read-only connector inspect and `read_batches`.
 
 1. at entry, before run-gate acquisition and before inspect;
 2. before opening `read_batches`;
-3. on every connector stream poll (the existing context-attached stream);
-4. before lowering each connector envelope;
+3. on every connector stream poll, including scan and flag-completion
+   lookahead polls (the existing context-attached stream);
+4. before lowering each consumed connector envelope and each discarded
+   target-output lookahead chunk;
 5. before returning success.
 
 If `context.deadline()` is `None`, `preview` applies
@@ -537,8 +697,15 @@ earlier failure.
    `PreparedPlan`.
 7. Open `ConnectorRegistry::read_batches` exactly once and attach the E2
    context wrapper.
-8. Stream, chunk, lower only the prefix, accumulate the bounded response.
-9. Drop the stream and the permit before returning. Return the fully
+8. Run the bounded raw input scan from section 9.3, then chunk, lower only
+   the prefix, and accumulate the bounded response. Continue the flag-
+   completion lookahead exactly as long as section 9.3 requires; it counts
+   target-output rows and stops at terminal `None`, target-output row
+   `row_limit + 1`, or a source scan cap.
+9. Record `source_rows_scanned` / `source_bytes_scanned` and the four
+   observed flags. `source_exhausted` is true only when terminal `None` was
+   actually observed.
+10. Drop the stream and the permit before returning. Return the fully
    constructed `PreviewResult`; never return a partially filled buffer.
 
 ## 15. Connector call accounting
@@ -550,13 +717,17 @@ earlier failure.
 - `ConnectorRegistry::read_batches` is opened exactly once for a request
   that reaches execution, and zero times otherwise.
 - Stream poll count is deterministic for a fixed mock stream:
-  - no truncation: one poll per source envelope plus one terminal `None`
-    poll;
-  - row truncation: polls until cumulative source rows first exceed
-    `row_limit` (this may be inside an already-polled envelope);
-  - byte truncation: returned rows close at the first non-fitting row; the
-    stream may then be polled only for the bounded `rows_truncated`
-    lookahead in section 9.3.
+  - no truncation / source exhaustion: one poll per consumed source
+    envelope plus one terminal `None` poll;
+  - target-output row truncation: poll and lower only until target-output
+    row `row_limit + 1` is observed, terminal `None`, or a scan cap closes;
+    raw source rows are not used as the truncation test;
+  - byte truncation: returned rows close at the first non-fitting
+    target-output row; flag-completion lookahead then continues under the
+    same target-output rule and the input scan caps;
+  - scan-cap boundary: exactly one lookahead poll distinguishes
+    `scan_truncated = true` (`Some`) from `source_exhausted = true`
+    (terminal `None`).
 - P10 freezes exact counts for named fixtures.
 
 ## 16. Implementation checklist (later E3 runtime PR only)
@@ -606,45 +777,64 @@ to a `Join`/`Union` node, assert `EngineError::UnsupportedOperator`,
 0, read poll count 0. Downstream Join/Union is rejected even when the target
 is upstream of it.
 
-### P05 — Row and byte double truncation
+### P05 — Target-output row/byte truncation and source exhaustion
 
-Three fixtures:
-
-1. more than `row_limit` small rows: returned rows equal `row_limit`;
-   `rows_truncated = true`; `bytes_truncated = false`;
+1. Filter-aware row truncation: a `Filter` passes every third source row;
+   the observed target output exceeds `row_limit`. Assert
+   `rows_truncated = true`, `bytes_truncated = false`,
+   `scan_truncated = false`, `source_exhausted = false`, and returned rows
+   equal `row_limit` in target-output order.
+2. Byte truncation with terminal source: total target output is below
+   `row_limit`, but `bytes(Q) > byte_limit`; lookahead then polls the
+   stream to terminal `None`. Assert the returned rows are the longest
+   byte-fitting earliest prefix, `rows_truncated = false`,
+   `bytes_truncated = true`, `scan_truncated = false`,
+   `source_exhausted = true`.
+3. Byte and row truncation: byte cap closes before `row_limit`, and
+   lookahead observes target-output row `row_limit + 1` before any scan cap
+   or terminal `None`. Assert `rows_truncated = true`,
+   `bytes_truncated = true`, `scan_truncated = false`,
    `source_exhausted = false`.
-2. fewer than `row_limit` rows but bytes over `byte_limit`: returned rows
-   are the longest byte-fitting earliest prefix; `rows_truncated = false`;
-   `bytes_truncated = true`; `source_exhausted = false`.
-3. more than `row_limit` rows and bytes over `byte_limit` before
-   `row_limit`: both `rows_truncated` and `bytes_truncated` are true when
-   the lookahead observes row `row_limit + 1`.
+4. Scan row cap: a source with more than 100,000 raw rows and a selective
+   filter that has not produced `row_limit + 1` target rows when the raw
+   row budget closes. Assert returned rows are all observed target-output
+   rows, `scan_truncated = true`, `rows_truncated = false`,
+   `source_exhausted = false`, and `source_rows_scanned = 100_000`.
+5. Scan byte cap: the first consumed envelope charges the full 64 MiB
+   source-byte budget and the lookahead poll observes another envelope.
+   Assert `scan_truncated = true`, `source_exhausted = false`, and the
+   lookahead envelope is not consumed or charged.
 
-Assert aggregate `rows_returned`/`bytes_returned` equal their envelope sums
-and obey both caps. Assert the returned rows are the earliest prefix, not a
-sample.
+Assert aggregate `rows_returned` / `bytes_returned` equal their envelope
+sums and obey both output caps. Assert `source_rows_scanned` /
+`source_bytes_scanned` obey both input scan caps. Assert every returned
+row set is the deterministic earliest prefix, not a sample.
 
 ### P06 — Single row exceeds byte cap
 
-Set `byte_limit` below the first transformed row's `BatchEnvelope` byte
-count. Assert `EngineError::BoundExceeded`, no `PreviewResult`, no
+Set `byte_limit` below the first transformed target row's `BatchEnvelope`
+byte count. Assert `EngineError::BoundExceeded`, no `PreviewResult`, no
 Snapshot/Storage call, and no partial batch publication.
 
 ### P07 — Repeated execution is identical
 
 Run the same request twice against an immutable fixture. Compare
 `plan_fingerprint`, `schema`, logical rows, envelope sequences,
-`row_count`/`byte_count` per envelope, and all three truncation fields. They
-must be equal. Source grep shows no `Uuid::new_v4` / `Utc::now` on the
-preview path.
+`row_count`/`byte_count` per envelope, `source_rows_scanned`,
+`source_bytes_scanned`, and all four truncation/source flags. They must be
+equal. Source grep shows no `Uuid::new_v4` / `Utc::now` on the preview
+path.
 
 ### P08 — Cancellation and deadline
 
 1. Cancel before `read_batches` and cancel during lowering: `Cancelled`, no
    partial result.
-2. Expired deadline before returning: `Timeout`, no partial result.
-3. No deadline: default 30 s is applied.
-4. Deadline farther than 30 s in the future: `BoundExceeded` before
+2. Cancel during the flag-completion lookahead of section 9.3: `Cancelled`,
+   no partial result.
+3. Expired deadline before returning, including during scan/lookahead:
+   `Timeout`, no partial result.
+4. No deadline: default 30 s is applied.
+5. Deadline farther than 30 s in the future: `BoundExceeded` before
    inspect/read.
 
 ### P09 — Fifth concurrent request is immediately Busy
@@ -657,25 +847,36 @@ second gate.
 
 ### P10 — Connector inspect/read call counts
 
-With mock counters, assert exact counts for:
+With mock counters and fixed stream partitions, assert exact counts for:
 
 - Join/Union/invalid-target plans: inspect 0, read open 0, poll 0.
 - Valid preview without `schema_override`: inspect 1, read open 1.
 - Valid preview with `schema_override`: inspect 0, read open 1.
 - No-truncation three-envelope stream: poll 4 (three envelopes + terminal
-  `None`).
-- Row truncation exactly at an envelope boundary: one extra lookahead poll
-  decides `rows_truncated`/`source_exhausted`.
-- Byte truncation lookahead stops at `row_limit + 1` observed source rows or
-  terminal `None`.
+  `None`), `source_exhausted = true`.
+- Filter row truncation where source and target rows are not equal: one
+  envelope with 40 source rows, filter keeps every third row,
+  `row_limit = 10`; poll 1, `rows_truncated = true` because target-output
+  row 11 is observed inside that envelope.
+- Byte truncation with terminal source: poll through terminal `None`;
+  `source_exhausted = true` even though `bytes_truncated = true`.
+- Scan-cap boundary: a stream whose consumed envelopes exactly reach a
+  source cap requires one additional lookahead poll; `Some` sets
+  `scan_truncated = true`, terminal `None` sets `source_exhausted = true`.
 
-### P11 — SnapshotWriter zero calls
+### P11 — SnapshotWriter and storage publication zero calls
 
-Source grep of the E3 preview runtime path must contain no
-`SnapshotWriter`, `SnapshotDraft`, `SnapshotStore`, `begin_snapshot`,
-`append`, or `commit` call. A preview test uses an instrumented storage
-sentinel/event recorder and asserts no manifest, no event, and no partition
-is published. `PreviewRequest` contains no `store` field.
+The preview runtime path must not construct `SnapshotDraft`, call
+`SnapshotStore::begin_snapshot`, `SnapshotWriter::append`,
+`SnapshotWriter::commit`, or invoke any other Snapshot publication entry
+point. Ordinary preview response-accumulator append operations are allowed
+and must not be matched by this check.
+
+To make the zero-call assertion executable without a public API change, E3
+may add `#[cfg(test)]`-only private storage-call counters in the storage
+crate or engine test support. They must not alter production behavior or
+public API. P11 invokes `preview` and asserts those counters remain 0 and
+that no manifest, event, or partition is published.
 
 ### P12 — Schema and ColumnId propagation
 
@@ -694,17 +895,26 @@ or `Arithmetic` at the target. Assert the sentinel is absent from
 and event metadata wrapping the summary. `EngineError` itself does not
 implement Serialize.
 
-### P14 — Preview response and working-set memory proof
+### P14 — Preview response allocated-capacity and working-set proof
 
-Using the E2 live-payload counter and capacity checks:
+Using the E2 live-payload counter, a counting allocator, and exact buffer
+capacity records:
 
-- live payload count is `<= 3` while a connector envelope is split into at
-  least two E2 chunks and a non-empty preview response buffer is retained;
-- connector envelope `<= 64 MiB`, current Polars working set `<= 64 MiB`,
-  response buffer `<= request.byte_limit` (and `<= 50 MiB`);
-- `bytes_returned + in_progress_builder_bytes <= byte_limit` before every
-  freeze;
-- peak engine-owned bytes obey `PREVIEW_PEAK_ENGINE_BYTES = 183 MiB`;
+- live columnar payload count is `<= 3` while a connector envelope is split
+  into at least two E2 chunks and finalized response batches remain live;
+- `response_allocated_capacity <= byte_limit` at every instant, including
+  the old-buffer/new-buffer realloc transient;
+- every builder reserve/realloc obeys
+  `other_response_capacity + old_capacity + requested_new_capacity <=
+  byte_limit` before allocation;
+- `current_export_transition(k) <= MAX_BATCH_BYTES`, connector envelope
+  capacity `<= MAX_BATCH_BYTES`, and operator state `<= 5 MiB`;
+- the peak sum of section 10.3 is `<= PREVIEW_PEAK_ENGINE_BYTES`
+  (183 MiB);
+- a prefix response envelope owns a compacted allocation for exactly its
+  prefix and does not retain an oversized parent buffer;
+- `Vec<BatchEnvelope>` / schema / metadata overhead is charged to operator
+  state, not to response capacity;
 - source grep forbids collecting the full connector stream and forbids a
   fourth `MAX_BATCH_BYTES`-class payload.
 
@@ -736,17 +946,23 @@ Stop and return to contract review if implementation needs:
 
 ## 19. Known risks
 
-- E2 is not yet merged. E3-C0 binds to Issue #46 R3 semantics as merged in
-  `main@4b65204`; any later approved E2 semantic revision requires an
-  explicit E3 contract revision, not silent adoption.
+- E2 runtime is not yet merged. E3-C0-R1 binds to Issue #46 R3 semantics as
+  merged in `main@4b65204`; any later approved E2 semantic revision
+  requires an explicit E3 contract revision, not silent adoption.
 - Full-plan preflight means downstream validation can fail a preview whose
   target is upstream. This is intentional reuse of one preflight and is
   covered by P02/P04.
-- The `rows_truncated` lookahead may poll a bounded number of extra
-  connector envelopes after byte truncation. It is capped at
-  `row_limit + 1` observed source rows and must not retain them.
+- The target-output flag lookahead may scan and lower up to the fixed input
+  scan caps after the visible prefix is closed. It is bounded by
+  100,000 source rows and 64 MiB source bytes, and must not retain those
+  rows.
+- `source_exhausted` is operational. A scan-cap boundary requires one
+  lookahead poll; if the next item is `Some`, the result reports
+  `scan_truncated = true` and does not consume that envelope.
 - Preview response bytes use public `BatchEnvelope.byte_count()`, while the
-  chunker uses E2 predicted physical bytes. The two numbers are different by
+  memory proof uses exact allocated capacity. The two numbers differ by
   design; both are frozen here.
 - A single transformed row that exceeds the preview byte cap is a
   `BoundExceeded`, not an empty successful result.
+- The 183 MiB peak is valid only because the response realloc transient is
+  included in the response bound by the pre-allocation law in section 10.3.

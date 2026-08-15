@@ -198,9 +198,11 @@ The accepted sequence is:
    - E3-C0 (Issue #50): docs-only Preview contract on
      `agent/issue-050-node-preview-contract`. It freezes `PreviewRequest` /
      `PreviewResult`, `target_node_id` cutoff, 1,000/10,000 rows,
-     8 MiB/50 MiB bytes, 30 s deadline, the shared E2 run gate of 4, the
-     earliest-prefix truncation flags, read-only/no-Snapshot rules, and the
-     P01–P15 acceptance matrix. It remains draft with Request changes until
+     8 MiB/50 MiB bytes, a 100,000-row / 64 MiB raw input scan bound,
+     30 s deadline, the shared E2 `MAX_ENGINE_CONCURRENT_RUNS` gate, the
+     earliest-prefix truncation/scan/exhaustion flags, read-only/no-Snapshot
+     rules, the allocated-capacity response memory law, and the P01–P15
+     acceptance matrix. It remains draft with Request changes until
      architecture approval binds a contract SHA.
 
 Do not pull work forward merely because a downstream type is convenient. A
