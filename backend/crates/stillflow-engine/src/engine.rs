@@ -193,6 +193,7 @@ impl ExecutionEngine {
             request.asset.id,
             request.batch_size,
         )?;
+        tracker.hold_remainder(rebatcher.remainder_bytes())?;
         let predicted = PredictedSchema::from_scan_output(&prepared.scan_output);
         let output_schema =
             stillflow_core::logical_schema_to_arrow(&prepared.materialize_schema)

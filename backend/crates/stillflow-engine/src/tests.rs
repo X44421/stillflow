@@ -309,11 +309,13 @@ async fn engine_with(
 
 #[test]
 fn crate_name_is_stable() {
+    let _guard = exclusive_test_lock().blocking_lock();
     assert_eq!(crate_name(), "stillflow-engine");
 }
 
 #[test]
 fn error_categories_match_contract() {
+    let _guard = exclusive_test_lock().blocking_lock();
     assert_eq!(
         EngineError::Busy.category(),
         stillflow_core::ErrorCategory::RateLimited
@@ -335,6 +337,7 @@ fn error_categories_match_contract() {
 
 #[test]
 fn utf8_physical_includes_view_offset_and_validity() {
+    let _guard = exclusive_test_lock().blocking_lock();
     let k = 8_usize;
     let data = k * 4;
     let bytes = utf8_physical_bytes(k, data);
@@ -468,6 +471,7 @@ async fn t39_fails_before_polars_import() {
     assert_eq!(ffi_import_count(), 0);
     assert_eq!(connector.read_count.load(Ordering::SeqCst), 1);
     assert!(store.load_manifest(Uuid::from_u128(100)).is_err());
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -507,6 +511,7 @@ async fn t45_date_to_utf8_is_type_error() {
         .expect_err("paused cast");
     assert!(matches!(error, EngineError::TypeError(_)));
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -539,6 +544,7 @@ async fn t37_derive_wide_utf8_chunks_before_polars() {
     assert!(report.min_chunk_rows < 65_536);
     assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
     assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -570,6 +576,7 @@ async fn t41_split_envelope_keeps_remainder_with_polars() {
     assert!(report.chunk_count >= 2);
     assert!(report.saw_split_envelope_with_remainder);
     assert!(report.peak_live_payloads <= MAX_LIVE_COLUMNAR_PAYLOADS);
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -602,17 +609,20 @@ async fn t44_phased_allocator_excludes_storage_encode() {
     assert!(report.remainder_phase_peak > 0);
     assert!(report.storage_append_phase_peak > 0);
     assert!(envelope_bytes <= MAX_BATCH_BYTES);
-    assert!(report.polars_phase_peak <= MAX_ENGINE_PEAK_BYTES);
-    assert!(report.remainder_phase_peak <= MAX_ENGINE_PEAK_BYTES);
-    let engine_phases = envelope_bytes
-        .saturating_add(report.polars_phase_peak.max(report.remainder_phase_peak))
+    assert!(report.polars_phase_peak <= MAX_BATCH_BYTES);
+    assert!(report.remainder_phase_peak <= MAX_BATCH_BYTES);
+    let total_live_engine = envelope_bytes
+        .saturating_add(report.polars_phase_peak)
+        .saturating_add(report.remainder_phase_peak)
         .saturating_add(MAX_OPERATOR_STATE_BYTES);
-    assert!(engine_phases <= MAX_ENGINE_PEAK_BYTES);
+    assert!(total_live_engine <= MAX_ENGINE_PEAK_BYTES);
     assert!(report.peak_engine_bytes <= MAX_ENGINE_PEAK_BYTES);
+    drop(_guard);
 }
 
 #[test]
 fn t43_utf8_byte_cap_uses_offset_overhead() {
+    let _guard = exclusive_test_lock().blocking_lock();
     let (schema, _) = int_schema();
     let values = Int64Array::from((0..20_000_i64).collect::<Vec<_>>());
     let factory = BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), Uuid::from_u128(42))
@@ -675,6 +685,8 @@ async fn fifth_materialize_is_busy_without_inspect() {
 
 #[test]
 fn t46_near_64mib_export_transition_respects_bounds() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    reset_alloc_peaks();
     let (schema, id) = int_schema();
     let values = Int64Array::from((0..20_000_i64).collect::<Vec<_>>());
     let factory = BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), Uuid::from_u128(42))
@@ -698,23 +710,29 @@ fn t46_near_64mib_export_transition_respects_bounds() {
     let peak_next = predict(k + 1, 0, batch.columns(), &predicted, &steps).expect("predict next");
     assert!(peak_next > MAX_BATCH_BYTES);
 
-    // Verify real export execution on a chunk of size k
-    let slice = batch.slice(0, k);
-    let frame = crate::ffi::record_batch_to_dataframe(&slice).expect("import");
-    let (transformed, deferred) =
-        crate::lower::transform(frame, &schema, &steps).expect("transform");
-    let target_schema =
-        stillflow_core::logical_schema_to_arrow(&manifest_schema_with_derived(&schema))
-            .expect("arrow schema");
-    let exported_batch = crate::ffi::dataframe_to_record_batch(
-        transformed,
-        &manifest_schema_with_derived(&schema),
-        &target_schema,
-        &deferred,
-    )
-    .expect("export");
+    // Verify real export execution on a chunk of size k with live allocator peak <= MAX_BATCH_BYTES
+    let (exported_batch, export_peak) = {
+        let _polars_guard = crate::memory::enter_phase(crate::memory::AllocatorPhase::Polars);
+        let slice = batch.slice(0, k);
+        let frame = crate::ffi::record_batch_to_dataframe(&slice).expect("import");
+        let (transformed, deferred) =
+            crate::lower::transform(frame, &schema, &steps).expect("transform");
+        let target_schema =
+            stillflow_core::logical_schema_to_arrow(&manifest_schema_with_derived(&schema))
+                .expect("arrow schema");
+        let batch = crate::ffi::dataframe_to_record_batch(
+            transformed,
+            &manifest_schema_with_derived(&schema),
+            &target_schema,
+            &deferred,
+        )
+        .expect("export");
+        let (polars_peak, _, _) = crate::memory::alloc_peaks();
+        (batch, polars_peak)
+    };
     assert_eq!(exported_batch.num_rows(), k);
     assert_eq!(exported_batch.num_columns(), 2);
+    assert!(export_peak <= MAX_BATCH_BYTES);
     let _ = id;
 }
 
@@ -728,6 +746,7 @@ fn manifest_schema_with_derived(base: &LogicalSchema) -> LogicalSchema {
 
 #[test]
 fn t47_4096_columns_no_pack_limit_bulk_preallocation() {
+    let _guard = exclusive_test_lock().blocking_lock();
     let fields: Vec<LogicalField> = (0..4096)
         .map(|i| {
             LogicalField::new(column(i + 1), format!("col_{i}"), LogicalType::Int64, false)
@@ -737,9 +756,8 @@ fn t47_4096_columns_no_pack_limit_bulk_preallocation() {
     let schema = Arc::new(LogicalSchema::new(fields).expect("schema"));
     let rebatcher = crate::remainder::CanonicalRebatcher::new(schema, Uuid::from_u128(99), 65_536)
         .expect("rebatcher");
-    // 4096 unallocated PrimitiveBuilder default capacities (1024 items * 8B = 8KB each) total ~33 MB,
-    // which is strictly bounded and far below pack_limit bulk preallocation (65536 * 8B * 4096 = 2 GB).
-    assert!(rebatcher.remainder_bytes() <= MAX_BATCH_BYTES);
+    // With ExactPrimitiveSink, Vec::new() has 0 allocated capacity.
+    assert_eq!(rebatcher.remainder_bytes(), 0);
     assert!(!rebatcher.remainder_live());
 }
 
@@ -792,6 +810,7 @@ async fn t48_timestamp_timezone_retention() {
             timezone: Some("UTC".to_owned())
         }
     );
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -826,6 +845,7 @@ async fn t49_iterative_ast_guard_rejects_deep_expression_fast() {
         .expect_err("deep expr");
     assert!(matches!(error, EngineError::BoundExceeded(_)));
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -933,6 +953,7 @@ async fn t50_lub_strict_casting_in_comparisons_and_coalesce() {
         .field(column(3))
         .expect("c field");
     assert_eq!(c_field.data_type, LogicalType::Int64);
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -978,10 +999,12 @@ async fn t51_typed_null_derivation() {
         .expect("field");
     assert_eq!(derived_field.data_type, LogicalType::Int64);
     assert!(derived_field.nullable);
+    drop(_guard);
 }
 
 #[test]
 fn t52_float_to_utf8_prediction_bound() {
+    let _guard = exclusive_test_lock().blocking_lock();
     let id = column(1);
     let schema = LogicalSchema::new(vec![LogicalField::new(
         id,
@@ -1025,6 +1048,7 @@ fn t52_float_to_utf8_prediction_bound() {
     let nested_cost =
         predict(k, 0, batch.columns(), &predicted, &nested_steps).expect("predict nested");
     assert!(nested_cost >= min_utf8_expected);
+    drop(_guard);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1087,10 +1111,12 @@ async fn t53_binary_cast_rejection() {
         .await
         .expect_err("int64 to binary cast");
     assert!(matches!(error_rev, EngineError::TypeError(_)));
+    drop(_guard);
 }
 
 #[test]
 fn t54_fallback_error_sanitization_is_always_internal() {
+    let _guard = exclusive_test_lock().blocking_lock();
     let summary = crate::error::EngineError::Internal("test internal").sanitized_summary();
     assert_eq!(summary.category, stillflow_core::ErrorCategory::Internal);
     assert!(!summary.retryable);
@@ -1109,4 +1135,5 @@ fn t54_fallback_error_sanitization_is_always_internal() {
     );
     assert!(!summary_forced.retryable);
     assert_eq!(summary_forced.message(), "internal error");
+    drop(_guard);
 }

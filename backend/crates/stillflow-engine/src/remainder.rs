@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use arrow_array::builder::{ArrayBuilder, BooleanBuilder, PrimitiveBuilder};
 use arrow_array::types::{
     Date32Type, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type,
     TimestampMicrosecondType, TimestampMillisecondType, TimestampNanosecondType, UInt16Type,
@@ -9,7 +8,7 @@ use arrow_array::types::{
 use arrow_array::{
     Array, ArrayRef, BinaryArray, BooleanArray, NullArray, PrimitiveArray, RecordBatch, StringArray,
 };
-use arrow_buffer::{Buffer, NullBuffer, OffsetBuffer, ScalarBuffer};
+use arrow_buffer::{BooleanBuffer, Buffer, NullBuffer, OffsetBuffer, ScalarBuffer};
 use stillflow_core::{
     BatchEnvelope, BatchEnvelopeFactory, LogicalSchema, LogicalType, TimeUnit, MAX_BATCH_BYTES,
 };
@@ -102,6 +101,7 @@ impl CanonicalRebatcher {
         if self.remainder_live() {
             self.flush(&mut publish, tracker)?;
         }
+        tracker.hold_remainder(0)?;
         Ok(())
     }
 
@@ -193,62 +193,62 @@ impl CanonicalRebatcher {
             .checked_add(1)
             .ok_or(EngineError::Internal("output envelope sequence overflow"))?;
         publish(envelope, tracker)?;
-        tracker.hold_remainder(0)?;
+        tracker.hold_remainder(self.remainder_bytes())?;
         Ok(())
     }
 }
 
 enum ColumnSink {
     Null,
-    Boolean(BooleanBuilder),
-    Int8(PrimitiveBuilder<Int8Type>),
-    Int16(PrimitiveBuilder<Int16Type>),
-    Int32(PrimitiveBuilder<Int32Type>),
-    Int64(PrimitiveBuilder<Int64Type>),
-    UInt8(PrimitiveBuilder<UInt8Type>),
-    UInt16(PrimitiveBuilder<UInt16Type>),
-    UInt32(PrimitiveBuilder<UInt32Type>),
-    UInt64(PrimitiveBuilder<UInt64Type>),
-    Float32(PrimitiveBuilder<Float32Type>),
-    Float64(PrimitiveBuilder<Float64Type>),
+    Boolean(ExactBooleanSink),
+    Int8(ExactPrimitiveSink<Int8Type>),
+    Int16(ExactPrimitiveSink<Int16Type>),
+    Int32(ExactPrimitiveSink<Int32Type>),
+    Int64(ExactPrimitiveSink<Int64Type>),
+    UInt8(ExactPrimitiveSink<UInt8Type>),
+    UInt16(ExactPrimitiveSink<UInt16Type>),
+    UInt32(ExactPrimitiveSink<UInt32Type>),
+    UInt64(ExactPrimitiveSink<UInt64Type>),
+    Float32(ExactPrimitiveSink<Float32Type>),
+    Float64(ExactPrimitiveSink<Float64Type>),
     Utf8(VariableBytes),
     Binary(VariableBytes),
-    Date32(PrimitiveBuilder<Date32Type>),
-    TimestampMs(PrimitiveBuilder<TimestampMillisecondType>, Option<String>),
-    TimestampUs(PrimitiveBuilder<TimestampMicrosecondType>, Option<String>),
-    TimestampNs(PrimitiveBuilder<TimestampNanosecondType>, Option<String>),
+    Date32(ExactPrimitiveSink<Date32Type>),
+    TimestampMs(ExactPrimitiveSink<TimestampMillisecondType>, Option<String>),
+    TimestampUs(ExactPrimitiveSink<TimestampMicrosecondType>, Option<String>),
+    TimestampNs(ExactPrimitiveSink<TimestampNanosecondType>, Option<String>),
 }
 
 impl ColumnSink {
     fn new(data_type: &LogicalType) -> Result<Self, EngineError> {
         Ok(match data_type {
             LogicalType::Null => Self::Null,
-            LogicalType::Boolean => Self::Boolean(BooleanBuilder::new()),
-            LogicalType::Int8 => Self::Int8(PrimitiveBuilder::new()),
-            LogicalType::Int16 => Self::Int16(PrimitiveBuilder::new()),
-            LogicalType::Int32 => Self::Int32(PrimitiveBuilder::new()),
-            LogicalType::Int64 => Self::Int64(PrimitiveBuilder::new()),
-            LogicalType::UInt8 => Self::UInt8(PrimitiveBuilder::new()),
-            LogicalType::UInt16 => Self::UInt16(PrimitiveBuilder::new()),
-            LogicalType::UInt32 => Self::UInt32(PrimitiveBuilder::new()),
-            LogicalType::UInt64 => Self::UInt64(PrimitiveBuilder::new()),
-            LogicalType::Float32 => Self::Float32(PrimitiveBuilder::new()),
-            LogicalType::Float64 => Self::Float64(PrimitiveBuilder::new()),
+            LogicalType::Boolean => Self::Boolean(ExactBooleanSink::new()),
+            LogicalType::Int8 => Self::Int8(ExactPrimitiveSink::new()),
+            LogicalType::Int16 => Self::Int16(ExactPrimitiveSink::new()),
+            LogicalType::Int32 => Self::Int32(ExactPrimitiveSink::new()),
+            LogicalType::Int64 => Self::Int64(ExactPrimitiveSink::new()),
+            LogicalType::UInt8 => Self::UInt8(ExactPrimitiveSink::new()),
+            LogicalType::UInt16 => Self::UInt16(ExactPrimitiveSink::new()),
+            LogicalType::UInt32 => Self::UInt32(ExactPrimitiveSink::new()),
+            LogicalType::UInt64 => Self::UInt64(ExactPrimitiveSink::new()),
+            LogicalType::Float32 => Self::Float32(ExactPrimitiveSink::new()),
+            LogicalType::Float64 => Self::Float64(ExactPrimitiveSink::new()),
             LogicalType::Utf8 => Self::Utf8(VariableBytes::new()),
             LogicalType::Binary => Self::Binary(VariableBytes::new()),
-            LogicalType::Date32 => Self::Date32(PrimitiveBuilder::new()),
+            LogicalType::Date32 => Self::Date32(ExactPrimitiveSink::new()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Millisecond,
                 timezone,
-            } => Self::TimestampMs(PrimitiveBuilder::new(), timezone.clone()),
+            } => Self::TimestampMs(ExactPrimitiveSink::new(), timezone.clone()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Microsecond,
                 timezone,
-            } => Self::TimestampUs(PrimitiveBuilder::new(), timezone.clone()),
+            } => Self::TimestampUs(ExactPrimitiveSink::new(), timezone.clone()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Nanosecond,
                 timezone,
-            } => Self::TimestampNs(PrimitiveBuilder::new(), timezone.clone()),
+            } => Self::TimestampNs(ExactPrimitiveSink::new(), timezone.clone()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Second,
                 ..
@@ -264,63 +264,21 @@ impl ColumnSink {
     fn allocated_capacity_bytes(&self) -> usize {
         match self {
             Self::Null => 0,
-            Self::Boolean(b) => b.capacity().div_ceil(8).saturating_mul(2),
-            Self::Int8(b) => b
-                .capacity()
-                .saturating_mul(1)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::UInt8(b) => b
-                .capacity()
-                .saturating_mul(1)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::Int16(b) => b
-                .capacity()
-                .saturating_mul(2)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::UInt16(b) => b
-                .capacity()
-                .saturating_mul(2)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::Int32(b) => b
-                .capacity()
-                .saturating_mul(4)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::UInt32(b) => b
-                .capacity()
-                .saturating_mul(4)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::Float32(b) => b
-                .capacity()
-                .saturating_mul(4)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::Date32(b) => b
-                .capacity()
-                .saturating_mul(4)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::Int64(b) => b
-                .capacity()
-                .saturating_mul(8)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::UInt64(b) => b
-                .capacity()
-                .saturating_mul(8)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::Float64(b) => b
-                .capacity()
-                .saturating_mul(8)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::TimestampMs(b, _) => b
-                .capacity()
-                .saturating_mul(8)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::TimestampUs(b, _) => b
-                .capacity()
-                .saturating_mul(8)
-                .saturating_add(b.capacity().div_ceil(8)),
-            Self::TimestampNs(b, _) => b
-                .capacity()
-                .saturating_mul(8)
-                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Boolean(b) => b.allocated_capacity_bytes(),
+            Self::Int8(b) => b.allocated_capacity_bytes(),
+            Self::UInt8(b) => b.allocated_capacity_bytes(),
+            Self::Int16(b) => b.allocated_capacity_bytes(),
+            Self::UInt16(b) => b.allocated_capacity_bytes(),
+            Self::Int32(b) => b.allocated_capacity_bytes(),
+            Self::UInt32(b) => b.allocated_capacity_bytes(),
+            Self::Float32(b) => b.allocated_capacity_bytes(),
+            Self::Date32(b) => b.allocated_capacity_bytes(),
+            Self::Int64(b) => b.allocated_capacity_bytes(),
+            Self::UInt64(b) => b.allocated_capacity_bytes(),
+            Self::Float64(b) => b.allocated_capacity_bytes(),
+            Self::TimestampMs(b, _) => b.allocated_capacity_bytes(),
+            Self::TimestampUs(b, _) => b.allocated_capacity_bytes(),
+            Self::TimestampNs(b, _) => b.allocated_capacity_bytes(),
             Self::Utf8(sink) | Self::Binary(sink) => sink.allocated_capacity_bytes(),
         }
     }
@@ -332,21 +290,21 @@ impl ColumnSink {
     ) -> (usize, usize) {
         match self {
             Self::Null => (0, 0),
-            Self::Boolean(b) => boolean_growth(b, k),
-            Self::Int8(b) => primitive_growth(b, k),
-            Self::UInt8(b) => primitive_growth(b, k),
-            Self::Int16(b) => primitive_growth(b, k),
-            Self::UInt16(b) => primitive_growth(b, k),
-            Self::Int32(b) => primitive_growth(b, k),
-            Self::UInt32(b) => primitive_growth(b, k),
-            Self::Float32(b) => primitive_growth(b, k),
-            Self::Date32(b) => primitive_growth(b, k),
-            Self::Int64(b) => primitive_growth(b, k),
-            Self::UInt64(b) => primitive_growth(b, k),
-            Self::Float64(b) => primitive_growth(b, k),
-            Self::TimestampMs(b, _) => primitive_growth(b, k),
-            Self::TimestampUs(b, _) => primitive_growth(b, k),
-            Self::TimestampNs(b, _) => primitive_growth(b, k),
+            Self::Boolean(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Int8(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::UInt8(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Int16(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::UInt16(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Int32(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::UInt32(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Float32(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Date32(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Int64(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::UInt64(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Float64(b) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::TimestampMs(b, _) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::TimestampUs(b, _) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::TimestampNs(b, _) => b.calculate_growth_peak_and_new_capacity(k),
             Self::Utf8(sink) | Self::Binary(sink) => {
                 sink.calculate_growth_peak_and_new_capacity(array, k)
             }
@@ -354,56 +312,250 @@ impl ColumnSink {
     }
 
     fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
-        let slice = array.slice(0, k);
         match self {
             Self::Null => Ok(()),
-            Self::Boolean(builder) => append_bool(builder, slice.as_ref()),
-            Self::Int8(builder) => append_prim(builder, slice.as_ref()),
-            Self::Int16(builder) => append_prim(builder, slice.as_ref()),
-            Self::Int32(builder) => append_prim(builder, slice.as_ref()),
-            Self::Int64(builder) => append_prim(builder, slice.as_ref()),
-            Self::UInt8(builder) => append_prim(builder, slice.as_ref()),
-            Self::UInt16(builder) => append_prim(builder, slice.as_ref()),
-            Self::UInt32(builder) => append_prim(builder, slice.as_ref()),
-            Self::UInt64(builder) => append_prim(builder, slice.as_ref()),
-            Self::Float32(builder) => append_prim(builder, slice.as_ref()),
-            Self::Float64(builder) => append_prim(builder, slice.as_ref()),
-            Self::Utf8(sink) => append_utf8(sink, slice.as_ref()),
-            Self::Binary(sink) => append_binary(sink, slice.as_ref()),
-            Self::Date32(builder) => append_prim(builder, slice.as_ref()),
-            Self::TimestampMs(builder, _) => append_prim(builder, slice.as_ref()),
-            Self::TimestampUs(builder, _) => append_prim(builder, slice.as_ref()),
-            Self::TimestampNs(builder, _) => append_prim(builder, slice.as_ref()),
+            Self::Boolean(b) => b.append(array, k),
+            Self::Int8(b) => b.append(array, k),
+            Self::Int16(b) => b.append(array, k),
+            Self::Int32(b) => b.append(array, k),
+            Self::Int64(b) => b.append(array, k),
+            Self::UInt8(b) => b.append(array, k),
+            Self::UInt16(b) => b.append(array, k),
+            Self::UInt32(b) => b.append(array, k),
+            Self::UInt64(b) => b.append(array, k),
+            Self::Float32(b) => b.append(array, k),
+            Self::Float64(b) => b.append(array, k),
+            Self::Utf8(sink) => append_utf8(sink, array, k),
+            Self::Binary(sink) => append_binary(sink, array, k),
+            Self::Date32(b) => b.append(array, k),
+            Self::TimestampMs(b, _) => b.append(array, k),
+            Self::TimestampUs(b, _) => b.append(array, k),
+            Self::TimestampNs(b, _) => b.append(array, k),
         }
     }
 
     fn finish(&mut self, rows: usize) -> Result<ArrayRef, EngineError> {
         Ok(match self {
             Self::Null => Arc::new(NullArray::new(rows)),
-            Self::Boolean(builder) => Arc::new(builder.finish()),
-            Self::Int8(builder) => Arc::new(builder.finish()),
-            Self::Int16(builder) => Arc::new(builder.finish()),
-            Self::Int32(builder) => Arc::new(builder.finish()),
-            Self::Int64(builder) => Arc::new(builder.finish()),
-            Self::UInt8(builder) => Arc::new(builder.finish()),
-            Self::UInt16(builder) => Arc::new(builder.finish()),
-            Self::UInt32(builder) => Arc::new(builder.finish()),
-            Self::UInt64(builder) => Arc::new(builder.finish()),
-            Self::Float32(builder) => Arc::new(builder.finish()),
-            Self::Float64(builder) => Arc::new(builder.finish()),
+            Self::Boolean(b) => b.finish()?,
+            Self::Int8(b) => b.finish()?,
+            Self::Int16(b) => b.finish()?,
+            Self::Int32(b) => b.finish()?,
+            Self::Int64(b) => b.finish()?,
+            Self::UInt8(b) => b.finish()?,
+            Self::UInt16(b) => b.finish()?,
+            Self::UInt32(b) => b.finish()?,
+            Self::UInt64(b) => b.finish()?,
+            Self::Float32(b) => b.finish()?,
+            Self::Float64(b) => b.finish()?,
             Self::Utf8(sink) => sink.finish_utf8()?,
             Self::Binary(sink) => sink.finish_binary()?,
-            Self::Date32(builder) => Arc::new(builder.finish()),
-            Self::TimestampMs(builder, timezone) => {
-                Arc::new(builder.finish().with_timezone_opt(timezone.clone()))
+            Self::Date32(b) => b.finish()?,
+            Self::TimestampMs(b, timezone) => {
+                let array = b.finish()?;
+                let prim = array
+                    .as_any()
+                    .downcast_ref::<PrimitiveArray<TimestampMillisecondType>>()
+                    .ok_or(EngineError::Internal("timestamp cast failed"))?;
+                Arc::new(prim.clone().with_timezone_opt(timezone.clone()))
             }
-            Self::TimestampUs(builder, timezone) => {
-                Arc::new(builder.finish().with_timezone_opt(timezone.clone()))
+            Self::TimestampUs(b, timezone) => {
+                let array = b.finish()?;
+                let prim = array
+                    .as_any()
+                    .downcast_ref::<PrimitiveArray<TimestampMicrosecondType>>()
+                    .ok_or(EngineError::Internal("timestamp cast failed"))?;
+                Arc::new(prim.clone().with_timezone_opt(timezone.clone()))
             }
-            Self::TimestampNs(builder, timezone) => {
-                Arc::new(builder.finish().with_timezone_opt(timezone.clone()))
+            Self::TimestampNs(b, timezone) => {
+                let array = b.finish()?;
+                let prim = array
+                    .as_any()
+                    .downcast_ref::<PrimitiveArray<TimestampNanosecondType>>()
+                    .ok_or(EngineError::Internal("timestamp cast failed"))?;
+                Arc::new(prim.clone().with_timezone_opt(timezone.clone()))
             }
         })
+    }
+}
+
+struct ExactPrimitiveSink<T: arrow_array::ArrowPrimitiveType> {
+    values: Vec<T::Native>,
+    validity: Vec<bool>,
+    all_valid: bool,
+}
+
+impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
+    fn new() -> Self {
+        Self {
+            values: Vec::new(),
+            validity: Vec::new(),
+            all_valid: true,
+        }
+    }
+
+    fn allocated_capacity_bytes(&self) -> usize {
+        self.values
+            .capacity()
+            .saturating_mul(std::mem::size_of::<T::Native>())
+            .saturating_add(
+                self.validity
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<bool>()),
+            )
+    }
+
+    fn calculate_growth_peak_and_new_capacity(&self, k: usize) -> (usize, usize) {
+        let val_slot = std::mem::size_of::<T::Native>();
+        let bool_slot = std::mem::size_of::<bool>();
+        let cur_val_cap = self.values.capacity();
+        let needed_val = self.values.len().saturating_add(k);
+        let cur_val_bytes = cur_val_cap.saturating_mul(val_slot);
+        let (val_transient, new_val_bytes) = if needed_val > cur_val_cap {
+            let new_bytes = needed_val.saturating_mul(val_slot);
+            (cur_val_bytes.saturating_add(new_bytes), new_bytes)
+        } else {
+            (cur_val_bytes, cur_val_bytes)
+        };
+
+        let cur_validity_cap = self.validity.capacity();
+        let needed_validity = self.validity.len().saturating_add(k);
+        let cur_validity_bytes = cur_validity_cap.saturating_mul(bool_slot);
+        let (validity_transient, new_validity_bytes) = if needed_validity > cur_validity_cap {
+            let new_bytes = needed_validity.saturating_mul(bool_slot);
+            (cur_validity_bytes.saturating_add(new_bytes), new_bytes)
+        } else {
+            (cur_validity_bytes, cur_validity_bytes)
+        };
+
+        (
+            val_transient.saturating_add(validity_transient),
+            new_val_bytes.saturating_add(new_validity_bytes),
+        )
+    }
+
+    fn prepare_append(&mut self, k: usize) {
+        self.values.reserve_exact(k);
+        self.validity.reserve_exact(k);
+    }
+
+    fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
+        let values = array
+            .as_any()
+            .downcast_ref::<PrimitiveArray<T>>()
+            .ok_or(EngineError::Internal("remainder expected primitive array"))?;
+        let len = k.min(values.len());
+        self.prepare_append(len);
+        for index in 0..len {
+            if values.is_null(index) {
+                self.all_valid = false;
+                self.validity.push(false);
+                self.values.push(T::Native::default());
+            } else {
+                self.validity.push(true);
+                self.values.push(values.value(index));
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<ArrayRef, EngineError> {
+        let values = ScalarBuffer::from(std::mem::take(&mut self.values));
+        let nulls = if self.all_valid {
+            None
+        } else {
+            Some(NullBuffer::from(std::mem::take(&mut self.validity)))
+        };
+        *self = Self::new();
+        Ok(Arc::new(PrimitiveArray::<T>::new(values, nulls)))
+    }
+}
+
+struct ExactBooleanSink {
+    values: Vec<bool>,
+    validity: Vec<bool>,
+    all_valid: bool,
+}
+
+impl ExactBooleanSink {
+    fn new() -> Self {
+        Self {
+            values: Vec::new(),
+            validity: Vec::new(),
+            all_valid: true,
+        }
+    }
+
+    fn allocated_capacity_bytes(&self) -> usize {
+        (self
+            .values
+            .capacity()
+            .saturating_add(self.validity.capacity()))
+        .saturating_mul(std::mem::size_of::<bool>())
+    }
+
+    fn calculate_growth_peak_and_new_capacity(&self, k: usize) -> (usize, usize) {
+        let bool_slot = std::mem::size_of::<bool>();
+        let cur_val_cap = self.values.capacity();
+        let needed_val = self.values.len().saturating_add(k);
+        let cur_val_bytes = cur_val_cap.saturating_mul(bool_slot);
+        let (val_transient, new_val_bytes) = if needed_val > cur_val_cap {
+            let new_bytes = needed_val.saturating_mul(bool_slot);
+            (cur_val_bytes.saturating_add(new_bytes), new_bytes)
+        } else {
+            (cur_val_bytes, cur_val_bytes)
+        };
+
+        let cur_validity_cap = self.validity.capacity();
+        let needed_validity = self.validity.len().saturating_add(k);
+        let cur_validity_bytes = cur_validity_cap.saturating_mul(bool_slot);
+        let (validity_transient, new_validity_bytes) = if needed_validity > cur_validity_cap {
+            let new_bytes = needed_validity.saturating_mul(bool_slot);
+            (cur_validity_bytes.saturating_add(new_bytes), new_bytes)
+        } else {
+            (cur_validity_bytes, cur_validity_bytes)
+        };
+
+        (
+            val_transient.saturating_add(validity_transient),
+            new_val_bytes.saturating_add(new_validity_bytes),
+        )
+    }
+
+    fn prepare_append(&mut self, k: usize) {
+        self.values.reserve_exact(k);
+        self.validity.reserve_exact(k);
+    }
+
+    fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
+        let values = array
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .ok_or(EngineError::Ffi)?;
+        let len = k.min(values.len());
+        self.prepare_append(len);
+        for index in 0..len {
+            if values.is_null(index) {
+                self.all_valid = false;
+                self.validity.push(false);
+                self.values.push(false);
+            } else {
+                self.validity.push(true);
+                self.values.push(values.value(index));
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<ArrayRef, EngineError> {
+        let values = BooleanBuffer::from_iter(std::mem::take(&mut self.values));
+        let nulls = if self.all_valid {
+            None
+        } else {
+            Some(NullBuffer::from(std::mem::take(&mut self.validity)))
+        };
+        *self = Self::new();
+        Ok(Arc::new(BooleanArray::new(values, nulls)))
     }
 }
 
@@ -431,7 +583,11 @@ impl VariableBytes {
             .capacity()
             .saturating_mul(4)
             .saturating_add(self.values.capacity())
-            .saturating_add(self.validity.capacity().div_ceil(8))
+            .saturating_add(
+                self.validity
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<bool>()),
+            )
     }
 
     fn calculate_growth_peak_and_new_capacity(
@@ -453,9 +609,9 @@ impl VariableBytes {
 
         let cur_validity_cap = self.validity.capacity();
         let needed_validity = self.validity.len().saturating_add(k);
-        let cur_validity_bytes = cur_validity_cap.div_ceil(8);
+        let cur_validity_bytes = cur_validity_cap.saturating_mul(std::mem::size_of::<bool>());
         let (validity_transient, new_validity_bytes) = if needed_validity > cur_validity_cap {
-            let new_bytes = needed_validity.div_ceil(8);
+            let new_bytes = needed_validity.saturating_mul(std::mem::size_of::<bool>());
             (cur_validity_bytes.saturating_add(new_bytes), new_bytes)
         } else {
             (cur_validity_bytes, cur_validity_bytes)
@@ -534,50 +690,6 @@ impl VariableBytes {
     }
 }
 
-fn utf8_range_bytes(array: &StringArray, offset: usize, k: usize) -> usize {
-    if k == 0 {
-        return 0;
-    }
-    let offsets = array.value_offsets();
-    let start = offsets[offset] as usize;
-    let end = offsets[offset + k] as usize;
-    end.saturating_sub(start)
-}
-
-fn boolean_growth(builder: &BooleanBuilder, k: usize) -> (usize, usize) {
-    let cur_items = builder.len();
-    let cur_cap = builder.capacity();
-    let cur_cap_bytes = cur_cap.div_ceil(8).saturating_mul(2);
-    let needed_items = cur_items.saturating_add(k);
-    if needed_items > cur_cap {
-        let new_cap_bytes = needed_items.div_ceil(8).saturating_mul(2);
-        (cur_cap_bytes.saturating_add(new_cap_bytes), new_cap_bytes)
-    } else {
-        (cur_cap_bytes, cur_cap_bytes)
-    }
-}
-
-fn primitive_growth<T: arrow_array::ArrowPrimitiveType>(
-    builder: &PrimitiveBuilder<T>,
-    k: usize,
-) -> (usize, usize) {
-    let slot = std::mem::size_of::<T::Native>();
-    let cur_items = builder.len();
-    let cur_cap = builder.capacity();
-    let cur_cap_bytes = cur_cap
-        .saturating_mul(slot)
-        .saturating_add(cur_cap.div_ceil(8));
-    let needed_items = cur_items.saturating_add(k);
-    if needed_items > cur_cap {
-        let new_cap_bytes = needed_items
-            .saturating_mul(slot)
-            .saturating_add(needed_items.div_ceil(8));
-        (cur_cap_bytes.saturating_add(new_cap_bytes), new_cap_bytes)
-    } else {
-        (cur_cap_bytes, cur_cap_bytes)
-    }
-}
-
 fn array_data_bytes_for_slice(array: &dyn Array, k: usize) -> usize {
     let end = k.min(array.len());
     if let Some(utf8) = array.as_any().downcast_ref::<StringArray>() {
@@ -619,42 +731,20 @@ fn array_data_bytes_for_slice(array: &dyn Array, k: usize) -> usize {
     0
 }
 
-fn append_bool(builder: &mut BooleanBuilder, array: &dyn Array) -> Result<(), EngineError> {
-    let values = array
-        .as_any()
-        .downcast_ref::<BooleanArray>()
-        .ok_or(EngineError::Ffi)?;
-    for index in 0..values.len() {
-        if values.is_null(index) {
-            builder.append_null();
-        } else {
-            builder.append_value(values.value(index));
-        }
+fn utf8_range_bytes(array: &StringArray, offset: usize, k: usize) -> usize {
+    if k == 0 {
+        return 0;
     }
-    Ok(())
+    let offsets = array.value_offsets();
+    let start = offsets[offset] as usize;
+    let end = offsets[offset + k] as usize;
+    end.saturating_sub(start)
 }
 
-fn append_prim<T: arrow_array::ArrowPrimitiveType>(
-    builder: &mut PrimitiveBuilder<T>,
-    array: &dyn Array,
-) -> Result<(), EngineError> {
-    let values = array
-        .as_any()
-        .downcast_ref::<PrimitiveArray<T>>()
-        .ok_or(EngineError::Internal("remainder expected primitive array"))?;
-    for index in 0..values.len() {
-        if values.is_null(index) {
-            builder.append_null();
-        } else {
-            builder.append_value(values.value(index));
-        }
-    }
-    Ok(())
-}
-
-fn append_utf8(sink: &mut VariableBytes, array: &dyn Array) -> Result<(), EngineError> {
+fn append_utf8(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Result<(), EngineError> {
     if let Some(values) = array.as_any().downcast_ref::<StringArray>() {
-        return append_utf8_values(sink, values.len(), |index| {
+        let len = k.min(values.len());
+        return append_utf8_values(sink, len, |index| {
             (!values.is_null(index)).then(|| values.value(index).as_bytes())
         });
     }
@@ -662,7 +752,8 @@ fn append_utf8(sink: &mut VariableBytes, array: &dyn Array) -> Result<(), Engine
         .as_any()
         .downcast_ref::<arrow_array::StringViewArray>()
     {
-        return append_utf8_values(sink, values.len(), |index| {
+        let len = k.min(values.len());
+        return append_utf8_values(sink, len, |index| {
             (!values.is_null(index)).then(|| values.value(index).as_bytes())
         });
     }
@@ -670,7 +761,8 @@ fn append_utf8(sink: &mut VariableBytes, array: &dyn Array) -> Result<(), Engine
         .as_any()
         .downcast_ref::<arrow_array::LargeStringArray>()
     {
-        return append_utf8_values(sink, values.len(), |index| {
+        let len = k.min(values.len());
+        return append_utf8_values(sink, len, |index| {
             (!values.is_null(index)).then(|| values.value(index).as_bytes())
         });
     }
@@ -692,17 +784,18 @@ fn append_utf8_values<'a>(
     Ok(())
 }
 
-fn append_binary(sink: &mut VariableBytes, array: &dyn Array) -> Result<(), EngineError> {
+fn append_binary(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Result<(), EngineError> {
     let values = array
         .as_any()
         .downcast_ref::<BinaryArray>()
         .ok_or(EngineError::Ffi)?;
-    let data_bytes = (0..values.len())
-        .filter(|index| !values.is_null(*index))
+    let len = k.min(values.len());
+    let data_bytes = (0..len)
+        .filter(|&index| !values.is_null(index))
         .map(|index| values.value(index).len())
         .fold(0_usize, usize::saturating_add);
-    sink.prepare_append(values.len(), data_bytes);
-    for index in 0..values.len() {
+    sink.prepare_append(len, data_bytes);
+    for index in 0..len {
         if values.is_null(index) {
             sink.append_value(None)?;
         } else {
