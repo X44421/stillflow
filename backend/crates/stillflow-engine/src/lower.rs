@@ -1,4 +1,4 @@
-use polars::prelude::{col, lit, when, DataFrame, DataType, Expr as PolarsExpr, IntoLazy, NULL};
+use polars::prelude::{col, lit, when, DataFrame, Expr as PolarsExpr, IntoLazy, NULL};
 use stillflow_core::{
     BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue,
     UnaryOperator,
@@ -111,14 +111,28 @@ fn apply_rule(
                 {
                     let height = frame.height();
                     let mut derived = frame;
+                    let dtype = polars_data_type(data_type)?;
                     derived
                         .with_column(polars::prelude::Column::full_null(
                             name.as_str().into(),
                             height,
-                            &DataType::Null,
+                            &dtype,
                         ))
                         .map_err(|_| EngineError::TypeError("derive-column failed"))?;
                     deferred.push((name.clone(), value.clone()));
+                    derived
+                }
+                Expr::Literal(ScalarValue::Null) => {
+                    let height = frame.height();
+                    let mut derived = frame;
+                    let dtype = polars_data_type(data_type)?;
+                    derived
+                        .with_column(polars::prelude::Column::full_null(
+                            name.as_str().into(),
+                            height,
+                            &dtype,
+                        ))
+                        .map_err(|_| EngineError::TypeError("derive-column failed"))?;
                     derived
                 }
                 Expr::Literal(value) => {
@@ -251,17 +265,32 @@ fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsExpr, EngineE
             operator,
             right,
         } => {
-            let left = lower_expr(left, schema)?;
-            let right = lower_expr(right, schema)?;
+            let left_type = crate::typing::type_check_expr(left, schema)?;
+            let right_type = crate::typing::type_check_expr(right, schema)?;
+            let mut left_expr = lower_expr(left, schema)?;
+            let mut right_expr = lower_expr(right, schema)?;
+            if left_type != right_type {
+                let lub = left_type
+                    .least_upper_bound(&right_type)
+                    .map_err(|_| EngineError::TypeError("incompatible binary operand types"))?;
+                if left_type != lub {
+                    let lub_dtype = polars_data_type(&lub)?;
+                    left_expr = left_expr.strict_cast(lub_dtype);
+                }
+                if right_type != lub {
+                    let lub_dtype = polars_data_type(&lub)?;
+                    right_expr = right_expr.strict_cast(lub_dtype);
+                }
+            }
             match operator {
-                BinaryOperator::Equal => left.eq(right),
-                BinaryOperator::NotEqual => left.neq(right),
-                BinaryOperator::LessThan => left.lt(right),
-                BinaryOperator::LessThanOrEqual => left.lt_eq(right),
-                BinaryOperator::GreaterThan => left.gt(right),
-                BinaryOperator::GreaterThanOrEqual => left.gt_eq(right),
-                BinaryOperator::And => left.and(right),
-                BinaryOperator::Or => left.or(right),
+                BinaryOperator::Equal => left_expr.eq(right_expr),
+                BinaryOperator::NotEqual => left_expr.neq(right_expr),
+                BinaryOperator::LessThan => left_expr.lt(right_expr),
+                BinaryOperator::LessThanOrEqual => left_expr.lt_eq(right_expr),
+                BinaryOperator::GreaterThan => left_expr.gt(right_expr),
+                BinaryOperator::GreaterThanOrEqual => left_expr.gt_eq(right_expr),
+                BinaryOperator::And => left_expr.and(right_expr),
+                BinaryOperator::Or => left_expr.or(right_expr),
                 BinaryOperator::Add
                 | BinaryOperator::Subtract
                 | BinaryOperator::Multiply
@@ -294,9 +323,19 @@ fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsExpr, EngineE
             data_type,
         } => lower_expr(expression, schema)?.strict_cast(polars_data_type(data_type)?),
         Expr::Coalesce { expressions } => {
+            if expressions.is_empty() {
+                return Ok(lit(NULL));
+            }
+            let target_lub = crate::typing::type_check_expr(expr, schema)?;
+            let target_dtype = polars_data_type(&target_lub)?;
             let mut lowered = Vec::new();
-            for expr in expressions {
-                lowered.push(lower_expr(expr, schema)?);
+            for e in expressions {
+                let arm_type = crate::typing::type_check_expr(e, schema)?;
+                let mut arm_expr = lower_expr(e, schema)?;
+                if arm_type != target_lub {
+                    arm_expr = arm_expr.strict_cast(target_dtype.clone());
+                }
+                lowered.push(arm_expr);
             }
             coalesce_exprs(lowered)
         }

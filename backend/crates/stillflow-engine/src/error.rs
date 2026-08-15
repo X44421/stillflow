@@ -198,13 +198,9 @@ impl fmt::Debug for EngineError {
 }
 
 fn fallback_summary() -> SanitizedErrorSummary {
-    for message in ["engine failure", "internal error", "error"] {
-        if let Ok(summary) = SanitizedErrorSummary::try_new(ErrorCategory::Internal, false, message)
-        {
-            return summary;
-        }
-    }
-    stillflow_core::ConnectorError::for_unsupported_capability("internal").sanitized_summary()
+    SanitizedErrorSummary::try_new(ErrorCategory::Internal, false, "internal error").unwrap_or_else(
+        |_| stillflow_core::ConnectorError::internal("internal error").sanitized_summary(),
+    )
 }
 
 fn operator_kind_name(kind: &PlanNodeKind) -> &'static str {

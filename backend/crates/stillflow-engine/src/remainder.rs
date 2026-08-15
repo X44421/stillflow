@@ -35,7 +35,7 @@ impl CanonicalRebatcher {
         let sinks = schema
             .fields
             .iter()
-            .map(|field| ColumnSink::new(&field.data_type, pack_limit))
+            .map(|field| ColumnSink::new(&field.data_type))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             factory: BatchEnvelopeFactory::try_new(schema, source_asset_id)
@@ -57,7 +57,7 @@ impl CanonicalRebatcher {
         }
         self.sinks
             .iter()
-            .map(|sink| sink.physical_bytes(self.rows))
+            .map(|sink| sink.allocated_capacity_bytes())
             .fold(0_usize, usize::saturating_add)
     }
 
@@ -67,12 +67,22 @@ impl CanonicalRebatcher {
         tracker: &mut MemoryTracker,
         mut publish: impl FnMut(BatchEnvelope, &mut MemoryTracker) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
-        crate::memory::set_alloc_phase(AllocatorPhase::Remainder);
+        let _remainder_guard = crate::memory::enter_phase(AllocatorPhase::Remainder);
         tracker.hold_incoming(incoming.get_array_memory_size())?;
         let mut remaining = incoming;
         while remaining.num_rows() > 0 {
             let k = self.max_prefix(&remaining)?;
             if k == 0 {
+                if self.remainder_live() {
+                    self.flush(&mut publish, tracker)?;
+                    continue;
+                }
+                return Err(EngineError::BoundExceeded(
+                    "a single transformed row exceeds MAX_BATCH_BYTES",
+                ));
+            }
+            let required_bytes = self.predicted_bytes_with(&remaining, k);
+            if required_bytes > MAX_BATCH_BYTES {
                 if self.remainder_live() {
                     self.flush(&mut publish, tracker)?;
                     continue;
@@ -102,7 +112,7 @@ impl CanonicalRebatcher {
         tracker: &mut MemoryTracker,
         mut publish: impl FnMut(BatchEnvelope, &mut MemoryTracker) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
-        crate::memory::set_alloc_phase(AllocatorPhase::Remainder);
+        let _remainder_guard = crate::memory::enter_phase(AllocatorPhase::Remainder);
         if self.remainder_live() {
             self.flush(&mut publish, tracker)?;
         }
@@ -141,7 +151,7 @@ impl CanonicalRebatcher {
             .iter()
             .zip(self.sinks.iter())
             .map(|(array, sink)| {
-                sink.physical_bytes(self.rows)
+                sink.allocated_capacity_bytes()
                     .saturating_add(incoming_physical_bytes(array.as_ref(), k))
             })
             .fold(0_usize, usize::saturating_add)
@@ -210,41 +220,41 @@ enum ColumnSink {
     Utf8(VariableBytes),
     Binary(VariableBytes),
     Date32(PrimitiveBuilder<Date32Type>),
-    TimestampMs(PrimitiveBuilder<TimestampMillisecondType>),
-    TimestampUs(PrimitiveBuilder<TimestampMicrosecondType>),
-    TimestampNs(PrimitiveBuilder<TimestampNanosecondType>),
+    TimestampMs(PrimitiveBuilder<TimestampMillisecondType>, Option<String>),
+    TimestampUs(PrimitiveBuilder<TimestampMicrosecondType>, Option<String>),
+    TimestampNs(PrimitiveBuilder<TimestampNanosecondType>, Option<String>),
 }
 
 impl ColumnSink {
-    fn new(data_type: &LogicalType, capacity: usize) -> Result<Self, EngineError> {
+    fn new(data_type: &LogicalType) -> Result<Self, EngineError> {
         Ok(match data_type {
             LogicalType::Null => Self::Null,
-            LogicalType::Boolean => Self::Boolean(BooleanBuilder::with_capacity(capacity)),
-            LogicalType::Int8 => Self::Int8(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::Int16 => Self::Int16(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::Int32 => Self::Int32(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::Int64 => Self::Int64(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::UInt8 => Self::UInt8(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::UInt16 => Self::UInt16(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::UInt32 => Self::UInt32(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::UInt64 => Self::UInt64(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::Float32 => Self::Float32(PrimitiveBuilder::with_capacity(capacity)),
-            LogicalType::Float64 => Self::Float64(PrimitiveBuilder::with_capacity(capacity)),
+            LogicalType::Boolean => Self::Boolean(BooleanBuilder::new()),
+            LogicalType::Int8 => Self::Int8(PrimitiveBuilder::new()),
+            LogicalType::Int16 => Self::Int16(PrimitiveBuilder::new()),
+            LogicalType::Int32 => Self::Int32(PrimitiveBuilder::new()),
+            LogicalType::Int64 => Self::Int64(PrimitiveBuilder::new()),
+            LogicalType::UInt8 => Self::UInt8(PrimitiveBuilder::new()),
+            LogicalType::UInt16 => Self::UInt16(PrimitiveBuilder::new()),
+            LogicalType::UInt32 => Self::UInt32(PrimitiveBuilder::new()),
+            LogicalType::UInt64 => Self::UInt64(PrimitiveBuilder::new()),
+            LogicalType::Float32 => Self::Float32(PrimitiveBuilder::new()),
+            LogicalType::Float64 => Self::Float64(PrimitiveBuilder::new()),
             LogicalType::Utf8 => Self::Utf8(VariableBytes::new()),
             LogicalType::Binary => Self::Binary(VariableBytes::new()),
-            LogicalType::Date32 => Self::Date32(PrimitiveBuilder::with_capacity(capacity)),
+            LogicalType::Date32 => Self::Date32(PrimitiveBuilder::new()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Millisecond,
-                ..
-            } => Self::TimestampMs(PrimitiveBuilder::with_capacity(capacity)),
+                timezone,
+            } => Self::TimestampMs(PrimitiveBuilder::new(), timezone.clone()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Microsecond,
-                ..
-            } => Self::TimestampUs(PrimitiveBuilder::with_capacity(capacity)),
+                timezone,
+            } => Self::TimestampUs(PrimitiveBuilder::new(), timezone.clone()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Nanosecond,
-                ..
-            } => Self::TimestampNs(PrimitiveBuilder::with_capacity(capacity)),
+                timezone,
+            } => Self::TimestampNs(PrimitiveBuilder::new(), timezone.clone()),
             LogicalType::Timestamp {
                 unit: TimeUnit::Second,
                 ..
@@ -257,22 +267,67 @@ impl ColumnSink {
         })
     }
 
-    fn physical_bytes(&self, rows: usize) -> usize {
+    fn allocated_capacity_bytes(&self) -> usize {
         match self {
-            Self::Utf8(sink) | Self::Binary(sink) => utf8_physical_bytes(rows, sink.data_bytes),
-            Self::Null => rows.div_ceil(8),
-            Self::Boolean(_) => fixed_physical_bytes(rows, 1),
-            Self::Int8(_) | Self::UInt8(_) => fixed_physical_bytes(rows, 1),
-            Self::Int16(_) | Self::UInt16(_) => fixed_physical_bytes(rows, 2),
-            Self::Int32(_) | Self::UInt32(_) | Self::Float32(_) | Self::Date32(_) => {
-                fixed_physical_bytes(rows, 4)
-            }
-            Self::Int64(_)
-            | Self::UInt64(_)
-            | Self::Float64(_)
-            | Self::TimestampMs(_)
-            | Self::TimestampUs(_)
-            | Self::TimestampNs(_) => fixed_physical_bytes(rows, 8),
+            Self::Null => 0,
+            Self::Boolean(b) => b.capacity().div_ceil(8).saturating_mul(2),
+            Self::Int8(b) => b
+                .capacity()
+                .saturating_mul(1)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::UInt8(b) => b
+                .capacity()
+                .saturating_mul(1)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Int16(b) => b
+                .capacity()
+                .saturating_mul(2)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::UInt16(b) => b
+                .capacity()
+                .saturating_mul(2)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Int32(b) => b
+                .capacity()
+                .saturating_mul(4)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::UInt32(b) => b
+                .capacity()
+                .saturating_mul(4)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Float32(b) => b
+                .capacity()
+                .saturating_mul(4)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Date32(b) => b
+                .capacity()
+                .saturating_mul(4)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Int64(b) => b
+                .capacity()
+                .saturating_mul(8)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::UInt64(b) => b
+                .capacity()
+                .saturating_mul(8)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Float64(b) => b
+                .capacity()
+                .saturating_mul(8)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::TimestampMs(b, _) => b
+                .capacity()
+                .saturating_mul(8)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::TimestampUs(b, _) => b
+                .capacity()
+                .saturating_mul(8)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::TimestampNs(b, _) => b
+                .capacity()
+                .saturating_mul(8)
+                .saturating_add(b.capacity().div_ceil(8)),
+            Self::Utf8(sink) | Self::Binary(sink) => sink.allocated_capacity_bytes(),
         }
     }
 
@@ -294,9 +349,9 @@ impl ColumnSink {
             Self::Utf8(sink) => append_utf8(sink, slice.as_ref()),
             Self::Binary(sink) => append_binary(sink, slice.as_ref()),
             Self::Date32(builder) => append_prim(builder, slice.as_ref()),
-            Self::TimestampMs(builder) => append_prim(builder, slice.as_ref()),
-            Self::TimestampUs(builder) => append_prim(builder, slice.as_ref()),
-            Self::TimestampNs(builder) => append_prim(builder, slice.as_ref()),
+            Self::TimestampMs(builder, _) => append_prim(builder, slice.as_ref()),
+            Self::TimestampUs(builder, _) => append_prim(builder, slice.as_ref()),
+            Self::TimestampNs(builder, _) => append_prim(builder, slice.as_ref()),
         }
     }
 
@@ -317,9 +372,15 @@ impl ColumnSink {
             Self::Utf8(sink) => sink.finish_utf8()?,
             Self::Binary(sink) => sink.finish_binary()?,
             Self::Date32(builder) => Arc::new(builder.finish()),
-            Self::TimestampMs(builder) => Arc::new(builder.finish()),
-            Self::TimestampUs(builder) => Arc::new(builder.finish()),
-            Self::TimestampNs(builder) => Arc::new(builder.finish()),
+            Self::TimestampMs(builder, timezone) => {
+                Arc::new(builder.finish().with_timezone_opt(timezone.clone()))
+            }
+            Self::TimestampUs(builder, timezone) => {
+                Arc::new(builder.finish().with_timezone_opt(timezone.clone()))
+            }
+            Self::TimestampNs(builder, timezone) => {
+                Arc::new(builder.finish().with_timezone_opt(timezone.clone()))
+            }
         })
     }
 }
@@ -341,6 +402,14 @@ impl VariableBytes {
             all_valid: true,
             data_bytes: 0,
         }
+    }
+
+    fn allocated_capacity_bytes(&self) -> usize {
+        self.offsets
+            .capacity()
+            .saturating_mul(4)
+            .saturating_add(self.values.capacity())
+            .saturating_add(self.validity.capacity().div_ceil(8))
     }
 
     fn prepare_append(&mut self, rows: usize, data_bytes: usize) {

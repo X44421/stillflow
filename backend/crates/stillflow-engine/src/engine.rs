@@ -254,28 +254,30 @@ fn consume_envelope(
             predicted,
             &prepared.steps,
         )?;
-        let slice = envelope.payload().slice(offset, k);
+        let batch = {
+            let _polars_phase = crate::memory::enter_phase(crate::memory::AllocatorPhase::Polars);
+            let slice = envelope.payload().slice(offset, k);
+            let frame = record_batch_to_dataframe(&slice)?;
+            let working_bytes = frame.estimated_size();
+            tracker.hold_polars(working_bytes.max(slice.get_array_memory_size()))?;
+            tracker.record_chunk(k, rebatcher.remainder_live());
+            if working_bytes > MAX_BATCH_BYTES {
+                return Err(EngineError::Internal(
+                    "polars working set exceeded MAX_BATCH_BYTES",
+                ));
+            }
+            let (transformed, deferred) =
+                crate::lower::transform(frame, &prepared.scan_output, &prepared.steps)?;
+            let transformed_bytes = transformed.estimated_size();
+            tracker.hold_polars(transformed_bytes)?;
+            dataframe_to_record_batch(
+                transformed,
+                &prepared.materialize_schema,
+                output_schema,
+                &deferred,
+            )?
+        };
         offset += k;
-        crate::memory::set_alloc_phase(crate::memory::AllocatorPhase::Polars);
-        let frame = record_batch_to_dataframe(&slice)?;
-        let working_bytes = frame.estimated_size();
-        tracker.hold_polars(working_bytes.max(slice.get_array_memory_size()))?;
-        tracker.record_chunk(k, rebatcher.remainder_live());
-        if working_bytes > MAX_BATCH_BYTES {
-            return Err(EngineError::Internal(
-                "polars working set exceeded MAX_BATCH_BYTES",
-            ));
-        }
-        let (transformed, deferred) =
-            crate::lower::transform(frame, &prepared.scan_output, &prepared.steps)?;
-        let transformed_bytes = transformed.estimated_size();
-        tracker.hold_polars(transformed_bytes)?;
-        let batch = dataframe_to_record_batch(
-            transformed,
-            &prepared.materialize_schema,
-            output_schema,
-            &deferred,
-        )?;
         tracker.drop_polars()?;
         rebatcher.push(batch, tracker, |envelope, tracker| {
             append_envelope(writer, envelope, tracker, context)
@@ -292,6 +294,7 @@ fn append_envelope(
 ) -> Result<(), EngineError> {
     context.ensure_active().map_err(map_context_error)?;
     tracker.record_storage_append(envelope.byte_count());
+    let _storage_phase = crate::memory::enter_phase(crate::memory::AllocatorPhase::StorageAppend);
     writer.append(&envelope).map_err(EngineError::from_storage)
 }
 

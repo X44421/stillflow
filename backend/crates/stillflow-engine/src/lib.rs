@@ -99,8 +99,7 @@ mod test_alloc {
         }
 
         unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            crate::memory::record_dealloc(layout.size());
-            crate::memory::record_alloc(new_size);
+            crate::memory::record_realloc(layout.size(), new_size);
             unsafe { System.realloc(ptr, layout, new_size) }
         }
     }

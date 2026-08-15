@@ -1,17 +1,14 @@
-use std::cell::Cell;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use crate::error::{live_payload_guard, peak_guard, EngineError};
 use crate::MAX_OPERATOR_STATE_BYTES;
 
-static ACTIVE_PHASES: AtomicU32 = AtomicU32::new(0);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AllocatorPhase {
-    Idle,
-    Polars,
-    Remainder,
-    StorageAppend,
+    Idle = 0,
+    Polars = 1,
+    Remainder = 2,
+    StorageAppend = 3,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -26,99 +23,136 @@ pub struct MemoryReport {
     pub saw_split_envelope_with_remainder: bool,
 }
 
-thread_local! {
-    static PHASE: Cell<AllocatorPhase> = const { Cell::new(AllocatorPhase::Idle) };
-    static POLARS_LIVE: Cell<usize> = const { Cell::new(0) };
-    static POLARS_PEAK: Cell<usize> = const { Cell::new(0) };
-    static REMAINDER_LIVE: Cell<usize> = const { Cell::new(0) };
-    static REMAINDER_PEAK: Cell<usize> = const { Cell::new(0) };
-    static STORAGE_LIVE: Cell<usize> = const { Cell::new(0) };
-    static STORAGE_PEAK: Cell<usize> = const { Cell::new(0) };
-}
+static GLOBAL_PHASE: AtomicU8 = AtomicU8::new(0);
+static POLARS_LIVE: AtomicUsize = AtomicUsize::new(0);
+static POLARS_PEAK: AtomicUsize = AtomicUsize::new(0);
+static REMAINDER_LIVE: AtomicUsize = AtomicUsize::new(0);
+static REMAINDER_PEAK: AtomicUsize = AtomicUsize::new(0);
+static STORAGE_LIVE: AtomicUsize = AtomicUsize::new(0);
+static STORAGE_PEAK: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn set_alloc_phase(phase: AllocatorPhase) {
-    PHASE.with(|cell| {
-        let previous = cell.get();
-        if previous == phase {
-            return;
-        }
-        cell.set(phase);
-        match (
-            previous == AllocatorPhase::Idle,
-            phase == AllocatorPhase::Idle,
-        ) {
-            (true, false) => {
-                ACTIVE_PHASES.fetch_add(1, Ordering::Relaxed);
-            }
-            (false, true) => {
-                ACTIVE_PHASES.fetch_sub(1, Ordering::Relaxed);
-            }
-            _ => {}
-        }
-    });
+    GLOBAL_PHASE.store(phase as u8, Ordering::SeqCst);
+}
+
+pub(crate) fn current_alloc_phase() -> AllocatorPhase {
+    match GLOBAL_PHASE.load(Ordering::SeqCst) {
+        1 => AllocatorPhase::Polars,
+        2 => AllocatorPhase::Remainder,
+        3 => AllocatorPhase::StorageAppend,
+        _ => AllocatorPhase::Idle,
+    }
+}
+
+pub(crate) struct PhaseGuard {
+    previous: AllocatorPhase,
+}
+
+impl Drop for PhaseGuard {
+    fn drop(&mut self) {
+        set_alloc_phase(self.previous);
+    }
+}
+
+pub(crate) fn enter_phase(phase: AllocatorPhase) -> PhaseGuard {
+    let previous = current_alloc_phase();
+    set_alloc_phase(phase);
+    PhaseGuard { previous }
 }
 
 pub(crate) fn reset_alloc_peaks() {
     set_alloc_phase(AllocatorPhase::Idle);
-    POLARS_LIVE.with(|cell| cell.set(0));
-    POLARS_PEAK.with(|cell| cell.set(0));
-    REMAINDER_LIVE.with(|cell| cell.set(0));
-    REMAINDER_PEAK.with(|cell| cell.set(0));
-    STORAGE_LIVE.with(|cell| cell.set(0));
-    STORAGE_PEAK.with(|cell| cell.set(0));
+    POLARS_LIVE.store(0, Ordering::SeqCst);
+    POLARS_PEAK.store(0, Ordering::SeqCst);
+    REMAINDER_LIVE.store(0, Ordering::SeqCst);
+    REMAINDER_PEAK.store(0, Ordering::SeqCst);
+    STORAGE_LIVE.store(0, Ordering::SeqCst);
+    STORAGE_PEAK.store(0, Ordering::SeqCst);
 }
 
 pub(crate) fn alloc_peaks() -> (usize, usize, usize) {
     (
-        POLARS_PEAK.with(Cell::get),
-        REMAINDER_PEAK.with(Cell::get),
-        STORAGE_PEAK.with(Cell::get),
+        POLARS_PEAK.load(Ordering::SeqCst),
+        REMAINDER_PEAK.load(Ordering::SeqCst),
+        STORAGE_PEAK.load(Ordering::SeqCst),
     )
 }
 
-#[inline]
-fn tracking_active() -> bool {
-    ACTIVE_PHASES.load(Ordering::Relaxed) != 0
-}
-
+#[cfg(test)]
 pub(crate) fn record_alloc(size: usize) {
-    if !tracking_active() {
-        return;
-    }
-    match PHASE.with(Cell::get) {
+    match current_alloc_phase() {
         AllocatorPhase::Idle => {}
-        AllocatorPhase::Polars => add_live(&POLARS_LIVE, &POLARS_PEAK, size),
-        AllocatorPhase::Remainder => add_live(&REMAINDER_LIVE, &REMAINDER_PEAK, size),
-        AllocatorPhase::StorageAppend => add_live(&STORAGE_LIVE, &STORAGE_PEAK, size),
+        AllocatorPhase::Polars => add_live_atomic(&POLARS_LIVE, &POLARS_PEAK, size),
+        AllocatorPhase::Remainder => add_live_atomic(&REMAINDER_LIVE, &REMAINDER_PEAK, size),
+        AllocatorPhase::StorageAppend => add_live_atomic(&STORAGE_LIVE, &STORAGE_PEAK, size),
     }
 }
 
+#[cfg(test)]
 pub(crate) fn record_dealloc(size: usize) {
-    if !tracking_active() {
-        return;
-    }
-    match PHASE.with(Cell::get) {
+    match current_alloc_phase() {
         AllocatorPhase::Idle => {}
-        AllocatorPhase::Polars => sub_live(&POLARS_LIVE, size),
-        AllocatorPhase::Remainder => sub_live(&REMAINDER_LIVE, size),
-        AllocatorPhase::StorageAppend => sub_live(&STORAGE_LIVE, size),
+        AllocatorPhase::Polars => sub_live_atomic(&POLARS_LIVE, size),
+        AllocatorPhase::Remainder => {
+            sub_live_with_fallback(&REMAINDER_LIVE, &POLARS_LIVE, size);
+        }
+        AllocatorPhase::StorageAppend => {
+            sub_live_with_fallback(&STORAGE_LIVE, &REMAINDER_LIVE, size);
+        }
     }
 }
 
-fn add_live(
-    live: &'static std::thread::LocalKey<Cell<usize>>,
-    peak: &'static std::thread::LocalKey<Cell<usize>>,
-    size: usize,
-) {
-    live.with(|cell| {
-        let next = cell.get().saturating_add(size);
-        cell.set(next);
-        peak.with(|peak_cell| peak_cell.set(peak_cell.get().max(next)));
+#[cfg(test)]
+pub(crate) fn record_realloc(old_size: usize, new_size: usize) {
+    match current_alloc_phase() {
+        AllocatorPhase::Idle => {}
+        AllocatorPhase::Polars => {
+            realloc_live_atomic(&POLARS_LIVE, &POLARS_PEAK, old_size, new_size)
+        }
+        AllocatorPhase::Remainder => {
+            realloc_live_atomic(&REMAINDER_LIVE, &REMAINDER_PEAK, old_size, new_size)
+        }
+        AllocatorPhase::StorageAppend => {
+            realloc_live_atomic(&STORAGE_LIVE, &STORAGE_PEAK, old_size, new_size)
+        }
+    }
+}
+
+#[cfg(test)]
+fn add_live_atomic(live: &AtomicUsize, peak: &AtomicUsize, size: usize) {
+    let next = live.fetch_add(size, Ordering::SeqCst).saturating_add(size);
+    peak.fetch_max(next, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+fn realloc_live_atomic(live: &AtomicUsize, peak: &AtomicUsize, old_size: usize, new_size: usize) {
+    let current = live.load(Ordering::SeqCst);
+    let transient = current.saturating_add(new_size);
+    peak.fetch_max(transient, Ordering::SeqCst);
+    if new_size >= old_size {
+        live.fetch_add(new_size - old_size, Ordering::SeqCst);
+    } else {
+        sub_live_atomic(live, old_size - new_size);
+    }
+}
+
+#[cfg(test)]
+fn sub_live_atomic(live: &AtomicUsize, size: usize) {
+    let _ = live.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+        Some(val.saturating_sub(size))
     });
 }
 
-fn sub_live(live: &'static std::thread::LocalKey<Cell<usize>>, size: usize) {
-    live.with(|cell| cell.set(cell.get().saturating_sub(size)));
+#[cfg(test)]
+fn sub_live_with_fallback(primary: &AtomicUsize, fallback: &AtomicUsize, size: usize) {
+    let prev = primary.load(Ordering::SeqCst);
+    if prev >= size {
+        primary.fetch_sub(size, Ordering::SeqCst);
+    } else {
+        primary.store(0, Ordering::SeqCst);
+        let remaining = size - prev;
+        sub_live_atomic(fallback, remaining);
+    }
 }
 
 #[derive(Debug)]
@@ -203,6 +237,11 @@ impl MemoryTracker {
     }
 
     pub(crate) fn hold_incoming(&mut self, bytes: usize) -> Result<(), EngineError> {
+        if bytes > stillflow_core::MAX_BATCH_BYTES {
+            return Err(EngineError::BoundExceeded(
+                "incoming canonical chunk exceeds MAX_BATCH_BYTES",
+            ));
+        }
         self.incoming_live = bytes > 0;
         self.polars_live = false;
         self.working_bytes = bytes;
@@ -228,11 +267,7 @@ impl MemoryTracker {
     }
 
     pub(crate) fn record_storage_append(&mut self, bytes: usize) {
-        set_alloc_phase(AllocatorPhase::StorageAppend);
-        record_alloc(bytes);
         self.report.storage_append_phase_peak = self.report.storage_append_phase_peak.max(bytes);
-        record_dealloc(bytes);
-        set_alloc_phase(AllocatorPhase::Idle);
     }
 
     fn live_payloads(&self) -> u8 {

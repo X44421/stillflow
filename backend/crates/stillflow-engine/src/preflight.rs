@@ -51,6 +51,7 @@ pub(crate) async fn preflight(
 
     plan.validate()
         .map_err(|_| EngineError::InvalidPlan("logical plan failed validation"))?;
+    validate_plan_exprs_iterative(plan)?;
     if compiled_plan_bytes(plan) > MAX_COMPILED_PLAN_BYTES {
         return Err(EngineError::BoundExceeded(
             "compiled plan exceeds MAX_COMPILED_PLAN_BYTES",
@@ -626,8 +627,12 @@ fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), Engine
             "cast from date32 or timestamp to utf8 is paused",
         ));
     }
-    if matches!(to, LogicalType::Binary) && !matches!(from, LogicalType::Binary) {
-        return Err(EngineError::TypeError("cast to binary is not authorized"));
+    if (matches!(to, LogicalType::Binary) && !matches!(from, LogicalType::Binary))
+        || (matches!(from, LogicalType::Binary) && !matches!(to, LogicalType::Binary))
+    {
+        return Err(EngineError::TypeError(
+            "cast to/from binary is not authorized",
+        ));
     }
     Ok(())
 }
@@ -680,6 +685,74 @@ fn validate_literal_for_column(
             "literal is not type-compatible with the column",
         )),
     }
+}
+
+fn validate_expr_iterative(expr: &Expr) -> Result<(), EngineError> {
+    expr.validate_shape()
+        .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
+    let mut nodes = 0_usize;
+    let mut max_depth = 0_usize;
+    let mut stack = vec![(expr, 1_usize)];
+    while let Some((current, depth)) = stack.pop() {
+        nodes += 1;
+        max_depth = max_depth.max(depth);
+        if nodes > MAX_EXPR_NODES || max_depth > MAX_EXPR_DEPTH {
+            return Err(EngineError::BoundExceeded(
+                "expression exceeds node or depth limits",
+            ));
+        }
+        match current {
+            Expr::Unary { expression, .. }
+            | Expr::IsNull { expression, .. }
+            | Expr::Cast { expression, .. } => stack.push((expression, depth + 1)),
+            Expr::Binary { left, right, .. } => {
+                stack.push((left, depth + 1));
+                stack.push((right, depth + 1));
+            }
+            Expr::Coalesce { expressions } => {
+                for expr in expressions {
+                    stack.push((expr, depth + 1));
+                }
+            }
+            Expr::Column(_) | Expr::Literal(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_plan_exprs_iterative(plan: &LogicalPlan) -> Result<(), EngineError> {
+    for node in plan.nodes.values() {
+        match &node.kind {
+            PlanNodeKind::Scan {
+                predicate: Some(predicate),
+                ..
+            }
+            | PlanNodeKind::Filter { predicate } => {
+                validate_expr_iterative(predicate)?;
+            }
+            PlanNodeKind::ApplyRules { rules } => {
+                for rule in rules {
+                    match rule {
+                        Rule::DeriveColumn { expression, .. } => {
+                            validate_expr_iterative(expression)?;
+                        }
+                        Rule::FilterRows { predicate } => {
+                            validate_expr_iterative(predicate)?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            PlanNodeKind::Join { keys, .. } => {
+                for key in keys {
+                    validate_expr_iterative(&key.left)?;
+                    validate_expr_iterative(&key.right)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn validate_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {

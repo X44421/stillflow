@@ -119,7 +119,8 @@ pub(crate) fn predict(
             }
         }
     }
-    Ok(peak.max(live_before))
+    let predict_export = live_before.saturating_add(live_before);
+    Ok(peak.max(predict_export))
 }
 
 pub(crate) fn largest_feasible_k(
@@ -355,8 +356,9 @@ fn predict_rule(
             data_type,
             on_failure,
         } => {
+            let source_type = working.column(*column)?.data_type.clone();
             if matches!(
-                (working.column(*column)?.data_type.clone(), data_type),
+                (&source_type, data_type),
                 (
                     LogicalType::Date32 | LogicalType::Timestamp { .. },
                     LogicalType::Utf8
@@ -366,13 +368,27 @@ fn predict_rule(
                     "cast from date32 or timestamp to utf8 is paused",
                 ));
             }
+            if matches!((&source_type, data_type), (LogicalType::Binary, dt) if dt != &LogicalType::Binary)
+                || matches!((&source_type, data_type), (src, LogicalType::Binary) if src != &LogicalType::Binary)
+            {
+                return Err(EngineError::TypeError(
+                    "cast to/from binary is not authorized",
+                ));
+            }
             let current = next.column_mut(*column)?;
             current.data_type = data_type.clone();
             if matches!(on_failure, stillflow_plan::CastFailurePolicy::SetNull) {
                 current.nullable = true;
             }
             current.max_value_bytes = match data_type {
-                LogicalType::Utf8 => current.max_value_bytes.max(MAX_INT_UTF8_BYTES),
+                LogicalType::Utf8 => match source_type {
+                    LogicalType::Boolean => current.max_value_bytes.max(MAX_BOOL_UTF8_BYTES),
+                    LogicalType::Float32 | LogicalType::Float64 => {
+                        current.max_value_bytes.max(MAX_FLOAT_UTF8_BYTES)
+                    }
+                    LogicalType::Utf8 => current.max_value_bytes,
+                    _ => current.max_value_bytes.max(MAX_INT_UTF8_BYTES),
+                },
                 _ => 0,
             };
             let temporary = match fixed_slot_bytes(data_type) {
