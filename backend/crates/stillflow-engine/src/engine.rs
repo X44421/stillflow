@@ -188,11 +188,15 @@ impl ExecutionEngine {
             .await
             .map_err(EngineError::from_connector)?;
 
-        let mut rebatcher = CanonicalRebatcher::new(
-            Arc::new(prepared.materialize_schema.clone()),
-            request.asset.id,
-            request.batch_size,
-        )?;
+        let mut rebatcher = {
+            let _remainder_phase =
+                crate::memory::enter_phase(crate::memory::AllocatorPhase::Remainder);
+            CanonicalRebatcher::new(
+                Arc::new(prepared.materialize_schema.clone()),
+                request.asset.id,
+                request.batch_size,
+            )?
+        };
         tracker.hold_remainder(rebatcher.remainder_bytes())?;
         let predicted = PredictedSchema::from_scan_output(&prepared.scan_output);
         let output_schema =

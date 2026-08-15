@@ -30,6 +30,7 @@ impl CanonicalRebatcher {
         source_asset_id: uuid::Uuid,
         pack_limit: usize,
     ) -> Result<Self, EngineError> {
+        let _guard = crate::memory::enter_phase(AllocatorPhase::Remainder);
         let sinks = schema
             .fields
             .iter()
@@ -505,10 +506,10 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
 
     fn finish(&mut self) -> Result<ArrayRef, EngineError> {
         let values = ScalarBuffer::from(std::mem::take(&mut self.values));
+        let validity_buf = self.validity.finish();
         let nulls = if self.all_valid {
             None
         } else {
-            let validity_buf = self.validity.finish();
             Some(NullBuffer::new(validity_buf))
         };
         self.all_valid = true;
@@ -573,10 +574,10 @@ impl ExactBooleanSink {
 
     fn finish(&mut self) -> Result<ArrayRef, EngineError> {
         let values_buf = self.values.finish();
+        let validity_buf = self.validity.finish();
         let nulls = if self.all_valid {
             None
         } else {
-            let validity_buf = self.validity.finish();
             Some(NullBuffer::new(validity_buf))
         };
         self.all_valid = true;
@@ -680,10 +681,10 @@ impl VariableBytes {
     ) -> Result<(OffsetBuffer<i32>, Buffer, Option<NullBuffer>), EngineError> {
         let offsets = OffsetBuffer::new(ScalarBuffer::from(std::mem::take(&mut self.offsets)));
         let values = Buffer::from_vec(std::mem::take(&mut self.values));
+        let validity_buf = self.validity.finish();
         let nulls = if self.all_valid {
             None
         } else {
-            let validity_buf = self.validity.finish();
             Some(NullBuffer::new(validity_buf))
         };
         *self = Self::new();

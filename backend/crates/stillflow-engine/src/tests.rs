@@ -1139,11 +1139,10 @@ fn t54_fallback_error_sanitization_is_always_internal() {
 }
 
 #[test]
-fn t55_near_64mib_boolean_and_nullable_remainder_freeze_respects_bounds() {
+fn t55_near_64mib_nullable_int64_remainder_freeze_respects_bounds() {
     let _guard = exclusive_test_lock().blocking_lock();
     reset_alloc_peaks();
 
-    // 1. Test near-64 MiB nullable Int64 remainder freeze (120 columns x 65,536 rows)
     let num_cols = 120_usize;
     let rows = 65_536_usize;
     let fields: Vec<LogicalField> = (0..num_cols)
@@ -1205,9 +1204,17 @@ fn t55_near_64mib_boolean_and_nullable_remainder_freeze_respects_bounds() {
     assert_eq!(published[0].payload().num_rows(), rows);
     assert_eq!(published[0].payload().num_columns(), num_cols);
 
-    // 2. Test near-60 MiB nullable Boolean remainder freeze (3,700 columns x 65,536 rows)
+    drop(published);
+    drop(_guard);
+}
+
+#[test]
+fn t56_near_60mib_nullable_boolean_remainder_freeze_respects_bounds() {
+    let _guard = exclusive_test_lock().blocking_lock();
     reset_alloc_peaks();
+
     let num_bool_cols = 3_700_usize;
+    let rows = 65_536_usize;
     let bool_fields: Vec<LogicalField> = (0..num_bool_cols)
         .map(|i| {
             LogicalField::new(
@@ -1268,5 +1275,148 @@ fn t55_near_64mib_boolean_and_nullable_remainder_freeze_respects_bounds() {
     assert_eq!(bool_published[0].payload().num_rows(), rows);
     assert_eq!(bool_published[0].payload().num_columns(), num_bool_cols);
 
+    drop(bool_published);
+    drop(_guard);
+}
+
+#[test]
+fn t57_all_valid_flush_then_nullable_flush_resets_validity() {
+    let _guard = exclusive_test_lock().blocking_lock();
+    reset_alloc_peaks();
+
+    // 1. Int64: First batch all valid (10 rows), Second batch with nulls (5 rows)
+    let id_int = column(1);
+    let int_schema = Arc::new(
+        LogicalSchema::new(vec![LogicalField::new(
+            id_int,
+            "val",
+            LogicalType::Int64,
+            true,
+        )
+        .expect("field")])
+        .expect("schema"),
+    );
+    let mut rebatcher = {
+        let _guard = crate::memory::enter_phase(crate::memory::AllocatorPhase::Remainder);
+        crate::remainder::CanonicalRebatcher::new(int_schema.clone(), Uuid::from_u128(101), 10)
+            .expect("rebatcher")
+    };
+    let mut tracker = crate::memory::MemoryTracker::new();
+    tracker
+        .hold_remainder(rebatcher.remainder_bytes())
+        .expect("hold");
+
+    // Batch 1: All valid (10 rows)
+    let b1_arr = arrow_array::Int64Array::from((0..10_i64).collect::<Vec<_>>());
+    let factory =
+        BatchEnvelopeFactory::try_new(int_schema.clone(), Uuid::from_u128(101)).expect("factory");
+    let b1 =
+        RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(b1_arr)]).expect("b1");
+    let mut published = Vec::new();
+    rebatcher
+        .push(b1, &mut tracker, |envelope, _| {
+            published.push(envelope);
+            Ok(())
+        })
+        .expect("push b1");
+    assert_eq!(published.len(), 1);
+    assert_eq!(published[0].payload().num_rows(), 10);
+    assert_eq!(published[0].payload().column(0).null_count(), 0);
+    assert_eq!(rebatcher.remainder_bytes(), 0);
+    assert!(!rebatcher.remainder_live());
+
+    // Batch 2: 5 rows with nulls
+    let b2_arr =
+        arrow_array::Int64Array::from(vec![Some(1_i64), None, Some(3_i64), None, Some(5_i64)]);
+    let b2 =
+        RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(b2_arr)]).expect("b2");
+    rebatcher
+        .push(b2, &mut tracker, |envelope, _| {
+            published.push(envelope);
+            Ok(())
+        })
+        .expect("push b2");
+    rebatcher
+        .finish(&mut tracker, |envelope, _| {
+            published.push(envelope);
+            Ok(())
+        })
+        .expect("finish");
+    assert_eq!(published.len(), 2);
+    assert_eq!(published[1].payload().num_rows(), 5);
+    assert_eq!(published[1].payload().column(0).null_count(), 2);
+
+    drop(published);
+
+    // 2. Boolean: First batch all valid (8 rows), Second batch with nulls (4 rows)
+    reset_alloc_peaks();
+    let id_bool = column(2);
+    let bool_schema = Arc::new(
+        LogicalSchema::new(vec![LogicalField::new(
+            id_bool,
+            "flag",
+            LogicalType::Boolean,
+            true,
+        )
+        .expect("field")])
+        .expect("schema"),
+    );
+    let mut bool_rebatcher = {
+        let _guard = crate::memory::enter_phase(crate::memory::AllocatorPhase::Remainder);
+        crate::remainder::CanonicalRebatcher::new(bool_schema.clone(), Uuid::from_u128(102), 8)
+            .expect("bool rebatcher")
+    };
+    let mut bool_tracker = crate::memory::MemoryTracker::new();
+    bool_tracker
+        .hold_remainder(bool_rebatcher.remainder_bytes())
+        .expect("hold");
+
+    // Batch 1: All valid (8 rows)
+    let bool_b1_arr =
+        arrow_array::BooleanArray::from(vec![true, false, true, false, true, false, true, false]);
+    let bool_factory =
+        BatchEnvelopeFactory::try_new(bool_schema.clone(), Uuid::from_u128(102)).expect("factory");
+    let bool_b1 = RecordBatch::try_new(
+        bool_factory.arrow_schema().clone(),
+        vec![Arc::new(bool_b1_arr)],
+    )
+    .expect("b1");
+    let mut bool_published = Vec::new();
+    bool_rebatcher
+        .push(bool_b1, &mut bool_tracker, |envelope, _| {
+            bool_published.push(envelope);
+            Ok(())
+        })
+        .expect("push bool b1");
+    assert_eq!(bool_published.len(), 1);
+    assert_eq!(bool_published[0].payload().num_rows(), 8);
+    assert_eq!(bool_published[0].payload().column(0).null_count(), 0);
+    assert_eq!(bool_rebatcher.remainder_bytes(), 0);
+    assert!(!bool_rebatcher.remainder_live());
+
+    // Batch 2: 4 rows with nulls
+    let bool_b2_arr = arrow_array::BooleanArray::from(vec![Some(true), None, Some(false), None]);
+    let bool_b2 = RecordBatch::try_new(
+        bool_factory.arrow_schema().clone(),
+        vec![Arc::new(bool_b2_arr)],
+    )
+    .expect("b2");
+    bool_rebatcher
+        .push(bool_b2, &mut bool_tracker, |envelope, _| {
+            bool_published.push(envelope);
+            Ok(())
+        })
+        .expect("push bool b2");
+    bool_rebatcher
+        .finish(&mut bool_tracker, |envelope, _| {
+            bool_published.push(envelope);
+            Ok(())
+        })
+        .expect("finish");
+    assert_eq!(bool_published.len(), 2);
+    assert_eq!(bool_published[1].payload().num_rows(), 4);
+    assert_eq!(bool_published[1].payload().column(0).null_count(), 2);
+
+    drop(bool_published);
     drop(_guard);
 }
