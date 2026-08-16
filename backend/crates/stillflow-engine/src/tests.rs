@@ -3939,3 +3939,157 @@ async fn p14_preview_response_and_scan_counters_are_bounded() {
     assert_eq!(result.rows_returned, 5);
     drop(_guard);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn p05_partition_invariance_for_canonical_rebatching() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, id1) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine1, _) = engine_with(
+        schema.clone(),
+        vec![int_envelope_seq(&schema, source.id, 6, 0)],
+        true,
+    )
+    .await;
+    let (engine2, _) = engine_with(
+        schema.clone(),
+        vec![
+            int_envelope_seq(&schema, source.id, 3, 0),
+            int_envelope_seq(&schema, source.id, 3, 1),
+        ],
+        true,
+    )
+    .await;
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(90));
+    let mat = PlanNodeId::from_uuid(Uuid::from_u128(91));
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        scan,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![id1],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    nodes.insert(
+        mat,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: "out".to_owned(),
+            },
+            vec![scan],
+        ),
+    );
+    let plan = LogicalPlan::new(mat, nodes).expect("plan");
+
+    let mut req = preview_request(
+        plan.clone(),
+        scan,
+        connection.clone(),
+        source.clone(),
+        schema.clone(),
+        100,
+        PREVIEW_DEFAULT_BYTE_LIMIT,
+    );
+    req.batch_size = 2;
+    let r1 = engine1.preview(req).await.expect("partition one");
+    let mut req = preview_request(
+        plan,
+        scan,
+        connection,
+        source,
+        schema,
+        100,
+        PREVIEW_DEFAULT_BYTE_LIMIT,
+    );
+    req.batch_size = 2;
+    let r2 = engine2.preview(req).await.expect("partition two");
+
+    assert_eq!(r1.rows_returned, r2.rows_returned);
+    assert_eq!(r1.bytes_returned, r2.bytes_returned);
+    assert_eq!(r1.rows_truncated, r2.rows_truncated);
+    assert_eq!(r1.bytes_truncated, r2.bytes_truncated);
+    assert_eq!(r1.scan_truncated, r2.scan_truncated);
+    assert_eq!(r1.source_exhausted, r2.source_exhausted);
+    assert_eq!(r1.batches.len(), r2.batches.len());
+    for (a, b) in r1.batches.iter().zip(&r2.batches) {
+        assert_eq!(a.sequence(), b.sequence());
+        assert_eq!(a.row_count(), b.row_count());
+        assert_eq!(a.byte_count(), b.byte_count());
+    }
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn p10_mid_envelope_overread_is_the_only_overread() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, id1) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let mut envelopes: Vec<stillflow_core::BatchEnvelope> = (0..99)
+        .map(|i| int_envelope_seq(&schema, source.id, 1_000, i))
+        .collect();
+    envelopes.push(int_envelope_seq(&schema, source.id, 2_000, 99));
+    let (engine, connector) = engine_with(schema.clone(), envelopes, true).await;
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(92));
+    let filter = PlanNodeId::from_uuid(Uuid::from_u128(93));
+    let mat = PlanNodeId::from_uuid(Uuid::from_u128(94));
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        scan,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![id1],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    nodes.insert(
+        filter,
+        PlanNode::new(
+            PlanNodeKind::Filter {
+                predicate: Expr::Binary {
+                    left: Box::new(Expr::Column(id1)),
+                    operator: stillflow_core::BinaryOperator::GreaterThan,
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(1_000_000))),
+                },
+            },
+            vec![scan],
+        ),
+    );
+    nodes.insert(
+        mat,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: "out".to_owned(),
+            },
+            vec![filter],
+        ),
+    );
+    let plan = LogicalPlan::new(mat, nodes).expect("plan");
+    let result = engine
+        .preview(preview_request(
+            plan,
+            filter,
+            connection,
+            source,
+            schema,
+            100,
+            PREVIEW_DEFAULT_BYTE_LIMIT,
+        ))
+        .await
+        .expect("preview");
+    assert!(result.scan_truncated);
+    assert!(!result.source_exhausted);
+    assert_eq!(result.rows_returned, 0);
+    assert_eq!(result.source_rows_scanned, 100_000);
+    assert_eq!(result.source_rows_observed, 101_000);
+    assert_eq!(connector.poll_count.load(Ordering::SeqCst), 100);
+    drop(_guard);
+}
