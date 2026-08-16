@@ -29,6 +29,8 @@ pub struct PreparedPlan {
     pub(crate) scan_output: LogicalSchema,
     pub(crate) materialize_schema: LogicalSchema,
     pub(crate) steps: Vec<CompiledStep>,
+    pub(crate) target_steps: Vec<CompiledStep>,
+    pub(crate) target_schema: LogicalSchema,
     #[allow(dead_code)]
     pub(crate) materialize_id: PlanNodeId,
 }
@@ -40,6 +42,7 @@ pub(crate) async fn preflight(
     asset: &SourceAsset,
     schema_override: Option<&LogicalSchema>,
     context: &RequestContext,
+    preview_target: Option<PlanNodeId>,
 ) -> Result<PreparedPlan, EngineError> {
     context.ensure_active().map_err(map_context_error)?;
     if context
@@ -94,6 +97,31 @@ pub(crate) async fn preflight(
         other => return Err(EngineError::unsupported_operator(materialize_id, other)),
     }
 
+    let target_index = match preview_target {
+        Some(target) => {
+            let Some(index) = linear.iter().position(|(id, _)| *id == target) else {
+                return Err(EngineError::InvalidPlan(
+                    "preview target is not on the linear path",
+                ));
+            };
+            if index == linear.len() - 1 {
+                return Err(EngineError::UnsupportedOperator {
+                    node: target.as_uuid(),
+                    kind: "materialize",
+                });
+            }
+            match &linear[index].1.kind {
+                PlanNodeKind::Scan { .. }
+                | PlanNodeKind::Project { .. }
+                | PlanNodeKind::Filter { .. }
+                | PlanNodeKind::ApplyRules { .. } => {}
+                other => return Err(EngineError::unsupported_operator(target, other)),
+            }
+            Some(index)
+        }
+        None => None,
+    };
+
     reject_phase_kinds(connection.kind())?;
     let capabilities = registry
         .capabilities(connection.kind())
@@ -104,23 +132,50 @@ pub(crate) async fn preflight(
     let push_projection = capabilities.supports(Capability::ColumnProjection);
 
     let mut steps = Vec::new();
+    let mut preview_steps = Vec::new();
     if !push_projection {
-        steps.push(CompiledStep::Project {
+        let step = CompiledStep::Project {
             columns: scan_projection.clone(),
-        });
+        };
+        if preview_target.is_some() {
+            preview_steps.push(step.clone());
+        }
+        steps.push(step);
     }
     if let Some(predicate) = scan_predicate {
-        steps.push(CompiledStep::Filter { predicate });
+        let step = CompiledStep::Filter { predicate };
+        if preview_target.is_some() {
+            preview_steps.push(step.clone());
+        }
+        steps.push(step);
     }
 
-    for (node_id, node) in linear.iter().skip(1).take(linear.len().saturating_sub(2)) {
+    for (position, (node_id, node)) in linear
+        .iter()
+        .enumerate()
+        .skip(1)
+        .take(linear.len().saturating_sub(2))
+    {
+        let in_preview = target_index.is_some_and(|index| position <= index);
         match &node.kind {
-            PlanNodeKind::Project { columns } => steps.push(CompiledStep::Project {
-                columns: columns.clone(),
-            }),
-            PlanNodeKind::Filter { predicate } => steps.push(CompiledStep::Filter {
-                predicate: predicate.clone(),
-            }),
+            PlanNodeKind::Project { columns } => {
+                let step = CompiledStep::Project {
+                    columns: columns.clone(),
+                };
+                if in_preview {
+                    preview_steps.push(step.clone());
+                }
+                steps.push(step);
+            }
+            PlanNodeKind::Filter { predicate } => {
+                let step = CompiledStep::Filter {
+                    predicate: predicate.clone(),
+                };
+                if in_preview {
+                    preview_steps.push(step.clone());
+                }
+                steps.push(step);
+            }
             PlanNodeKind::ApplyRules { rules } => {
                 if rules.is_empty() || rules.len() > MAX_RULES_PER_NODE {
                     return Err(EngineError::BoundExceeded(
@@ -144,9 +199,13 @@ pub(crate) async fn preflight(
                         _ => {}
                     }
                 }
-                steps.push(CompiledStep::Rules {
+                let step = CompiledStep::Rules {
                     rules: rules.clone(),
-                });
+                };
+                if in_preview {
+                    preview_steps.push(step.clone());
+                }
+                steps.push(step);
             }
             PlanNodeKind::Join { .. } | PlanNodeKind::Union => {
                 return Err(EngineError::unsupported_operator(*node_id, &node.kind));
@@ -176,6 +235,14 @@ pub(crate) async fn preflight(
     reject_paused_schema(&scan_output)?;
     let materialize_schema = propagate_schema(&scan_output, &steps)?;
     reject_paused_schema(&materialize_schema)?;
+    let (target_steps, target_schema) = match preview_target {
+        Some(_) => {
+            let schema = propagate_schema(&scan_output, &preview_steps)?;
+            reject_paused_schema(&schema)?;
+            (preview_steps, schema)
+        }
+        None => (steps.clone(), materialize_schema.clone()),
+    };
 
     Ok(PreparedPlan {
         push_projection,
@@ -184,6 +251,8 @@ pub(crate) async fn preflight(
         scan_output,
         materialize_schema,
         steps,
+        target_steps,
+        target_schema,
         materialize_id,
     })
 }

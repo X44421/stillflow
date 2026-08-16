@@ -10,18 +10,21 @@ mod lower;
 mod memory;
 mod predict;
 mod preflight;
+mod preview;
 mod remainder;
 mod types;
 mod typing;
 
 use std::collections::BTreeSet;
+use std::fmt;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use stillflow_core::{
-    LogicalSchema, RequestContext, SourceAsset, SourceConnection, MAX_BATCH_BYTES,
+    BatchEnvelope, LogicalSchema, RequestContext, SourceAsset, SourceConnection, MAX_BATCH_BYTES,
+    MAX_BATCH_ROWS,
 };
-use stillflow_plan::LogicalPlan;
+use stillflow_plan::{LogicalPlan, PlanFingerprint, PlanNodeId};
 use stillflow_storage::SnapshotStore;
 use uuid::Uuid;
 
@@ -48,6 +51,96 @@ pub const MAX_INT_UTF8_BYTES: usize = 20;
 pub const MAX_FLOAT_UTF8_BYTES: usize = 32;
 pub const UTF8_VIEW_SLOT_BYTES: usize = 16;
 pub const UTF8_OFFSET_SLOT_BYTES: usize = 4;
+
+pub const PREVIEW_DEFAULT_ROW_LIMIT: usize = 1_000;
+pub const PREVIEW_MAX_ROW_LIMIT: usize = 10_000;
+pub const PREVIEW_DEFAULT_BYTE_LIMIT: usize = 8 * 1024 * 1024;
+pub const PREVIEW_MAX_BYTE_LIMIT: usize = 50 * 1024 * 1024;
+pub const PREVIEW_DEFAULT_BATCH_SIZE: usize = 1_024;
+pub const PREVIEW_MAX_SOURCE_ROWS_SCANNED: usize = 100_000;
+pub const PREVIEW_MAX_SOURCE_BYTES_SCANNED: usize = MAX_BATCH_BYTES;
+pub const PREVIEW_MAX_SOURCE_ROWS_OBSERVED: usize =
+    PREVIEW_MAX_SOURCE_ROWS_SCANNED + MAX_BATCH_ROWS;
+pub const PREVIEW_MAX_SOURCE_BYTES_OBSERVED: usize =
+    PREVIEW_MAX_SOURCE_BYTES_SCANNED + MAX_BATCH_BYTES;
+pub const PREVIEW_DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
+pub const PREVIEW_MAX_DEADLINE: Duration = Duration::from_secs(30);
+pub const PREVIEW_MAX_CONCURRENT_REQUESTS: u16 = MAX_ENGINE_CONCURRENT_RUNS;
+pub const PREVIEW_RESPONSE_MAX_BYTES: usize = PREVIEW_MAX_BYTE_LIMIT;
+pub const PREVIEW_PEAK_ENGINE_BYTES: usize =
+    MAX_BATCH_BYTES + MAX_BATCH_BYTES + PREVIEW_RESPONSE_MAX_BYTES + MAX_OPERATOR_STATE_BYTES;
+
+pub struct PreviewRequest {
+    pub plan: LogicalPlan,
+    pub target_node_id: PlanNodeId,
+    pub connection: SourceConnection,
+    pub asset: SourceAsset,
+    pub schema_override: Option<LogicalSchema>,
+    pub context: RequestContext,
+    pub batch_size: usize,
+    pub row_limit: usize,
+    pub byte_limit: usize,
+}
+
+impl PreviewRequest {
+    pub fn new(
+        plan: LogicalPlan,
+        target_node_id: PlanNodeId,
+        connection: SourceConnection,
+        asset: SourceAsset,
+    ) -> Self {
+        Self {
+            plan,
+            target_node_id,
+            connection,
+            asset,
+            schema_override: None,
+            context: RequestContext::default(),
+            batch_size: PREVIEW_DEFAULT_BATCH_SIZE,
+            row_limit: PREVIEW_DEFAULT_ROW_LIMIT,
+            byte_limit: PREVIEW_DEFAULT_BYTE_LIMIT,
+        }
+    }
+}
+
+pub struct PreviewResult {
+    pub plan_fingerprint: PlanFingerprint,
+    pub target_node_id: PlanNodeId,
+    pub schema: LogicalSchema,
+    pub batches: Vec<BatchEnvelope>,
+    pub rows_returned: usize,
+    pub bytes_returned: usize,
+    pub source_rows_scanned: usize,
+    pub source_bytes_scanned: usize,
+    pub source_rows_observed: usize,
+    pub source_bytes_observed: usize,
+    pub rows_truncated: bool,
+    pub bytes_truncated: bool,
+    pub scan_truncated: bool,
+    pub source_exhausted: bool,
+}
+
+impl fmt::Debug for PreviewResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PreviewResult")
+            .field("plan_fingerprint", &self.plan_fingerprint)
+            .field("target_node_id", &self.target_node_id)
+            .field("schema", &self.schema)
+            .field("batch_count", &self.batches.len())
+            .field("rows_returned", &self.rows_returned)
+            .field("bytes_returned", &self.bytes_returned)
+            .field("source_rows_scanned", &self.source_rows_scanned)
+            .field("source_bytes_scanned", &self.source_bytes_scanned)
+            .field("source_rows_observed", &self.source_rows_observed)
+            .field("source_bytes_observed", &self.source_bytes_observed)
+            .field("rows_truncated", &self.rows_truncated)
+            .field("bytes_truncated", &self.bytes_truncated)
+            .field("scan_truncated", &self.scan_truncated)
+            .field("source_exhausted", &self.source_exhausted)
+            .finish_non_exhaustive()
+    }
+}
 
 pub struct ExecutionIdentities {
     pub snapshot_id: Uuid,
