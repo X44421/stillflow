@@ -455,6 +455,12 @@ impl PreviewAccumulator {
             tracker.hold_remainder(self.rebatcher.remainder_bytes())?;
 
             if k < incoming.num_rows() {
+                if k == pack_room {
+                    // The single-envelope pack limit closed this prefix; the
+                    // canonical builder was flushed by `push` and the next
+                    // loop iteration must continue with the remaining rows.
+                    continue;
+                }
                 self.flush_builder(tracker)?;
                 if k >= row_room {
                     return Ok(PushOutcome::RowClosed);
