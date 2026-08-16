@@ -1,7 +1,14 @@
 # Issue #50 Implementation Contract: node-level Preview (E3-C0)
 
-> Status: Frozen for architecture review (not approved)
+> Status: Approved (frozen)
 > Revision: C0-R3
+> Approved SHA: `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`
+> Architecture approval: fourth architecture review; no remaining P0/P1
+> blockers.
+> Merge record: PR #51 merged as
+> `da3d03b81f32ebb2940eecd23649039227c10ad7`; contract branch deleted.
+> This approved contract entered `main` again through PR #49 merge commit
+> `85502cbebb1fab461fe42d30fe019ad20613aa7c`.
 > Supersedes: C0 `a57589edc160739130b3d5375134c003613b9d0e`, C0-R1
 > `e821f8ad477608f8bcd47bf5791af5ac935a6c13`, and C0-R2
 > `eef99e6a8e4d7b0af4fc5dc41951f6a964a8e6ae`
@@ -10,13 +17,11 @@
 > Parent contract: Issue #46 revision R3, merged at
 > `32f1c53d9903f66aeaca1c2676c0b81abfb2a702` in PR #47
 > Authorized base: `main@4b65204cfdb69c73389fba77cf4fd9715e94cba`
-> Branch: `agent/issue-050-node-preview-contract`
-> Last updated: 2026-08-15
-> Review: PR #51 remains draft with Request changes. C0, C0-R1, and C0-R2
-> were not approved. This C0-R3 revision resolves the exact-byte estimator
-> and p-selection/append lifecycle blockers; architecture approval binds
-> exactly one new commit SHA of this file. Runtime implementation starts
-> only after that approval.
+> Branch: contract branch deleted after merge
+> Last updated: 2026-08-16
+> Runtime authorization: Issue #52, branch
+> `agent/issue-052-node-preview-runtime`, based on
+> `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`.
 
 This document freezes the public contract and objective acceptance matrix for
 Engine E3-C0 node-level Preview. It does **not** authorize any Rust runtime
