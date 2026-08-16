@@ -403,19 +403,26 @@ impl PreviewAccumulator {
         })
     }
 
-    fn absorb(&mut self, published: Vec<BatchEnvelope>) {
+    fn absorb(
+        &mut self,
+        published: Vec<BatchEnvelope>,
+        tracker: &mut MemoryTracker,
+    ) -> Result<(), EngineError> {
         for envelope in published {
             self.finalized_rows = self.finalized_rows.saturating_add(envelope.row_count());
             self.finalized_bytes = self.finalized_bytes.saturating_add(envelope.byte_count());
             self.batches.push(envelope);
         }
+        tracker.hold_remainder(
+            self.finalized_bytes
+                .saturating_add(self.rebatcher.remainder_bytes()),
+        )
     }
 
     fn flush_builder(&mut self, tracker: &mut MemoryTracker) -> Result<(), EngineError> {
         let mut published = Vec::new();
         self.rebatcher.flush_to(&mut published, tracker)?;
-        self.absorb(published);
-        Ok(())
+        self.absorb(published, tracker)
     }
 
     fn push(
@@ -480,9 +487,8 @@ impl PreviewAccumulator {
                     published.push(envelope);
                     Ok(())
                 })?;
-            self.absorb(published);
+            self.absorb(published, tracker)?;
             incoming = remaining;
-            tracker.hold_remainder(self.rebatcher.remainder_bytes())?;
 
             if k < incoming.num_rows() {
                 if k == pack_room {
@@ -508,6 +514,10 @@ impl PreviewAccumulator {
     fn finish(mut self, tracker: &mut MemoryTracker) -> Result<Vec<BatchEnvelope>, EngineError> {
         self.flush_builder(tracker)?;
         self.rebatcher.finish_to(&mut self.batches, tracker)?;
+        let total = self.batches.iter().fold(0_usize, |sum, envelope| {
+            sum.saturating_add(envelope.byte_count())
+        });
+        tracker.hold_remainder(total)?;
         Ok(self.batches)
     }
 }
