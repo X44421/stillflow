@@ -13,7 +13,7 @@ use tokio::time::Instant;
 use crate::engine::ExecutionEngine;
 use crate::error::{map_context_error, EngineError};
 use crate::ffi::{dataframe_to_record_batch, record_batch_to_dataframe};
-use crate::memory::MemoryTracker;
+use crate::memory::{MemoryReport, MemoryTracker};
 use crate::predict::{largest_feasible_k, PredictedSchema};
 use crate::preflight::{self, PreparedPlan};
 use crate::remainder::CanonicalRebatcher;
@@ -27,7 +27,7 @@ use crate::{
 pub(crate) async fn preview(
     engine: &ExecutionEngine,
     request: PreviewRequest,
-) -> Result<PreviewResult, EngineError> {
+) -> Result<(PreviewResult, MemoryReport), EngineError> {
     let mut context = request.context.clone();
     if context.deadline().is_none() {
         context = RequestContext::with_cancellation_and_deadline(
@@ -92,6 +92,7 @@ pub(crate) async fn preview(
         .fingerprint()
         .map_err(|_| EngineError::InvalidPlan("logical plan fingerprint failed"))?;
 
+    context.ensure_active().map_err(map_context_error)?;
     let read = ReadRequest {
         context: context.clone(),
         asset: request.asset.clone(),
@@ -115,7 +116,7 @@ pub(crate) async fn preview(
         LogicalSchemaFingerprint::try_from_schema(&prepared.expected_connector)
             .map_err(|_| EngineError::Internal("connector schema fingerprint failed"))?;
     let predicted = PredictedSchema::from_scan_output(&prepared.scan_output);
-    let mut tracker = MemoryTracker::new();
+    let mut tracker = MemoryTracker::new_preview();
     let mut accumulator = PreviewAccumulator::new(
         Arc::new(prepared.target_schema.clone()),
         request.asset.id,
@@ -176,7 +177,6 @@ pub(crate) async fn preview(
             .min(PREVIEW_MAX_SOURCE_ROWS_SCANNED - source_rows_scanned);
         let mid_envelope_scan_close = consume_rows < envelope.row_count();
         source_bytes_scanned = source_bytes_scanned.saturating_add(envelope.byte_count());
-        source_rows_scanned = source_rows_scanned.saturating_add(consume_rows);
         tracker.hold_envelope(envelope.byte_count())?;
 
         let consumed = if consume_rows == envelope.row_count() {
@@ -203,14 +203,16 @@ pub(crate) async fn preview(
                 &predicted,
                 &prepared.target_steps,
             )?;
-            let batch = lower_chunk(
+            let (batch, consumed_rows) = lower_chunk(
                 consumed.payload().slice(offset, k),
                 &prepared,
                 &target_arrow,
                 &mut tracker,
             )?;
-            offset = offset.saturating_add(k);
+            source_rows_scanned = source_rows_scanned.saturating_add(consumed_rows);
+            offset = offset.saturating_add(consumed_rows);
             target_rows_seen = target_rows_seen.saturating_add(batch.num_rows());
+            tracker.record_chunk(consumed_rows, false);
 
             if visible_prefix_closed {
                 if target_rows_seen > request.row_limit {
@@ -269,31 +271,69 @@ pub(crate) async fn preview(
         }
     }
 
+    context.ensure_active().map_err(map_context_error)?;
     let response_batches = accumulator.finish(&mut tracker)?;
+    context.ensure_active().map_err(map_context_error)?;
 
     let mut rows_returned = 0_usize;
     let mut bytes_returned = 0_usize;
+    let mut expected_sequence = 0_u64;
     for batch in &response_batches {
+        if batch.sequence() != expected_sequence {
+            return Err(EngineError::Internal(
+                "preview response envelope sequence is not contiguous",
+            ));
+        }
+        expected_sequence = expected_sequence.saturating_add(1);
+        if batch.schema() != &prepared.target_schema || batch.source_asset_id() != request.asset.id
+        {
+            return Err(EngineError::Internal(
+                "preview response envelope schema or lineage invariant failed",
+            ));
+        }
         rows_returned = rows_returned.saturating_add(batch.row_count());
         bytes_returned = bytes_returned.saturating_add(batch.byte_count());
     }
+    if rows_returned > request.row_limit || bytes_returned > request.byte_limit {
+        return Err(EngineError::Internal(
+            "preview response exceeded a frozen output cap",
+        ));
+    }
+    if source_rows_scanned > PREVIEW_MAX_SOURCE_ROWS_SCANNED
+        || source_bytes_scanned > PREVIEW_MAX_SOURCE_BYTES_SCANNED
+        || source_rows_observed > PREVIEW_MAX_SOURCE_ROWS_OBSERVED
+        || source_bytes_observed > PREVIEW_MAX_SOURCE_BYTES_OBSERVED
+    {
+        return Err(EngineError::Internal(
+            "preview source counters exceeded a frozen scan cap",
+        ));
+    }
+    if source_exhausted && (rows_truncated || scan_truncated) {
+        return Err(EngineError::Internal(
+            "source_exhausted contradicts truncation flags",
+        ));
+    }
 
-    Ok(PreviewResult {
-        plan_fingerprint,
-        target_node_id: request.target_node_id,
-        schema: prepared.target_schema.clone(),
-        rows_returned,
-        bytes_returned,
-        source_rows_scanned,
-        source_bytes_scanned,
-        source_rows_observed,
-        source_bytes_observed,
-        rows_truncated,
-        bytes_truncated,
-        scan_truncated,
-        source_exhausted,
-        batches: response_batches,
-    })
+    let report = tracker.report();
+    Ok((
+        PreviewResult {
+            plan_fingerprint,
+            target_node_id: request.target_node_id,
+            schema: prepared.target_schema.clone(),
+            rows_returned,
+            bytes_returned,
+            source_rows_scanned,
+            source_bytes_scanned,
+            source_rows_observed,
+            source_bytes_observed,
+            rows_truncated,
+            bytes_truncated,
+            scan_truncated,
+            source_exhausted,
+            batches: response_batches,
+        },
+        report,
+    ))
 }
 
 #[cfg(test)]
@@ -324,7 +364,7 @@ fn lower_chunk(
     prepared: &PreparedPlan,
     target_arrow: &arrow_schema::SchemaRef,
     tracker: &mut MemoryTracker,
-) -> Result<arrow_array::RecordBatch, EngineError> {
+) -> Result<(arrow_array::RecordBatch, usize), EngineError> {
     let mut n = slice.num_rows();
     loop {
         let attempt = if n == slice.num_rows() {
@@ -353,7 +393,7 @@ fn lower_chunk(
         let force_retry = false;
         if exact <= MAX_BATCH_BYTES && !force_retry {
             tracker.hold_incoming(exact)?;
-            return Ok(batch);
+            return Ok((batch, n));
         }
         drop(batch);
         if n == 1 {
@@ -421,7 +461,8 @@ impl PreviewAccumulator {
 
     fn flush_builder(&mut self, tracker: &mut MemoryTracker) -> Result<(), EngineError> {
         let mut published = Vec::new();
-        self.rebatcher.flush_to(&mut published, tracker)?;
+        self.rebatcher
+            .flush_to(self.finalized_bytes, &mut published, tracker)?;
         self.absorb(published, tracker)
     }
 
@@ -431,6 +472,7 @@ impl PreviewAccumulator {
         tracker: &mut MemoryTracker,
     ) -> Result<PushOutcome, EngineError> {
         while incoming.num_rows() > 0 {
+            let incoming_rows_before = incoming.num_rows();
             let row_room = self
                 .row_limit
                 .saturating_sub(self.finalized_rows)
@@ -450,8 +492,12 @@ impl PreviewAccumulator {
             while low < high {
                 let mid = low + (high - low).div_ceil(2);
                 let exact = self.rebatcher.exact_bytes_after_append(&incoming, mid)?;
+                let builder_budget = self.byte_limit.saturating_sub(self.finalized_bytes);
                 if exact <= MAX_BATCH_BYTES
                     && self.finalized_bytes.saturating_add(exact) <= self.byte_limit
+                    && self
+                        .rebatcher
+                        .can_reserve_for_budget(&incoming, mid, builder_budget)?
                 {
                     low = mid;
                 } else {
@@ -482,15 +528,19 @@ impl PreviewAccumulator {
             let accepted = incoming.slice(0, k);
             let remaining = incoming.slice(k, incoming.num_rows() - k);
             let mut published = Vec::new();
-            self.rebatcher
-                .push(accepted, tracker, |envelope, _tracker| {
+            self.rebatcher.push_with_base(
+                accepted,
+                self.finalized_bytes,
+                tracker,
+                |envelope, _tracker| {
                     published.push(envelope);
                     Ok(())
-                })?;
+                },
+            )?;
             self.absorb(published, tracker)?;
             incoming = remaining;
 
-            if k < incoming.num_rows() {
+            if k < incoming_rows_before {
                 if k == pack_room {
                     // The single-envelope pack limit closed this prefix; the
                     // canonical builder was flushed by `push` and the next
@@ -513,7 +563,8 @@ impl PreviewAccumulator {
 
     fn finish(mut self, tracker: &mut MemoryTracker) -> Result<Vec<BatchEnvelope>, EngineError> {
         self.flush_builder(tracker)?;
-        self.rebatcher.finish_to(&mut self.batches, tracker)?;
+        self.rebatcher
+            .finish_to(self.finalized_bytes, &mut self.batches, tracker)?;
         let total = self.batches.iter().fold(0_usize, |sum, envelope| {
             sum.saturating_add(envelope.byte_count())
         });
@@ -592,7 +643,7 @@ mod estimator_tests {
             ],
         )
         .unwrap();
-        let mut tracker = MemoryTracker::new();
+        let mut tracker = MemoryTracker::new_preview();
         let mut rebatcher = CanonicalRebatcher::new(schema, uuid::Uuid::from_u128(9), 4).unwrap();
         let exact = rebatcher.exact_bytes_after_append(&batch, 4).unwrap();
         let mut published = Vec::new();
@@ -634,9 +685,10 @@ mod estimator_tests {
         )
         .unwrap();
         set_forced_export_retries(1);
-        let mut tracker = MemoryTracker::new();
-        let result = lower_chunk(batch, &prepared, &arrow, &mut tracker).unwrap();
+        let mut tracker = MemoryTracker::new_preview();
+        let (result, consumed) = lower_chunk(batch, &prepared, &arrow, &mut tracker).unwrap();
         assert_eq!(result.num_rows(), 2);
+        assert_eq!(consumed, 2);
         assert!(result.get_array_memory_size() <= MAX_BATCH_BYTES);
         set_forced_export_retries(0);
     }
@@ -667,7 +719,7 @@ mod estimator_tests {
             ]))],
         )
         .unwrap();
-        let mut tracker = MemoryTracker::new();
+        let mut tracker = MemoryTracker::new_preview();
         let rebatcher =
             CanonicalRebatcher::new(schema.clone(), uuid::Uuid::from_u128(11), 9).unwrap();
         for k in [7, 8, 9] {
@@ -682,7 +734,7 @@ mod estimator_tests {
                     Ok(())
                 })
                 .unwrap();
-            fresh.finish_to(&mut published, &mut tracker).unwrap();
+            fresh.finish_to(0, &mut published, &mut tracker).unwrap();
             assert_eq!(exact, published[0].byte_count(), "k={k}");
         }
         let _ = rebatcher.rows();

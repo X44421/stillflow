@@ -92,10 +92,12 @@ impl CanonicalRebatcher {
     /// Freeze the current builder into the next finalized envelope.
     pub(crate) fn flush_to(
         &mut self,
+        base_bytes: usize,
         batches: &mut Vec<BatchEnvelope>,
         tracker: &mut MemoryTracker,
     ) -> Result<(), EngineError> {
         self.flush(
+            base_bytes,
             &mut |envelope, _tracker| {
                 batches.push(envelope);
                 Ok(())
@@ -106,10 +108,11 @@ impl CanonicalRebatcher {
 
     pub(crate) fn finish_to(
         self,
+        base_bytes: usize,
         batches: &mut Vec<BatchEnvelope>,
         tracker: &mut MemoryTracker,
     ) -> Result<(), EngineError> {
-        self.finish(tracker, |envelope, _tracker| {
+        self.finish_with_base(base_bytes, tracker, |envelope, _tracker| {
             batches.push(envelope);
             Ok(())
         })
@@ -119,16 +122,27 @@ impl CanonicalRebatcher {
         &mut self,
         incoming: RecordBatch,
         tracker: &mut MemoryTracker,
+        publish: impl FnMut(BatchEnvelope, &mut MemoryTracker) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        self.push_with_base(incoming, 0, tracker, publish)
+    }
+
+    pub(crate) fn push_with_base(
+        &mut self,
+        incoming: RecordBatch,
+        base_bytes: usize,
+        tracker: &mut MemoryTracker,
         mut publish: impl FnMut(BatchEnvelope, &mut MemoryTracker) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
         let _remainder_guard = crate::memory::enter_phase(AllocatorPhase::Remainder);
+        tracker.hold_remainder(base_bytes.saturating_add(self.remainder_bytes()))?;
         tracker.hold_incoming(incoming.get_array_memory_size())?;
         let mut remaining = incoming;
         while remaining.num_rows() > 0 {
             let k = self.max_prefix(&remaining)?;
             if k == 0 {
                 if self.remainder_live() {
-                    self.flush(&mut publish, tracker)?;
+                    self.flush(base_bytes, &mut publish, tracker)?;
                     continue;
                 }
                 return Err(EngineError::BoundExceeded(
@@ -142,9 +156,9 @@ impl CanonicalRebatcher {
             } else {
                 remaining.get_array_memory_size()
             })?;
-            tracker.hold_remainder(self.remainder_bytes())?;
+            tracker.hold_remainder(base_bytes.saturating_add(self.remainder_bytes()))?;
             if self.should_flush() {
-                self.flush(&mut publish, tracker)?;
+                self.flush(base_bytes, &mut publish, tracker)?;
             }
         }
         tracker.drop_incoming()?;
@@ -152,20 +166,34 @@ impl CanonicalRebatcher {
     }
 
     pub(crate) fn finish(
+        self,
+        tracker: &mut MemoryTracker,
+        publish: impl FnMut(BatchEnvelope, &mut MemoryTracker) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        self.finish_with_base(0, tracker, publish)
+    }
+
+    pub(crate) fn finish_with_base(
         mut self,
+        base_bytes: usize,
         tracker: &mut MemoryTracker,
         mut publish: impl FnMut(BatchEnvelope, &mut MemoryTracker) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
         let _remainder_guard = crate::memory::enter_phase(AllocatorPhase::Remainder);
         if self.remainder_live() {
-            self.flush(&mut publish, tracker)?;
+            self.flush(base_bytes, &mut publish, tracker)?;
         }
         drop(self);
-        tracker.hold_remainder(0)?;
+        tracker.hold_remainder(base_bytes)?;
         Ok(())
     }
 
-    fn can_reserve_for(&self, incoming: &RecordBatch, k: usize) -> Result<bool, EngineError> {
+    pub(crate) fn can_reserve_for_budget(
+        &self,
+        incoming: &RecordBatch,
+        k: usize,
+        budget: usize,
+    ) -> Result<bool, EngineError> {
         if incoming.num_columns() != self.sinks.len() {
             return Err(EngineError::Internal("remainder column mismatch"));
         }
@@ -179,15 +207,19 @@ impl CanonicalRebatcher {
             let step_peak = sum_prior_new
                 .saturating_add(transient_peak)
                 .saturating_add(sum_subsequent_old);
-            if step_peak > MAX_BATCH_BYTES {
+            if step_peak > budget {
                 return Ok(false);
             }
             sum_prior_new = sum_prior_new.saturating_add(new_cap);
-            if sum_prior_new.saturating_add(sum_subsequent_old) > MAX_BATCH_BYTES {
+            if sum_prior_new.saturating_add(sum_subsequent_old) > budget {
                 return Ok(false);
             }
         }
-        Ok(sum_prior_new <= MAX_BATCH_BYTES)
+        Ok(sum_prior_new <= budget)
+    }
+
+    fn can_reserve_for(&self, incoming: &RecordBatch, k: usize) -> Result<bool, EngineError> {
+        self.can_reserve_for_budget(incoming, k, MAX_BATCH_BYTES)
     }
 
     fn max_prefix(&self, incoming: &RecordBatch) -> Result<usize, EngineError> {
@@ -228,6 +260,7 @@ impl CanonicalRebatcher {
 
     fn flush(
         &mut self,
+        base_bytes: usize,
         publish: &mut impl FnMut(BatchEnvelope, &mut MemoryTracker) -> Result<(), EngineError>,
         tracker: &mut MemoryTracker,
     ) -> Result<(), EngineError> {
@@ -247,13 +280,13 @@ impl CanonicalRebatcher {
             .factory
             .try_build(self.next_sequence, batch)
             .map_err(|_| EngineError::BoundExceeded("output envelope exceeded batch bounds"))?;
-        tracker.hold_remainder(envelope.byte_count())?;
+        tracker.hold_remainder(base_bytes.saturating_add(envelope.byte_count()))?;
         self.next_sequence = self
             .next_sequence
             .checked_add(1)
             .ok_or(EngineError::Internal("output envelope sequence overflow"))?;
         publish(envelope, tracker)?;
-        tracker.hold_remainder(self.remainder_bytes())?;
+        tracker.hold_remainder(base_bytes.saturating_add(self.remainder_bytes()))?;
         Ok(())
     }
 }

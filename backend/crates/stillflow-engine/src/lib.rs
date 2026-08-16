@@ -10,7 +10,7 @@ mod lower;
 mod memory;
 mod predict;
 mod preflight;
-mod preview;
+pub(crate) mod preview;
 mod remainder;
 mod types;
 mod typing;

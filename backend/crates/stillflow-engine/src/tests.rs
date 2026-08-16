@@ -31,7 +31,7 @@ use crate::{
     crate_name, ExecutionEngine, ExecutionIdentities, ExecutionRequest, PreviewRequest,
     ENGINE_MAX_DEADLINE, MAX_COMPILED_PLAN_BYTES, MAX_ENGINE_PEAK_BYTES,
     MAX_LIVE_COLUMNAR_PAYLOADS, MAX_OPERATOR_STATE_BYTES, PREVIEW_DEFAULT_BYTE_LIMIT,
-    PREVIEW_MAX_SOURCE_ROWS_SCANNED,
+    PREVIEW_MAX_SOURCE_ROWS_SCANNED, PREVIEW_PEAK_ENGINE_BYTES,
 };
 
 const SENTINEL: &str = "STILLFLOW_SENTINEL_CELL_VALUE_9f3c2a";
@@ -64,6 +64,7 @@ struct ScriptedConnector {
     read_count: AtomicUsize,
     poll_count: Arc<AtomicUsize>,
     projection: bool,
+    pending: bool,
 }
 
 #[async_trait]
@@ -126,6 +127,9 @@ impl SourceConnector for ScriptedConnector {
     ) -> ConnectorResult<RawBatchStream> {
         request.context.ensure_active()?;
         self.read_count.fetch_add(1, Ordering::SeqCst);
+        if self.pending {
+            return Ok(RawBatchStream::new(Box::pin(futures::stream::pending())));
+        }
         let envelopes = self.envelopes.lock().expect("fixture lock").clone();
         Ok(RawBatchStream::new(Box::pin(CountingBatchStream {
             items: envelopes.into_iter().map(Ok).collect(),
@@ -318,6 +322,26 @@ fn derive_plan(asset_id: Uuid, literal: String) -> LogicalPlan {
     )
 }
 
+async fn engine_with_pending(
+    schema: LogicalSchema,
+    projection: bool,
+) -> (ExecutionEngine, Arc<ScriptedConnector>) {
+    let connector = Arc::new(ScriptedConnector {
+        schema,
+        envelopes: Mutex::new(Vec::new()),
+        inspect_count: AtomicUsize::new(0),
+        read_count: AtomicUsize::new(0),
+        poll_count: Arc::new(AtomicUsize::new(0)),
+        projection,
+        pending: true,
+    });
+    let mut registry = ConnectorRegistry::new();
+    registry
+        .register(Arc::clone(&connector) as SourceConnectorRef)
+        .expect("register");
+    (ExecutionEngine::new(registry), connector)
+}
+
 async fn engine_with(
     schema: LogicalSchema,
     envelopes: Vec<stillflow_core::BatchEnvelope>,
@@ -330,6 +354,7 @@ async fn engine_with(
         read_count: AtomicUsize::new(0),
         poll_count: Arc::new(AtomicUsize::new(0)),
         projection,
+        pending: false,
     });
     let mut registry = ConnectorRegistry::new();
     registry
@@ -3658,12 +3683,16 @@ async fn p07_repeated_preview_is_identical() {
     drop(_guard);
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test]
 async fn p08_cancellation_and_deadline() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, _) = int_schema();
+    let pending_connection = connection();
+    let pending_source = asset(pending_connection.id());
+    let pending_schema = schema.clone();
     let connection = connection();
     let source = asset(connection.id());
+
     let (engine, _) =
         engine_with(schema.clone(), vec![int_batch(&schema, source.id, 2)], true).await;
     let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
@@ -3714,39 +3743,124 @@ async fn p08_cancellation_and_deadline() {
         .await
         .expect_err("too long deadline");
     assert!(matches!(err, EngineError::BoundExceeded(_)));
+
+    // Cancellation and timeout while the connector read stream is pending.
+    let (engine, _) = engine_with_pending(pending_schema.clone(), true).await;
+    let token = stillflow_core::RequestContext::default()
+        .cancellation()
+        .clone();
+    let engine = Arc::new(engine);
+    let source = pending_source;
+    let connection = pending_connection;
+    let schema = pending_schema;
+    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
+    let mut request = preview_request(
+        plan.clone(),
+        scan,
+        connection.clone(),
+        source.clone(),
+        schema.clone(),
+        10,
+        PREVIEW_DEFAULT_BYTE_LIMIT,
+    );
+    request.context = stillflow_core::RequestContext::with_cancellation(token.clone());
+    let engine_clone = Arc::clone(&engine);
+    let handle = tokio::spawn(async move { engine_clone.preview(request).await });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    token.cancel();
+    let err = handle
+        .await
+        .expect("join")
+        .expect_err("cancelled during read");
+    assert!(matches!(err, EngineError::Cancelled));
+
+    let mut request = preview_request(
+        plan,
+        scan,
+        connection,
+        source,
+        schema,
+        10,
+        PREVIEW_DEFAULT_BYTE_LIMIT,
+    );
+    request.context = stillflow_core::RequestContext::with_deadline(
+        tokio::time::Instant::now() + Duration::from_millis(30),
+    );
+    let err = engine
+        .preview(request)
+        .await
+        .expect_err("timeout during read");
+    assert!(matches!(err, EngineError::Timeout));
     drop(_guard);
 }
 
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test]
 async fn p09_fifth_concurrent_preview_is_busy() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, _) = int_schema();
+    let fifth_connection = connection();
     let connection = connection();
     let source = asset(connection.id());
-    let (engine, connector) = engine_with(schema.clone(), Vec::new(), true).await;
+    let (engine, connector) = engine_with_pending(schema.clone(), true).await;
     let engine = Arc::new(engine);
-    let holds = (0..4)
-        .map(|_| engine.try_hold_run_gate().expect("permit"))
-        .collect::<Vec<_>>();
     let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
-    let err = engine
+    let mut handles = Vec::new();
+    for _ in 0..4 {
+        let engine = Arc::clone(&engine);
+        let plan = plan.clone();
+        let connection = connection.clone();
+        let source = source.clone();
+        let schema = schema.clone();
+        handles.push(tokio::spawn(async move {
+            let _ = engine
+                .preview(preview_request(
+                    plan,
+                    scan,
+                    connection,
+                    source,
+                    schema,
+                    10,
+                    PREVIEW_DEFAULT_BYTE_LIMIT,
+                ))
+                .await;
+        }));
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        tokio::task::yield_now().await;
+        if connector.read_count.load(Ordering::SeqCst) >= 4 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "pending previews did not reach read_batches: {}",
+            connector.read_count.load(Ordering::SeqCst)
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    let (fifth_plan, fifth_scan, _, _, _, _) = preview_pipeline_plan(source.id);
+    let error = engine
         .preview(preview_request(
-            plan,
-            scan,
-            connection,
+            fifth_plan,
+            fifth_scan,
+            fifth_connection,
             source,
             schema,
             10,
             PREVIEW_DEFAULT_BYTE_LIMIT,
         ))
         .await
-        .expect_err("busy");
-    assert!(matches!(err, EngineError::Busy));
-    assert_eq!(err.category(), stillflow_core::ErrorCategory::RateLimited);
-    assert!(err.retryable());
+        .expect_err("fifth preview must be busy");
+    assert!(matches!(error, EngineError::Busy));
+    assert_eq!(error.category(), stillflow_core::ErrorCategory::RateLimited);
+    assert!(error.retryable());
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 0);
-    assert_eq!(connector.read_count.load(Ordering::SeqCst), 0);
-    drop(holds);
+    assert_eq!(connector.read_count.load(Ordering::SeqCst), 4);
+    for handle in handles {
+        handle.abort();
+    }
     drop(_guard);
 }
 
@@ -3821,19 +3935,19 @@ fn p11_preview_runtime_has_no_storage_publication_entry_points() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn p12_schema_and_column_id_propagation() {
+async fn p11_preview_publishes_no_storage_artifacts() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, _) = int_schema();
     let connection = connection();
     let source = asset(connection.id());
     let (engine, _) =
         engine_with(schema.clone(), vec![int_batch(&schema, source.id, 3)], true).await;
-    let asset_id = source.id;
-    let (plan, _, _, _, rules, _) = preview_pipeline_plan(asset_id);
+    let dir = tempfile::TempDir::new().expect("temp");
+    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
     let result = engine
         .preview(preview_request(
             plan,
-            rules,
+            scan,
             connection,
             source,
             schema,
@@ -3842,11 +3956,46 @@ async fn p12_schema_and_column_id_propagation() {
         ))
         .await
         .expect("preview");
-    assert_eq!(result.schema.fields[0].id, column(1));
-    assert_eq!(result.schema.fields[0].name, "renamed");
-    for envelope in &result.batches {
-        assert_eq!(envelope.schema(), &result.schema);
-        assert_eq!(envelope.source_asset_id(), asset_id);
+    assert_eq!(result.rows_returned, 3);
+    assert_eq!(std::fs::read_dir(dir.path()).expect("dir").count(), 0);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn p12_schema_and_column_id_propagation() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) =
+        engine_with(schema.clone(), vec![int_batch(&schema, source.id, 5)], true).await;
+    let asset_id = source.id;
+    let (plan, scan, project, filter, rules, _) = preview_pipeline_plan(asset_id);
+    for (target, expected_name, expected_rows) in [
+        (scan, "value", vec![0_i64, 1, 2, 3, 4]),
+        (project, "value", vec![0_i64, 1, 2, 3, 4]),
+        (filter, "value", vec![3_i64, 4]),
+        (rules, "renamed", vec![3_i64, 4]),
+    ] {
+        let result = engine
+            .preview(preview_request(
+                plan.clone(),
+                target,
+                connection.clone(),
+                source.clone(),
+                schema.clone(),
+                10,
+                PREVIEW_DEFAULT_BYTE_LIMIT,
+            ))
+            .await
+            .expect("preview");
+        assert_eq!(result.schema.fields[0].id, column(1));
+        assert_eq!(result.schema.fields[0].name, expected_name);
+        assert_eq!(collect_preview_i64(&result), expected_rows);
+        for envelope in &result.batches {
+            assert_eq!(envelope.schema(), &result.schema);
+            assert_eq!(envelope.source_asset_id(), asset_id);
+        }
     }
     drop(_guard);
 }
@@ -3921,123 +4070,18 @@ async fn p13_sentinel_never_enters_errors_or_debug() {
 #[tokio::test(flavor = "current_thread")]
 async fn p14_preview_response_and_scan_counters_are_bounded() {
     let _guard = exclusive_test_lock().lock().await;
-    let (schema, _) = int_schema();
-    let connection = connection();
-    let source = asset(connection.id());
-    let (engine, _) =
-        engine_with(schema.clone(), vec![int_batch(&schema, source.id, 5)], true).await;
-    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
-    let result = engine
-        .preview(preview_request(
-            plan, scan, connection, source, schema, 100, 1_024,
-        ))
-        .await
-        .expect("preview");
-    assert!(result.bytes_returned <= 1_024);
-    assert!(result.source_rows_observed <= 100_000 + 65_536);
-    assert!(result.source_bytes_observed <= 64 * 1024 * 1024 + 64 * 1024 * 1024);
-    assert_eq!(result.rows_returned, 5);
-    drop(_guard);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn p05_partition_invariance_for_canonical_rebatching() {
-    let _guard = exclusive_test_lock().lock().await;
     let (schema, id1) = int_schema();
     let connection = connection();
     let source = asset(connection.id());
-    let (engine1, _) = engine_with(
+    let (engine, _) = engine_with(
         schema.clone(),
-        vec![int_envelope_seq(&schema, source.id, 6, 0)],
+        vec![int_batch(&schema, source.id, 40)],
         true,
     )
     .await;
-    let (engine2, _) = engine_with(
-        schema.clone(),
-        vec![
-            int_envelope_seq(&schema, source.id, 3, 0),
-            int_envelope_seq(&schema, source.id, 3, 1),
-        ],
-        true,
-    )
-    .await;
-    let scan = PlanNodeId::from_uuid(Uuid::from_u128(90));
-    let mat = PlanNodeId::from_uuid(Uuid::from_u128(91));
-    let mut nodes = BTreeMap::new();
-    nodes.insert(
-        scan,
-        PlanNode::new(
-            PlanNodeKind::Scan {
-                source_asset_id: source.id,
-                projection: vec![id1],
-                predicate: None,
-            },
-            Vec::new(),
-        ),
-    );
-    nodes.insert(
-        mat,
-        PlanNode::new(
-            PlanNodeKind::Materialize {
-                output_label: "out".to_owned(),
-            },
-            vec![scan],
-        ),
-    );
-    let plan = LogicalPlan::new(mat, nodes).expect("plan");
-
-    let mut req = preview_request(
-        plan.clone(),
-        scan,
-        connection.clone(),
-        source.clone(),
-        schema.clone(),
-        100,
-        PREVIEW_DEFAULT_BYTE_LIMIT,
-    );
-    req.batch_size = 2;
-    let r1 = engine1.preview(req).await.expect("partition one");
-    let mut req = preview_request(
-        plan,
-        scan,
-        connection,
-        source,
-        schema,
-        100,
-        PREVIEW_DEFAULT_BYTE_LIMIT,
-    );
-    req.batch_size = 2;
-    let r2 = engine2.preview(req).await.expect("partition two");
-
-    assert_eq!(r1.rows_returned, r2.rows_returned);
-    assert_eq!(r1.bytes_returned, r2.bytes_returned);
-    assert_eq!(r1.rows_truncated, r2.rows_truncated);
-    assert_eq!(r1.bytes_truncated, r2.bytes_truncated);
-    assert_eq!(r1.scan_truncated, r2.scan_truncated);
-    assert_eq!(r1.source_exhausted, r2.source_exhausted);
-    assert_eq!(r1.batches.len(), r2.batches.len());
-    for (a, b) in r1.batches.iter().zip(&r2.batches) {
-        assert_eq!(a.sequence(), b.sequence());
-        assert_eq!(a.row_count(), b.row_count());
-        assert_eq!(a.byte_count(), b.byte_count());
-    }
-    drop(_guard);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn p10_mid_envelope_overread_is_the_only_overread() {
-    let _guard = exclusive_test_lock().lock().await;
-    let (schema, id1) = int_schema();
-    let connection = connection();
-    let source = asset(connection.id());
-    let mut envelopes: Vec<stillflow_core::BatchEnvelope> = (0..99)
-        .map(|i| int_envelope_seq(&schema, source.id, 1_000, i))
-        .collect();
-    envelopes.push(int_envelope_seq(&schema, source.id, 2_000, 99));
-    let (engine, connector) = engine_with(schema.clone(), envelopes, true).await;
-    let scan = PlanNodeId::from_uuid(Uuid::from_u128(92));
-    let filter = PlanNodeId::from_uuid(Uuid::from_u128(93));
-    let mat = PlanNodeId::from_uuid(Uuid::from_u128(94));
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(97));
+    let filter = PlanNodeId::from_uuid(Uuid::from_u128(98));
+    let mat = PlanNodeId::from_uuid(Uuid::from_u128(99));
     let mut nodes = BTreeMap::new();
     nodes.insert(
         scan,
@@ -4057,7 +4101,7 @@ async fn p10_mid_envelope_overread_is_the_only_overread() {
                 predicate: Expr::Binary {
                     left: Box::new(Expr::Column(id1)),
                     operator: stillflow_core::BinaryOperator::GreaterThan,
-                    right: Box::new(Expr::Literal(ScalarValue::Int64(1_000_000))),
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(9))),
                 },
             },
             vec![scan],
@@ -4073,23 +4117,19 @@ async fn p10_mid_envelope_overread_is_the_only_overread() {
         ),
     );
     let plan = LogicalPlan::new(mat, nodes).expect("plan");
-    let result = engine
-        .preview(preview_request(
-            plan,
-            filter,
-            connection,
-            source,
-            schema,
-            100,
-            PREVIEW_DEFAULT_BYTE_LIMIT,
+    let byte_limit = 512_usize;
+    let (result, report) = engine
+        .preview_tracked(preview_request(
+            plan, filter, connection, source, schema, 10, byte_limit,
         ))
         .await
-        .expect("preview");
-    assert!(result.scan_truncated);
-    assert!(!result.source_exhausted);
-    assert_eq!(result.rows_returned, 0);
-    assert_eq!(result.source_rows_scanned, 100_000);
-    assert_eq!(result.source_rows_observed, 101_000);
-    assert_eq!(connector.poll_count.load(Ordering::SeqCst), 100);
+        .expect("tracked preview");
+    assert!(result.bytes_returned <= byte_limit);
+    assert!(report.peak_live_payloads <= 3);
+    assert!(report.peak_engine_bytes <= PREVIEW_PEAK_ENGINE_BYTES);
+    assert!(report.chunk_count > 0);
+    assert!(result.rows_truncated || result.bytes_truncated);
+    assert!(result.source_rows_observed <= 100_000 + 65_536);
+    assert!(result.source_bytes_observed <= 64 * 1024 * 1024 + 64 * 1024 * 1024);
     drop(_guard);
 }

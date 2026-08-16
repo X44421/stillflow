@@ -77,26 +77,6 @@ pub(crate) async fn preflight(
     }
 
     let linear = linearize(plan)?;
-    let (scan_id, scan_projection, scan_predicate) = match &linear[0].1.kind {
-        PlanNodeKind::Scan {
-            source_asset_id,
-            projection,
-            predicate,
-        } => {
-            bind_scan(*source_asset_id, connection, asset)?;
-            (linear[0].0, projection.clone(), predicate.clone())
-        }
-        other => return Err(EngineError::unsupported_operator(linear[0].0, other)),
-    };
-
-    let materialize_id = linear[linear.len() - 1].0;
-    match &linear[linear.len() - 1].1.kind {
-        PlanNodeKind::Materialize { output_label } => {
-            validate_output_label(output_label)?;
-        }
-        other => return Err(EngineError::unsupported_operator(materialize_id, other)),
-    }
-
     let target_index = match preview_target {
         Some(target) => {
             let Some(index) = linear.iter().position(|(id, _)| *id == target) else {
@@ -121,6 +101,26 @@ pub(crate) async fn preflight(
         }
         None => None,
     };
+
+    let (scan_id, scan_projection, scan_predicate) = match &linear[0].1.kind {
+        PlanNodeKind::Scan {
+            source_asset_id,
+            projection,
+            predicate,
+        } => {
+            bind_scan(*source_asset_id, connection, asset)?;
+            (linear[0].0, projection.clone(), predicate.clone())
+        }
+        other => return Err(EngineError::unsupported_operator(linear[0].0, other)),
+    };
+
+    let materialize_id = linear[linear.len() - 1].0;
+    match &linear[linear.len() - 1].1.kind {
+        PlanNodeKind::Materialize { output_label } => {
+            validate_output_label(output_label)?;
+        }
+        other => return Err(EngineError::unsupported_operator(materialize_id, other)),
+    }
 
     reject_phase_kinds(connection.kind())?;
     let capabilities = registry

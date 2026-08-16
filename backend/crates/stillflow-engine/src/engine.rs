@@ -60,6 +60,16 @@ impl ExecutionEngine {
         &self,
         request: crate::PreviewRequest,
     ) -> Result<crate::PreviewResult, EngineError> {
+        crate::preview::preview(self, request)
+            .await
+            .map(|(result, _report)| result)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn preview_tracked(
+        &self,
+        request: crate::PreviewRequest,
+    ) -> Result<(crate::PreviewResult, crate::memory::MemoryReport), EngineError> {
         crate::preview::preview(self, request).await
     }
 
