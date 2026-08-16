@@ -24,8 +24,8 @@ use crate::{
 };
 
 pub struct ExecutionEngine {
-    registry: ConnectorRegistry,
-    run_gate: Arc<Semaphore>,
+    pub(crate) registry: ConnectorRegistry,
+    pub(crate) run_gate: Arc<Semaphore>,
 }
 
 impl ExecutionEngine {
@@ -51,8 +51,16 @@ impl ExecutionEngine {
             asset,
             schema_override,
             context,
+            None,
         )
         .await
+    }
+
+    pub async fn preview(
+        &self,
+        request: crate::PreviewRequest,
+    ) -> Result<crate::PreviewResult, EngineError> {
+        crate::preview::preview(self, request).await
     }
 
     pub async fn materialize(
