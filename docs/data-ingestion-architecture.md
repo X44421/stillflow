@@ -465,10 +465,10 @@ Contract: [`issue-046-deterministic-engine-execution-contract.md`](issues/issue-
 
 - E1: freeze the single-source execution contract. Docs-only; stop for review.
 - E2: `LogicalPlan` → execution chunks → Polars → bounded `BatchStream` → atomic Snapshot. Live engine memory is connector envelope + complete Polars working set + canonical remainder + 5 MiB state (peak 197 MiB). Remainder flush is move/freeze. Do not transform a whole connector envelope and split afterwards.
-- E3-C0: docs-only freeze of the node-level Preview contract in Issue #50
-  (`agent/issue-050-node-preview-contract`). The PR remains draft with
-  Request changes until architecture approval binds the contract SHA. It
-  must not be based on or modify PR #49.
+- E3-C0: docs-only freeze of the node-level Preview contract in Issue #50.
+  **Approved SHA `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`; merged in
+  PR #51 as `main@da3d03b`.** E3 runtime remains paused until PR #49 is
+  merged and passes its final merge-readiness architecture review.
 - E3 runtime: node-level Preview using the same E2 preflight, typing,
   lowering, chunker, and sanitized errors, with frozen output row/byte,
   input scan row/byte, deadline, concurrency, and allocated-capacity

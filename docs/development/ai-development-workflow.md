@@ -31,10 +31,10 @@ must be frozen before high-risk implementation begins.
    behavior.
 6. For stacked delivery, the second PR targets the first PR's branch until the
    base merges. Rebase/rebuild it from `main` afterward.
-7. E3-C0 (Issue #50) is explicitly independent of PR #49: build from latest
-   `main`, do not base/rebase/cherry-pick from the E2 branch, and do not edit
-   PR #49. E3-C0 is docs-only and stops with a draft PR plus Request changes
-   until architecture approval.
+7. E3-C0 (Issue #50) was explicitly independent of PR #49. It is approved
+   at SHA `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`, merged in PR #51 as
+   `main@da3d03b`, and its contract branch was deleted. E3 runtime remains
+   paused until PR #49 is merged and passes final merge-readiness review.
 
 This policy makes authorship, accepted state, and rollback boundaries observable.
 
@@ -181,16 +181,16 @@ The accepted sequence is:
 5. **PR4 — local tabular**: CSV, TSV, JSON, NDJSON, and Parquet connector under
    the frozen Issue #6 contract. Workbook #7 and object-store #8 follow the same
    connector boundary.
-6. **Engine E1 — execution contract**: Issue #46 docs-only freeze of deterministic
-   single-source Polars execution. PR #47 remains unapproved until revision R3
-   passes a fourth architecture review. Do not start the executor in the same PR.
-   E2, once approved, must chunk before Polars; live engine memory is connector
-   envelope + complete Polars working set + canonical remainder + 5 MiB state
-   (peak 197 MiB). It must not transform a whole connector envelope and split
-   afterwards.
-7. **Engine E2 — streaming executor**: after E1 approval, rebuild from latest
-   `main`. Connector envelope → execution chunker → Polars → canonical
-   rebatcher → atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API.
+6. **Engine E1 — execution contract**: Issue #46 docs-only freeze, approved at
+   `32f1c53` and merged in PR #47. Live engine memory is connector envelope +
+   complete Polars working set + canonical remainder + 5 MiB state (peak 197 MiB).
+7. **Engine E2 — streaming executor**: Issue #48, from latest `main` after #47.
+   Connector envelope → execution chunker → Polars → canonical rebatcher →
+   atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API. Do not
+   continue the E1 contract branch. `15536eca` is Request changes; E2-R1
+   proposed deltas are `docs/issues/issue-048-e2-r1-contract-addendum.md`
+   on draft PR #49. Do not expand remaining operators until that addendum
+   is approved.
 8. **Engine E3–E5**: node-level Preview, Validate/Rejected Rows/Deduplicate, then
    job runtime and Axum. DuckDB (#10) and SQL Connector (#9, Post-MVP) stay
    outside this sequence until their own contracts.
@@ -202,8 +202,10 @@ The accepted sequence is:
      30 s deadline, the shared E2 `MAX_ENGINE_CONCURRENT_RUNS` gate, the
      earliest-prefix truncation/scan/exhaustion flags, read-only/no-Snapshot
      rules, the allocated-capacity response memory law, and the P01–P15
-     acceptance matrix. It remains draft with Request changes until
-     architecture approval binds a contract SHA.
+     acceptance matrix. **Approved SHA
+     `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`; merged in PR #51 as
+     `main@da3d03b`.** E3 runtime stays paused until E2 is merged and
+     finally reviewed.
 
 Do not pull work forward merely because a downstream type is convenient. A
 temporary placeholder must remain private and must not become a public contract.

@@ -6,7 +6,7 @@ use stillflow_core::{
     PreviewRequest, ReadRequest, SourceAsset, SourceConnection, TestConnectionRequest,
 };
 
-use crate::capabilities::Capability;
+use crate::capabilities::{Capability, ConnectorCapabilities};
 use crate::connector::SourceConnectorRef;
 
 /// Registry mapping connector kinds to shared adapter implementations.
@@ -42,6 +42,10 @@ impl ConnectorRegistry {
         self.get(kind).ok_or_else(|| {
             ConnectorError::invalid_configuration(format!("unknown connector kind `{kind:?}`"))
         })
+    }
+
+    pub fn capabilities(&self, kind: ConnectorKind) -> ConnectorResult<ConnectorCapabilities> {
+        Ok(self.require(kind)?.capabilities())
     }
 
     pub async fn test_connection(
@@ -516,6 +520,25 @@ mod tests {
         assert_eq!(
             error.category(),
             stillflow_core::ErrorCategory::UnsupportedCapability
+        );
+    }
+
+    #[test]
+    fn capabilities_returns_registered_kind_and_rejects_unknown() {
+        let mut registry = ConnectorRegistry::new();
+        registry
+            .register(Arc::new(StubConnector) as SourceConnectorRef)
+            .expect("register");
+        let caps = registry
+            .capabilities(ConnectorKind::LocalFile)
+            .expect("known kind");
+        assert!(caps.streaming);
+        let error = registry
+            .capabilities(ConnectorKind::SqlDatabase)
+            .expect_err("unknown kind");
+        assert_eq!(
+            error.category(),
+            stillflow_core::ErrorCategory::InvalidConfiguration
         );
     }
 }

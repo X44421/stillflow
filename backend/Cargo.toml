@@ -56,3 +56,10 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 tokio-util = "0.7"
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 zip = { version = "=7.0.0", default-features = false, features = ["deflate"] }
+
+# Full DWARF in the test profile makes `cargo test --workspace` link
+# Polars/Arrow with multi-GB peak RAM. Line-less debuginfo plus fewer
+# codegen units keeps T37–T44 correct while avoiding local freezes.
+[profile.test]
+debug = 0
+codegen-units = 4
