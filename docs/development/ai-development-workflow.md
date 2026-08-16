@@ -1,7 +1,7 @@
 # Contract-first development workflow
 
 > Status: Accepted
-> Last updated: 2026-08-14
+> Last updated: 2026-08-15
 
 This workflow separates architectural decisions from implementation so parallel
 or automated work cannot silently invent incompatible public contracts.
@@ -31,6 +31,10 @@ must be frozen before high-risk implementation begins.
    behavior.
 6. For stacked delivery, the second PR targets the first PR's branch until the
    base merges. Rebase/rebuild it from `main` afterward.
+7. E3-C0 (Issue #50) is explicitly independent of PR #49: build from latest
+   `main`, do not base/rebase/cherry-pick from the E2 branch, and do not edit
+   PR #49. E3-C0 is docs-only and stops with a draft PR plus Request changes
+   until architecture approval.
 
 This policy makes authorship, accepted state, and rollback boundaries observable.
 
@@ -190,6 +194,16 @@ The accepted sequence is:
 8. **Engine E3–E5**: node-level Preview, Validate/Rejected Rows/Deduplicate, then
    job runtime and Axum. DuckDB (#10) and SQL Connector (#9, Post-MVP) stay
    outside this sequence until their own contracts.
+
+   - E3-C0 (Issue #50): docs-only Preview contract on
+     `agent/issue-050-node-preview-contract`. It freezes `PreviewRequest` /
+     `PreviewResult`, `target_node_id` cutoff, 1,000/10,000 rows,
+     8 MiB/50 MiB bytes, a 100,000-row / 64 MiB raw input scan bound,
+     30 s deadline, the shared E2 `MAX_ENGINE_CONCURRENT_RUNS` gate, the
+     earliest-prefix truncation/scan/exhaustion flags, read-only/no-Snapshot
+     rules, the allocated-capacity response memory law, and the P01–P15
+     acceptance matrix. It remains draft with Request changes until
+     architecture approval binds a contract SHA.
 
 Do not pull work forward merely because a downstream type is convenient. A
 temporary placeholder must remain private and must not become a public contract.
