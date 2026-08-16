@@ -3803,9 +3803,12 @@ async fn p09_fifth_concurrent_preview_is_busy() {
     let source = asset(connection.id());
     let (engine, connector) = engine_with_pending(schema.clone(), true).await;
     let engine = Arc::new(engine);
+    let store_dir = tempfile::TempDir::new().expect("temp");
+    let store = SnapshotStore::open(store_dir.path(), StorageLimits::default()).expect("store");
     let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
     let mut handles = Vec::new();
-    for _ in 0..4 {
+
+    for _ in 0..3 {
         let engine = Arc::clone(&engine);
         let plan = plan.clone();
         let connection = connection.clone();
@@ -3826,6 +3829,26 @@ async fn p09_fifth_concurrent_preview_is_busy() {
         }));
     }
 
+    let engine_clone = Arc::clone(&engine);
+    let materialize_connection = connection.clone();
+    let materialize_source = source.clone();
+    let materialize_schema = schema.clone();
+    let store_clone = store.clone();
+    handles.push(tokio::spawn(async move {
+        let _ = engine_clone
+            .materialize(ExecutionRequest {
+                plan: scan_materialize_plan(materialize_source.id, None),
+                connection: materialize_connection,
+                asset: materialize_source,
+                schema_override: Some(materialize_schema),
+                identities: identities(),
+                context: stillflow_core::RequestContext::default(),
+                batch_size: 16,
+                store: &store_clone,
+            })
+            .await;
+    }));
+
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         tokio::task::yield_now().await;
@@ -3834,7 +3857,7 @@ async fn p09_fifth_concurrent_preview_is_busy() {
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "pending previews did not reach read_batches: {}",
+            "pending requests did not reach read_batches: {}",
             connector.read_count.load(Ordering::SeqCst)
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
