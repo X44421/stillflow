@@ -1,5 +1,8 @@
 use std::sync::Arc;
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use futures::StreamExt;
 use stillflow_core::{
     BatchEnvelope, LogicalSchema, LogicalSchemaFingerprint, ReadRequest, RequestContext,
@@ -293,6 +296,29 @@ pub(crate) async fn preview(
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    static FORCE_EXPORT_RETRIES: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_forced_export_retries(value: usize) {
+    FORCE_EXPORT_RETRIES.with(|cell| cell.set(value));
+}
+
+#[cfg(test)]
+fn take_forced_export_retry() -> bool {
+    FORCE_EXPORT_RETRIES.with(|cell| {
+        let value = cell.get();
+        if value == 0 {
+            false
+        } else {
+            cell.set(value - 1);
+            true
+        }
+    })
+}
+
 fn lower_chunk(
     slice: arrow_array::RecordBatch,
     prepared: &PreparedPlan,
@@ -321,7 +347,11 @@ fn lower_chunk(
         )?;
         tracker.drop_polars()?;
         let exact = batch.get_array_memory_size();
-        if exact <= MAX_BATCH_BYTES {
+        #[cfg(test)]
+        let force_retry = take_forced_export_retry();
+        #[cfg(not(test))]
+        let force_retry = false;
+        if exact <= MAX_BATCH_BYTES && !force_retry {
             tracker.hold_incoming(exact)?;
             return Ok(batch);
         }
@@ -565,6 +595,40 @@ mod estimator_tests {
             .unwrap();
         let actual = published[0].byte_count();
         assert_eq!(exact, actual);
+    }
+
+    #[test]
+    fn n_shrink_retry_halves_until_feasible() {
+        let id = stillflow_core::ColumnId::from_uuid(uuid::Uuid::from_u128(12));
+        let schema = Arc::new(
+            LogicalSchema::new(vec![
+                LogicalField::new(id, "v", LogicalType::Int64, false).unwrap()
+            ])
+            .unwrap(),
+        );
+        let arrow = stillflow_core::logical_schema_to_arrow(&schema).unwrap();
+        let prepared = PreparedPlan {
+            push_projection: true,
+            scan_projection: vec![id],
+            expected_connector: schema.as_ref().clone(),
+            scan_output: schema.as_ref().clone(),
+            materialize_schema: schema.as_ref().clone(),
+            steps: Vec::new(),
+            target_steps: Vec::new(),
+            target_schema: schema.as_ref().clone(),
+            materialize_id: stillflow_plan::PlanNodeId::from_uuid(uuid::Uuid::from_u128(13)),
+        };
+        let batch = RecordBatch::try_new(
+            arrow.clone(),
+            vec![std::sync::Arc::new(Int64Array::from(vec![1_i64, 2, 3, 4]))],
+        )
+        .unwrap();
+        set_forced_export_retries(1);
+        let mut tracker = MemoryTracker::new();
+        let result = lower_chunk(batch, &prepared, &arrow, &mut tracker).unwrap();
+        assert_eq!(result.num_rows(), 2);
+        assert!(result.get_array_memory_size() <= MAX_BATCH_BYTES);
+        set_forced_export_retries(0);
     }
 
     #[test]
