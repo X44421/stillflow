@@ -2,7 +2,7 @@
 
 > Status: Accepted
 > Scope: Backend and data contracts only
-> Last updated: 2026-08-14
+> Last updated: 2026-08-15
 
 ## 1. Decision summary
 
@@ -90,6 +90,9 @@ rules, validated DAGs and canonicalization. See
 Polars owns:
 
 - CSV, TSV, JSON, NDJSON and Parquet decoding.
+- Node-level bounded Preview of validated E2 linear plans up to the selected
+  `target_node_id` (`Scan` / `Project` / `Filter` / `ApplyRules`; never
+  `Materialize`). See Issue #50.
 - Lazy scans when the source supports them.
 - Schema inference and normalization.
 - Cleaning rules and column expressions.
@@ -331,14 +334,32 @@ Events contain object IDs, timestamps, operation metadata and sanitized errors. 
 
 Preview is a bounded diagnostic operation, not a hidden full import.
 
-Defaults are configurable, with these initial product limits:
+Two preview surfaces remain distinct:
 
-- Default preview: 1,000 rows.
-- Maximum interactive preview: 10,000 rows.
+- Connector asset preview (`stillflow_core::PreviewRequest` /
+  `PreviewData`) is the existing connector diagnostic and is unchanged.
+- Engine node-level Preview (Issue #50) executes a validated E2 logical plan
+  only through one caller-selected `target_node_id`. It returns the earliest
+  deterministic prefix and reports `rows_truncated`, `bytes_truncated`,
+  `scan_truncated`, and observed `source_exhausted`. Its raw input scan is
+  bounded by 100,000 rows and 64 MiB. It never creates a Snapshot and never
+  calls `SnapshotWriter`.
+
+Defaults and ceilings:
+
+- Default engine node-level Preview: 1,000 rows / 8 MiB.
+- Maximum engine node-level Preview: 10,000 rows / 50 MiB.
+- Preview deadline: 30 s.
+- Preview raw input scan: maximum 100,000 rows and 64 MiB per request;
+  exceeding either bound reports `scan_truncated` instead of scanning the
+  full source.
+- Preview shares the E2 run gate: `MAX_ENGINE_CONCURRENT_RUNS` concurrent
+  requests; the next request is `Busy`.
 - Column projection is mandatory when the caller selects columns.
 - Remote byte reads use ranges when supported.
 - Every result reports whether rows or bytes were truncated.
-- Cancellation and request deadlines propagate through the connector.
+- Cancellation and request deadlines propagate through the connector and
+  engine.
 - Full imports run as jobs and emit progress events.
 
 ## 13. Failure model
@@ -444,7 +465,14 @@ Contract: [`issue-046-deterministic-engine-execution-contract.md`](issues/issue-
 
 - E1: freeze the single-source execution contract. Docs-only; stop for review.
 - E2: `LogicalPlan` → execution chunks → Polars → bounded `BatchStream` → atomic Snapshot. Live engine memory is connector envelope + complete Polars working set + canonical remainder + 5 MiB state (peak 197 MiB). Remainder flush is move/freeze. Do not transform a whole connector envelope and split afterwards.
-- E3: node-level Preview using the same lowering, with row/byte/time ceilings.
+- E3-C0: docs-only freeze of the node-level Preview contract in Issue #50
+  (`agent/issue-050-node-preview-contract`). The PR remains draft with
+  Request changes until architecture approval binds the contract SHA. It
+  must not be based on or modify PR #49.
+- E3 runtime: node-level Preview using the same E2 preflight, typing,
+  lowering, chunker, and sanitized errors, with frozen output row/byte,
+  input scan row/byte, deadline, concurrency, and allocated-capacity
+  ceilings and the P01–P15 acceptance matrix.
 - E4: `Validate`, Rejected Rows, and `Deduplicate`.
 - E5: job runtime and Axum Preview / Run / Status / Cancel.
 
@@ -490,6 +518,7 @@ SQL Connector #9 is explicitly Post-MVP and must not block Engine work.
 - The Engine E1 contract is frozen before Polars runtime work begins.
 - After E1 approval, a single-source deterministic Polars path materializes an
   atomic Snapshot without partial publication.
+- The E3-C0 node-level Preview contract is frozen before E3 runtime starts.
 - Imports register Dataset and Snapshot objects with lineage and sanitized events.
 - Cancellation, timeouts and typed failures are covered by tests.
 - Credentials are absent from logs, events and persisted domain objects.
