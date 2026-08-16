@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use crate::error::{live_payload_guard, peak_guard, EngineError};
+use crate::error::{live_payload_guard, EngineError};
 use crate::MAX_OPERATOR_STATE_BYTES;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +129,7 @@ pub(crate) struct MemoryTracker {
     working_bytes: usize,
     remainder_bytes: usize,
     operator_state_bytes: usize,
+    peak_limit: usize,
     envelope_live: bool,
     polars_live: bool,
     incoming_live: bool,
@@ -138,12 +139,21 @@ pub(crate) struct MemoryTracker {
 
 impl MemoryTracker {
     pub(crate) fn new() -> Self {
+        Self::with_peak_limit(crate::MAX_ENGINE_PEAK_BYTES)
+    }
+
+    pub(crate) fn new_preview() -> Self {
+        Self::with_peak_limit(crate::PREVIEW_PEAK_ENGINE_BYTES)
+    }
+
+    fn with_peak_limit(peak_limit: usize) -> Self {
         reset_alloc_peaks();
         Self {
             envelope_bytes: 0,
             working_bytes: 0,
             remainder_bytes: 0,
             operator_state_bytes: MAX_OPERATOR_STATE_BYTES,
+            peak_limit,
             envelope_live: false,
             polars_live: false,
             incoming_live: false,
@@ -253,7 +263,9 @@ impl MemoryTracker {
         let live = self.live_payloads();
         live_payload_guard(live)?;
         let bytes = self.engine_bytes();
-        peak_guard(bytes)?;
+        if bytes > self.peak_limit {
+            return Err(EngineError::peak_exceeded());
+        }
         self.report.peak_live_payloads = self.report.peak_live_payloads.max(live);
         self.report.peak_engine_bytes = self.report.peak_engine_bytes.max(bytes);
         let (polars, remainder, storage) = alloc_peaks();

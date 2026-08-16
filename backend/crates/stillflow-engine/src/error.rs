@@ -7,7 +7,7 @@ use stillflow_storage::StorageError;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{MAX_ENGINE_PEAK_BYTES, MAX_LIVE_COLUMNAR_PAYLOADS};
+use crate::MAX_LIVE_COLUMNAR_PAYLOADS;
 
 #[derive(Error)]
 pub enum EngineError {
@@ -282,13 +282,6 @@ pub(crate) fn deadline_too_long(_limit: Duration) -> EngineError {
 
 pub(crate) fn live_payload_guard(live: u8) -> Result<(), EngineError> {
     if live > MAX_LIVE_COLUMNAR_PAYLOADS {
-        return Err(EngineError::peak_exceeded());
-    }
-    Ok(())
-}
-
-pub(crate) fn peak_guard(bytes: usize) -> Result<(), EngineError> {
-    if bytes > MAX_ENGINE_PEAK_BYTES {
         return Err(EngineError::peak_exceeded());
     }
     Ok(())
