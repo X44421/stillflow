@@ -31,10 +31,10 @@ must be frozen before high-risk implementation begins.
    behavior.
 6. For stacked delivery, the second PR targets the first PR's branch until the
    base merges. Rebase/rebuild it from `main` afterward.
-7. E3-C0 (Issue #50) is explicitly independent of PR #49: build from latest
-   `main`, do not base/rebase/cherry-pick from the E2 branch, and do not edit
-   PR #49. E3-C0 is docs-only and stops with a draft PR plus Request changes
-   until architecture approval.
+7. E3-C0 (Issue #50) was explicitly independent of PR #49. It is approved
+   at SHA `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`, merged in PR #51 as
+   `main@da3d03b`, and its contract branch was deleted. E3 runtime remains
+   paused until PR #49 is merged and passes final merge-readiness review.
 
 This policy makes authorship, accepted state, and rollback boundaries observable.
 
@@ -202,8 +202,10 @@ The accepted sequence is:
      30 s deadline, the shared E2 `MAX_ENGINE_CONCURRENT_RUNS` gate, the
      earliest-prefix truncation/scan/exhaustion flags, read-only/no-Snapshot
      rules, the allocated-capacity response memory law, and the P01–P15
-     acceptance matrix. It remains draft with Request changes until
-     architecture approval binds a contract SHA.
+     acceptance matrix. **Approved SHA
+     `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`; merged in PR #51 as
+     `main@da3d03b`.** E3 runtime stays paused until E2 is merged and
+     finally reviewed.
 
 Do not pull work forward merely because a downstream type is convenient. A
 temporary placeholder must remain private and must not become a public contract.
