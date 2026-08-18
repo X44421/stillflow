@@ -305,7 +305,7 @@ E3 must not re-implement or fork any of the following:
 ## 8. Frozen resource ceilings
 
 All limits are hard ceilings. Exceeding a maximum fails with the error named
-in section 13. No TBD value is permitted.
+in section 13. No placeholder value is permitted.
 
 | Resource | Ceiling | Default | Source |
 | --- | --- | --- | --- |
