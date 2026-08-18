@@ -1,8 +1,9 @@
-# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R3)
+# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R4)
 
 > Status: Frozen for architecture review (not approved)
-> Revision: C0-R3
-> Supersedes: C0-R2 `2a35bced9e2eb8b35a9e4679c8698d15bbb6b941` (Request changes)
+> Revision: C0-R4
+> Supersedes: C0-R3 `cf4f0bdd7207c0a961d05e56ac69bf26578b42da` (Request changes)
+> Also supersedes: C0-R2 `2a35bced9e2eb8b35a9e4679c8698d15bbb6b941` (Request changes)
 > Also supersedes: C0-R1 `e5b70db4bfdfd9546842c138d50ec815440725fc`
 > Also supersedes: C0 `d33f45610620c03afe253cdc0b4aef7468fa5dd8`
 > Risk: High
@@ -13,11 +14,12 @@
 > Authorized E4 base: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`
 > Storage facts base: `main@473c65b` (PR #62 merged storage publication/recovery inventory)
 > Branch: `agent/issue-054-validation-rejected-rows-contract`
-> Last updated: 2026-08-18 (R3 after PR #62 merge)
-> Review: PR #57 remains draft with Request changes. C0 and C0-R1 were not
-> approved. R1 closed the six original P0 blockers; R2 closed four
-> implementation-level P0 blockers; R3 closes the remaining identity, recovery,
-> digest, resource-scope, and acceptance-executability blockers.
+> Last updated: 2026-08-18 (R4 after Request changes)
+> Review: PR #57 is Ready with Request changes. C0, C0-R1, and C0-R2 were not
+> approved. R3 closed the previous identity, recovery, digest, resource-scope,
+> and acceptance-executability blockers. R4 closes the remaining report
+> `ColumnId`, canonical digest/encoding, journal-before-staging recovery, and
+> SQLite initialization/memory-limit blockers.
 > Architecture approval binds exactly one new commit SHA of this file. E4
 > runtime remains paused until that approval and must then rebuild from the
 > latest accepted `main`.
@@ -107,7 +109,16 @@ E5 job/API work.
 | V09 had no load-by-run-id API; cancellation cleanup and variable-width key bounds conflicted | Added `load_verification_bundle_by_run_id`, made normal cancellation cleanup strict, and limited preflight key-size proofs to statically bounded types while retaining the required per-row runtime check (sections 6, 10, 11, and 16). |
 | R3 was not yet bound to the merged storage publication/recovery inventory | R3 now incorporates the PR #62 facts from `main@473c65b`: the publication journal commits before staging creation, final files precede SQLite visibility, and snapshot visibility plus journal deletion share one SQLite transaction. Bundle states reuse the existing storage maintenance gate/root lock and do not claim untested process-kill or power-loss durability. |
 
-### 3.4 Compatibility decision
+### 3.4 R4 blockers closed by this revision
+
+| R3 blocker / review item | R4 disposition |
+| --- | --- |
+| Report schemas do not freeze `ColumnId`; runtime would generate report IDs | Added fixed `ColumnId` constants for every `ValidationRuleSummary`, `ValidationFinding`, `DedupRuleSummary`, and `DuplicateFinding` field (section 8.7). Runtime never generates report IDs. |
+| Digest model references non-existent `LogicalSchema::canonical_bytes()`; `SnapshotManifest` has no version/digest; `canonical_batch_bytes` and accepted-snapshot provenance digest are not fully defined; `LogicalInputRef.version_digest` preimage is undefined | R4 freezes `canonical_schema_bytes` (including the required `LogicalSchema::canonical_bytes()` encoding), `canonical_batch_bytes` as Arrow IPC record-batch body, `LogicalInputRef.version_digest` preimage, and an explicit `accepted_snapshot_manifest_digest` formula over `DatasetSnapshot` + `SnapshotPartition` values (section 8.1.1). |
+| Crash recovery state machine misses journal-before-staging window | `Prepared` now means the publication journal row is committed before staging; recovery removes that committed row. V30 injects this exact window (sections 10.4 and 16). |
+| SQLite initialization writes lease before `PRAGMA page_size`, and `cache_size=-512` is described as a strict memory cap | R4 sets all PRAGMAs immediately after exclusive creation and before any table/lease row, and clarifies `cache_size` is a soft target, not a hard 512 KiB limit (section 9.1). |
+
+### 3.5 Compatibility decision
 
 - Existing `ExecutionRequest`, `ExecutionIdentities`, `ExecutionEngine`,
   `PreviewRequest`, `PreviewResult`, `BatchEnvelope`, `LogicalSchema`,
@@ -368,7 +379,7 @@ provenance and artifact types are therefore split by dependency direction:
 
 | Crate | Owns |
 | --- | --- |
-| `stillflow-core` | `InputRef`, `LogicalInputRef`, `SourceRowRef`, `RuleRef`, `ArtifactKind`, `ArtifactSummary`, caller-owned `ArtifactProvenanceInput`, engine-assembled `ArtifactProvenanceDraft`, and committed `ArtifactProvenance` with `[u8;32]` digests |
+| `stillflow-core` | `InputRef`, `LogicalInputRef`, `SourceRowRef`, `RuleRef`, `ArtifactKind`, `ArtifactSummary`, caller-owned `ArtifactProvenanceInput`, engine-assembled `ArtifactProvenanceDraft`, committed `ArtifactProvenance` with `[u8;32]` digests, and `LogicalSchema::canonical_bytes()` (new E4 runtime API) |
 | `stillflow-plan` | `PlanFingerprint`, `LogicalPlan::canonical_bytes()`, `PlanFingerprint::as_bytes()` |
 | `stillflow-storage` | `ArtifactManifest`, `ArtifactSection`, `ArtifactPartition`, `VerificationBundleMembership`, `VerificationBundle`, `ArtifactBatchReader`, `DedupIndex`, bundle writer/commit/load APIs |
 | `stillflow-engine` | `ExecutionEngine::materialize_verification`, conversion from `PlanFingerprint` / `PlanNodeId` to core `RuleRef` / digest bytes, and writer orchestration |
@@ -566,6 +577,8 @@ domain prefixes below are ASCII bytes followed by `0x00`:
 | manifest | `stillflow.e4.manifest.v1` |
 | artifact provenance | `stillflow.e4.artifact-provenance.v1` |
 | bundle provenance | `stillflow.e4.bundle-provenance.v1` |
+| logical input | `stillflow.e4.logical-input.v1` |
+| accepted snapshot | `stillflow.e4.accepted-snapshot.v1` |
 
 The fixed enum tags are:
 
@@ -587,19 +600,66 @@ An `optional(Uuid)` begins with `0x00` for `None` or `0x01` followed by the
 order stated by its enclosing formula; counts are authoritative and a decoder
 rejects trailing or missing bytes.
 
+`canonical_schema_bytes` is the frozen byte encoding of a `LogicalSchema`
+that the E4 runtime must expose as `LogicalSchema::canonical_bytes()` on
+`stillflow-plan` (or an equivalent core-owned helper). The encoding is:
+
+```text
+u16(logical_schema_version)
+|| u32(field_count)
+|| repeated(
+     u32(field_name_len) || utf8(field_name)
+     || u8(nullable)
+     || u8(logical_type_tag)
+     || type_payload
+     || u32(metadata_len) || repeated(u32(key_len) || utf8(key)
+                                      || u32(value_len) || utf8(value))
+   )
+```
+
+`logical_type_tag` and `type_payload` use the existing
+`stillflow-core::LogicalType` serialization rules already frozen by the E2
+contract; `metadata` is sorted by UTF-8 key bytes and must not contain secret
+field names or values. The digest inputs never include display names that are
+not part of the logical schema, allocator addresses, or filesystem paths.
+
+`canonical_batch_bytes` is the Arrow 59 IPC record-batch message body for the
+batch produced by the versioned E2 `BatchEnvelopeFactory`, with:
+- little-endian Arrow IPC encoding;
+- no compression;
+- `IpcWriteOptions::default()`-equivalent metadata;
+- the canonical schema message represented separately by
+  `canonical_schema_bytes`, not repeated inside each batch digest;
+- no transport headers, connection metadata, allocator addresses, or Parquet
+  footer.
+Batches are included in their logical sequence order.
+
+`LogicalInputRef.version_digest` is defined as:
+
+```text
+SHA-256(logical-input-domain || u8(input_kind_tag) || u16(descriptor_version)
+        || asset_id_bytes || canonical_schema_bytes)
+```
+
+where `input_kind_tag` is `0x01` for `InputRef::Asset` and `0x02` for the
+reserved `InputRef::Snapshot`, `descriptor_version = 1` for this contract, and
+`canonical_schema_bytes` is the authorized schema for the logical input (the
+schema override when present, otherwise the connector-inspected schema). The
+caller supplies `version_digest`; the engine recomputes it from the bound
+asset/schema and rejects a mismatch.
+
 `ArtifactPartition.digest` is
 `SHA-256(partition-domain || artifact_id || section_id_tag ||
 u32(sequence) || u64(row_count) || u64(stored_byte_count) ||
 u32(canonical_batch_count) || repeated(u32(batch_len) || canonical_batch_bytes))`.
-`canonical_batch_bytes` is the Arrow 59 `BatchEnvelope` payload produced by the
-versioned E2 `BatchEnvelopeFactory`, with canonical schema metadata and no
-transport headers, compression, or allocator addresses. Batches are included
-in their logical sequence order. The runtime records the resulting byte length
-as `stored_byte_count`; for this contract that is the canonical logical
-payload byte count, not a filesystem allocation or Parquet footer size. The
-physical Parquet representation remains immutable storage, but its allocator,
-compression, and footer metadata are outside these digests. The runtime does
-not hash a filesystem path or mutable file metadata.
+`canonical_batch_bytes` is the Arrow IPC record-batch message body defined
+above. Batches are included in their logical sequence order. The runtime
+records the resulting byte length as `stored_byte_count`; for this contract
+that is the canonical logical payload byte count, not a filesystem allocation
+or Parquet footer size. The physical Parquet representation remains immutable
+storage, but its allocator, compression, and footer metadata are outside these
+digests. The runtime does not hash a filesystem path or mutable file
+metadata.
 
 `ArtifactSection.section_digest` is
 `SHA-256(section-domain || artifact_id || section_id_tag ||
@@ -607,9 +667,10 @@ canonical_schema_bytes || schema_fingerprint || u64(row_count) ||
 u64(stored_byte_count) || u32(partition_count) ||
 repeated(u32(sequence) || u64(row_count) || u64(stored_byte_count) ||
 partition_digest))`, with partitions sorted by strictly increasing
-`sequence`. `canonical_schema_bytes` is the existing
-`LogicalSchema::canonical_bytes()` encoding. The section statistics must equal
-the sums of its partitions and `partition_count` must equal the vector length.
+`sequence`. `canonical_schema_bytes` is the frozen encoding defined above
+(the E4 runtime exposes it as `LogicalSchema::canonical_bytes()`). The
+section statistics must equal the sums of its partitions and
+`partition_count` must equal the vector length.
 
 `ArtifactManifest.manifest_digest` is
 `SHA-256(manifest-domain || u16(version) || artifact_id || kind_tag ||
@@ -631,9 +692,26 @@ manifest_digest)`, using the same fixed section order. The provenance digest
 does not include timestamps, `engine_build`, display names, or any secret or
 filesystem metadata.
 
-The accepted snapshot artifact keeps the existing E2 `SnapshotManifest`
-canonical digest as its manifest contribution; it does not acquire an
-`ArtifactManifest`.
+The accepted snapshot artifact does not acquire an `ArtifactManifest`.
+Its manifest contribution is the explicit accepted-snapshot digest:
+
+```text
+accepted_snapshot_manifest_digest =
+    SHA-256(accepted-snapshot-domain || snapshot_id || dataset_id
+            || session_id || source_asset_id || schema_fingerprint
+            || u64(row_count) || u64(stored_byte_count)
+            || u32(partition_count)
+            || repeated(u32(sequence) || u64(row_count)
+                        || u64(stored_byte_count) || partition_digest))
+```
+
+where `partition_digest` is the same `ArtifactPartition.digest` formula used
+for report artifacts, applied to each accepted `SnapshotPartition` in
+strictly increasing sequence order. This digest is computed from the
+committed `DatasetSnapshot` and `SnapshotPartition` values; it does not
+require a new field on the existing `SnapshotManifest`. The E4 runtime may
+additionally store this digest on `SnapshotManifest` for convenience, but the
+formula above is authoritative.
 
 The bundle-level provenance is not a child `ArtifactManifest`. Its
 `content_digest` is
@@ -643,9 +721,10 @@ validation_report_artifact_id || optional(rejected_rows_artifact_id) ||
 deduplication_report_artifact_id || repeated(child_artifact_id ||
 child_manifest_digest || child_content_digest))`. The child sequence is fixed
 as accepted snapshot, validation report, optional rejected rows, then
-deduplication report; the accepted snapshot contribution uses its committed
-`SnapshotManifest` digest. This separates the transaction identity
-`bundle_id` from the bundle provenance artifact identity.
+deduplication report; the accepted snapshot contribution uses
+`accepted_snapshot_manifest_digest` from the formula above. This separates
+the transaction identity `bundle_id` from the bundle provenance artifact
+identity.
 
 `ArtifactSummary` is computed over the complete artifact, not independently
 per section: `row_count`, `stored_byte_count`, and `partition_count` are the
@@ -886,7 +965,85 @@ collision is preflight `InvalidPlan`. The rejected artifact schema has
 `source_field_count + 9 <= MAX_SCHEMA_FIELDS`; a source schema with more
 than `MAX_SCHEMA_FIELDS - 9` fields is preflight `InvalidPlan`.
 
-### 8.7 Original-value preservation decision
+### 8.7 Report section ColumnId constants
+
+Every report section field has a fixed `ColumnId`. The runtime never
+generates a report `ColumnId`. The values use the same reserved `0xE4C0`
+namespace as the rejected-row control columns.
+
+`ValidationRuleSummary` fields:
+
+| Field | ColumnId |
+| --- | --- |
+| `input_kind` | `0x...0021` |
+| `input_id` | `0x...0022` |
+| `input_version_digest` | `0x...0023` |
+| `plan_fingerprint` | `0x...0024` |
+| `canonical_plan_digest` | `0x...0025` |
+| `node_id` | `0x...0026` |
+| `rule_ordinal` | `0x...0027` |
+| `message` | `0x...0028` |
+| `evaluated_count` | `0x...0029` |
+| `pass_count` | `0x...002A` |
+| `fail_count` | `0x...002B` |
+| `warning_count` | `0x...002C` |
+| `error_count` | `0x...002D` |
+| `null_count` | `0x...002E` |
+| `false_count` | `0x...002F` |
+
+`ValidationFinding` fields:
+
+| Field | ColumnId |
+| --- | --- |
+| `input_kind` | `0x...0031` |
+| `input_id` | `0x...0032` |
+| `input_version_digest` | `0x...0033` |
+| `source_row_ordinal` | `0x...0034` |
+| `plan_fingerprint` | `0x...0035` |
+| `canonical_plan_digest` | `0x...0036` |
+| `node_id` | `0x...0037` |
+| `rule_ordinal` | `0x...0038` |
+| `severity` | `0x...0039` |
+| `predicate_outcome` | `0x...003A` |
+
+`DedupRuleSummary` fields:
+
+| Field | ColumnId |
+| --- | --- |
+| `input_kind` | `0x...0041` |
+| `input_id` | `0x...0042` |
+| `input_version_digest` | `0x...0043` |
+| `plan_fingerprint` | `0x...0044` |
+| `canonical_plan_digest` | `0x...0045` |
+| `node_id` | `0x...0046` |
+| `rule_ordinal` | `0x...0047` |
+| `key_column_count` | `0x...0048` |
+| `evaluated_count` | `0x...0049` |
+| `unique_count` | `0x...004A` |
+| `duplicate_count` | `0x...004B` |
+
+`DuplicateFinding` fields:
+
+| Field | ColumnId |
+| --- | --- |
+| `input_kind` | `0x...0051` |
+| `input_id` | `0x...0052` |
+| `input_version_digest` | `0x...0053` |
+| `source_row_ordinal` | `0x...0054` |
+| `first_source_row_ordinal` | `0x...0055` |
+| `plan_fingerprint` | `0x...0056` |
+| `canonical_plan_digest` | `0x...0057` |
+| `node_id` | `0x...0058` |
+| `rule_ordinal` | `0x...0059` |
+| `key_column_count` | `0x...005A` |
+| `encoded_key_byte_count` | `0x...005B` |
+
+The shorthand `0x...00XX` means the full UUID
+`0xE4C0_0000_0000_4000_8000_0000_0000_00XX`. The same collision rule as
+the rejected-row controls applies: source/report schemas must not already
+contain these ids, and a collision is preflight `InvalidPlan`.
+
+### 8.8 Original-value preservation decision
 
 - The original value copied into a rejected row is the logical Scan output
   row after projection and after `Scan.predicate`, before any `ApplyRules`.
@@ -924,15 +1081,28 @@ exclusive and never deletes an existing file:
 3. The handle keeps the exclusive OS file lock on
    `dedup_{run_id}.lock` for the lifetime of the index. This lock, not only
    `started_at`, is the active-ownership signal.
-4. After SQLite opens, the handle writes an ownership lease row containing
-   `run_id`, `bundle_id`, and `started_at`. The lease is advisory recovery
-   metadata; the file lock and `create_new` are the primary ownership guards.
-5. The handle sets `PRAGMA page_size = 4096`,
+4. 4. Immediately after SQLite opens and before creating any table or lease
+   row, the handle sets `PRAGMA page_size = 4096`,
    `PRAGMA max_page_count = MAX_DEDUP_INDEX_PAGES`,
    `PRAGMA cache_size = -512`, and `PRAGMA journal_mode = DELETE`.
+   Because the `.sqlite` file was exclusively created by this attempt,
+   `page_size` applies to the new database before its first table is
+   created.
+5. After the PRAGMAs are applied, the handle writes an ownership lease row
+   containing `run_id`, `bundle_id`, and `started_at`. The lease is
+   advisory recovery metadata; the file lock and `create_new` are the
+   primary ownership guards.
 6. File permission is `0600` (Unix). On platforms without Unix modes, the
    storage crate applies the strongest equivalent owner-only ACL available
    and records that behavior in its tests.
+
+`PRAGMA cache_size = -512` is a soft page-cache target (512 KiB), not a
+strict SQLite memory cap. The contract does not claim it enforces a hard
+512 KiB total memory limit. Strict resource enforcement is provided by
+`PRAGMA max_page_count`, reserve-before-allocate, the application-level
+dedup page/byte caps, and the engine/storage peak laws. The runtime must
+document and test the actual memory behavior rather than treating
+`cache_size` as a hard ceiling.
 
 The creation protocol has explicit crash points after lock-file creation,
 after lock acquisition, after SQLite-file creation, after SQLite open, and
@@ -1109,8 +1279,8 @@ records as untested.
 
 | State | Meaning | Crash recovery |
 | --- | --- | --- |
-| `Prepared` | Draft validated; no files yet | no cleanup needed |
-| `Staged` | Accepted/report/rejected partitions written under the bundle staging directory | recovery removes stale bundle staging directory; no SQLite manifest row exists |
+| `Prepared` | Draft validated; publication journal row committed; no staging directory yet | recovery removes the committed publication row (abort publication) and any temp files created by this attempt; no manifest row exists |
+| `Staged` | Accepted/report/rejected partitions written under the bundle staging directory | recovery removes stale bundle staging directory and the committed publication row; no SQLite manifest row exists |
 | `Installing` | Final artifact directories created but SQLite commit has not begun | recovery removes installed artifact directories and staging; no manifest row exists; bundle is not visible |
 | `Committing` | SQLite transaction is installing bundle membership and all manifests | the SQLite transaction is atomic; a crash before commit leaves the previous state, a crash after commit leaves the complete bundle visible |
 | `Committed` | bundle is visible and complete | no cleanup; bundle can be read by `bundle_id`, `run_id`, or accepted snapshot id |
@@ -1652,7 +1822,7 @@ The sanitization sentinel is
 | V27 | Rule summaries and message once | `ValidationRuleSummary` contains evaluated/pass/fail/warning/error/null/false counts and message once per `RuleRef`; findings contain no message; `DedupRuleSummary` contains evaluated/unique/duplicate counts. |
 | V28 | Dedup insert typed first ordinal | `insert_first()` returns `Inserted` or `Duplicate` with `first_source_row_ordinal`; duplicate finding uses that ordinal even if the first-seen row is later rejected by Validate Error. |
 | V29 | Report resource math | Exactly `MAX_REPORT_ROWS = MAX_REPORT_PARTITIONS * REPORT_PACK_ROWS` and `MAX_REPORT_BYTES = MAX_REPORT_PARTITIONS * REPORT_PACK_BYTES`; limits are enforced after aggregating all sections of each report artifact and again at the two-report bundle ceiling; exceeding row/byte/partition limits fails `BoundExceeded`; no writer can emit a partition count above the applicable ceiling. |
-| V30 | Crash and maintenance recovery | Inject process crash at bundle states `Prepared`, `Staged`, `Installing`, and `Committing`, and at every dedup creation point in section 9.1; no partial bundle is visible; recovery under the maintenance gate removes stale bundle staging and every stale/orphan dedup suffix pair only after acquiring the lock when present; active bundle/index is untouched. |
+| V30 | Crash and maintenance recovery | Inject process crash at bundle states `Prepared` (including the journal-commit-before-staging window), `Staged`, `Installing`, and `Committing`, and at every dedup creation point in section 9.1; no partial bundle is visible; recovery under the maintenance gate removes the committed publication row, stale bundle staging, and every stale/orphan dedup suffix pair only after acquiring the lock when present; active bundle/index is untouched. |
 
 ## 17. Stop conditions
 
