@@ -201,7 +201,16 @@ impl MemoryTracker {
             report.allocator_reallocation_count = allocator_reallocation_count();
             report.allocator_peak_bytes = polars.max(remainder).max(storage);
         }
+        let allocator_overlay = polars.saturating_add(remainder).saturating_add(storage);
+        report.peak_engine_bytes = report
+            .peak_engine_bytes
+            .max(self.operator_state_bytes.saturating_add(allocator_overlay));
         report
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_response_budget_peak(&mut self, peak: usize) {
+        self.report.response_capacity_peak = self.report.response_capacity_peak.max(peak);
     }
 
     pub(crate) fn record_chunk(&mut self, rows: usize, remainder_live: bool) {
@@ -329,6 +338,11 @@ impl MemoryTracker {
         self.report.polars_phase_peak = self.report.polars_phase_peak.max(polars);
         self.report.remainder_phase_peak = self.report.remainder_phase_peak.max(remainder);
         self.report.storage_append_phase_peak = self.report.storage_append_phase_peak.max(storage);
+        let allocator_overlay = polars.saturating_add(remainder).saturating_add(storage);
+        self.report.peak_engine_bytes = self
+            .report
+            .peak_engine_bytes
+            .max(self.operator_state_bytes.saturating_add(allocator_overlay));
         Ok(())
     }
 }

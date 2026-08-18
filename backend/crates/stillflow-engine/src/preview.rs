@@ -490,7 +490,6 @@ impl PreviewAccumulator {
         tracker: &mut MemoryTracker,
     ) -> Result<PushOutcome, EngineError> {
         while incoming.num_rows() > 0 {
-            let incoming_rows_before = incoming.num_rows();
             let row_room = self
                 .row_limit
                 .saturating_sub(self.finalized_rows)
@@ -504,37 +503,25 @@ impl PreviewAccumulator {
                 self.flush_builder(tracker)?;
                 continue;
             }
-            let high = incoming.num_rows().min(row_room).min(pack_room);
-            let mut low = 0_usize;
-            let mut high = high;
-            while low < high {
-                let mid = low + (high - low).div_ceil(2);
-                let exact = self.rebatcher.exact_bytes_after_append(&incoming, mid)?;
-                let builder_budget = self.byte_limit.saturating_sub(self.finalized_bytes);
-                if exact <= MAX_BATCH_BYTES
-                    && self.finalized_bytes.saturating_add(exact) <= self.byte_limit
-                    && self
-                        .rebatcher
-                        .can_reserve_for_budget(&incoming, mid, builder_budget)?
-                {
-                    low = mid;
-                } else {
-                    high = mid - 1;
+
+            let one = self.rebatcher.exact_bytes_after_append(&incoming, 1)?;
+            if one > MAX_BATCH_BYTES {
+                if self.rebatcher.rows() > 0 {
+                    self.flush_builder(tracker)?;
+                    continue;
                 }
+                return Err(EngineError::BoundExceeded(
+                    "a single transformed row exceeds MAX_BATCH_BYTES",
+                ));
             }
-            let k = low;
-            if k == 0 {
-                let one = self.rebatcher.exact_bytes_after_append(&incoming, 1)?;
-                if one > MAX_BATCH_BYTES {
-                    if self.rebatcher.rows() > 0 {
-                        self.flush_builder(tracker)?;
-                        continue;
-                    }
-                    return Err(EngineError::BoundExceeded(
-                        "a single transformed row exceeds MAX_BATCH_BYTES",
-                    ));
+
+            let candidate_total = self.finalized_bytes.saturating_add(one);
+            if candidate_total > self.byte_limit {
+                if self.rebatcher.rows() > 0 {
+                    self.flush_builder(tracker)?;
+                    continue;
                 }
-                if self.finalized_bytes == 0 && self.rebatcher.rows() == 0 {
+                if self.finalized_bytes == 0 {
                     return Err(EngineError::BoundExceeded(
                         "the first preview row exceeds the response byte limit",
                     ));
@@ -543,8 +530,25 @@ impl PreviewAccumulator {
                 return Ok(PushOutcome::ByteClosed);
             }
 
-            let accepted = incoming.slice(0, k);
-            let remaining = incoming.slice(k, incoming.num_rows() - k);
+            let builder_budget = self.byte_limit.saturating_sub(self.finalized_bytes);
+            #[cfg(test)]
+            {
+                let admission_peak = self.rebatcher.admission_budget_peak(&incoming, 1)?;
+                tracker.record_response_budget_peak(
+                    self.finalized_bytes.saturating_add(admission_peak),
+                );
+            }
+            if !self
+                .rebatcher
+                .can_reserve_for_budget(&incoming, 1, builder_budget)?
+                && self.rebatcher.rows() > 0
+            {
+                self.flush_builder(tracker)?;
+                continue;
+            }
+
+            let accepted = incoming.slice(0, 1);
+            let remaining = incoming.slice(1, incoming.num_rows() - 1);
             let mut published = Vec::new();
             self.rebatcher.push_with_base(
                 accepted,
@@ -558,35 +562,6 @@ impl PreviewAccumulator {
             self.absorb(published, tracker)?;
             incoming = remaining;
 
-            if k < incoming_rows_before {
-                if k == pack_room {
-                    // The single-envelope pack limit closed this prefix; the
-                    // canonical builder was flushed by `push` and the next
-                    // loop iteration must continue with the remaining rows.
-                    continue;
-                }
-                self.flush_builder(tracker)?;
-                if k >= row_room {
-                    return Ok(PushOutcome::RowClosed);
-                }
-                let next_exact = self.rebatcher.exact_bytes_after_append(&incoming, 1)?;
-                if next_exact > MAX_BATCH_BYTES {
-                    // The current canonical envelope reached its single-
-                    // envelope bound. The next row may still fit in a fresh
-                    // envelope and must not be reported as public byte
-                    // truncation.
-                    continue;
-                }
-                if self.finalized_bytes.saturating_add(next_exact) > self.byte_limit {
-                    return Ok(PushOutcome::ByteClosed);
-                }
-                // A smaller prefix can also be caused by an internal
-                // reserve/reallocation budget. That is a response-envelope
-                // segmentation point, not public byte truncation: the
-                // remaining rows from this lowered chunk must still be
-                // processed.
-                continue;
-            }
             if self.finalized_rows.saturating_add(self.rebatcher.rows()) >= self.row_limit {
                 self.flush_builder(tracker)?;
                 return Ok(PushOutcome::RowClosed);
