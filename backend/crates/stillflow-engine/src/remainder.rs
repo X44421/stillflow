@@ -194,11 +194,22 @@ impl CanonicalRebatcher {
         k: usize,
         budget: usize,
     ) -> Result<bool, EngineError> {
+        Ok(self.admission_budget_peak(incoming, k)? <= budget)
+    }
+
+    /// Peak remainder-builder bytes during admission of `k` rows, including
+    /// old-buffer + new-buffer realloc transients.
+    pub(crate) fn admission_budget_peak(
+        &self,
+        incoming: &RecordBatch,
+        k: usize,
+    ) -> Result<usize, EngineError> {
         if incoming.num_columns() != self.sinks.len() {
             return Err(EngineError::Internal("remainder column mismatch"));
         }
         let mut sum_subsequent_old = self.remainder_bytes();
         let mut sum_prior_new = 0_usize;
+        let mut peak = 0_usize;
         for (sink, array) in self.sinks.iter().zip(incoming.columns()) {
             let old_cap = sink.allocated_capacity_bytes();
             sum_subsequent_old = sum_subsequent_old.saturating_sub(old_cap);
@@ -207,15 +218,11 @@ impl CanonicalRebatcher {
             let step_peak = sum_prior_new
                 .saturating_add(transient_peak)
                 .saturating_add(sum_subsequent_old);
-            if step_peak > budget {
-                return Ok(false);
-            }
+            peak = peak.max(step_peak);
             sum_prior_new = sum_prior_new.saturating_add(new_cap);
-            if sum_prior_new.saturating_add(sum_subsequent_old) > budget {
-                return Ok(false);
-            }
+            peak = peak.max(sum_prior_new.saturating_add(sum_subsequent_old));
         }
-        Ok(sum_prior_new <= budget)
+        Ok(peak)
     }
 
     fn can_reserve_for(&self, incoming: &RecordBatch, k: usize) -> Result<bool, EngineError> {

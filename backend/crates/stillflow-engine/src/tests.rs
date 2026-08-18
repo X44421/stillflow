@@ -31,7 +31,7 @@ use crate::{
     crate_name, ExecutionEngine, ExecutionIdentities, ExecutionRequest, PreviewRequest,
     ENGINE_MAX_DEADLINE, MAX_COMPILED_PLAN_BYTES, MAX_ENGINE_PEAK_BYTES,
     MAX_LIVE_COLUMNAR_PAYLOADS, MAX_OPERATOR_STATE_BYTES, PREVIEW_DEFAULT_BYTE_LIMIT,
-    PREVIEW_MAX_SOURCE_ROWS_SCANNED, PREVIEW_PEAK_ENGINE_BYTES,
+    PREVIEW_MAX_ROW_LIMIT, PREVIEW_MAX_SOURCE_ROWS_SCANNED, PREVIEW_PEAK_ENGINE_BYTES,
 };
 
 const SENTINEL: &str = "STILLFLOW_SENTINEL_CELL_VALUE_9f3c2a";
@@ -3698,6 +3698,107 @@ async fn p05_partition_invariance_for_canonical_rebatching() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn p05_k_zero_realloc_transient_preserves_rows() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = utf8_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let first = "a".repeat(1_000);
+    let second = "b".repeat(1_000);
+    let (engine, _) = engine_with(
+        schema.clone(),
+        vec![utf8_envelope_values(
+            &schema,
+            source.id,
+            vec![first.clone(), second.clone()],
+            0,
+        )],
+        true,
+    )
+    .await;
+    let plan = scan_materialize_plan(source.id, None);
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+
+    let result = engine
+        .preview(preview_request(
+            plan, scan, connection, source, schema, 100, 2_800,
+        ))
+        .await
+        .expect("k-zero realloc transient");
+
+    assert_eq!(collect_preview_utf8(&result), vec![first, second]);
+    assert_eq!(result.rows_returned, 2);
+    assert!(!result.bytes_truncated);
+    assert!(result.source_exhausted);
+    assert_eq!(result.batches.len(), 2);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn p05_utf8_capacity_partition_invariance() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = utf8_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let first = "a".repeat(1_000);
+    let second = "b".repeat(500);
+    let third = "c".repeat(500);
+    let partitioning_a = vec![
+        utf8_envelope_values(&schema, source.id, vec![first.clone()], 0),
+        utf8_envelope_values(&schema, source.id, vec![second.clone(), third.clone()], 1),
+    ];
+    let partitioning_b = vec![utf8_envelope_values(
+        &schema,
+        source.id,
+        vec![first.clone(), second.clone(), third.clone()],
+        0,
+    )];
+    let (engine_a, _) = engine_with(schema.clone(), partitioning_a, true).await;
+    let (engine_b, _) = engine_with(schema.clone(), partitioning_b, true).await;
+    let plan = scan_materialize_plan(source.id, None);
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+
+    let result_a = engine_a
+        .preview(preview_request(
+            plan.clone(),
+            scan,
+            connection.clone(),
+            source.clone(),
+            schema.clone(),
+            100,
+            2_800,
+        ))
+        .await
+        .expect("partitioning A");
+    let result_b = engine_b
+        .preview(preview_request(
+            plan, scan, connection, source, schema, 100, 2_800,
+        ))
+        .await
+        .expect("partitioning B");
+
+    assert_eq!(collect_preview_utf8(&result_a), vec![first, second, third]);
+    assert_eq!(
+        collect_preview_utf8(&result_a),
+        collect_preview_utf8(&result_b)
+    );
+    assert_eq!(result_a.rows_returned, result_b.rows_returned);
+    assert_eq!(result_a.bytes_returned, result_b.bytes_returned);
+    assert_eq!(result_a.rows_truncated, result_b.rows_truncated);
+    assert_eq!(result_a.bytes_truncated, result_b.bytes_truncated);
+    assert_eq!(result_a.scan_truncated, result_b.scan_truncated);
+    assert_eq!(result_a.source_exhausted, result_b.source_exhausted);
+    assert_eq!(result_a.batches.len(), result_b.batches.len());
+    for (left, right) in result_a.batches.iter().zip(&result_b.batches) {
+        assert_eq!(left.sequence(), right.sequence());
+        assert_eq!(left.row_count(), right.row_count());
+        assert_eq!(left.byte_count(), right.byte_count());
+    }
+    assert_eq!(result_a.batches.len(), 2);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn p05_internal_reserve_segmentation_preserves_lowered_chunk() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, _) = utf8_schema();
@@ -3794,6 +3895,35 @@ async fn p06_n_shrink_preserves_logical_output() {
         assert_eq!(left.row_count(), right.row_count());
         assert_eq!(left.byte_count(), right.byte_count());
     }
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn p06_n_shrink_terminal_one_row_export_fails() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) =
+        engine_with(schema.clone(), vec![int_batch(&schema, source.id, 8)], true).await;
+    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
+
+    crate::preview::set_forced_export_retries(1_000);
+    let err = engine
+        .preview(preview_request(
+            plan,
+            scan,
+            connection,
+            source,
+            schema,
+            100,
+            PREVIEW_DEFAULT_BYTE_LIMIT,
+        ))
+        .await
+        .expect_err("terminal n=1 export transition");
+    crate::preview::set_forced_export_retries(0);
+
+    assert!(matches!(err, EngineError::BoundExceeded(_)));
     drop(_guard);
 }
 
@@ -4352,9 +4482,14 @@ async fn p13_sentinel_never_enters_errors_or_debug() {
         serde_json::json!({ "operation": "preview" }),
     )
     .expect("event")
-    .with_error(summary);
+    .with_error(summary.clone());
     let metadata_json = serde_json::to_string(event.metadata()).expect("metadata");
+    let event_json = serde_json::to_string(&event).expect("event");
+    let error_json = serde_json::to_string(event.error().expect("error")).expect("error");
     assert!(!metadata_json.contains(SENTINEL));
+    assert!(!event_json.contains(SENTINEL));
+    assert!(!error_json.contains(SENTINEL));
+    assert!(!event.error().expect("error").message().contains(SENTINEL));
     drop(_guard);
 }
 
@@ -4412,7 +4547,15 @@ async fn p14_preview_response_and_scan_counters_are_bounded() {
     );
     let plan = LogicalPlan::new(mat, nodes).expect("plan");
     let byte_limit = 4 * 1024_usize;
-    let mut request = preview_request(plan, filter, connection, source, schema, 5, byte_limit);
+    let mut request = preview_request(
+        plan,
+        filter,
+        connection.clone(),
+        source.clone(),
+        schema.clone(),
+        5,
+        byte_limit,
+    );
     request.batch_size = 4;
     let (result, report) = engine
         .preview_tracked(request)
@@ -4441,6 +4584,7 @@ async fn p14_preview_response_and_scan_counters_are_bounded() {
     assert!(report.allocator_reallocation_count > 0);
     assert!(report.allocator_peak_bytes > 0);
     assert!(report.remainder_phase_peak > 0);
+    assert!(report.remainder_phase_peak <= byte_limit);
     assert!(report.response_capacity_peak >= result.bytes_returned);
     assert!(report.response_capacity_peak <= byte_limit);
     assert!(report.peak_live_payloads <= 3);
@@ -4450,5 +4594,71 @@ async fn p14_preview_response_and_scan_counters_are_bounded() {
     assert_eq!(result.source_rows_scanned, 8);
     assert_eq!(result.source_rows_observed, 8);
     assert_eq!(result.source_bytes_observed, result.source_bytes_scanned);
+
+    let (split_engine, _) = engine_with(
+        schema.clone(),
+        vec![int_envelope_values(
+            &schema,
+            source.id,
+            (0..20_000).collect(),
+            0,
+        )],
+        true,
+    )
+    .await;
+    let split_scan = PlanNodeId::from_uuid(Uuid::from_u128(107));
+    let split_derive = PlanNodeId::from_uuid(Uuid::from_u128(108));
+    let split_mat = PlanNodeId::from_uuid(Uuid::from_u128(109));
+    let mut split_nodes = BTreeMap::new();
+    split_nodes.insert(
+        split_scan,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![id1],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    split_nodes.insert(
+        split_derive,
+        PlanNode::new(
+            PlanNodeKind::ApplyRules {
+                rules: vec![Rule::DeriveColumn {
+                    id: column(2),
+                    name: "wide".to_owned(),
+                    data_type: LogicalType::Utf8,
+                    nullable: false,
+                    expression: Expr::Literal(ScalarValue::Utf8("w".repeat(8_000))),
+                }],
+            },
+            vec![split_scan],
+        ),
+    );
+    split_nodes.insert(
+        split_mat,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: "out".to_owned(),
+            },
+            vec![split_derive],
+        ),
+    );
+    let split_plan = LogicalPlan::new(split_mat, split_nodes).expect("split plan");
+    let (_, split_report) = split_engine
+        .preview_tracked(preview_request(
+            split_plan,
+            split_derive,
+            connection,
+            source,
+            schema,
+            PREVIEW_MAX_ROW_LIMIT,
+            PREVIEW_DEFAULT_BYTE_LIMIT,
+        ))
+        .await
+        .expect("single-envelope chunk split");
+    assert!(split_report.chunk_count >= 2);
+    assert!(split_report.min_chunk_rows < 20_000);
     drop(_guard);
 }
