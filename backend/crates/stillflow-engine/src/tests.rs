@@ -3835,6 +3835,124 @@ async fn p05_internal_reserve_segmentation_preserves_lowered_chunk() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn p05_simultaneous_row_and_byte_truncation_with_m_gt_p() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = utf8_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+
+    let one = utf8_envelope_values(&schema, source.id, vec!["a".repeat(1_000)], 0);
+    let two = utf8_envelope_values(
+        &schema,
+        source.id,
+        vec!["a".repeat(1_000), "b".repeat(1_000)],
+        1,
+    );
+    assert!(one.byte_count() < two.byte_count());
+    let byte_limit = one.byte_count() + 1;
+
+    let values = (0..10).map(|_| "a".repeat(1_000)).collect::<Vec<_>>();
+    let (engine, _) =
+        engine_with(schema.clone(), vec![utf8_batch(&schema, source.id, values)], true).await;
+    let plan = scan_materialize_plan(source.id, None);
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+
+    let result = engine
+        .preview(preview_request(
+            plan,
+            scan,
+            connection,
+            source,
+            schema,
+            2,
+            byte_limit,
+        ))
+        .await
+        .expect("simultaneous row and byte truncation");
+
+    assert_eq!(result.rows_returned, 1);
+    assert!(result.rows_truncated);
+    assert!(result.bytes_truncated);
+    assert!(result.source_exhausted);
+    assert!(result.batches.len() >= 1);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn p05_exact_source_byte_boundary_with_lookahead() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = utf8_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+
+    fn two_row_envelope_with_target_bytes(
+        schema: &LogicalSchema,
+        asset_id: Uuid,
+        target: usize,
+        sequence: u64,
+    ) -> stillflow_core::BatchEnvelope {
+        let empty = utf8_envelope_values(
+            schema,
+            asset_id,
+            vec![String::new(), String::new()],
+            sequence,
+        );
+        let overhead = empty.byte_count();
+        let mut len = target.saturating_sub(overhead) / 2;
+        for _ in 0..6 {
+            let envelope = utf8_envelope_values(
+                schema,
+                asset_id,
+                vec!["a".repeat(len), "b".repeat(len)],
+                sequence,
+            );
+            let bytes = envelope.byte_count();
+            if bytes == target {
+                return envelope;
+            }
+            if bytes < target {
+                len = len.saturating_add((target - bytes + 1) / 2);
+            } else {
+                len = len.saturating_sub((bytes - target + 1) / 2);
+            }
+        }
+        panic!("could not construct exact source byte boundary");
+    }
+
+    let target = crate::PREVIEW_MAX_SOURCE_BYTES_SCANNED;
+    let boundary = two_row_envelope_with_target_bytes(&schema, source.id, target, 0);
+    let lookahead = utf8_envelope_values(&schema, source.id, vec!["lookahead".to_owned()], 1);
+    let (engine, connector) =
+        engine_with(schema.clone(), vec![boundary, lookahead], true).await;
+    let plan = scan_materialize_plan(source.id, None);
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+
+    let result = engine
+        .preview(preview_request(
+            plan,
+            scan,
+            connection,
+            source,
+            schema,
+            100,
+            stillflow_core::MAX_BATCH_BYTES.min(crate::PREVIEW_MAX_BYTE_LIMIT),
+        ))
+        .await
+        .expect("source byte boundary preview");
+
+    assert_eq!(result.source_bytes_scanned, target);
+    assert_eq!(
+        result.source_bytes_observed,
+        target.saturating_add(lookahead.byte_count())
+    );
+    assert!(result.scan_truncated);
+    assert!(!result.source_exhausted);
+    assert!(result.rows_returned >= 1);
+    assert_eq!(connector.poll_count.load(Ordering::SeqCst), 2);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn p06_n_shrink_preserves_logical_output() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, _) = int_schema();
@@ -4270,6 +4388,36 @@ async fn p10_connector_call_counts_and_overread() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn p10_no_schema_override_inspects_once() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, connector) = engine_with(
+        schema.clone(),
+        vec![int_batch(&schema, source.id, 3)],
+        true,
+    )
+    .await;
+    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
+    let mut request = preview_request(
+        plan,
+        scan,
+        connection,
+        source,
+        schema,
+        100,
+        PREVIEW_DEFAULT_BYTE_LIMIT,
+    );
+    request.schema_override = None;
+    let result = engine.preview(request).await.expect("preview without override");
+    assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 1);
+    assert_eq!(connector.read_count.load(Ordering::SeqCst), 1);
+    assert!(result.source_exhausted);
+    drop(_guard);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn p10_mid_envelope_overread_is_the_only_overread() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, id1) = int_schema();
@@ -4584,9 +4732,9 @@ async fn p14_preview_response_and_scan_counters_are_bounded() {
     assert!(report.allocator_reallocation_count > 0);
     assert!(report.allocator_peak_bytes > 0);
     assert!(report.remainder_phase_peak > 0);
-    assert!(report.remainder_phase_peak <= byte_limit);
+    assert!(report.remainder_phase_peak <= MAX_BATCH_BYTES);
     assert!(report.response_capacity_peak >= result.bytes_returned);
-    assert!(report.response_capacity_peak <= byte_limit);
+    assert!(report.response_capacity_peak <= PREVIEW_PEAK_ENGINE_BYTES);
     assert!(report.peak_live_payloads <= 3);
     assert!(report.peak_engine_bytes <= PREVIEW_PEAK_ENGINE_BYTES);
     assert_eq!(report.chunk_count, 2);

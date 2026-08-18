@@ -188,15 +188,6 @@ impl CanonicalRebatcher {
         Ok(())
     }
 
-    pub(crate) fn can_reserve_for_budget(
-        &self,
-        incoming: &RecordBatch,
-        k: usize,
-        budget: usize,
-    ) -> Result<bool, EngineError> {
-        Ok(self.admission_budget_peak(incoming, k)? <= budget)
-    }
-
     /// Peak remainder-builder bytes during admission of `k` rows, including
     /// old-buffer + new-buffer realloc transients.
     pub(crate) fn admission_budget_peak(
@@ -225,23 +216,20 @@ impl CanonicalRebatcher {
         Ok(peak)
     }
 
-    fn can_reserve_for(&self, incoming: &RecordBatch, k: usize) -> Result<bool, EngineError> {
-        self.can_reserve_for_budget(incoming, k, MAX_BATCH_BYTES)
-    }
-
     fn max_prefix(&self, incoming: &RecordBatch) -> Result<usize, EngineError> {
         let n = incoming.num_rows();
         if n == 0 {
             return Ok(0);
         }
-        let mut low = 0_usize;
-        let mut high = n.min(self.pack_limit.saturating_sub(self.rows));
+        let high = n.min(self.pack_limit.saturating_sub(self.rows));
         if high == 0 {
             return Ok(0);
         }
+        let mut low = 0_usize;
+        let mut high = high;
         while low < high {
             let mid = low + (high - low).div_ceil(2);
-            if self.can_reserve_for(incoming, mid)? {
+            if self.exact_bytes_after_append(incoming, mid)? <= MAX_BATCH_BYTES {
                 low = mid;
             } else {
                 high = mid - 1;
@@ -262,7 +250,7 @@ impl CanonicalRebatcher {
     }
 
     fn should_flush(&self) -> bool {
-        self.rows >= self.pack_limit || self.remainder_bytes() >= MAX_BATCH_BYTES
+        self.rows >= self.pack_limit || self.exact_current_bytes() >= MAX_BATCH_BYTES
     }
 
     fn flush(
