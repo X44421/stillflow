@@ -39,6 +39,7 @@ const SENTINEL: &str = "STILLFLOW_SENTINEL_CELL_VALUE_9f3c2a";
 struct CountingBatchStream {
     items: std::collections::VecDeque<stillflow_core::BatchItem>,
     poll_count: Arc<AtomicUsize>,
+    pending_after: Option<usize>,
 }
 
 impl futures::Stream for CountingBatchStream {
@@ -48,7 +49,10 @@ impl futures::Stream for CountingBatchStream {
         mut self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.poll_count.fetch_add(1, Ordering::SeqCst);
+        let polls = self.poll_count.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.pending_after.is_some_and(|limit| polls > limit) {
+            return std::task::Poll::Pending;
+        }
         if let Some(item) = self.items.pop_front() {
             std::task::Poll::Ready(Some(item))
         } else {
@@ -65,6 +69,7 @@ struct ScriptedConnector {
     poll_count: Arc<AtomicUsize>,
     projection: bool,
     pending: bool,
+    pending_after: Option<usize>,
 }
 
 #[async_trait]
@@ -134,6 +139,7 @@ impl SourceConnector for ScriptedConnector {
         Ok(RawBatchStream::new(Box::pin(CountingBatchStream {
             items: envelopes.into_iter().map(Ok).collect(),
             poll_count: Arc::clone(&self.poll_count),
+            pending_after: self.pending_after,
         })))
     }
 
@@ -343,6 +349,30 @@ async fn engine_with_pending(
         poll_count: Arc::new(AtomicUsize::new(0)),
         projection,
         pending: true,
+        pending_after: None,
+    });
+    let mut registry = ConnectorRegistry::new();
+    registry
+        .register(Arc::clone(&connector) as SourceConnectorRef)
+        .expect("register");
+    (ExecutionEngine::new(registry), connector)
+}
+
+async fn engine_with_pending_after(
+    schema: LogicalSchema,
+    envelopes: Vec<stillflow_core::BatchEnvelope>,
+    pending_after: usize,
+    projection: bool,
+) -> (ExecutionEngine, Arc<ScriptedConnector>) {
+    let connector = Arc::new(ScriptedConnector {
+        schema,
+        envelopes: Mutex::new(envelopes),
+        inspect_count: AtomicUsize::new(0),
+        read_count: AtomicUsize::new(0),
+        poll_count: Arc::new(AtomicUsize::new(0)),
+        projection,
+        pending: false,
+        pending_after: Some(pending_after),
     });
     let mut registry = ConnectorRegistry::new();
     registry
@@ -364,6 +394,7 @@ async fn engine_with(
         poll_count: Arc::new(AtomicUsize::new(0)),
         projection,
         pending: false,
+        pending_after: None,
     });
     let mut registry = ConnectorRegistry::new();
     registry
@@ -4238,6 +4269,55 @@ async fn p08_cancellation_and_deadline() {
         .await
         .expect_err("timeout during read");
     assert!(matches!(err, EngineError::Timeout));
+    drop(_guard);
+}
+
+#[tokio::test]
+async fn p08_cancellation_during_flag_completion_lookahead() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let boundary = int_batch(&schema, source.id, PREVIEW_MAX_SOURCE_ROWS_SCANNED as i64);
+    let (engine, connector) =
+        engine_with_pending_after(schema.clone(), vec![boundary], 1, true).await;
+    let token = stillflow_core::RequestContext::default()
+        .cancellation()
+        .clone();
+    let engine = Arc::new(engine);
+    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
+    let mut request = preview_request(
+        plan,
+        scan,
+        connection,
+        source,
+        schema,
+        1_000,
+        PREVIEW_DEFAULT_BYTE_LIMIT,
+    );
+    request.context = stillflow_core::RequestContext::with_cancellation(token.clone());
+    let handle = tokio::spawn(async move { engine.preview(request).await });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        tokio::task::yield_now().await;
+        if connector.poll_count.load(Ordering::SeqCst) >= 2 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "lookahead poll did not start: {}",
+            connector.poll_count.load(Ordering::SeqCst)
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    token.cancel();
+    let err = handle
+        .await
+        .expect("join")
+        .expect_err("cancelled during flag-completion lookahead");
+    assert!(matches!(err, EngineError::Cancelled));
     drop(_guard);
 }
 
