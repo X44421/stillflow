@@ -10,9 +10,10 @@
 > PR: #57 draft (actual PR number; C0 header said expected #55 and is corrected here)
 > Parent: Issue #46 revision R3, merged at
 > `32f1c53d9903f66aeaca1c2676c0b81abfb2a702` in PR #47
-> Authorized base: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`
+> Authorized E4 base: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`
+> Storage facts base: `main@473c65b` (PR #62 merged storage publication/recovery inventory)
 > Branch: `agent/issue-054-validation-rejected-rows-contract`
-> Last updated: 2026-08-18
+> Last updated: 2026-08-18 (R3 after PR #62 merge)
 > Review: PR #57 remains draft with Request changes. C0 and C0-R1 were not
 > approved. R1 closed the six original P0 blockers; R2 closed four
 > implementation-level P0 blockers; R3 closes the remaining identity, recovery,
@@ -49,9 +50,14 @@ separate Preview interpretation of Validate/Deduplicate.
 
 ## 2. Source policy and branch discipline
 
-- The authorized base is `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`.
+- The authorized E4 base is `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`.
 - This branch is created from that exact commit. It must not merge, rebase
   onto, or cherry-pick from PR #53, PR #49, or any historical branch.
+- The docs-only storage inventory PR #62 was merged into `main@473c65b` and is
+  merged into this branch solely to bind E4 bundle publication/recovery to the
+  verified storage facts in
+  `docs/issues/storage-publication-recovery-inventory.md`. It adds no runtime
+  code and does not alter the E4 contract's non-goals.
 - PR #53 is a read-only reference for the current E3 public surface. E4
   runtime must wait until PR #53 merges and must then rebuild from the
   latest accepted `main`; this contract does not authorize changing E3 or
@@ -99,6 +105,7 @@ E5 job/API work.
 | `artifact_id` conflicted with `bundle_id`; bundle provenance and membership identities were undefined | Added a distinct `bundle_artifact_id`, separate accepted/child artifact identities, and renamed membership fields to the exact `ArtifactManifest.artifact_id` values (section 7 and section 8.1). |
 | Manifest/content digest order and multi-section summaries were under-specified | Frozen byte-level manifest encoding, section/partition ordering, artifact and bundle digest formulas, summary aggregation, and report-limit scope (section 8.1.1). |
 | V09 had no load-by-run-id API; cancellation cleanup and variable-width key bounds conflicted | Added `load_verification_bundle_by_run_id`, made normal cancellation cleanup strict, and limited preflight key-size proofs to statically bounded types while retaining the required per-row runtime check (sections 6, 10, 11, and 16). |
+| R3 was not yet bound to the merged storage publication/recovery inventory | R3 now incorporates the PR #62 facts from `main@473c65b`: the publication journal commits before staging creation, final files precede SQLite visibility, and snapshot visibility plus journal deletion share one SQLite transaction. Bundle states reuse the existing storage maintenance gate/root lock and do not claim untested process-kill or power-loss durability. |
 
 ### 3.4 Compatibility decision
 
@@ -1093,6 +1100,12 @@ recovery as needed.
 
 The bundle writer moves through explicit storage states. Recovery is owned
 by `SnapshotStore` and uses the existing maintenance gate and root file lock.
+This state machine is bound to the verified storage facts from PR #62
+(`docs/issues/storage-publication-recovery-inventory.md`): publication journal
+commit precedes staging creation, final files precede SQLite visibility, and
+visibility plus journal deletion share one SQLite transaction. The contract
+does not claim process-kill or power-loss durability beyond what that inventory
+records as untested.
 
 | State | Meaning | Crash recovery |
 | --- | --- | --- |
@@ -1557,8 +1570,8 @@ preview execution path.
 | Storage append/Parquet encode scratch | not counted in engine peak; counted in storage phase | E2 §14.1 |
 | Default / maximum deadline | 15 min / 30 min | E2 |
 
-Exceeding any ceiling is a typed error before visible publication. No TBD
-value is permitted.
+Exceeding any ceiling is a typed error before visible publication. No
+placeholder value is permitted.
 
 ## 15. Determinism, partition invariance, and retry
 
