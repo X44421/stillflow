@@ -1,8 +1,9 @@
-# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R2)
+# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R3)
 
 > Status: Frozen for architecture review (not approved)
-> Revision: C0-R2
-> Supersedes: C0-R1 `e5b70db4bfdfd9546842c138d50ec815440725fc` (Request changes)
+> Revision: C0-R3
+> Supersedes: C0-R2 `2a35bced9e2eb8b35a9e4679c8698d15bbb6b941` (Request changes)
+> Also supersedes: C0-R1 `e5b70db4bfdfd9546842c138d50ec815440725fc`
 > Also supersedes: C0 `d33f45610620c03afe253cdc0b4aef7468fa5dd8`
 > Risk: High
 > Issue: #54 (contract)
@@ -11,10 +12,11 @@
 > `32f1c53d9903f66aeaca1c2676c0b81abfb2a702` in PR #47
 > Authorized base: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`
 > Branch: `agent/issue-054-validation-rejected-rows-contract`
-> Last updated: 2026-08-16
+> Last updated: 2026-08-18
 > Review: PR #57 remains draft with Request changes. C0 and C0-R1 were not
-> approved. R1 closed the six original P0 blockers; R2 closes four
-> implementation-level P0 blockers and extends the acceptance matrix.
+> approved. R1 closed the six original P0 blockers; R2 closed four
+> implementation-level P0 blockers; R3 closes the remaining identity, recovery,
+> digest, resource-scope, and acceptance-executability blockers.
 > Architecture approval binds exactly one new commit SHA of this file. E4
 > runtime remains paused until that approval and must then rebuild from the
 > latest accepted `main`.
@@ -89,7 +91,16 @@ E5 job/API work.
 | Reports are finding logs only; Dedup report cannot be generated; message repeated; no first ordinal | Added `ValidationRuleSummary` and `DedupRuleSummary`; message stored once per `RuleRef`; SQLite index stores `first_source_row_ordinal`; `insert_first()` returns typed `DedupInsert`; changed “accepted keep-first” wording to “first-seen at this rule”. |
 | Resource/failure model not closed; report limits inconsistent; crash state machine missing; dedup recovery not gated | Made report row/byte/partition limits mathematically consistent in section 14; froze reserve-before-allocate and allocator phases; added bundle crash/recovery state machine in section 10; dedup recovery uses maintenance gate + OS lock in section 9. |
 
-### 3.3 Compatibility decision
+### 3.3 R3 blockers closed by this revision
+
+| R2 blocker | R3 disposition |
+| --- | --- |
+| Dedup `.sqlite` / `.lock` creation could leave an orphan and recovery scanned only `.lock` | Frozen lock-first creation, exclusive-open rollback for files created by the current attempt, crash points after every creation step, and recovery over the union of `.sqlite` and `.lock` candidates (section 9). |
+| `artifact_id` conflicted with `bundle_id`; bundle provenance and membership identities were undefined | Added a distinct `bundle_artifact_id`, separate accepted/child artifact identities, and renamed membership fields to the exact `ArtifactManifest.artifact_id` values (section 7 and section 8.1). |
+| Manifest/content digest order and multi-section summaries were under-specified | Frozen byte-level manifest encoding, section/partition ordering, artifact and bundle digest formulas, summary aggregation, and report-limit scope (section 8.1.1). |
+| V09 had no load-by-run-id API; cancellation cleanup and variable-width key bounds conflicted | Added `load_verification_bundle_by_run_id`, made normal cancellation cleanup strict, and limited preflight key-size proofs to statically bounded types while retaining the required per-row runtime check (sections 6, 10, 11, and 16). |
+
+### 3.4 Compatibility decision
 
 - Existing `ExecutionRequest`, `ExecutionIdentities`, `ExecutionEngine`,
   `PreviewRequest`, `PreviewResult`, `BatchEnvelope`, `LogicalSchema`,
@@ -227,8 +238,16 @@ finding, no rejected payload, and no duplicate finding.
 - E4 preflight adds: `keys.len() <= MAX_DEDUP_KEY_COLUMNS`; every key id
   exists in the current working schema at that rule; every key working type
   passes the E2 `reject_paused_type` boundary and is in the E4-C0 supported
-  set of section 6.3; and the canonical encoded composite key length can
-  never exceed `MAX_DEDUP_KEY_BYTES`.
+  set of section 6.3. For fixed-width key components, preflight computes a
+  static maximum encoded length. Utf8/Binary values are variable-width and
+  therefore have no preflight proof of a finite row length under the current
+  logical schema contract; they are admitted by preflight and bounded by the
+  per-row runtime check below.
+- Immediately before every SQLite insert, the engine computes the complete
+  canonical key bytes and rejects an encoded length greater than
+  `MAX_DEDUP_KEY_BYTES` with `EngineError::BoundExceeded`. This runtime check
+  applies to fixed-width and variable-width keys alike and occurs before any
+  SQLite write.
 - Violations map to `UnknownColumn`, `TypeError`, or `BoundExceeded` as in
   section 10.8.
 - Deduplicate does not change the working schema, row values, or row order.
@@ -342,7 +361,7 @@ provenance and artifact types are therefore split by dependency direction:
 
 | Crate | Owns |
 | --- | --- |
-| `stillflow-core` | `InputRef`, `LogicalInputRef`, `SourceRowRef`, `RuleRef`, `ArtifactKind`, `ArtifactSummary`, `ArtifactProvenanceDraft`, committed `ArtifactProvenance` with `[u8;32]` digests |
+| `stillflow-core` | `InputRef`, `LogicalInputRef`, `SourceRowRef`, `RuleRef`, `ArtifactKind`, `ArtifactSummary`, caller-owned `ArtifactProvenanceInput`, engine-assembled `ArtifactProvenanceDraft`, and committed `ArtifactProvenance` with `[u8;32]` digests |
 | `stillflow-plan` | `PlanFingerprint`, `LogicalPlan::canonical_bytes()`, `PlanFingerprint::as_bytes()` |
 | `stillflow-storage` | `ArtifactManifest`, `ArtifactSection`, `ArtifactPartition`, `VerificationBundleMembership`, `VerificationBundle`, `ArtifactBatchReader`, `DedupIndex`, bundle writer/commit/load APIs |
 | `stillflow-engine` | `ExecutionEngine::materialize_verification`, conversion from `PlanFingerprint` / `PlanNodeId` to core `RuleRef` / digest bytes, and writer orchestration |
@@ -364,9 +383,12 @@ No storage type may name `PlanFingerprint`, `PlanNodeId`, `LogicalPlan`,
 
 ### 7.2 Provenance draft and committed provenance
 
-`ArtifactProvenanceDraft` is constructed by the caller before execution and
+The caller supplies only `ArtifactProvenanceInput`. The engine constructs
+`ArtifactProvenanceDraft` before storage I/O by combining that input with the
+verified canonical-plan digest and compile-time engine metadata. The draft
 contains no summary and no content digest. The writer computes summary and
-content digest during/after writing.
+content digest during/after writing. This ownership split prevents callers from
+forging engine-derived integrity fields or build identity.
 
 ```rust
 pub enum InputRef {
@@ -413,22 +435,28 @@ pub struct ArtifactSummary {
     pub duplicate_count: u64,
 }
 
-pub struct ArtifactProvenanceDraft {
+pub type ContentDigest = [u8; 32];
+
+pub struct ArtifactProvenanceInput {
     pub run_id: Uuid,
     pub bundle_id: Uuid,
     pub artifact_id: Uuid,
     pub artifact_kind: ArtifactKind,
     pub session_id: Uuid,
     pub input: LogicalInputRef,
-    pub canonical_plan_digest: [u8; 32],
-    pub plan_fingerprint: [u8; 32],
-    pub engine_contract_version: u16,
-    pub engine_build: String,
-    pub verification_contract_version: u16,
     pub lineage: BTreeSet<Uuid>,
     pub created_at: DateTime<Utc>,
     pub started_at: DateTime<Utc>,
     pub committed_at: DateTime<Utc>,
+}
+
+pub struct ArtifactProvenanceDraft {
+    pub input: ArtifactProvenanceInput,
+    pub plan_fingerprint: [u8; 32],
+    pub canonical_plan_digest: [u8; 32],
+    pub engine_contract_version: u16,
+    pub engine_build: String,
+    pub verification_contract_version: u16,
 }
 
 pub struct ArtifactProvenance {
@@ -442,27 +470,28 @@ pub struct ArtifactProvenance {
 
 | Field | Rule |
 | --- | --- |
-| `run_id` | Caller-injected non-nil `Uuid`. Identifies one execution run. |
-| `bundle_id` | Caller-injected non-nil `Uuid`, independent from `run_id` and from every artifact id. One `VerificationBundle` has one `bundle_id`. |
-| `artifact_id` | Caller-injected non-nil `Uuid`, distinct from `bundle_id`, `run_id`, and every sibling artifact id. |
-| `session_id` | Caller-injected non-nil `Uuid`, present in the provenance structure and in the accepted snapshot draft. |
-| `artifact_kind` | One of the five kinds. Bundle-level provenance uses `VerificationBundle`; child artifacts use their own kind. |
+| `run_id` | Caller-injected non-nil `Uuid` in `ArtifactProvenanceInput`. Identifies one execution run. |
+| `bundle_id` | Caller-injected non-nil `Uuid` in `ArtifactProvenanceInput`, independent from `run_id` and from every artifact id. One `VerificationBundle` has one `bundle_id`. |
+| `artifact_id` | Caller-injected non-nil `Uuid` in `ArtifactProvenanceInput`, distinct from `bundle_id`, `run_id`, and every artifact sibling id. |
+| `session_id` | Caller-injected non-nil `Uuid` in `ArtifactProvenanceInput`, present in the provenance structure and in the accepted snapshot draft. |
+| `artifact_kind` | Caller-selected in `ArtifactProvenanceInput`, one of the five kinds. Bundle-level provenance uses `VerificationBundle`; child artifacts use their own kind. |
 | `input` | Caller-injected `LogicalInputRef`. E4-C0 uses `InputRef::Asset { asset_id }` and requires it to equal the bound `SourceAsset.id`. `Snapshot` is reserved for future snapshot-input E4 revisions. |
-| `canonical_plan_digest` | SHA-256 over `LogicalPlan::canonical_bytes()`, computed by the engine. This is the integrity digest. |
-| `plan_fingerprint` | Existing FNV-1a `PlanFingerprint::as_bytes()` copied into `[u8;32]`. It is an index only, not an integrity digest. |
-| `engine_contract_version` | Existing `ENGINE_CONTRACT_VERSION`. |
-| `engine_build` | Compile-time engine crate version string, not caller-generated. |
-| `verification_contract_version` | `VERIFICATION_CONTRACT_VERSION = 1`. |
+| `canonical_plan_digest` | SHA-256 over `LogicalPlan::canonical_bytes()`, verified and inserted by the engine into the draft; the caller cannot supply or override it. |
+| `plan_fingerprint` | Existing FNV-1a `PlanFingerprint::as_bytes()` copied into `[u8;32]` by the engine from the plan; it is an index only, not an integrity digest. |
+| `engine_contract_version` | Existing `ENGINE_CONTRACT_VERSION`, inserted by the engine. |
+| `engine_build` | Compile-time engine crate version string, inserted by the engine and never caller-generated. |
+| `verification_contract_version` | `VERIFICATION_CONTRACT_VERSION = 1`, inserted by the engine. |
 | `lineage` | Caller-injected `BTreeSet<Uuid>`; nil ids rejected. |
-| `created_at` / `started_at` / `committed_at` | All caller-injected; engine must not call `Utc::now`. Ordering checked as `created_at <= started_at <= committed_at`. |
+| `created_at` / `started_at` / `committed_at` | Caller-injected in `ArtifactProvenanceInput`; engine must not call `Utc::now`. Ordering checked as `created_at <= started_at <= committed_at`. |
 | `summary` | Not in the draft. The writer computes it from actual written rows/partitions/findings. |
-| `content_digest` | Not in the draft. The writer computes a SHA-256 over the artifact's canonical manifest + section partitions (excluding none). |
+| `content_digest` | Not in the draft. The writer computes the exact SHA-256 formula in section 8.1.1 over the canonical manifest, ordered section digests, and provenance identity fields. |
 
-The bundle-level provenance uses `ArtifactKind::VerificationBundle` and
-`artifact_id = bundle_id`. Every child artifact uses its own artifact id.
-`VerificationBundleDraft` in section 11 carries the same provenance draft
-fields plus the accepted `SnapshotDraft` and child artifact ids; it is
-validated before any storage I/O.
+The bundle-level provenance uses `ArtifactKind::VerificationBundle` and the
+caller-injected `bundle_artifact_id`, which is distinct from `bundle_id`,
+`run_id`, and every child artifact id. Every child artifact uses its own
+artifact id. `VerificationBundleDraft` in section 11 carries the engine-built
+bundle provenance draft plus the accepted `SnapshotDraft` and child artifact
+ids; it is validated before any storage I/O.
 
 `RuleRef` is stored in validation and deduplication report rows and in the
 rejected rows control columns. It contains the canonical-plan SHA-256,
@@ -489,6 +518,7 @@ pub struct ArtifactManifest {
     pub artifact_id: Uuid,
     pub kind: ArtifactKind,
     pub sections: Vec<ArtifactSection>,
+    pub manifest_digest: ContentDigest,
 }
 
 pub struct ArtifactSection {
@@ -497,6 +527,7 @@ pub struct ArtifactSection {
     pub schema_fingerprint: LogicalSchemaFingerprint,
     pub stats: ArtifactSectionStats,
     pub partitions: Vec<ArtifactPartition>,
+    pub section_digest: ContentDigest,
 }
 
 pub struct ArtifactSectionStats {
@@ -513,6 +544,120 @@ pub struct ArtifactPartition {
 }
 ```
 
+### 8.1.1 Canonical manifest, section, partition, and provenance digests
+
+All digest inputs are versioned byte strings. Multi-byte integers use
+little-endian encoding; UUIDs use their 16 bytes from `Uuid::as_bytes()`;
+enum tags are fixed `u8` values; byte strings use a `u32` little-endian length
+followed by the exact bytes; text is UTF-8 with no normalization. The digest
+domain prefixes below are ASCII bytes followed by `0x00`:
+
+| Digest | Domain prefix |
+| --- | --- |
+| partition | `stillflow.e4.partition.v1` |
+| section | `stillflow.e4.section.v1` |
+| manifest | `stillflow.e4.manifest.v1` |
+| artifact provenance | `stillflow.e4.artifact-provenance.v1` |
+| bundle provenance | `stillflow.e4.bundle-provenance.v1` |
+
+The fixed enum tags are:
+
+| Enum | Tag |
+| --- | --- |
+| `ArtifactKind::VerificationBundle` | `0x01` |
+| `ArtifactKind::AcceptedSnapshot` | `0x02` |
+| `ArtifactKind::ValidationReport` | `0x03` |
+| `ArtifactKind::RejectedRows` | `0x04` |
+| `ArtifactKind::DeduplicationReport` | `0x05` |
+| `ArtifactSectionId::ValidationRuleSummary` | `0x01` |
+| `ArtifactSectionId::ValidationFinding` | `0x02` |
+| `ArtifactSectionId::RejectedRows` | `0x03` |
+| `ArtifactSectionId::DedupRuleSummary` | `0x04` |
+| `ArtifactSectionId::DuplicateFinding` | `0x05` |
+
+An `optional(Uuid)` begins with `0x00` for `None` or `0x01` followed by the
+16-byte UUID for `Some`. Every `repeated(...)` item is emitted exactly in the
+order stated by its enclosing formula; counts are authoritative and a decoder
+rejects trailing or missing bytes.
+
+`ArtifactPartition.digest` is
+`SHA-256(partition-domain || artifact_id || section_id_tag ||
+u32(sequence) || u64(row_count) || u64(stored_byte_count) ||
+u32(canonical_batch_count) || repeated(u32(batch_len) || canonical_batch_bytes))`.
+`canonical_batch_bytes` is the Arrow 59 `BatchEnvelope` payload produced by the
+versioned E2 `BatchEnvelopeFactory`, with canonical schema metadata and no
+transport headers, compression, or allocator addresses. Batches are included
+in their logical sequence order. The runtime records the resulting byte length
+as `stored_byte_count`; for this contract that is the canonical logical
+payload byte count, not a filesystem allocation or Parquet footer size. The
+physical Parquet representation remains immutable storage, but its allocator,
+compression, and footer metadata are outside these digests. The runtime does
+not hash a filesystem path or mutable file metadata.
+
+`ArtifactSection.section_digest` is
+`SHA-256(section-domain || artifact_id || section_id_tag ||
+canonical_schema_bytes || schema_fingerprint || u64(row_count) ||
+u64(stored_byte_count) || u32(partition_count) ||
+repeated(u32(sequence) || u64(row_count) || u64(stored_byte_count) ||
+partition_digest))`, with partitions sorted by strictly increasing
+`sequence`. `canonical_schema_bytes` is the existing
+`LogicalSchema::canonical_bytes()` encoding. The section statistics must equal
+the sums of its partitions and `partition_count` must equal the vector length.
+
+`ArtifactManifest.manifest_digest` is
+`SHA-256(manifest-domain || u16(version) || artifact_id || kind_tag ||
+u32(section_count) || repeated(section_id_tag || canonical_schema_bytes ||
+schema_fingerprint || u64(section.row_count) ||
+u64(section.stored_byte_count) || u32(section.partition_count) ||
+section_digest))`, with sections sorted by the fixed `ArtifactSectionId` tag order
+`ValidationRuleSummary`, `ValidationFinding`, `RejectedRows`,
+`DedupRuleSummary`, `DuplicateFinding`. The `manifest_digest` field itself is
+excluded from this preimage. A manifest cannot contain duplicate section ids,
+and its `sections` vector is stored in the canonical order.
+
+For every report or rejected-rows artifact, committed
+`ArtifactProvenance.content_digest` is
+`SHA-256(artifact-provenance-domain || run_id || bundle_id || artifact_id ||
+artifact_kind_tag || canonical_plan_digest || input.version_digest ||
+u32(section_count) || repeated(section_id_tag || section_digest) ||
+manifest_digest)`, using the same fixed section order. The provenance digest
+does not include timestamps, `engine_build`, display names, or any secret or
+filesystem metadata.
+
+The accepted snapshot artifact keeps the existing E2 `SnapshotManifest`
+canonical digest as its manifest contribution; it does not acquire an
+`ArtifactManifest`.
+
+The bundle-level provenance is not a child `ArtifactManifest`. Its
+`content_digest` is
+`SHA-256(bundle-provenance-domain || run_id || bundle_id ||
+bundle_artifact_id || accepted_snapshot_id ||
+validation_report_artifact_id || optional(rejected_rows_artifact_id) ||
+deduplication_report_artifact_id || repeated(child_artifact_id ||
+child_manifest_digest || child_content_digest))`. The child sequence is fixed
+as accepted snapshot, validation report, optional rejected rows, then
+deduplication report; the accepted snapshot contribution uses its committed
+`SnapshotManifest` digest. This separates the transaction identity
+`bundle_id` from the bundle provenance artifact identity.
+
+`ArtifactSummary` is computed over the complete artifact, not independently
+per section: `row_count`, `stored_byte_count`, and `partition_count` are the
+respective sums across all sections; `finding_count` counts rows only in
+`ValidationFinding` or `DuplicateFinding`; `warning_count` and `error_count`
+count finding severities only in `ValidationFinding`; and `duplicate_count`
+counts rows only in `DuplicateFinding`. A rule-summary row is not also counted
+as a finding. The bundle-level summary is the sum of the committed summaries
+of its present accepted and child artifacts, with each row counted once in its
+own artifact.
+
+`MAX_REPORT_ROWS`, `MAX_REPORT_BYTES`, and `MAX_REPORT_PARTITIONS` apply to each
+report artifact after all of its sections are aggregated. The two always
+present report artifacts additionally have the bundle-wide ceilings
+`MAX_BUNDLE_REPORT_ROWS`, `MAX_BUNDLE_REPORT_BYTES`, and
+`MAX_BUNDLE_REPORT_PARTITIONS`; rejected rows use the existing snapshot limits.
+Exceeding either the per-artifact or bundle-wide ceiling fails with
+`BoundExceeded` before commit.
+
 `ArtifactSectionId` is one of `ValidationRuleSummary`,
 `ValidationFinding`, `RejectedRows`, `DedupRuleSummary`,
 `DuplicateFinding`.
@@ -524,10 +669,11 @@ snapshot and every artifact manifest:
 pub struct VerificationBundleMembership {
     pub bundle_id: Uuid,
     pub run_id: Uuid,
+    pub bundle_artifact_id: Uuid,
     pub accepted_snapshot_id: Uuid,
-    pub validation_report_manifest_id: Uuid,
-    pub rejected_rows_manifest_id: Option<Uuid>,
-    pub deduplication_report_manifest_id: Uuid,
+    pub validation_report_artifact_id: Uuid,
+    pub rejected_rows_artifact_id: Option<Uuid>,
+    pub deduplication_report_artifact_id: Uuid,
 }
 ```
 
@@ -538,6 +684,8 @@ impl SnapshotStore {
     pub fn load_verification_bundle(&self, bundle_id: Uuid)
         -> Result<VerificationBundle, StorageError>;
     pub fn load_verification_bundle_by_snapshot(&self, snapshot_id: Uuid)
+        -> Result<VerificationBundle, StorageError>;
+    pub fn load_verification_bundle_by_run_id(&self, run_id: Uuid)
         -> Result<VerificationBundle, StorageError>;
     pub fn open_artifact_section(
         &self,
@@ -551,6 +699,19 @@ impl SnapshotStore {
 `ArtifactBatchReader` is a bounded iterator of `Result<BatchEnvelope,
 StorageError>` with the same partition/row/byte limits as
 `SnapshotBatchReader`. It cannot bypass bundle membership.
+
+`VerificationBundleMembership` stores the exact `ArtifactManifest.artifact_id`
+for each report/rejected artifact; the `_artifact_id` names are intentional and
+do not refer to a separate manifest identity. `bundle_artifact_id` identifies
+the bundle-level provenance record, while `bundle_id` identifies the atomic
+visibility transaction. `rejected_rows_artifact_id` is `None` exactly when the
+rejected artifact is absent.
+
+`run_id` is unique among committed verification bundles. Therefore
+`load_verification_bundle_by_run_id(run_id)` performs an exact membership lookup
+and returns `StorageError::NotFound` when cancellation, failure, or an unknown
+run has no committed bundle; it never scans or reconstructs an uncommitted
+staging directory.
 
 ### 8.2 Artifacts
 
@@ -685,7 +846,7 @@ encoded_key_byte_count     : UInt32, nullable = false
 The report contains no key bytes and no original cell values. It references
 the **first-seen row at the Deduplicate rule**, not necessarily the
 accepted row: the first-seen row may later be rejected by a Validate Error.
-This wording is frozen in R2.
+This wording remains frozen in R3.
 
 ### 8.6 Reserved control identities
 
@@ -744,23 +905,34 @@ exclusive and never deletes an existing file:
    storage-managed temp root. `run_id` and `bundle_id` are caller-injected
    and non-nil.
 2. The storage crate creates the temp directory with permissions `0700`
-   (Unix) and opens the database file with `create_new(true)` semantics.
-   If either `.sqlite` or `.lock` already exists, open fails with
-   `StorageError::AlreadyExists`; the engine aborts the bundle and no file
-   is removed.
-3. The handle acquires an exclusive OS file lock on `dedup_{run_id}.lock`
-   for the lifetime of the index. This lock, not only `started_at`, is the
-   active-ownership signal.
+   (Unix). It then exclusively creates the `.lock` path with
+   `create_new(true)`, records that this attempt created it, and acquires the
+   exclusive OS lock before touching the `.sqlite` path.
+   While holding the new `.lock`, it exclusively creates the `.sqlite` path
+   with `create_new(true)`, records that this attempt created it, and opens
+   SQLite. If either path existed before this attempt, opening fails with
+   `StorageError::AlreadyExists`. The failure handler may delete only paths
+   recorded as created by this attempt; it never deletes a pre-existing
+   `.sqlite` or `.lock`.
+3. The handle keeps the exclusive OS file lock on
+   `dedup_{run_id}.lock` for the lifetime of the index. This lock, not only
+   `started_at`, is the active-ownership signal.
 4. After SQLite opens, the handle writes an ownership lease row containing
    `run_id`, `bundle_id`, and `started_at`. The lease is advisory recovery
-   metadata; the file lock and `create_new` are the primary ownership
-   guards.
+   metadata; the file lock and `create_new` are the primary ownership guards.
 5. The handle sets `PRAGMA page_size = 4096`,
    `PRAGMA max_page_count = MAX_DEDUP_INDEX_PAGES`,
    `PRAGMA cache_size = -512`, and `PRAGMA journal_mode = DELETE`.
 6. File permission is `0600` (Unix). On platforms without Unix modes, the
    storage crate applies the strongest equivalent owner-only ACL available
    and records that behavior in its tests.
+
+The creation protocol has explicit crash points after lock-file creation,
+after lock acquisition, after SQLite-file creation, after SQLite open, and
+after lease initialization. A crash at any point is recoverable because the
+next recovery scans both filename suffixes. A failed second-file creation
+rolls back the first file only when the first file was created by this attempt;
+rollback failure is reported and leaves a recoverable candidate.
 
 ### 9.2 Dedup table
 
@@ -824,16 +996,18 @@ impl DedupIndex {
 - No open path ever deletes a pre-existing file. Stale files are removed
   only by storage recovery, and recovery runs under the existing storage
   **maintenance gate** and root file lock.
-- Recovery uses the same file-lock ownership rule: for each candidate
-  `dedup_{run_id}.lock`, recovery tries to acquire the lock. If acquisition
-  fails, the run is active and the file is skipped. If acquisition succeeds,
-  the candidate is stale/orphaned and both `.lock` and `.sqlite` are
-  removed.
-- A process crash leaves a stale temp file and releases its OS lock. The
-  crashed run cannot have committed its bundle because index cleanup
-  precedes commit; storage recovery later removes the stale files. Retry
-  with the same `run_id` before recovery returns `AlreadyExists`; after
-  recovery it starts from an empty index.
+- Recovery scans the union of `dedup_*.sqlite` and `dedup_*.lock`, derives the
+  `run_id` candidate from either filename, and evaluates each candidate as a
+  pair. If a `.lock` exists, recovery first tries to acquire it. If
+  acquisition fails, the run is active and neither file is removed. If
+  acquisition succeeds, or if only an orphan `.sqlite` exists with no
+  `.lock`, the candidate is stale/orphaned and both paths are removed if
+  present. A lone `.lock` is handled the same way after the lock is acquired.
+- A process crash releases its OS lock but may leave either or both files. The
+  crashed run cannot have committed its bundle because index cleanup precedes
+  commit; recovery removes the complete pair or orphan and records the
+  cleanup. Retry with the same `run_id` before recovery returns
+  `AlreadyExists`; after recovery it starts from an empty index.
 - The dedup index is per-run and disposable. It is never a persisted
   dataset and can never change an already committed bundle.
 
@@ -859,8 +1033,9 @@ Publication sequence for `materialize_verification`:
 1. Apply the default deadline and acquire the existing E2 run-gate permit
    (`try_acquire`, never await).
 2. Run shared E2 preflight with E4 target disabled and the E4 rule checks.
-3. Validate injected identities, input ref, provenance fields, and artifact
-   id uniqueness.
+3. Validate injected identities, input ref, provenance fields, and pairwise
+   uniqueness of `bundle_artifact_id`, accepted snapshot id, and every
+   present child artifact id independently from `bundle_id`.
 4. `SnapshotStore::begin_verification_bundle(draft, started_at)`. This
    acquires exactly one storage publisher permit and creates one bundle
    staging context for all present and potential artifacts.
@@ -874,9 +1049,9 @@ Publication sequence for `materialize_verification`:
 9. Return `VerificationBundle`.
 
 The commit is the only visibility point. A reader either loads the complete
-bundle by `bundle_id` (or by accepted snapshot id) or sees none of it. There
-is no API that loads validation report, rejected rows, or deduplication
-report independently of the bundle transaction.
+bundle by `bundle_id`, by `run_id`, or by accepted snapshot id, or sees none
+of it. There is no API that loads validation report, rejected rows, or
+deduplication report independently of the bundle transaction.
 
 ### 10.2 Zero-rejection rule
 
@@ -900,11 +1075,15 @@ Cancellation and deadline are observed:
 8. before `VerificationBundleWriter::commit`.
 
 A cancelled or timed-out run returns `Cancelled` / `Timeout`, publishes no
-bundle, and leaves no partial partition, report file, or temp index. A
-storage error during bundle commit rolls back every manifest row and every
-installed partition directory. Tests must assert that loading the bundle by
-`run_id` fails after every failure injection and that no child artifact is
-independently visible.
+bundle, and leaves no partial partition, report file, or temp index after
+normal cleanup. If cleanup itself is interrupted or fails, the run still
+publishes no bundle and the resulting `.sqlite` / `.lock` candidate is
+recoverable by the maintenance-gated recovery protocol in section 9.3.
+A storage error during bundle commit rolls back every manifest row and every
+installed partition directory. Tests must assert that both
+`load_verification_bundle_by_run_id(run_id)` and
+`load_verification_bundle(bundle_id)` fail after every failure injection and
+that no child artifact is independently visible.
 
 Dropping an uncommitted `VerificationBundleWriter` aborts the whole bundle
 staging context. `DedupIndex::Drop` remains best-effort and is followed by
@@ -921,7 +1100,7 @@ by `SnapshotStore` and uses the existing maintenance gate and root file lock.
 | `Staged` | Accepted/report/rejected partitions written under the bundle staging directory | recovery removes stale bundle staging directory; no SQLite manifest row exists |
 | `Installing` | Final artifact directories created but SQLite commit has not begun | recovery removes installed artifact directories and staging; no manifest row exists; bundle is not visible |
 | `Committing` | SQLite transaction is installing bundle membership and all manifests | the SQLite transaction is atomic; a crash before commit leaves the previous state, a crash after commit leaves the complete bundle visible |
-| `Committed` | bundle is visible and complete | no cleanup; bundle can be read by `bundle_id` |
+| `Committed` | bundle is visible and complete | no cleanup; bundle can be read by `bundle_id`, `run_id`, or accepted snapshot id |
 
 Tests must cover each state with injected process-crash/storage-failure
 fixtures and assert that no partial bundle is ever visible.
@@ -933,11 +1112,12 @@ fixtures and assert that no partial bundle is ever visible.
 | `run_id` | `identities.run_id` |
 | `bundle_id` | `identities.bundle_id` |
 | `logical_input` | `identities.logical_input`, including `version_digest` |
-| `canonical_plan_digest` | `identities.canonical_plan_digest`; engine also verifies it against `LogicalPlan::canonical_bytes()` SHA-256 |
+| `canonical_plan_digest` | `identities.canonical_plan_digest` is a caller-supplied expected value; the engine recomputes SHA-256 over `LogicalPlan::canonical_bytes()`, rejects a mismatch, and inserts the recomputed value into every provenance draft |
 | Accepted snapshot id / dataset id | `identities.snapshot_id` / `identities.dataset_id` |
-| Validation report artifact id | `identities.validation_report_id` |
-| Rejected rows artifact id | `identities.rejected_rows_id` (used only if present) |
-| Deduplication report artifact id | `identities.deduplication_report_id` |
+| Bundle provenance artifact id | `identities.bundle_artifact_id` |
+| Validation report artifact id | `identities.validation_report_artifact_id` |
+| Rejected rows artifact id | `identities.rejected_rows_artifact_id` (used only if present) |
+| Deduplication report artifact id | `identities.deduplication_report_artifact_id` |
 | `session_id` | `identities.session_id` for accepted snapshot and bundle provenance |
 | `source_asset_id` | bound `SourceAsset.id` |
 | `input_ref` | `InputRef::Asset { asset_id: bound SourceAsset.id }` |
@@ -951,6 +1131,14 @@ identity or timestamp. Wall-clock `Instant` remains allowed only for
 deadline observation. Nil ids, nil lineage ids, quality scores above 100,
 duplicate artifact ids, and timestamp order violations are rejected before
 `begin_verification_bundle`.
+
+`bundle_id` is the atomic visibility identity, not an artifact identity.
+`bundle_artifact_id`, `snapshot_id`, `validation_report_artifact_id`,
+`deduplication_report_artifact_id`, and any present
+`rejected_rows_artifact_id` must all be non-nil and pairwise distinct from
+`run_id` and from one another. When `terminal_rejection_count == 0`,
+`rejected_rows_artifact_id` must be `None` and no rejected provenance or
+manifest is constructed.
 
 ### 10.6 Security boundary for raw values
 
@@ -1035,6 +1223,9 @@ pub const MAX_REPORT_ROWS: u64 =
     (MAX_REPORT_PARTITIONS as u64) * (REPORT_PACK_ROWS as u64); // 16,777,216
 pub const MAX_REPORT_BYTES: u64 =
     (MAX_REPORT_PARTITIONS as u64) * (REPORT_PACK_BYTES as u64); // 32 GiB
+pub const MAX_BUNDLE_REPORT_PARTITIONS: u32 = 2 * MAX_REPORT_PARTITIONS;
+pub const MAX_BUNDLE_REPORT_ROWS: u64 = 2 * MAX_REPORT_ROWS;
+pub const MAX_BUNDLE_REPORT_BYTES: u64 = 2 * MAX_REPORT_BYTES;
 pub const MAX_VALIDATION_FINDINGS_PER_RUN: u64 = MAX_REPORT_ROWS;
 pub const MAX_DUPLICATE_FINDINGS_PER_RUN: u64 = MAX_REPORT_ROWS;
 pub const MAX_VALIDATION_MESSAGE_BYTES: usize = 1_024;
@@ -1045,11 +1236,12 @@ pub const VERIFICATION_MAX_ROUTING_STATE_BYTES: usize = 512 * 1024;
 pub struct VerificationIdentities {
     pub run_id: Uuid,
     pub bundle_id: Uuid,
+    pub bundle_artifact_id: Uuid,
     pub snapshot_id: Uuid,
     pub dataset_id: Uuid,
-    pub validation_report_id: Uuid,
-    pub rejected_rows_id: Uuid,
-    pub deduplication_report_id: Uuid,
+    pub validation_report_artifact_id: Uuid,
+    pub rejected_rows_artifact_id: Option<Uuid>,
+    pub deduplication_report_artifact_id: Uuid,
     pub session_id: Uuid,
     pub logical_input: LogicalInputRef,
     pub canonical_plan_digest: [u8; 32],
@@ -1074,9 +1266,9 @@ pub struct VerificationRequest<'a> {
 pub struct VerificationBundleDraft {
     pub provenance: ArtifactProvenanceDraft,
     pub accepted: SnapshotDraft,
-    pub validation_report_id: Uuid,
-    pub rejected_rows_id: Uuid,
-    pub deduplication_report_id: Uuid,
+    pub validation_report_artifact_id: Uuid,
+    pub rejected_rows_artifact_id: Option<Uuid>,
+    pub deduplication_report_artifact_id: Uuid,
 }
 
 pub struct VerificationBundle {
@@ -1121,6 +1313,7 @@ pub struct ArtifactManifest {
     pub artifact_id: Uuid,
     pub kind: ArtifactKind,
     pub sections: Vec<ArtifactSection>,
+    pub manifest_digest: ContentDigest,
 }
 
 pub struct ArtifactSection {
@@ -1129,6 +1322,7 @@ pub struct ArtifactSection {
     pub schema_fingerprint: LogicalSchemaFingerprint,
     pub stats: ArtifactSectionStats,
     pub partitions: Vec<ArtifactPartition>,
+    pub section_digest: ContentDigest,
 }
 
 pub struct ArtifactSectionStats {
@@ -1147,10 +1341,11 @@ pub struct ArtifactPartition {
 pub struct VerificationBundleMembership {
     pub bundle_id: Uuid,
     pub run_id: Uuid,
+    pub bundle_artifact_id: Uuid,
     pub accepted_snapshot_id: Uuid,
-    pub validation_report_manifest_id: Uuid,
-    pub rejected_rows_manifest_id: Option<Uuid>,
-    pub deduplication_report_manifest_id: Uuid,
+    pub validation_report_artifact_id: Uuid,
+    pub rejected_rows_artifact_id: Option<Uuid>,
+    pub deduplication_report_artifact_id: Uuid,
 }
 
 pub struct ArtifactBatchReader {
@@ -1184,6 +1379,11 @@ impl SnapshotStore {
     pub fn load_verification_bundle_by_snapshot(
         &self,
         snapshot_id: Uuid,
+    ) -> Result<VerificationBundle, StorageError>;
+
+    pub fn load_verification_bundle_by_run_id(
+        &self,
+        run_id: Uuid,
     ) -> Result<VerificationBundle, StorageError>;
 
     pub fn open_artifact_section(
@@ -1222,6 +1422,7 @@ impl DedupIndex {
 
     pub fn close_and_delete(self) -> Result<(), StorageError>;
 }
+```
 
 Compatibility note: every type above is outside the current E2/E3 public
 surface and is `Proposed`. If PR #53 changes `PreviewRequest` /
@@ -1301,7 +1502,7 @@ beyond its configured 512 KiB SQLite page cache.
 
 ## 13. Preview relationship
 
-E4-C0-R2 does **not** extend `PreviewResult`, `PreviewRequest`, or the E3
+E4-C0-R3 does **not** extend `PreviewResult`, `PreviewRequest`, or the E3
 preview execution path.
 
 - The E3 preview contract in Issue #50 (and its current PR #53 revision)
@@ -1332,6 +1533,9 @@ preview execution path.
 | Report max partitions | `MAX_SNAPSHOT_PARTITIONS` = 16,384 | this contract |
 | Report max rows | `MAX_REPORT_ROWS` = 16,777,216 | `MAX_REPORT_PARTITIONS * REPORT_PACK_ROWS` |
 | Report max bytes | `MAX_REPORT_BYTES` = 32 GiB | `MAX_REPORT_PARTITIONS * REPORT_PACK_BYTES` |
+| Bundle report max partitions | `MAX_BUNDLE_REPORT_PARTITIONS` = 32,768 | two report artifacts after section aggregation |
+| Bundle report max rows | `MAX_BUNDLE_REPORT_ROWS` = 33,554,432 | `2 * MAX_REPORT_ROWS` |
+| Bundle report max bytes | `MAX_BUNDLE_REPORT_BYTES` = 64 GiB | `2 * MAX_REPORT_BYTES` |
 | Report remainder bytes | 2 MiB each | this contract |
 | Dedup key columns per rule | 64 | this contract |
 | Encoded composite dedup key | 64 KiB | this contract |
@@ -1413,10 +1617,10 @@ The sanitization sentinel is
 | V06 | Multiple Validate hits and one-payload guarantee | Warning then Error on one row emits both findings in rule order; first Error terminates later rules; rejected artifact contains exactly one payload for that row; 256-finding cap fails with `BoundExceeded` and no bundle. |
 | V07 | Warning rows never enter rejected artifact | Warning-only fixture has zero terminal rejections, `rejected_rows = None`, and warning finding references the accepted row. |
 | V08 | Duplicate rows enter rejected artifact and dedup report, not silent deletion | Each duplicate has one payload with `rejection_kind = "duplicate"`, one `DuplicateFinding` with first-seen `SourceRowRef`, and no key bytes in the report. |
-| V09 | Cancellation and deadline publish nothing | Inject cancel/deadline at each section 10.3 point; `load_verification_bundle(bundle_id)` fails; temp index absent or recoverable; no staging residue. |
+| V09 | Cancellation and deadline publish nothing | Inject cancel/deadline at each section 10.3 point; both `load_verification_bundle_by_run_id(run_id)` and `load_verification_bundle(bundle_id)` fail; normal cleanup leaves no temp index, while an interrupted cleanup leaves only a recoverable `.sqlite`/`.lock` candidate; no staging residue. |
 | V10 | Bundle atomicity | Inject failure during commit after accepted partition install; neither accepted snapshot nor any report/rejected artifact is independently visible; rollback cleans all files. |
 | V11 | Zero-rejection rule | No rejected artifact row is inserted when terminal rejection count is zero; storage creates no empty DatasetSnapshot for rejected rows. |
-| V12 | Dedup index ownership and recovery | `create_new` fails with `AlreadyExists` for an existing file and deletes nothing; `close_and_delete` removes file; crash-stale file is removed only by recovery under the maintenance gate after acquiring the stale `.lock`; an active locked file is never removed. |
+| V12 | Dedup index ownership and recovery | Failure-inject lock-first creation after each creation step; a pre-existing `.sqlite` or `.lock` returns `AlreadyExists` and is never deleted; a newly created first file is rolled back on second-file failure; recovery scans the union of both suffixes, removes orphan/pairs only under the maintenance gate after acquiring the lock when present, and never removes an active locked pair. |
 | V13 | Dedup index permissions and page cap | Temp dir mode `0700`, DB file mode `0600`; `PRAGMA max_page_count` equals `MAX_DEDUP_INDEX_PAGES`; disk > 8 GiB fails `BoundExceeded`. |
 | V14 | Memory ceiling | Instrumented live-payload counter shows `<= 6` and no seventh payload; allocator/SQLite cache stay within section 12.2; source grep and allocator prove no in-memory `HashSet`/`HashMap` dedup index. |
 | V15 | Secret sentinel | Sentinel appears in a failing cell but not in `EngineError` Display/Debug, `sanitized_summary()` JSON, event metadata, reports, or provenance summaries. |
@@ -1424,18 +1628,18 @@ The sanitization sentinel is
 | V17 | Utf8 and Binary key equality | Exact byte equality; empty string/binary distinct from null; no normalization/collation. |
 | V18 | Timestamp key boundary and equality | Millisecond/Microsecond/Nanosecond same-type same-epoch duplicates; `Timestamp { unit: Second }`, `List`, and `Struct` keys are preflight `TypeError`. |
 | V19 | Canonical key bytes and collision safety | Golden vectors for every supported tag, including `timezone: None` vs `Some` presence encoding; different values never produce equal bytes; SQLite BLOB PK is the only duplicate decision path. |
-| V20 | Key bounds | 65th key column, encoded key > 64 KiB, and SQLite `max_page_count` disk cap each fail `BoundExceeded` before bundle commit with no visible artifact. |
+| V20 | Key bounds | The 65th key column fails preflight; fixed-width key maxima are checked in preflight; every actual fixed-width, Utf8, and Binary key is encoded and checked immediately before SQLite insert, so an encoded key > 64 KiB fails `BoundExceeded` before any index write; the SQLite `max_page_count` cap also fails before bundle commit with no visible artifact. |
 | V21 | Schema/ColumnId/original value preservation | Rejected schema field order and metadata match logical Scan output + nine control fields; ColumnIds unchanged; Arrow values equal source values including null/NaN/`-0.0`; at most one payload per source row. |
 | V22 | Validation message safety and length | Explicit E4 preflight rejects empty-after-trim, > 1,024 bytes, and secret-like message; exact safe message stored once per `RuleRef` in the validation rule summary; absent from errors/logs/events. |
 | V23 | Existing E2/E3 compatibility | `materialize` still returns `UnsupportedRule` for Validate/Deduplicate; `preview` behavior is unchanged by the E4 code path; no `PreviewResult` field changed. |
-| V24 | Provenance completeness and CI | Every artifact embeds committed `ArtifactProvenance` with draft fields plus writer-computed summary/content digest; includes `run_id`, `bundle_id`, `session_id`, `LogicalInputRef`, canonical-plan SHA-256, FNV index, versions, lineage, and injected times. CI checks pass in the later runtime PR; this docs PR modifies only the file named in section 2. |
+| V24 | Provenance completeness and CI | Every artifact embeds committed `ArtifactProvenance`; callers provide only `ArtifactProvenanceInput`, while the engine supplies the verified canonical-plan SHA-256, contract versions, and compile-time `engine_build`; the writer supplies summary/content digest. The result includes `run_id`, `bundle_id`, distinct `artifact_id`, `session_id`, `LogicalInputRef`, FNV index, lineage, and injected times. CI checks pass in the later runtime PR; this docs PR modifies only the file named in section 2. |
 
-| V25 | Storage round-trip through bundle reader | Write a bundle containing accepted, validation summary/findings, rejected rows, and dedup summary/findings; load by `bundle_id` and by accepted snapshot id; open each `ArtifactSection` through `ArtifactBatchReader` and assert row/partition/digest equality. |
-| V26 | Provenance draft vs committed | `VerificationBundleDraft` has no summary/content_digest; after commit, every artifact provenance contains summary and content digest; `bundle_id` is distinct from `run_id` and child artifact ids; `session_id` is present. |
+| V25 | Storage round-trip through bundle reader | Write a bundle containing accepted, validation summary/findings, rejected rows, and dedup summary/findings; load by `bundle_id`, by `run_id`, and by accepted snapshot id; open each `ArtifactSection` through `ArtifactBatchReader` and assert row/partition/manifest/section/provenance digest equality. |
+| V26 | Provenance draft vs committed | `VerificationBundleDraft` contains engine-assembled provenance with no summary/content_digest; after commit, every artifact provenance contains summary and content digest; `bundle_id` is distinct from `run_id`, `bundle_artifact_id`, and every child artifact id; `session_id` is present. |
 | V27 | Rule summaries and message once | `ValidationRuleSummary` contains evaluated/pass/fail/warning/error/null/false counts and message once per `RuleRef`; findings contain no message; `DedupRuleSummary` contains evaluated/unique/duplicate counts. |
 | V28 | Dedup insert typed first ordinal | `insert_first()` returns `Inserted` or `Duplicate` with `first_source_row_ordinal`; duplicate finding uses that ordinal even if the first-seen row is later rejected by Validate Error. |
-| V29 | Report resource math | Exactly `MAX_REPORT_ROWS = MAX_REPORT_PARTITIONS * REPORT_PACK_ROWS` and `MAX_REPORT_BYTES = MAX_REPORT_PARTITIONS * REPORT_PACK_BYTES`; exceeding row/byte/partition limits fails `BoundExceeded`; no writer can emit a partition count above `MAX_REPORT_PARTITIONS`. |
-| V30 | Crash and maintenance recovery | Inject process crash at `Prepared`, `Staged`, `Installing`, and `Committing`; no partial bundle is visible; recovery under maintenance gate removes stale bundle staging and stale dedup files only after acquiring the lock; active bundle/index is untouched. |
+| V29 | Report resource math | Exactly `MAX_REPORT_ROWS = MAX_REPORT_PARTITIONS * REPORT_PACK_ROWS` and `MAX_REPORT_BYTES = MAX_REPORT_PARTITIONS * REPORT_PACK_BYTES`; limits are enforced after aggregating all sections of each report artifact and again at the two-report bundle ceiling; exceeding row/byte/partition limits fails `BoundExceeded`; no writer can emit a partition count above the applicable ceiling. |
+| V30 | Crash and maintenance recovery | Inject process crash at bundle states `Prepared`, `Staged`, `Installing`, and `Committing`, and at every dedup creation point in section 9.1; no partial bundle is visible; recovery under the maintenance gate removes stale bundle staging and every stale/orphan dedup suffix pair only after acquiring the lock when present; active bundle/index is untouched. |
 
 ## 17. Stop conditions
 
