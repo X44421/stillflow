@@ -23,6 +23,77 @@ use crate::{
     MAX_ENGINE_CONCURRENT_RUNS,
 };
 
+#[cfg(test)]
+#[derive(Default)]
+struct StoragePublicationCallCounts {
+    begin_snapshot: usize,
+    append: usize,
+    commit: usize,
+}
+
+#[cfg(test)]
+static STORAGE_PUBLICATION_CALLS: std::sync::Mutex<StoragePublicationCallCounts> =
+    std::sync::Mutex::new(StoragePublicationCallCounts {
+        begin_snapshot: 0,
+        append: 0,
+        commit: 0,
+    });
+
+#[cfg(test)]
+pub(crate) fn reset_storage_publication_call_counts() {
+    *STORAGE_PUBLICATION_CALLS
+        .lock()
+        .expect("storage publication counter lock") = StoragePublicationCallCounts::default();
+}
+
+#[cfg(test)]
+pub(crate) fn storage_begin_snapshot_call_count() -> usize {
+    STORAGE_PUBLICATION_CALLS
+        .lock()
+        .expect("storage publication counter lock")
+        .begin_snapshot
+}
+
+#[cfg(test)]
+pub(crate) fn storage_append_call_count() -> usize {
+    STORAGE_PUBLICATION_CALLS
+        .lock()
+        .expect("storage publication counter lock")
+        .append
+}
+
+#[cfg(test)]
+pub(crate) fn storage_commit_call_count() -> usize {
+    STORAGE_PUBLICATION_CALLS
+        .lock()
+        .expect("storage publication counter lock")
+        .commit
+}
+
+#[cfg(test)]
+fn record_begin_snapshot_call() {
+    STORAGE_PUBLICATION_CALLS
+        .lock()
+        .expect("storage publication counter lock")
+        .begin_snapshot += 1;
+}
+
+#[cfg(test)]
+fn record_append_call() {
+    STORAGE_PUBLICATION_CALLS
+        .lock()
+        .expect("storage publication counter lock")
+        .append += 1;
+}
+
+#[cfg(test)]
+fn record_commit_call() {
+    STORAGE_PUBLICATION_CALLS
+        .lock()
+        .expect("storage publication counter lock")
+        .commit += 1;
+}
+
 pub struct ExecutionEngine {
     pub(crate) registry: ConnectorRegistry,
     pub(crate) run_gate: Arc<Semaphore>,
@@ -160,6 +231,8 @@ impl ExecutionEngine {
             request.identities.created_at,
         )
         .map_err(EngineError::from_storage)?;
+        #[cfg(test)]
+        record_begin_snapshot_call();
         let mut writer = request
             .store
             .begin_snapshot(draft, request.identities.started_at)
@@ -170,6 +243,8 @@ impl ExecutionEngine {
             .await;
         match result {
             Ok(()) => {
+                #[cfg(test)]
+                record_commit_call();
                 let manifest = writer.commit().map_err(EngineError::from_storage)?;
                 Ok((manifest, tracker.report()))
             }
@@ -313,6 +388,8 @@ fn append_envelope(
 ) -> Result<(), EngineError> {
     context.ensure_active().map_err(map_context_error)?;
     let _storage_phase = crate::memory::enter_phase(crate::memory::AllocatorPhase::StorageAppend);
+    #[cfg(test)]
+    record_append_call();
     writer.append(&envelope).map_err(EngineError::from_storage)
 }
 

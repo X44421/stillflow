@@ -21,6 +21,24 @@ pub struct MemoryReport {
     pub chunk_count: usize,
     pub min_chunk_rows: usize,
     pub saw_split_envelope_with_remainder: bool,
+    #[cfg(test)]
+    pub(crate) max_input_chunk_rows: usize,
+    #[cfg(test)]
+    pub(crate) max_lowered_rows: usize,
+    #[cfg(test)]
+    pub(crate) max_response_prefix_rows: usize,
+    #[cfg(test)]
+    pub(crate) finalized_response_envelopes: usize,
+    #[cfg(test)]
+    pub(crate) response_capacity_peak: usize,
+    #[cfg(test)]
+    pub(crate) saw_n_gt_m_gt_p: bool,
+    #[cfg(test)]
+    pub(crate) saw_full_lowered_chunk_with_compacted_prefix: bool,
+    #[cfg(test)]
+    pub(crate) allocator_reallocation_count: usize,
+    #[cfg(test)]
+    pub(crate) allocator_peak_bytes: usize,
 }
 
 static GLOBAL_PHASE: AtomicU8 = AtomicU8::new(0);
@@ -30,6 +48,8 @@ static REMAINDER_LIVE: AtomicUsize = AtomicUsize::new(0);
 static REMAINDER_PEAK: AtomicUsize = AtomicUsize::new(0);
 static STORAGE_LIVE: AtomicUsize = AtomicUsize::new(0);
 static STORAGE_PEAK: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static ALLOCATOR_REALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn set_alloc_phase(phase: AllocatorPhase) {
     GLOBAL_PHASE.store(phase as u8, Ordering::SeqCst);
@@ -68,6 +88,8 @@ pub(crate) fn reset_alloc_peaks() {
     REMAINDER_PEAK.store(0, Ordering::SeqCst);
     STORAGE_LIVE.store(0, Ordering::SeqCst);
     STORAGE_PEAK.store(0, Ordering::SeqCst);
+    #[cfg(test)]
+    ALLOCATOR_REALLOCATIONS.store(0, Ordering::SeqCst);
 }
 
 pub(crate) fn alloc_peaks() -> (usize, usize, usize) {
@@ -76,6 +98,11 @@ pub(crate) fn alloc_peaks() -> (usize, usize, usize) {
         REMAINDER_PEAK.load(Ordering::SeqCst),
         STORAGE_PEAK.load(Ordering::SeqCst),
     )
+}
+
+#[cfg(test)]
+pub(crate) fn allocator_reallocation_count() -> usize {
+    ALLOCATOR_REALLOCATIONS.load(Ordering::SeqCst)
 }
 
 #[cfg(test)]
@@ -111,6 +138,7 @@ pub(crate) fn record_realloc_phase(phase: u8, old_size: usize, new_size: usize) 
         3 => (&STORAGE_LIVE, &STORAGE_PEAK),
         _ => return,
     };
+    ALLOCATOR_REALLOCATIONS.fetch_add(1, Ordering::SeqCst);
     let current = live.load(Ordering::SeqCst);
     let transient = current.saturating_add(new_size);
     peak.fetch_max(transient, Ordering::SeqCst);
@@ -168,6 +196,11 @@ impl MemoryTracker {
         report.polars_phase_peak = report.polars_phase_peak.max(polars);
         report.remainder_phase_peak = report.remainder_phase_peak.max(remainder);
         report.storage_append_phase_peak = report.storage_append_phase_peak.max(storage);
+        #[cfg(test)]
+        {
+            report.allocator_reallocation_count = allocator_reallocation_count();
+            report.allocator_peak_bytes = polars.max(remainder).max(storage);
+        }
         report
     }
 
@@ -176,9 +209,29 @@ impl MemoryTracker {
         if self.report.min_chunk_rows == 0 || rows < self.report.min_chunk_rows {
             self.report.min_chunk_rows = rows;
         }
+        #[cfg(test)]
+        {
+            self.report.max_input_chunk_rows = self.report.max_input_chunk_rows.max(rows);
+        }
         if remainder_live && self.envelope_live && self.polars_live {
             self.report.saw_split_envelope_with_remainder = true;
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_chunk_output(&mut self, n: usize, m: usize, p: usize) {
+        self.report.max_input_chunk_rows = self.report.max_input_chunk_rows.max(n);
+        self.report.max_lowered_rows = self.report.max_lowered_rows.max(m);
+        self.report.max_response_prefix_rows = self.report.max_response_prefix_rows.max(p);
+        self.report.saw_n_gt_m_gt_p |= n > m && m > p;
+        self.report.saw_full_lowered_chunk_with_compacted_prefix |= p > 0 && p < m;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_finalized_response_envelope(&mut self, bytes: usize) {
+        self.report.finalized_response_envelopes =
+            self.report.finalized_response_envelopes.saturating_add(1);
+        self.report.response_capacity_peak = self.report.response_capacity_peak.max(bytes);
     }
 
     pub(crate) fn hold_envelope(&mut self, bytes: usize) -> Result<(), EngineError> {
@@ -240,6 +293,10 @@ impl MemoryTracker {
         }
         self.remainder_live = bytes > 0;
         self.remainder_bytes = bytes;
+        #[cfg(test)]
+        {
+            self.report.response_capacity_peak = self.report.response_capacity_peak.max(bytes);
+        }
         self.refresh()
     }
 
