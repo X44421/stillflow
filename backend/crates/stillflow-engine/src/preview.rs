@@ -530,21 +530,12 @@ impl PreviewAccumulator {
                 return Ok(PushOutcome::ByteClosed);
             }
 
-            let builder_budget = self.byte_limit.saturating_sub(self.finalized_bytes);
             #[cfg(test)]
             {
                 let admission_peak = self.rebatcher.admission_budget_peak(&incoming, 1)?;
                 tracker.record_response_budget_peak(
                     self.finalized_bytes.saturating_add(admission_peak),
                 );
-            }
-            if !self
-                .rebatcher
-                .can_reserve_for_budget(&incoming, 1, builder_budget)?
-                && self.rebatcher.rows() > 0
-            {
-                self.flush_builder(tracker)?;
-                continue;
             }
 
             let accepted = incoming.slice(0, 1);
