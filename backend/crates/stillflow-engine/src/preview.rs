@@ -222,7 +222,18 @@ pub(crate) async fn preview(
                 continue;
             }
 
-            match accumulator.push(batch, &mut tracker)? {
+            #[cfg(test)]
+            let batch_rows = batch.num_rows();
+            #[cfg(test)]
+            let rows_before_push = accumulator.rows();
+            let push_outcome = accumulator.push(batch, &mut tracker)?;
+            #[cfg(test)]
+            tracker.record_chunk_output(
+                consumed_rows,
+                batch_rows,
+                accumulator.rows().saturating_sub(rows_before_push),
+            );
+            match push_outcome {
                 PushOutcome::Appended => {}
                 PushOutcome::RowClosed => {
                     visible_prefix_closed = true;
@@ -451,6 +462,8 @@ impl PreviewAccumulator {
         for envelope in published {
             self.finalized_rows = self.finalized_rows.saturating_add(envelope.row_count());
             self.finalized_bytes = self.finalized_bytes.saturating_add(envelope.byte_count());
+            #[cfg(test)]
+            tracker.record_finalized_response_envelope(envelope.byte_count());
             self.batches.push(envelope);
         }
         tracker.hold_remainder(
@@ -464,6 +477,11 @@ impl PreviewAccumulator {
         self.rebatcher
             .flush_to(self.finalized_bytes, &mut published, tracker)?;
         self.absorb(published, tracker)
+    }
+
+    #[cfg(test)]
+    fn rows(&self) -> usize {
+        self.finalized_rows.saturating_add(self.rebatcher.rows())
     }
 
     fn push(
@@ -551,7 +569,23 @@ impl PreviewAccumulator {
                 if k >= row_room {
                     return Ok(PushOutcome::RowClosed);
                 }
-                return Ok(PushOutcome::ByteClosed);
+                let next_exact = self.rebatcher.exact_bytes_after_append(&incoming, 1)?;
+                if next_exact > MAX_BATCH_BYTES {
+                    // The current canonical envelope reached its single-
+                    // envelope bound. The next row may still fit in a fresh
+                    // envelope and must not be reported as public byte
+                    // truncation.
+                    continue;
+                }
+                if self.finalized_bytes.saturating_add(next_exact) > self.byte_limit {
+                    return Ok(PushOutcome::ByteClosed);
+                }
+                // A smaller prefix can also be caused by an internal
+                // reserve/reallocation budget. That is a response-envelope
+                // segmentation point, not public byte truncation: the
+                // remaining rows from this lowered chunk must still be
+                // processed.
+                continue;
             }
             if self.finalized_rows.saturating_add(self.rebatcher.rows()) >= self.row_limit {
                 self.flush_builder(tracker)?;
