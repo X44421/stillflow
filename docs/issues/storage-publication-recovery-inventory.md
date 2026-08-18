@@ -14,7 +14,7 @@ This inventory records only behavior present at the evidence baseline. PR #53, #
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SnapshotStore` | `backend/crates/stillflow-storage/src/store.rs` | `inner: Arc<StoreInner>`; `StoreInner` contains `root: PathBuf`, `limits: StorageLimits`, `_root_lock: File`, `activity: Mutex<ActivityState>` | `stillflow-storage` | `SnapshotStore::open(root, limits)` | The Rust object is in-memory. `open` owns root `.stillflow.lock` for the store lifetime and opens `metadata.sqlite3`; snapshot state is persisted beneath the managed root. | Writes through `begin_snapshot`, `recover`, `tombstone_snapshot`, `collect_garbage`; reads through `load_manifest`, `read_batches`, `verify_snapshot`. | Dropping the last `Arc<StoreInner>` closes the root lock file and releases the process ownership lock. |
 | `SnapshotDraft` | `backend/crates/stillflow-storage/src/manifest.rs` | `id`, `dataset_id`, `session_id`, `source_asset_id`, `schema`, `schema_fingerprint`, `lineage`, `quality_score`, `created_at` | `stillflow-storage` | `SnapshotDraft::try_new` | No standalone persistence. Its values become `DatasetSnapshot` / SQLite snapshot columns only after successful commit. | Supplied to `SnapshotStore::begin_snapshot`; consumed by `SnapshotWriter::commit`. | Ends when the writer is dropped or consumed by `commit`. |
-| `SnapshotWriter` | `backend/crates/stillflow-storage/src/store.rs` | `inner`, `_activity`, `draft`, `staging_dir`, `staged`, `next_input_sequence`, `envelope_count`, `row_count`, `stored_byte_count`, `installed`, `committed`, `failed` | `stillflow-storage` | `SnapshotStore::begin_snapshot` | Transient. It causes a `publications` journal row and filesystem staging/final files, but the writer itself is not serialized. | `append(&BatchEnvelope)` writes staged Parquet; `commit()` installs partitions and commits the SQLite manifest. | Successful `commit` marks `committed`; drop after success leaves the publication intact. Any non-committed drop best-effort removes staging, removes installed final directory when `installed`, and deletes the publication journal. The publisher activity guard lives for the whole writer lifetime. |
+| `SnapshotWriter` | `backend/crates/stillflow-storage/src/store.rs` | `inner`, `_activity`, `draft`, `staging_dir`, `staged`, `next_input_sequence`, `envelope_count`, `row_count`, `stored_byte_count`, `installed`, `committed`, `failed` | `stillflow-storage` | `SnapshotStore::begin_snapshot` | Transient. It causes a `publications` journal row and filesystem staging/final files, but the writer itself is not serialized. | `append(&BatchEnvelope)` writes staged Parquet; `commit()` installs partitions and commits the SQLite manifest. | Successful `commit` marks `committed`; Drop after successful commit leaves the committed snapshot and final partitions intact; the publication journal row has already been deleted by the manifest transaction. Any non-committed drop best-effort removes staging, removes installed final directory when `installed`, and deletes the publication journal. The publisher activity guard lives for the whole writer lifetime. |
 | `SnapshotManifest` | `backend/crates/stillflow-storage/src/manifest.rs` | `snapshot: DatasetSnapshot`, `partitions: Vec<SnapshotPartition>` | `stillflow-storage` | `SnapshotWriter::commit` builds it with `build_snapshot` + `SnapshotManifest::try_new`; `load_manifest_inner` reconstructs it. | There is no standalone manifest file. Snapshot fields are stored in SQLite `snapshots`; partition metadata is stored in SQLite `partitions`; Parquet payloads live under `partitions/<snapshot_id>/`. | Written by `commit_manifest`; read by `load_manifest`, `read_batches`, `verify_snapshot`. | Immutable value returned to callers or held by a reader. SQLite visibility ends when snapshot is tombstoned/deleted by storage maintenance. |
 | `SnapshotBatchReader` | `backend/crates/stillflow-storage/src/store.rs` | `inner`, `_activity: ActivityGuard`, `manifest`, `next_partition` | `stillflow-storage` | `SnapshotStore::read_batches` | No. | Loads one visible manifest, then its `Iterator::next` reads one manifest partition at a time. | Holds a reader activity guard until the reader is dropped, including while the caller is between `next()` calls. |
 | `StorageLimits` | `backend/crates/stillflow-storage/src/manifest.rs` | `max_input_envelopes`, `max_partitions`, `max_rows`, `max_stored_bytes`, `max_active_readers`, `max_active_publishers` | `stillflow-storage` | `Default` or `StorageLimits::try_new` | No dedicated persistence. The chosen limits live in `StoreInner` and are re-applied on reads/writes. | Read through `SnapshotStore::limits` and internal checks. | Same in-memory lifetime as the store configuration. |
@@ -32,7 +32,8 @@ At this baseline the relevant paths are constructed in `backend/crates/stillflow
 - final partition root: `<root>/partitions`;
 - one snapshot final directory: `<root>/partitions/<snapshot_id>`;
 - one staged snapshot directory: `<root>/staging/<snapshot_id>`;
-- partition filename: zero-padded ten-digit sequence, for example `0000000000.parquet`.
+- staged partition filename: zero-padded ten-digit sequence plus `.parquet`, for example `<root>/staging/<snapshot_id>/0000000000.parquet`;
+- final partition filename: zero-padded ten-digit sequence, `-`, the lowercase 64-character partition SHA-256 digest, then `.parquet`, for example `<root>/partitions/<snapshot_id>/0000000000-<sha256>.parquet`.
 
 ## 2. Actual publication order
 
@@ -50,7 +51,7 @@ The real order differs from a simplified `begin -> staging -> append -> install 
 6. if staging-directory creation fails, best-effort `abort_publication` deletes the journal row;
 7. returns `SnapshotWriter` holding the publisher guard.
 
-Therefore a crash can leave a publication row even before a staging directory exists.
+Therefore a crash can leave a publication row even before a staging directory exists. The SQLite connection is configured with `journal_mode = WAL` and `synchronous = FULL`; this inventory records the committed transaction boundary but does not claim tested process-kill or power-loss durability.
 
 ### 2.2 Append
 
@@ -177,9 +178,11 @@ Status vocabulary in this table is restricted to `proven`, `tested`, `implemente
 | Crash position | Disk residue | SQLite state | Current recovery status | Evidence at `main@85502cb` |
 | --- | --- | --- | --- | --- |
 | before `begin_snapshot` | No per-snapshot staging/final files created by this operation. | No publication or snapshot row created by this operation. | proven | `begin_snapshot` is the first publication entry and no pre-begin recovery state exists. `backend/crates/stillflow-storage/src/store.rs`. |
+| after publication journal commit, before staging directory creation | No snapshot staging/final directory is required to exist yet. | `publications(id, started_at_utc)` is committed; no visible snapshot. | implemented-but-untested | `begin_snapshot` commits `insert_publication` before `create_exact_directory`. For an invisible stale publication, `recover` calls directory removal for staging and final; missing directories are tolerated, then the publication row is deleted. No test isolates this exact crash point. |
 | after staging creation | `<root>/staging/<id>` may exist and can be empty. | `publications(id, started_at_utc)` is already committed; no visible snapshot. | implemented-but-untested | `begin_snapshot` commits `insert_publication` before `create_exact_directory`; `recover` removes staging/final for an invisible stale publication. No test isolates a process failure immediately after directory creation. |
 | after partition append | Synced Parquet files under staging; no required final files yet. | Publication row present; no visible snapshot. | implemented-but-untested | `write_partition` syncs each staged file; invisible stale-publication recovery removes staging and final directories. Existing recovery test does not isolate this exact point. |
 | before install | Staged Parquet files and publication row; final directory may not yet exist. | Publication row present; no visible snapshot. | implemented-but-untested | Same invisible-publication branch in `recover`; no separate install-boundary crash injection. |
+| during multi-partition install after only some renames | Some partition files remain under staging; already-renamed partitions are under final. | Publication row present; no visible snapshot row because `commit_manifest` has not started. | implemented-but-untested | `install_partitions` iterates manifest partitions and performs one `fs::rename` per partition. Recovery of an invisible stale publication removes both staging and final snapshot directories, covering both halves of a partial install. No test injects a crash between individual renames. |
 | after install, before SQLite manifest transaction | Final directory and renamed Parquet files exist; staging directory may remain. | Publication row present; no visible snapshot row. | tested | `recovery_removes_precommit_files_and_preserves_committed_snapshot` white-box creates final directory, calls `install_partitions`, suppresses writer Drop cleanup, verifies the snapshot is not visible, then calls `recover` and verifies final/staging removal. |
 | during SQLite manifest transaction | Installed final files exist; staging may remain. | Transaction contains snapshot/partition inserts and publication deletion until commit. Observable post-crash DB state is not failure-injected by tests at this exact point. | implemented-but-untested | All DB visibility mutations are grouped in one `TransactionBehavior::Immediate`; no test terminates/reopens the process during this transaction. Recovery has paths for an invisible stale publication and for post-commit orphan staging, but mid-transaction restart is not directly exercised. |
 | after DB commit, before cleanup | Final Parquet files are installed; staging residue may remain. | Snapshot and partitions are visible; publication row has been deleted in the same committed transaction. | tested | `recovery_removes_precommit_files_and_preserves_committed_snapshot` creates post-commit staging residue, calls `recover`, verifies the committed manifest/final directory remain and staging is removed. |
@@ -228,7 +231,12 @@ Publication identity is `snapshot_id`: it is the primary key of `publications` a
 
 ### 6.4 Partition sequence
 
-A non-empty appended envelope gets `partition_sequence = u32::try_from(self.staged.len())`. `SnapshotManifest::try_new` requires partition sequences to equal their zero-based vector indices and therefore be contiguous. Physical filenames encode that sequence as ten zero-padded decimal digits followed by `.parquet`.
+A non-empty appended envelope gets `partition_sequence = u32::try_from(self.staged.len())`. `SnapshotManifest::try_new` requires partition sequences to equal their zero-based vector indices and therefore be contiguous.
+
+The two physical path encodings are different:
+
+- staging: `<root>/staging/<snapshot_id>/<sequence:010>.parquet`, for example `<root>/staging/<snapshot_id>/0000000000.parquet`;
+- final: `<root>/partitions/<snapshot_id>/<sequence:010>-<sha256>.parquet`, for example `<root>/partitions/<snapshot_id>/0000000000-<sha256>.parquet`, where `<sha256>` is the lowercase 64-character `ContentDigest` of the finalized Parquet file.
 
 Input envelope sequence is a separate `u64` and must equal `SnapshotWriter.next_input_sequence`; empty envelopes consume input sequence numbers but do not consume partition sequence numbers.
 
@@ -295,7 +303,7 @@ For the `maintenance recovery` row, `implemented-but-untested` specifically mean
 
 The following are baseline constraints, not solution proposals:
 
-1. The existing publication journal is durable in SQLite **before** staging-directory creation.
+1. The publication-journal transaction is committed before staging-directory creation; SQLite connections use WAL with `synchronous = FULL`, while actual process-kill and power-loss recovery remain untested.
 2. Physical final Parquet installation precedes SQLite snapshot visibility.
 3. Snapshot visibility and deletion of the publication journal occur in the same SQLite transaction.
 4. Existing recovery treats a stale publication with no visible snapshot as unpublished and removes both staging and final partition directories.
