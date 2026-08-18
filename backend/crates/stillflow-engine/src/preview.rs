@@ -207,6 +207,7 @@ pub(crate) async fn preview(
                 consumed.payload().slice(offset, k),
                 &prepared,
                 &target_arrow,
+                &context,
                 &mut tracker,
             )?;
             source_rows_scanned = source_rows_scanned.saturating_add(consumed_rows);
@@ -374,10 +375,12 @@ fn lower_chunk(
     slice: arrow_array::RecordBatch,
     prepared: &PreparedPlan,
     target_arrow: &arrow_schema::SchemaRef,
+    context: &RequestContext,
     tracker: &mut MemoryTracker,
 ) -> Result<(arrow_array::RecordBatch, usize), EngineError> {
     let mut n = slice.num_rows();
     loop {
+        context.ensure_active().map_err(map_context_error)?;
         let attempt = if n == slice.num_rows() {
             slice.clone()
         } else {
@@ -686,7 +689,14 @@ mod estimator_tests {
         .unwrap();
         set_forced_export_retries(1);
         let mut tracker = MemoryTracker::new_preview();
-        let (result, consumed) = lower_chunk(batch, &prepared, &arrow, &mut tracker).unwrap();
+        let (result, consumed) = lower_chunk(
+            batch,
+            &prepared,
+            &arrow,
+            &RequestContext::default(),
+            &mut tracker,
+        )
+        .unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(consumed, 2);
         assert!(result.get_array_memory_size() <= MAX_BATCH_BYTES);

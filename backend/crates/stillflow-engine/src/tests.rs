@@ -4322,6 +4322,58 @@ async fn p08_cancellation_during_flag_completion_lookahead() {
 }
 
 #[tokio::test]
+async fn p08_cancellation_during_lowering_retry() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, _) = int_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    let (engine, _) =
+        engine_with(schema.clone(), vec![int_batch(&schema, source.id, 8)], true).await;
+    let token = stillflow_core::RequestContext::default()
+        .cancellation()
+        .clone();
+    let engine = Arc::new(engine);
+    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
+    let mut request = preview_request(
+        plan,
+        scan,
+        connection,
+        source,
+        schema,
+        100,
+        PREVIEW_DEFAULT_BYTE_LIMIT,
+    );
+    request.context = stillflow_core::RequestContext::with_cancellation(token.clone());
+
+    reset_ffi_import_count();
+    crate::preview::set_forced_export_retries(1_000);
+    let handle = tokio::spawn(async move { engine.preview(request).await });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        tokio::task::yield_now().await;
+        if ffi_import_count() > 0 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "lowering did not start: ffi_import_count={}",
+            ffi_import_count()
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    token.cancel();
+    let err = handle
+        .await
+        .expect("join")
+        .expect_err("cancelled during lowering retry");
+    assert!(matches!(err, EngineError::Cancelled));
+    crate::preview::set_forced_export_retries(0);
+    drop(_guard);
+}
+
+#[tokio::test]
 async fn p09_fifth_concurrent_preview_is_busy() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, _) = int_schema();
