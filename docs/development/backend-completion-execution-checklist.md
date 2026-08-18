@@ -2,7 +2,8 @@
 
 > Tracking issue: #63  
 > Planning baseline: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`  
-> Created: 2026-08-18  
+> Current main: `main@473c65b` (PR #62 storage inventory merged)
+> Created: 2026-08-18
 > Scope: Phase 1 / product-MVP backend completion  
 > Status: execution plan; this document does not authorize contract-external runtime work
 
@@ -103,17 +104,18 @@ its base before execution.
 
 | Area | Current item | Head / baseline | State | Required next gate |
 | --- | --- | --- | --- | --- |
-| Main | `main` | `85502cbebb1fab461fe42d30fe019ad20613aa7c` | E2 merged | All new implementation branches start from the latest accepted main |
-| E3 | PR #53 / Issue #52 | `bdcfd64d8d29fa3434824cd97f45bba228f15e52` | Draft; E3-R2 pushed; CI/re-review pending | Re-run exact acceptance, approve the unchanged SHA, Ready, merge, close issue, delete branch |
-| E4 | PR #57 / Issue #54 | `2a35bced9e2eb8b35a9e4679c8698d15bbb6b941` | Draft / Request changes | Produce C0-R3 after storage facts are merged; do not start runtime |
-| E5 inventory | PR #59 / Issue #58 | `b73524374b962c541b615b884f94df0dab23f320` | Draft skeleton | Complete fact inventory; no E5 fields or endpoints may be frozen here |
-| Permission smoke test | PR #60 | `07c6384cb91670481aa8cfcfbcac2e189f5fead5` | Disposable Draft | Close without merge and delete the branch |
-| Storage inventory | PR #62 / Issue #61 | `036ec575fc16a240ace77860ebb7389f16dbb3da` | Final factual review approved | Ready/merge unchanged SHA, close issue, delete branch |
-| Plan | Issue #63 | `main@85502cb` | This docs-only delivery | Merge this checklist after review; it does not unblock runtime by itself |
+| Main | `main` | `473c65b` | E2 + storage inventory merged | All new implementation branches start from the latest accepted main |
+| E3 | PR #53 / Issue #52 | `51606e48824f725040c61224766bf86238550570` | Draft; E3-R3 pushed; CI passed; final runtime acceptance pending | Approve exact head, Ready, merge, close issue, delete branch |
+| E4 | PR #57 / Issue #54 | `cf4f0bdd7207c0a961d05e56ac69bf26578b42da` | Draft; C0-R3 after storage facts merged | Architecture review of R3; do not start runtime |
+| E5 inventory | PR #59 / Issue #58 | `6f3ad00b633d8ec96b6a36a2bc6b51bbe99a2331` | Draft; inventory complete | Docs review, Ready, merge, close issue, delete branch |
+| Permission smoke test | PR #60 | `07c6384cb91670481aa8cfcfbcac2e189f5fead5` | Closed without merge; branch deleted | None |
+| Storage inventory | PR #62 / Issue #61 | `036ec575fc16a240ace77860ebb7389f16dbb3da` | Merged at `main@473c65b`; issue #61 closed; branch deleted | None |
+| Plan | Issue #63 | this PR | This docs-only delivery; statuses updated | Merge this checklist after review; it does not unblock runtime by itself |
 
-PR #62 factual approval is bound to
-`036ec575fc16a240ace77860ebb7389f16dbb3da`. It validates facts only and does
-not approve PR #57 or E4 runtime.
+PR #62 factual approval was bound to
+`036ec575fc16a240ace77860ebb7389f16dbb3da`. It validated facts only and did
+not approve PR #57 or E4 runtime. PR #62 is now merged at `main@473c65b` and
+its facts are incorporated into E4-C0-R3.
 
 ## 5. Execution status vocabulary
 
@@ -199,7 +201,7 @@ branch starts from the latest `main` containing the approved contract.
 
 ### G0-01 — Remove the permission smoke-test PR
 
-- [ ] Status: `ready`.
+- [x] Status: closed without merge; remote branch deleted.
 - **Target:** PR #60 and branch
   `agent/github-permission-test-20260818`.
 - **Action:** close without merge; delete the remote branch.
@@ -209,7 +211,7 @@ branch starts from the latest `main` containing the approved contract.
 ### G0-02 — Finalize E3 node-level Preview
 
 - [ ] Status: `review` at PR #53 head
-  `bdcfd64d8d29fa3434824cd97f45bba228f15e52`.
+  `51606e48824f725040c61224766bf86238550570` (E3-R3).
 - **Entry:** approved E3-C0 SHA
   `d2809de294bb16ae8fe11f425a4f910ec2ed43cc` remains unchanged.
 - **Required evidence:**
@@ -232,7 +234,8 @@ branch starts from the latest `main` containing the approved contract.
 
 ### G0-03 — Complete E5-D0 domain inventory
 
-- [ ] Status: `in_progress` in PR #59.
+- [x] Status: `review` at PR #59 head
+  `6f3ad00b633d8ec96b6a36a2bc6b51bbe99a2331`.
 - **Only delivery:** `docs/issues/e5-runtime-domain-inventory.md`.
 - **Required inventory:**
   - exact fields, crate ownership, behavior, and persistence state for
@@ -255,8 +258,8 @@ branch starts from the latest `main` containing the approved contract.
 
 ### G0-04 — Merge the storage publication/recovery inventory
 
-- [ ] Status: `approved` at PR #62 head
-  `036ec575fc16a240ace77860ebb7389f16dbb3da`.
+- [x] Status: `merged` at PR #62 head
+  `036ec575fc16a240ace77860ebb7389f16dbb3da`; merged into `main@473c65b`.
 - **Verified facts:**
   - publication journal commit precedes staging directory creation;
   - staged and final partition names are distinct;
@@ -272,7 +275,8 @@ branch starts from the latest `main` containing the approved contract.
 
 ### G0-05 — Freeze E4-C0-R3
 
-- [ ] Status: `blocked` until G0-04 is merged.
+- [x] Status: `review` at PR #57 head
+  `cf4f0bdd7207c0a961d05e56ac69bf26578b42da`; G0-04 is merged.
 - **Existing PR:** #57. Continue the same branch and PR.
 - **Required R3 closure:**
   - define one crash-safe ownership protocol for dedup `.sqlite` and lock/journal
@@ -393,8 +397,8 @@ branch starts from the latest `main` containing the approved contract.
 
 ### E5-C0 — Freeze the runtime domain before endpoints
 
-- [ ] Status: `blocked` on G0-03 and approved E4-C0; use merged E4 runtime fields
-  when available.
+- [ ] Status: `blocked` on approved E4-C0; G0-03 inventory is complete. Use
+  merged E4 runtime fields when available.
 - **Docs-only decisions:**
   - `Session -> Job -> Run -> Event -> Artifact` ownership and cardinality;
   - SourceConnection, SourceAsset, Dataset, Snapshot, and VerificationBundle
