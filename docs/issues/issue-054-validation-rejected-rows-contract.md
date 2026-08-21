@@ -24,7 +24,7 @@
 > the frozen `LogicalType` schema-descriptor encoding (P0), the
 > accepted-snapshot provenance `content_digest` preimage (P0), the
 > deterministic `rejected_rows_artifact_id` input/error protocol (P1), the
-> FilterRows ordinal/payload acceptance item (P1), and six precision or
+> FilterRows ordinal/payload acceptance item (P1), and eight precision or
 > editorial items (P2). No runtime design was added.
 > Architecture approval binds exactly one new commit SHA of this file. E4
 > runtime remains paused until that approval and must then rebuild from the
