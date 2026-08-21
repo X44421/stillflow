@@ -24,8 +24,8 @@ use crate::{
 };
 
 pub struct ExecutionEngine {
-    registry: ConnectorRegistry,
-    run_gate: Arc<Semaphore>,
+    pub(crate) registry: ConnectorRegistry,
+    pub(crate) run_gate: Arc<Semaphore>,
 }
 
 impl ExecutionEngine {
@@ -51,6 +51,7 @@ impl ExecutionEngine {
             asset,
             schema_override,
             context,
+            preflight::PreflightMode::Materialize,
         )
         .await
     }
@@ -62,6 +63,13 @@ impl ExecutionEngine {
         self.materialize_inner(request)
             .await
             .map(|(manifest, _)| manifest)
+    }
+
+    pub async fn materialize_verification(
+        &self,
+        request: crate::VerificationRequest<'_>,
+    ) -> Result<stillflow_storage::VerificationBundle, EngineError> {
+        crate::verification::materialize_verification(self, request).await
     }
 
     #[cfg(test)]

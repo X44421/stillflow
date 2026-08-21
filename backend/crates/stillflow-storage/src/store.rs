@@ -13,7 +13,7 @@ use parquet::arrow::arrow_reader::{ArrowReaderOptions, ParquetRecordBatchReaderB
 use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use uuid::Uuid;
 
 use stillflow_core::{
@@ -29,7 +29,7 @@ use crate::{
     SQLITE_BUSY_TIMEOUT_MILLIS, STORAGE_SCHEMA_VERSION,
 };
 
-const VISIBLE_STATE: i64 = 1;
+pub(crate) const VISIBLE_STATE: i64 = 1;
 const TOMBSTONED_STATE: i64 = 2;
 
 #[derive(Clone)]
@@ -47,9 +47,9 @@ impl fmt::Debug for SnapshotStore {
     }
 }
 
-struct StoreInner {
-    root: PathBuf,
-    limits: StorageLimits,
+pub(crate) struct StoreInner {
+    pub(crate) root: PathBuf,
+    pub(crate) limits: StorageLimits,
     _root_lock: File,
     activity: Mutex<ActivityState>,
 }
@@ -62,12 +62,12 @@ struct ActivityState {
 }
 
 #[derive(Clone, Copy)]
-enum ActivityKind {
+pub(crate) enum ActivityKind {
     Reader,
     Publisher,
 }
 
-struct ActivityGuard {
+pub(crate) struct ActivityGuard {
     inner: Arc<StoreInner>,
     kind: ActivityKind,
     active: bool,
@@ -134,6 +134,10 @@ impl SnapshotStore {
         let mut connection = open_connection(&inner)?;
         migrate(&mut connection)?;
         Ok(Self { inner })
+    }
+
+    pub(crate) fn inner(&self) -> &Arc<StoreInner> {
+        &self.inner
     }
 
     pub fn limits(&self) -> StorageLimits {
@@ -586,7 +590,10 @@ fn reject_symlink_if_present(path: &Path, operation: &'static str) -> Result<(),
     }
 }
 
-fn create_exact_directory(path: &Path, operation: &'static str) -> Result<(), StorageError> {
+pub(crate) fn create_exact_directory(
+    path: &Path,
+    operation: &'static str,
+) -> Result<(), StorageError> {
     fs::create_dir(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
             StorageError::InvalidConfiguration("managed snapshot directory already exists")
@@ -596,27 +603,27 @@ fn create_exact_directory(path: &Path, operation: &'static str) -> Result<(), St
     })
 }
 
-fn staging_root(inner: &StoreInner) -> PathBuf {
+pub(crate) fn staging_root(inner: &StoreInner) -> PathBuf {
     inner.root.join("staging")
 }
 
-fn partitions_root(inner: &StoreInner) -> PathBuf {
+pub(crate) fn partitions_root(inner: &StoreInner) -> PathBuf {
     inner.root.join("partitions")
 }
 
-fn staging_snapshot_dir(inner: &StoreInner, snapshot_id: Uuid) -> PathBuf {
+pub(crate) fn staging_snapshot_dir(inner: &StoreInner, snapshot_id: Uuid) -> PathBuf {
     staging_root(inner).join(snapshot_id.to_string())
 }
 
-fn final_snapshot_dir(inner: &StoreInner, snapshot_id: Uuid) -> PathBuf {
+pub(crate) fn final_snapshot_dir(inner: &StoreInner, snapshot_id: Uuid) -> PathBuf {
     partitions_root(inner).join(snapshot_id.to_string())
 }
 
-fn staged_partition_path(directory: &Path, sequence: u32) -> PathBuf {
+pub(crate) fn staged_partition_path(directory: &Path, sequence: u32) -> PathBuf {
     directory.join(format!("{sequence:010}.parquet"))
 }
 
-fn final_partition_path(
+pub(crate) fn final_partition_path(
     inner: &StoreInner,
     snapshot_id: Uuid,
     partition: &SnapshotPartition,
@@ -628,7 +635,7 @@ fn final_partition_path(
     ))
 }
 
-fn open_connection(inner: &StoreInner) -> Result<Connection, StorageError> {
+pub(crate) fn open_connection(inner: &StoreInner) -> Result<Connection, StorageError> {
     let database_path = inner.root.join("metadata.sqlite3");
     reject_symlink_if_present(&database_path, "inspect metadata database")?;
     let connection = Connection::open(&database_path)
@@ -651,8 +658,12 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| StorageError::database("read storage schema version"))?;
     match version {
-        0 => migrate_to_version_one(connection),
-        1 => Ok(()),
+        0 => {
+            migrate_to_version_one(connection)?;
+            migrate_to_version_two(connection)
+        }
+        1 => migrate_to_version_two(connection),
+        2 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
 }
@@ -708,7 +719,68 @@ fn migrate_to_version_one(connection: &mut Connection) -> Result<(), StorageErro
         .map_err(|_| StorageError::database("commit storage migration"))
 }
 
-fn acquire_activity(
+fn migrate_to_version_two(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version two"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE verification_bundles (
+                 bundle_id TEXT PRIMARY KEY NOT NULL,
+                 run_id TEXT NOT NULL UNIQUE,
+                 bundle_artifact_id TEXT NOT NULL UNIQUE,
+                 accepted_snapshot_id TEXT NOT NULL UNIQUE,
+                 validation_report_artifact_id TEXT NOT NULL UNIQUE,
+                 rejected_rows_artifact_id TEXT UNIQUE,
+                 deduplication_report_artifact_id TEXT NOT NULL UNIQUE,
+                 provenance_json TEXT NOT NULL,
+                 created_at_utc TEXT NOT NULL,
+                 started_at_utc TEXT NOT NULL,
+                 committed_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE artifacts (
+                 artifact_id TEXT PRIMARY KEY NOT NULL,
+                 bundle_id TEXT NOT NULL REFERENCES verification_bundles(bundle_id) ON DELETE CASCADE,
+                 kind INTEGER NOT NULL,
+                 version INTEGER NOT NULL CHECK (version = 1),
+                 manifest_digest TEXT NOT NULL CHECK (length(manifest_digest) = 64),
+                 provenance_json TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE artifact_sections (
+                 artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
+                 section_id INTEGER NOT NULL,
+                 schema_json TEXT NOT NULL,
+                 schema_fingerprint TEXT NOT NULL CHECK (length(schema_fingerprint) = 64),
+                 row_count INTEGER NOT NULL CHECK (row_count >= 0),
+                 stored_byte_count INTEGER NOT NULL CHECK (stored_byte_count >= 0),
+                 partition_count INTEGER NOT NULL CHECK (partition_count >= 0),
+                 section_digest TEXT NOT NULL CHECK (length(section_digest) = 64),
+                 PRIMARY KEY (artifact_id, section_id)
+             ) STRICT;
+
+             CREATE TABLE artifact_partitions (
+                 artifact_id TEXT NOT NULL,
+                 section_id INTEGER NOT NULL,
+                 sequence INTEGER NOT NULL CHECK (sequence >= 0),
+                 row_count INTEGER NOT NULL CHECK (row_count > 0),
+                 stored_byte_count INTEGER NOT NULL CHECK (stored_byte_count > 0),
+                 sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+                 PRIMARY KEY (artifact_id, section_id, sequence),
+                 FOREIGN KEY (artifact_id, section_id)
+                     REFERENCES artifact_sections(artifact_id, section_id) ON DELETE CASCADE
+             ) STRICT;
+
+             PRAGMA user_version = 2;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version two"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version two"))
+}
+
+pub(crate) fn acquire_activity(
     inner: &Arc<StoreInner>,
     kind: ActivityKind,
 ) -> Result<ActivityGuard, StorageError> {
@@ -757,7 +829,7 @@ fn acquire_maintenance(inner: &Arc<StoreInner>) -> Result<MaintenanceGuard, Stor
     })
 }
 
-fn insert_publication(
+pub(crate) fn insert_publication(
     inner: &StoreInner,
     snapshot_id: Uuid,
     started_at: &DateTime<Utc>,
@@ -794,7 +866,7 @@ fn insert_publication(
         .map_err(|_| StorageError::database("commit publication journal"))
 }
 
-fn write_partition(
+pub(crate) fn write_partition(
     staging_dir: &Path,
     sequence: u32,
     envelope: &BatchEnvelope,
@@ -841,7 +913,7 @@ fn remove_staged_partition(staging_dir: &Path, sequence: u32) {
     }
 }
 
-fn install_partitions(
+pub(crate) fn install_partitions(
     inner: &StoreInner,
     snapshot_id: Uuid,
     manifest: &SnapshotManifest,
@@ -860,7 +932,7 @@ fn install_partitions(
     sync_directory(&partitions_root(inner))
 }
 
-fn create_final_snapshot_directory(
+pub(crate) fn create_final_snapshot_directory(
     inner: &StoreInner,
     snapshot_id: Uuid,
 ) -> Result<(), StorageError> {
@@ -872,7 +944,7 @@ fn create_final_snapshot_directory(
 }
 
 #[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), StorageError> {
+pub(crate) fn sync_directory(path: &Path) -> Result<(), StorageError> {
     let directory = File::open(path)
         .map_err(|error| StorageError::io("open directory for synchronization", &error))?;
     directory
@@ -881,11 +953,25 @@ fn sync_directory(path: &Path) -> Result<(), StorageError> {
 }
 
 #[cfg(not(unix))]
-fn sync_directory(_path: &Path) -> Result<(), StorageError> {
+pub(crate) fn sync_directory(_path: &Path) -> Result<(), StorageError> {
     Ok(())
 }
 
 fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<(), StorageError> {
+    let mut connection = open_connection(inner)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin manifest transaction"))?;
+    insert_snapshot_rows(&transaction, manifest)?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit visible snapshot manifest"))
+}
+
+pub(crate) fn insert_snapshot_rows(
+    transaction: &Transaction<'_>,
+    manifest: &SnapshotManifest,
+) -> Result<(), StorageError> {
     let snapshot = manifest.snapshot();
     let schema_json = serde_json::to_string(snapshot.schema())
         .map_err(|_| StorageError::Serialization("encode logical schema"))?;
@@ -897,10 +983,6 @@ fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<()
     let partition_count = i64::from(stats.partition_count());
     let quality_score = snapshot.quality_score().map(i64::from);
 
-    let mut connection = open_connection(inner)?;
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| StorageError::database("begin manifest transaction"))?;
     let journal_exists: bool = transaction
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?1)",
@@ -966,9 +1048,7 @@ fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<()
             "publication journal completion count is invalid",
         ));
     }
-    transaction
-        .commit()
-        .map_err(|_| StorageError::database("commit visible snapshot manifest"))
+    Ok(())
 }
 
 struct RawSnapshotRow {
@@ -986,7 +1066,7 @@ struct RawSnapshotRow {
     created_at: String,
 }
 
-fn load_manifest_inner(
+pub(crate) fn load_manifest_inner(
     inner: &StoreInner,
     snapshot_id: Uuid,
 ) -> Result<SnapshotManifest, StorageError> {
@@ -1408,7 +1488,7 @@ fn delete_publication(inner: &StoreInner, snapshot_id: Uuid) -> Result<(), Stora
         .map_err(|_| StorageError::database("delete publication journal"))
 }
 
-fn abort_publication(inner: &StoreInner, snapshot_id: Uuid) {
+pub(crate) fn abort_publication(inner: &StoreInner, snapshot_id: Uuid) {
     let Ok(connection) = open_connection(inner) else {
         return;
     };
@@ -1419,19 +1499,19 @@ fn abort_publication(inner: &StoreInner, snapshot_id: Uuid) {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RemovalOutcome {
+pub(crate) enum RemovalOutcome {
     Removed,
     Missing,
     Ignored,
 }
 
 #[derive(Clone, Copy)]
-enum SymlinkPolicy {
+pub(crate) enum SymlinkPolicy {
     Reject,
     Ignore,
 }
 
-fn remove_uuid_directory(
+pub(crate) fn remove_uuid_directory(
     parent: &Path,
     snapshot_id: Uuid,
     symlink_policy: SymlinkPolicy,
@@ -1479,21 +1559,24 @@ fn cutoff_timestamp(
     Ok(format_timestamp(&cutoff))
 }
 
-fn format_timestamp(timestamp: &DateTime<Utc>) -> String {
+pub(crate) fn format_timestamp(timestamp: &DateTime<Utc>) -> String {
     timestamp.to_rfc3339_opts(SecondsFormat::Nanos, true)
 }
 
-fn parse_timestamp(value: &str, operation: &'static str) -> Result<DateTime<Utc>, StorageError> {
+pub(crate) fn parse_timestamp(
+    value: &str,
+    operation: &'static str,
+) -> Result<DateTime<Utc>, StorageError> {
     DateTime::parse_from_rfc3339(value)
         .map(|timestamp| timestamp.with_timezone(&Utc))
         .map_err(|_| StorageError::InvalidManifest(operation))
 }
 
-fn parse_uuid(value: &str, operation: &'static str) -> Result<Uuid, StorageError> {
+pub(crate) fn parse_uuid(value: &str, operation: &'static str) -> Result<Uuid, StorageError> {
     Uuid::parse_str(value).map_err(|_| StorageError::InvalidManifest(operation))
 }
 
-fn checked_i64(value: u64, operation: &'static str) -> Result<i64, StorageError> {
+pub(crate) fn checked_i64(value: u64, operation: &'static str) -> Result<i64, StorageError> {
     i64::try_from(value).map_err(|_| StorageError::ArithmeticOverflow(operation))
 }
 
@@ -1620,25 +1703,25 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
 
         let future = TempDir::new().expect("future temp directory");
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 2;")
+            .execute_batch("PRAGMA user_version = 3;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(2))
+            Err(StorageError::UnsupportedStorageVersion(3))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     #[test]

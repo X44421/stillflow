@@ -2,8 +2,10 @@
 
 #![deny(unsafe_code)]
 
+mod canonical;
 mod engine;
 mod error;
+mod export;
 #[allow(unsafe_code)]
 mod ffi;
 mod lower;
@@ -11,15 +13,17 @@ mod memory;
 mod predict;
 mod preflight;
 mod remainder;
+mod report;
 mod types;
 mod typing;
+mod verification;
 
 use std::collections::BTreeSet;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use stillflow_core::{
-    LogicalSchema, RequestContext, SourceAsset, SourceConnection, MAX_BATCH_BYTES,
+    LogicalInputRef, LogicalSchema, RequestContext, SourceAsset, SourceConnection, MAX_BATCH_BYTES,
 };
 use stillflow_plan::LogicalPlan;
 use stillflow_storage::SnapshotStore;
@@ -27,6 +31,7 @@ use uuid::Uuid;
 
 pub use engine::ExecutionEngine;
 pub use error::EngineError;
+pub use export::export_snapshot_to_csv;
 pub use preflight::PreparedPlan;
 
 pub const ENGINE_CONTRACT_VERSION: u16 = 1;
@@ -49,6 +54,14 @@ pub const MAX_FLOAT_UTF8_BYTES: usize = 32;
 pub const UTF8_VIEW_SLOT_BYTES: usize = 16;
 pub const UTF8_OFFSET_SLOT_BYTES: usize = 4;
 
+/// Experimental Issue #54 probe. Not an approved public contract.
+pub const VERIFICATION_CONTRACT_VERSION: u16 = 1;
+pub const MAX_DEDUP_KEY_COLUMNS: usize = 64;
+pub const MAX_DEDUP_KEY_BYTES: usize = 64 * 1024;
+pub const MAX_VALIDATION_FINDINGS_PER_ROW: usize = MAX_RULES_PER_NODE;
+pub const MAX_VALIDATION_MESSAGE_BYTES: usize = 1024;
+pub const REPORT_PACK_ROWS: usize = 1024;
+
 pub struct ExecutionIdentities {
     pub snapshot_id: Uuid,
     pub dataset_id: Uuid,
@@ -65,6 +78,40 @@ pub struct ExecutionRequest<'a> {
     pub asset: SourceAsset,
     pub schema_override: Option<LogicalSchema>,
     pub identities: ExecutionIdentities,
+    pub context: RequestContext,
+    pub batch_size: usize,
+    pub store: &'a SnapshotStore,
+}
+
+/// Experimental identities for `materialize_verification`. Do not merge as a
+/// stable public API; Issue #57 must freeze these fields first.
+#[derive(Clone)]
+pub struct VerificationIdentities {
+    pub run_id: Uuid,
+    pub bundle_id: Uuid,
+    pub bundle_artifact_id: Uuid,
+    pub snapshot_id: Uuid,
+    pub dataset_id: Uuid,
+    pub validation_report_artifact_id: Uuid,
+    pub rejected_rows_artifact_id: Option<Uuid>,
+    pub deduplication_report_artifact_id: Uuid,
+    pub session_id: Uuid,
+    pub logical_input: LogicalInputRef,
+    pub canonical_plan_digest: [u8; 32],
+    pub created_at: DateTime<Utc>,
+    pub started_at: DateTime<Utc>,
+    pub committed_at: DateTime<Utc>,
+    pub lineage: BTreeSet<Uuid>,
+    pub quality_score: Option<u8>,
+}
+
+/// Experimental verification request. Same ownership as `ExecutionRequest`.
+pub struct VerificationRequest<'a> {
+    pub plan: LogicalPlan,
+    pub connection: SourceConnection,
+    pub asset: SourceAsset,
+    pub schema_override: Option<LogicalSchema>,
+    pub identities: VerificationIdentities,
     pub context: RequestContext,
     pub batch_size: usize,
     pub store: &'a SnapshotStore,
@@ -209,4 +256,13 @@ mod test_alloc {
 static TEST_ALLOC: test_alloc::PhasedAlloc = test_alloc::PhasedAlloc;
 
 #[cfg(test)]
+pub(crate) fn exclusive_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    &LOCK
+}
+
+#[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod e4_smoke;

@@ -187,8 +187,7 @@ fn long_context() -> stillflow_core::RequestContext {
 }
 
 fn exclusive_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    &LOCK
+    crate::exclusive_test_lock()
 }
 
 fn utf8_schema() -> (LogicalSchema, ColumnId) {
@@ -2121,6 +2120,7 @@ fn t43_utf8_byte_cap_uses_offset_overhead() {
         .expect("batch");
     let predicted = PredictedSchema::from_scan_output(&schema);
     let steps = vec![crate::preflight::CompiledStep::Rules {
+        node_id: PlanNodeId::from_uuid(Uuid::from_u128(4)),
         rules: vec![Rule::DeriveColumn {
             id: column(2),
             name: "derived".to_owned(),
@@ -2233,6 +2233,7 @@ fn t46_near_64mib_export_transition_respects_bounds() {
         .expect("batch");
     let predicted = PredictedSchema::from_scan_output(&schema);
     let steps = vec![crate::preflight::CompiledStep::Rules {
+        node_id: PlanNodeId::from_uuid(Uuid::from_u128(4)),
         rules: vec![Rule::DeriveColumn {
             id: column(2),
             name: "wide".to_owned(),
@@ -2556,6 +2557,7 @@ fn t52_float_to_utf8_prediction_bound() {
         .expect("batch");
     let predicted = PredictedSchema::from_scan_output(&schema);
     let steps = vec![crate::preflight::CompiledStep::Rules {
+        node_id: PlanNodeId::from_uuid(Uuid::from_u128(4)),
         rules: vec![Rule::Cast {
             column: id,
             data_type: LogicalType::Utf8,
@@ -2569,6 +2571,7 @@ fn t52_float_to_utf8_prediction_bound() {
 
     // Also test nested expression cast: Expr::Cast(Float -> Utf8)
     let nested_steps = vec![crate::preflight::CompiledStep::Rules {
+        node_id: PlanNodeId::from_uuid(Uuid::from_u128(4)),
         rules: vec![Rule::DeriveColumn {
             id: column(2),
             name: "str_val".to_owned(),

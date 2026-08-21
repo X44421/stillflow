@@ -35,7 +35,7 @@ pub(crate) fn transform(
                     .collect()
                     .map_err(|_| EngineError::TypeError("filter evaluation failed"))?;
             }
-            CompiledStep::Rules { rules } => {
+            CompiledStep::Rules { rules, .. } => {
                 for rule in rules {
                     frame = apply_rule(frame, &mut schema, &mut deferred, rule)?;
                 }
@@ -45,7 +45,7 @@ pub(crate) fn transform(
     Ok((frame, deferred))
 }
 
-fn apply_rule(
+pub(crate) fn apply_rule(
     frame: DataFrame,
     schema: &mut LogicalSchema,
     deferred: &mut Vec<(String, ScalarValue)>,
@@ -372,4 +372,52 @@ fn literal_scalar(value: &ScalarValue) -> Result<polars::prelude::Scalar, Engine
         ScalarValue::Float64(value) => Scalar::from(value.get()),
         ScalarValue::Utf8(value) => Scalar::from(polars::prelude::PlSmallStr::from(value.as_str())),
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PredicateOutcome {
+    True,
+    False,
+    Null,
+}
+
+pub(crate) fn predicate_outcomes(
+    frame: &DataFrame,
+    predicate: &Expr,
+    schema: &LogicalSchema,
+) -> Result<Vec<PredicateOutcome>, EngineError> {
+    use polars::prelude::AnyValue;
+    let expr = lower_expr(predicate, schema)?;
+    let evaluated = frame
+        .clone()
+        .lazy()
+        .select([expr.alias("__stillflow_e4_pred")])
+        .collect()
+        .map_err(|_| EngineError::TypeError("validate predicate evaluation failed"))?;
+    let column = evaluated
+        .column("__stillflow_e4_pred")
+        .map_err(|_| EngineError::Internal("validate predicate column missing"))?;
+    let mut out = Vec::with_capacity(frame.height());
+    for row in 0..frame.height() {
+        match column
+            .get(row)
+            .map_err(|_| EngineError::Internal("validate predicate row"))?
+        {
+            AnyValue::Boolean(true) => out.push(PredicateOutcome::True),
+            AnyValue::Boolean(false) => out.push(PredicateOutcome::False),
+            AnyValue::Null => out.push(PredicateOutcome::Null),
+            _ => {
+                return Err(EngineError::TypeError("validate predicate was not boolean"));
+            }
+        }
+    }
+    Ok(out)
+}
+
+pub(crate) fn filter_rows(frame: DataFrame, keep: &[bool]) -> Result<DataFrame, EngineError> {
+    use polars::prelude::{BooleanChunked, NewChunkedArray};
+    let mask = BooleanChunked::from_iter_values("keep".into(), keep.iter().copied());
+    frame
+        .filter(&mask)
+        .map_err(|_| EngineError::Internal("row filter failed"))
 }

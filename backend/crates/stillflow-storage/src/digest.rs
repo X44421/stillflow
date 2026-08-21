@@ -13,6 +13,10 @@ pub const DIGEST_BUFFER_BYTES: usize = 64 * 1024;
 pub struct ContentDigest([u8; 32]);
 
 impl ContentDigest {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
@@ -59,6 +63,12 @@ impl<'de> Deserialize<'de> for ContentDigest {
         let value = String::deserialize(deserializer)?;
         Self::try_from_hex(&value).map_err(DeError::custom)
     }
+}
+
+pub(crate) fn digest_bytes(bytes: &[u8]) -> ContentDigest {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    ContentDigest(hasher.finalize().into())
 }
 
 pub(crate) fn digest_file(file: &mut File) -> Result<ContentDigest, StorageError> {

@@ -110,7 +110,7 @@ pub(crate) fn predict(
     peak = peak.max(live_before);
     for step in steps {
         match step {
-            crate::preflight::CompiledStep::Rules { rules } => {
+            crate::preflight::CompiledStep::Rules { rules, .. } => {
                 for rule in rules {
                     let (temporary, live_after, next) =
                         predict_rule(k, offset, arrays, &working, live_before, rule)?;
@@ -244,7 +244,7 @@ fn predict_step(
         crate::preflight::CompiledStep::Filter { .. } => {
             Ok((live_before, live_before, working.clone()))
         }
-        crate::preflight::CompiledStep::Rules { rules } => {
+        crate::preflight::CompiledStep::Rules { rules, .. } => {
             let _ = rules;
             Err(EngineError::Internal(
                 "apply-rules must be expanded per rule in predict",
@@ -420,15 +420,9 @@ fn predict_rule(
             let live_after = column_physical_sum(&next, arrays, offset, k)?;
             Ok((temporary, live_after, next))
         }
-        Rule::FilterRows { .. } => Ok((live_before, live_before, next)),
-        Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
-            node: uuid::Uuid::nil(),
-            kind: "validate",
-        }),
-        Rule::Deduplicate { .. } => Err(EngineError::UnsupportedRule {
-            node: uuid::Uuid::nil(),
-            kind: "deduplicate",
-        }),
+        Rule::FilterRows { .. } | Rule::Validate { .. } | Rule::Deduplicate { .. } => {
+            Ok((live_before, live_before, next))
+        }
     }
 }
 

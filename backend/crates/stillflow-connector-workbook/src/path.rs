@@ -574,6 +574,7 @@ pub(crate) fn root_label(index: usize) -> String {
     format!("root-{index}")
 }
 
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn file_identity(metadata: &Metadata, root: &str, relative: &str) -> FileIdentity {
     #[cfg(unix)]
     {

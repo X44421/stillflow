@@ -35,6 +35,10 @@ uuid.workspace = true
 
 [dev-dependencies]
 parquet.workspace = true
+sha2.workspace = true
+stillflow-engine.workspace = true
+stillflow-plan.workspace = true
+stillflow-storage.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

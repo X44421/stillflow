@@ -1,5 +1,6 @@
 //! Core ingestion domain types.
 
+mod artifact;
 mod asset;
 mod checkpoint;
 mod connection;
@@ -11,6 +12,10 @@ mod session;
 mod snapshot;
 mod workbook;
 
+pub use artifact::{
+    digest_hex, ArtifactKind, ArtifactProvenance, ArtifactProvenanceDraft, ArtifactProvenanceInput,
+    ArtifactSummary, InputRef, LogicalInputRef, RuleRef, SourceRowRef,
+};
 pub use asset::{AssetKind, AssetLocator, SourceAsset};
 pub use checkpoint::Checkpoint;
 pub use connection::{ConnectionStatus, CredentialRef, SourceConnection};

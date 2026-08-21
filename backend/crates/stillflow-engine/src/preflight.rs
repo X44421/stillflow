@@ -3,22 +3,35 @@ use std::time::Duration;
 
 use stillflow_connectors::{Capability, ConnectorRegistry};
 use stillflow_core::{
-    ColumnId, ConnectorKind, Expr, InspectRequest, LogicalField, LogicalSchema, LogicalType,
-    RequestContext, ScalarValue, SourceAsset, SourceConnection,
+    ensure_no_secret_fields, ColumnId, ConnectorKind, Expr, InspectRequest, LogicalField,
+    LogicalSchema, LogicalType, RequestContext, ScalarValue, SourceAsset, SourceConnection,
 };
 use stillflow_plan::{CastFailurePolicy, LogicalPlan, PlanNodeId, PlanNodeKind, Rule};
 
 use crate::error::{deadline_too_long, map_context_error, EngineError};
 use crate::{
-    ENGINE_MAX_DEADLINE, MAX_COMPILED_PLAN_BYTES, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_PLAN_NODES,
-    MAX_RULES_PER_NODE,
+    ENGINE_MAX_DEADLINE, MAX_COMPILED_PLAN_BYTES, MAX_DEDUP_KEY_COLUMNS, MAX_EXPR_DEPTH,
+    MAX_EXPR_NODES, MAX_PLAN_NODES, MAX_RULES_PER_NODE, MAX_VALIDATION_MESSAGE_BYTES,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreflightMode {
+    Materialize,
+    Verification,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum CompiledStep {
-    Project { columns: Vec<ColumnId> },
-    Filter { predicate: Expr },
-    Rules { rules: Vec<Rule> },
+    Project {
+        columns: Vec<ColumnId>,
+    },
+    Filter {
+        predicate: Expr,
+    },
+    Rules {
+        node_id: PlanNodeId,
+        rules: Vec<Rule>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +42,7 @@ pub struct PreparedPlan {
     pub(crate) scan_output: LogicalSchema,
     pub(crate) materialize_schema: LogicalSchema,
     pub(crate) steps: Vec<CompiledStep>,
+    pub(crate) scan_step_count: usize,
     #[allow(dead_code)]
     pub(crate) materialize_id: PlanNodeId,
 }
@@ -40,6 +54,7 @@ pub(crate) async fn preflight(
     asset: &SourceAsset,
     schema_override: Option<&LogicalSchema>,
     context: &RequestContext,
+    mode: PreflightMode,
 ) -> Result<PreparedPlan, EngineError> {
     context.ensure_active().map_err(map_context_error)?;
     if context
@@ -112,6 +127,7 @@ pub(crate) async fn preflight(
     if let Some(predicate) = scan_predicate {
         steps.push(CompiledStep::Filter { predicate });
     }
+    let scan_step_count = steps.len();
 
     for (node_id, node) in linear.iter().skip(1).take(linear.len().saturating_sub(2)) {
         match &node.kind {
@@ -129,13 +145,13 @@ pub(crate) async fn preflight(
                 }
                 for rule in rules {
                     match rule {
-                        Rule::Validate { .. } => {
+                        Rule::Validate { .. } if mode == PreflightMode::Materialize => {
                             return Err(EngineError::UnsupportedRule {
                                 node: node_id.as_uuid(),
                                 kind: "validate",
                             });
                         }
-                        Rule::Deduplicate { .. } => {
+                        Rule::Deduplicate { .. } if mode == PreflightMode::Materialize => {
                             return Err(EngineError::UnsupportedRule {
                                 node: node_id.as_uuid(),
                                 kind: "deduplicate",
@@ -145,6 +161,7 @@ pub(crate) async fn preflight(
                     }
                 }
                 steps.push(CompiledStep::Rules {
+                    node_id: *node_id,
                     rules: rules.clone(),
                 });
             }
@@ -184,6 +201,7 @@ pub(crate) async fn preflight(
         scan_output,
         materialize_schema,
         steps,
+        scan_step_count,
         materialize_id,
     })
 }
@@ -455,7 +473,7 @@ fn propagate_schema(
             CompiledStep::Filter { predicate } => {
                 crate::typing::require_boolean(predicate, &schema)?;
             }
-            CompiledStep::Rules { rules } => {
+            CompiledStep::Rules { rules, .. } => {
                 for rule in rules {
                     schema = apply_rule_schema(schema, rule)?;
                 }
@@ -608,14 +626,53 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
             crate::typing::require_boolean(predicate, &schema)?;
             Ok(schema)
         }
-        Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
-            node: uuid::Uuid::nil(),
-            kind: "validate",
-        }),
-        Rule::Deduplicate { .. } => Err(EngineError::UnsupportedRule {
-            node: uuid::Uuid::nil(),
-            kind: "deduplicate",
-        }),
+        Rule::Validate {
+            predicate, message, ..
+        } => {
+            crate::typing::require_boolean(predicate, &schema)?;
+            let trimmed = message.trim();
+            if trimmed.is_empty() {
+                return Err(EngineError::InvalidPlan(
+                    "validation message must not be empty",
+                ));
+            }
+            if trimmed.len() > MAX_VALIDATION_MESSAGE_BYTES {
+                return Err(EngineError::BoundExceeded(
+                    "validation message exceeds MAX_VALIDATION_MESSAGE_BYTES",
+                ));
+            }
+            ensure_no_secret_fields(&serde_json::Value::String(message.clone()))
+                .map_err(|_| EngineError::InvalidPlan("validation message is not secret-safe"))?;
+            Expr::Literal(ScalarValue::Utf8(message.clone()))
+                .validate_shape()
+                .map_err(|_| {
+                    EngineError::InvalidPlan("validation message failed shape validation")
+                })?;
+            Ok(schema)
+        }
+        Rule::Deduplicate { keys } => {
+            if keys.len() > MAX_DEDUP_KEY_COLUMNS {
+                return Err(EngineError::BoundExceeded(
+                    "dedup key count exceeds MAX_DEDUP_KEY_COLUMNS",
+                ));
+            }
+            for key in keys {
+                let field = schema.field(*key).ok_or(EngineError::UnknownColumn(*key))?;
+                crate::typing::reject_paused_type(&field.data_type)?;
+                if matches!(
+                    field.data_type,
+                    LogicalType::Timestamp {
+                        unit: stillflow_core::TimeUnit::Second,
+                        ..
+                    }
+                ) {
+                    return Err(EngineError::TypeError(
+                        "timestamp second unit is paused for dedup keys",
+                    ));
+                }
+            }
+            Ok(schema)
+        }
     }
 }
 

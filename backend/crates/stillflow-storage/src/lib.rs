@@ -3,11 +3,20 @@
 //! The crate owns local persistence adapters only. Stable logical identities and
 //! schemas remain in `stillflow-core`.
 
+mod bundle;
+mod dedup;
 mod digest;
 mod error;
 mod manifest;
 mod store;
 
+pub use bundle::{
+    AcceptedSnapshotArtifact, ArtifactBatchReader, ArtifactManifest, ArtifactPartition,
+    ArtifactSection, ArtifactSectionId, ArtifactSectionStats, DeduplicationReportArtifact,
+    RejectedRowsArtifact, ValidationReportArtifact, VerificationBundle, VerificationBundleDraft,
+    VerificationBundleMembership, VerificationBundleWriter, ARTIFACT_MANIFEST_VERSION,
+};
+pub use dedup::{DedupIndex, DedupInsert, MAX_DEDUP_INDEX_CACHE_BYTES, MAX_DEDUP_INDEX_PAGES};
 pub use digest::{ContentDigest, DIGEST_BUFFER_BYTES};
 pub use error::{IntegrityFailure, StorageError};
 pub use manifest::{
