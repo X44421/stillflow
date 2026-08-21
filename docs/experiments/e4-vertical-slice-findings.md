@@ -1,9 +1,15 @@
 # E4 experimental vertical slice findings
 
-Status: experimental probe only. **Do not merge this branch. Do not
+Status: frozen experimental probe. **Do not merge this branch. Do not
 cherry-pick the implementation wholesale onto `main`.** Do not treat
 `2958548ccc26832ee2978a7ae8744ebc677a42a0` as evidence that Issue #54 /
-PR #57 is satisfied.
+PR #57 is satisfied. These wording nits do not open C0-R5.
+
+Frozen disposition:
+
+> Probe loop holds; the #57 contract remains unapproved; the experiment
+> branch is retained read-only; formal E4 rebuilds from merged `main`
+> after approval.
 
 Feed the design conclusions in this file into PR #57 (E4-C0-R4). Formal E4
 runtime must still start from an approved contract on merged `main`, then
@@ -32,8 +38,8 @@ The loop runs. Crate arrows and the dual entry (`materialize` vs
 seven high-priority defects and is **not** a mergeable E4, **not** a complete
 contract proof, and **not** a reusable storage publication.
 
-Keep this branch as an architecture probe. Revise #57 from the conclusions
-below. Rewrite storage publication in formal E4; do not lift
+This branch is now a read-only architecture probe. Revise #57 from the
+conclusions below. Rewrite storage publication in formal E4; do not lift
 `stillflow-storage` bundle/journal/recovery/digest code from this branch.
 
 ## Probe answers
@@ -93,7 +99,7 @@ Locations: `verification.rs` rule dispatch ~L478–L518; Validate routing
 ### P1-3 — Findings stay in memory for the whole run, with an O(n²) path
 
 `RoutingState` accumulates every validation and duplicate finding in `Vec`.
-`REPORT_PACK_ROWS` / `REPORT_PACK_BYTES` are unused. Each validation insert
+`REPORT_PACK_ROWS` is unused; `REPORT_PACK_BYTES` is absent. Each validation insert
 scans the existing Vec to count findings for the same ordinal (O(n²) when
 many rows fail). The writer then builds one Arrow batch and copies provenance
 strings per row.
@@ -187,8 +193,9 @@ These are shortcuts, not approved exceptions:
    `None` when zero rows were rejected; the caller cannot know
    `terminal_rejection_count` before the run. This membership rule is worth
    keeping; the "always Some in the request" injection is a probe API.
-3. Findings are buffered in `Vec`, not packed at `REPORT_PACK_ROWS` /
-   report-byte remainders (P1-3).
+3. Findings are buffered in `Vec`. `REPORT_PACK_ROWS` is unused;
+   `REPORT_PACK_BYTES` is absent, so there is no report-byte remainder
+   pack (P1-3).
 4. `CanonicalRebatcher` still flushes at `MAX_BATCH_BYTES` / `batch_size`, not
    a 2 MiB report pack.
 5. Unix `0700` / `0600` modes are best-effort; they are no-ops on Windows.
@@ -236,10 +243,12 @@ Not covered, and the gaps matter:
 - MSRV / stable / Clippy / workspace CI as a merge gate
 - Issue #54 V01–V30 mapped onto named test functions
 
-Local checks on the probe host: `cargo fmt`, Clippy, engine tests, and the
-connector CSV test passed. Workspace `cargo test` still fails pre-existing
-Windows-only storage lock / workbook-root tests that this branch did not
-change. GitHub had no CI status on `2958548` at review time.
+Local checks on the probe host were previously run for probe commit
+`2958548`: `cargo fmt`, Clippy, engine tests, and the connector CSV test
+passed. Workspace `cargo test` still fails pre-existing Windows-only storage
+lock / workbook-root tests that this branch did not change. GitHub had no CI
+status on `2958548` at review time. Later findings-only commits, including
+`8698057`, did not re-run those runtime checks.
 
 ## Reuse vs rewrite
 
@@ -287,7 +296,7 @@ Do **not** weaken R4 because the experiment took shortcuts. In particular:
 | FilterRows drops without renumbering; rejected payload is Scan output §5.1.4 / §5.3 | Probe is **wrong**; contract is right | Keep. Add an explicit FilterRows → Validate Error fixture (Scan payload + original ordinal, not a shifted index) |
 | Engine recomputes `version_digest` and rejects mismatch §8.1.1 | Probe skipped it | Keep; do not trust the caller |
 | Fixed report `ColumnId` constants §8.7 | Probe generates colliding IDs | Keep; runtime must copy constants |
-| `REPORT_PACK_*` and six live payloads §12.1 / V29 | Probe unbounded Vec + E2 tracker | Keep; treat an all-run findings `Vec` as a stop condition |
+| `REPORT_PACK_*` and six live payloads §12.1 / V29 | Probe: `REPORT_PACK_ROWS` unused, `REPORT_PACK_BYTES` absent, unbounded Vec + E2 tracker | Keep; treat an all-run findings `Vec` as a stop condition |
 | Journal-before-staging; Installing cleans **bundle** members §10.4 / V30 | Probe reuses snapshot-keyed E2 recover | Keep; E2 `snapshot_id` journal is not enough |
 | Dedup lock-first; leftover files `AlreadyExists`; recovery under maintenance gate §9 / V12 | Probe `create_new` can poison the run forever | Keep; crash leftover must not be a permanent same-run poison without recovery |
 | Canonical digest formulas + reload recomputation §8.1.1 / V25 | Probe hashes UUID / omits children / stub-reloads accepted provenance | Keep. Require persist-or-lossless-derive of accepted provenance; commit == close-store reload |
@@ -296,4 +305,5 @@ Do **not** weaken R4 because the experiment took shortcuts. In particular:
 
 Formal E4 should start from an approved contract on merged `main`, then
 reconstruct only the pieces the contract names. This branch remains a
-read-only probe.
+read-only probe under the frozen disposition above. C0-R5 is not opened
+for the wording nits in this file.
