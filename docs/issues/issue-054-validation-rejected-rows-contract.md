@@ -1,8 +1,9 @@
-# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R4)
+# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R5)
 
 > Status: Frozen for architecture review (not approved)
-> Revision: C0-R4
-> Supersedes: C0-R3 `cf4f0bdd7207c0a961d05e56ac69bf26578b42da` (Request changes)
+> Revision: C0-R5
+> Supersedes: C0-R4 `e9fc94b9b2ebacf4a8501b53a1f8f7b3d23ade52` (Request changes)
+> Also supersedes: C0-R3 `cf4f0bdd7207c0a961d05e56ac69bf26578b42da` (Request changes)
 > Also supersedes: C0-R2 `2a35bced9e2eb8b35a9e4679c8698d15bbb6b941` (Request changes)
 > Also supersedes: C0-R1 `e5b70db4bfdfd9546842c138d50ec815440725fc`
 > Also supersedes: C0 `d33f45610620c03afe253cdc0b4aef7468fa5dd8`
@@ -14,12 +15,17 @@
 > Authorized E4 base: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`
 > Storage facts base: `main@473c65b` (PR #62 merged storage publication/recovery inventory)
 > Branch: `agent/issue-054-validation-rejected-rows-contract`
-> Last updated: 2026-08-18 (R4 after Request changes)
-> Review: PR #57 is Ready with Request changes. C0, C0-R1, and C0-R2 were not
-> approved. R3 closed the previous identity, recovery, digest, resource-scope,
-> and acceptance-executability blockers. R4 closes the remaining report
-> `ColumnId`, canonical digest/encoding, journal-before-staging recovery, and
-> SQLite initialization/memory-limit blockers.
+> Last updated: 2026-08-21 (R5 after Request changes)
+> Review: PR #57 remains under Request-changes review. C0, C0-R1, C0-R2,
+> C0-R3, and C0-R4 were not approved. R4 closed the report `ColumnId`,
+> canonical digest/encoding, journal-before-staging recovery, and SQLite
+> initialization/memory-limit blockers. R5 closes the independent
+> architecture review of R4 head `e9fc94b9b2ebacf4a8501b53a1f8f7b3d23ade52`:
+> the frozen `LogicalType` schema-descriptor encoding (P0), the
+> accepted-snapshot provenance `content_digest` preimage (P0), the
+> deterministic `rejected_rows_artifact_id` input/error protocol (P1), the
+> FilterRows ordinal/payload acceptance item (P1), and six precision or
+> editorial items (P2). No runtime design was added.
 > Architecture approval binds exactly one new commit SHA of this file. E4
 > runtime remains paused until that approval and must then rebuild from the
 > latest accepted `main`.
@@ -118,7 +124,17 @@ E5 job/API work.
 | Crash recovery state machine misses journal-before-staging window | `Prepared` now means the publication journal row is committed before staging; recovery removes that committed row. V30 injects this exact window (sections 10.4 and 16). |
 | SQLite initialization writes lease before `PRAGMA page_size`, and `cache_size=-512` is described as a strict memory cap | R4 sets all PRAGMAs immediately after exclusive creation and before any table/lease row, and clarifies `cache_size` is a soft target, not a hard 512 KiB limit (section 9.1). |
 
-### 3.5 Compatibility decision
+### 3.5 R5 blockers closed by this revision
+
+| R4 blocker (independent architecture review of `e9fc94b9b2ebacf4a8501b53a1f8f7b3d23ade52`) | R5 disposition |
+| --- | --- |
+| `canonical_schema_bytes` cited "`LogicalType` serialization rules already frozen by the E2 contract", but no merged contract or code freezes any such byte encoding, leaving the schema preimage non-executable | R5 freezes the complete schema-descriptor encoding in section 8.1.1: per-field `ColumnId` UUID bytes, schema-level metadata, and a total `logical_type_tag` / `type_payload` table over every `LogicalType` variant including nested `List` / `Struct`. The false E2 attribution is removed; this table is the sole authority. |
+| The accepted-snapshot child had no `content_digest` preimage, so the bundle-provenance formula, V25, and V26 were not executable | R5 defines the committed accepted-snapshot `ArtifactProvenance.content_digest` as exactly `accepted_snapshot_manifest_digest`, and that value fills both the `child_manifest_digest` and `child_content_digest` slots of the bundle preimage (section 8.1.1). |
+| `rejected_rows_artifact_id` had to be `None` exactly at a runtime outcome (`terminal_rejection_count == 0`) although identities are validated before execution | R5 freezes one deterministic input/error protocol: `Some(id)` authorizes the rejected artifact and stays unused without error at zero rejections; `None` declares the run must reject nothing and the first terminal rejection fails `InvalidPlan` before any rejected append (sections 10.5 and 11, V02). |
+| The section 5.1.4 FilterRows no-renumbering law had no acceptance evidence and no fixture could catch ordinal/payload sidecar drift | R5 adds V31: `FilterRows` between the logical Scan output and terminal rules must preserve original ordinals with stable gaps and keep payload and sidecar in agreement; divergence fails the assertions. |
+| Precision items: `canonical_bytes()` owner conflict, section 9.1 list marker, unfrozen persistence encoding of bundle rows, unspecified `MAX_DEDUP_KEY_BYTES` check timing, V13 test-sized page-cap proof, `canonical_batch_bytes` header scope, split acceptance table, stale revision self-reference in section 13 | All corrected in place (sections 6.1, 8.1, 8.1.1, 9.1, 13, 16); no runtime design was added. |
+
+### 3.6 Compatibility decision
 
 - Existing `ExecutionRequest`, `ExecutionIdentities`, `ExecutionEngine`,
   `PreviewRequest`, `PreviewResult`, `BatchEnvelope`, `LogicalSchema`,
@@ -265,7 +281,10 @@ finding, no rejected payload, and no duplicate finding.
   canonical key bytes and rejects an encoded length greater than
   `MAX_DEDUP_KEY_BYTES` with `EngineError::BoundExceeded`. This runtime check
   applies to fixed-width and variable-width keys alike and occurs before any
-  SQLite write.
+  SQLite write. The encoder maintains a running byte counter and aborts
+  before extending an allocation past the cap; the complete encoded length is
+  re-checked immediately before the SQLite insert. V20 exercises the
+  running-length abort.
 - Violations map to `UnknownColumn`, `TypeError`, or `BoundExceeded` as in
   section 10.8.
 - Deduplicate does not change the working schema, row values, or row order.
@@ -502,7 +521,7 @@ pub struct ArtifactProvenance {
 | `lineage` | Caller-injected `BTreeSet<Uuid>`; nil ids rejected. |
 | `created_at` / `started_at` / `committed_at` | Caller-injected in `ArtifactProvenanceInput`; engine must not call `Utc::now`. Ordering checked as `created_at <= started_at <= committed_at`. |
 | `summary` | Not in the draft. The writer computes it from actual written rows/partitions/findings. |
-| `content_digest` | Not in the draft. The writer computes the exact SHA-256 formula in section 8.1.1 over the canonical manifest, ordered section digests, and provenance identity fields. |
+| `content_digest` | Not in the draft. The writer computes the exact SHA-256 formulas in section 8.1.1: report and rejected artifacts use the manifest/section-digest preimage; the accepted snapshot uses `accepted_snapshot_manifest_digest`; the bundle uses the bundle-provenance preimage. |
 
 The bundle-level provenance uses `ArtifactKind::VerificationBundle` and the
 caller-injected `bundle_artifact_id`, which is distinct from `bundle_id`,
@@ -602,36 +621,71 @@ rejects trailing or missing bytes.
 
 `canonical_schema_bytes` is the frozen byte encoding of a `LogicalSchema`
 that the E4 runtime must expose as `LogicalSchema::canonical_bytes()` on
-`stillflow-plan` (or an equivalent core-owned helper). The encoding is:
+`stillflow-core` (section 7.1). The encoding is total over every
+`LogicalType` variant and is:
 
 ```text
-u16(logical_schema_version)
+u16(logical_schema_version)                     // LOGICAL_SCHEMA_VERSION = 1
 || u32(field_count)
 || repeated(
      u32(field_name_len) || utf8(field_name)
-     || u8(nullable)
-     || u8(logical_type_tag)
-     || type_payload
-     || u32(metadata_len) || repeated(u32(key_len) || utf8(key)
-                                      || u32(value_len) || utf8(value))
+     || uuid(field_id)                          // ColumnId via Uuid::as_bytes()
+     || u8(nullable)                            // 0x00 false, 0x01 true
+     || type_encoding
+     || u32(field_metadata_count)
+        || repeated(u32(key_len) || utf8(key) || u32(value_len) || utf8(value))
    )
+|| u32(schema_metadata_count)
+|| repeated(u32(key_len) || utf8(key) || u32(value_len) || utf8(value))
 ```
 
-`logical_type_tag` and `type_payload` use the existing
-`stillflow-core::LogicalType` serialization rules already frozen by the E2
-contract; `metadata` is sorted by UTF-8 key bytes and must not contain secret
-field names or values. The digest inputs never include display names that are
-not part of the logical schema, allocator addresses, or filesystem paths.
+`type_encoding` is `u8(logical_type_tag) || type_payload` with the frozen
+descriptor tags below. These tags are their own namespace for type
+descriptors; they deliberately mirror the value tags of section 6.4, but
+their payloads describe the type and never a value. Fixed-width scalar
+descriptors have an empty payload:
 
-`canonical_batch_bytes` is the Arrow 59 IPC record-batch message body for the
-batch produced by the versioned E2 `BatchEnvelopeFactory`, with:
+| Tag | `LogicalType` | `type_payload` |
+| --- | --- | --- |
+| `0x00` | `Null` | empty |
+| `0x01` | `Boolean` | empty |
+| `0x02` | `Int8` | empty |
+| `0x03` | `Int16` | empty |
+| `0x04` | `Int32` | empty |
+| `0x05` | `Int64` | empty |
+| `0x06` | `UInt8` | empty |
+| `0x07` | `UInt16` | empty |
+| `0x08` | `UInt32` | empty |
+| `0x09` | `UInt64` | empty |
+| `0x0A` | `Float32` | empty |
+| `0x0B` | `Float64` | empty |
+| `0x0C` | `Utf8` | empty |
+| `0x0D` | `Binary` | empty |
+| `0x0E` | `Date32` | empty |
+| `0x0F` | `Timestamp { unit, timezone }` | one unit-tag byte (`0=Second`, `1=Millisecond`, `2=Microsecond`, `3=Nanosecond`), then one timezone-presence byte (`0=None`, `1=Some`), then for `Some`: `u32` little-endian UTF-8 byte length followed by the timezone bytes; for `None`: no length and no bytes |
+| `0x10` | `List(element)` | `type_encoding` of the element type |
+| `0x11` | `Struct(fields)` | `u32(field_count)` then `repeated(field_encoding)`, encoding each nested `LogicalField` exactly like a top-level field above |
+
+`metadata` maps (field-level and schema-level) are sorted by UTF-8 key bytes
+and must not contain secret field names or values. Nesting depth and field
+counts stay bounded by the existing `MAX_SCHEMA_NESTING_DEPTH` and
+`MAX_SCHEMA_FIELDS` validation. The digest inputs never include display names
+that are not part of the logical schema, allocator addresses, or filesystem
+paths. No merged contract freezes any other `LogicalType` byte serialization;
+the table above, not a reference to another contract, is the sole authority
+for `canonical_schema_bytes`.
+
+`canonical_batch_bytes` is the complete Arrow 59 IPC record-batch message —
+the Message flatbuffer metadata block plus its body — for the batch produced
+by the versioned E2 `BatchEnvelopeFactory`, with:
 - little-endian Arrow IPC encoding;
 - no compression;
-- `IpcWriteOptions::default()`-equivalent metadata;
+- `IpcWriteOptions::default()`-equivalent metadata and buffer alignment;
 - the canonical schema message represented separately by
   `canonical_schema_bytes`, not repeated inside each batch digest;
-- no transport headers, connection metadata, allocator addresses, or Parquet
-  footer.
+- no stream framing (continuation markers, message-length prefixes, or
+  end-of-stream markers), transport headers, connection metadata, allocator
+  addresses, or Parquet footer.
 Batches are included in their logical sequence order.
 
 `LogicalInputRef.version_digest` is defined as:
@@ -713,6 +767,14 @@ require a new field on the existing `SnapshotManifest`. The E4 runtime may
 additionally store this digest on `SnapshotManifest` for convenience, but the
 formula above is authoritative.
 
+The committed `ArtifactProvenance.content_digest` of the accepted snapshot
+artifact is exactly `accepted_snapshot_manifest_digest`. The accepted
+snapshot has no `ArtifactManifest` and no section digests, so its manifest
+digest is also its provenance content digest; no separate formula exists for
+it. In the bundle-provenance preimage below, the accepted snapshot child
+therefore contributes `accepted_snapshot_manifest_digest` as both its
+`child_manifest_digest` and its `child_content_digest`.
+
 The bundle-level provenance is not a child `ArtifactManifest`. Its
 `content_digest` is
 `SHA-256(bundle-provenance-domain || run_id || bundle_id ||
@@ -722,7 +784,8 @@ deduplication_report_artifact_id || repeated(child_artifact_id ||
 child_manifest_digest || child_content_digest))`. The child sequence is fixed
 as accepted snapshot, validation report, optional rejected rows, then
 deduplication report; the accepted snapshot contribution uses
-`accepted_snapshot_manifest_digest` from the formula above. This separates
+`accepted_snapshot_manifest_digest` from the formula above as both its
+`child_manifest_digest` and its `child_content_digest`. This separates
 the transaction identity `bundle_id` from the bundle provenance artifact
 identity.
 
@@ -798,6 +861,18 @@ rejected artifact is absent.
 and returns `StorageError::NotFound` when cancellation, failure, or an unknown
 run has no committed bundle; it never scans or reconstructs an uncommitted
 staging directory.
+
+Bundle membership, `ArtifactManifest`, `ArtifactSection`,
+`ArtifactPartition`, and committed `ArtifactProvenance` rows are persisted by
+`stillflow-storage` as versioned compact UTF-8 JSON documents with the same
+conventions as the existing storage contracts: `BTreeMap`-ordered maps,
+lowercase hyphenated UUIDs, explicit version field, and no clock, locale,
+random-generator, or hash-map-iteration input. The section 8.1.1 digest
+preimages are computed over the binary encodings defined there and are
+independent of the row persistence encoding. `load_verification_bundle*`
+reconstructs the exact structs, so a close-store/reopen round trip reproduces
+the committed provenance exactly, with no stub or zero digests and no
+regenerated timestamps.
 
 ### 8.2 Artifacts
 
@@ -1081,7 +1156,7 @@ exclusive and never deletes an existing file:
 3. The handle keeps the exclusive OS file lock on
    `dedup_{run_id}.lock` for the lifetime of the index. This lock, not only
    `started_at`, is the active-ownership signal.
-4. 4. Immediately after SQLite opens and before creating any table or lease
+4. Immediately after SQLite opens and before creating any table or lease
    row, the handle sets `PRAGMA page_size = 4096`,
    `PRAGMA max_page_count = MAX_DEDUP_INDEX_PAGES`,
    `PRAGMA cache_size = -512`, and `PRAGMA journal_mode = DELETE`.
@@ -1299,7 +1374,7 @@ fixtures and assert that no partial bundle is ever visible.
 | Accepted snapshot id / dataset id | `identities.snapshot_id` / `identities.dataset_id` |
 | Bundle provenance artifact id | `identities.bundle_artifact_id` |
 | Validation report artifact id | `identities.validation_report_artifact_id` |
-| Rejected rows artifact id | `identities.rejected_rows_artifact_id` (used only if present) |
+| Rejected rows artifact id | `identities.rejected_rows_artifact_id` under the deterministic protocol below |
 | Deduplication report artifact id | `identities.deduplication_report_artifact_id` |
 | `session_id` | `identities.session_id` for accepted snapshot and bundle provenance |
 | `source_asset_id` | bound `SourceAsset.id` |
@@ -1319,9 +1394,24 @@ duplicate artifact ids, and timestamp order violations are rejected before
 `bundle_artifact_id`, `snapshot_id`, `validation_report_artifact_id`,
 `deduplication_report_artifact_id`, and any present
 `rejected_rows_artifact_id` must all be non-nil and pairwise distinct from
-`run_id` and from one another. When `terminal_rejection_count == 0`,
-`rejected_rows_artifact_id` must be `None` and no rejected provenance or
-manifest is constructed.
+`run_id` and from one another.
+
+`rejected_rows_artifact_id` follows one deterministic input/error protocol:
+
+- `Some(id)` authorizes publishing the rejected artifact under that exact id
+  when terminal rejections occur. When `terminal_rejection_count == 0`, no
+  rejected provenance or manifest is constructed, the committed
+  `VerificationBundleMembership.rejected_rows_artifact_id` is `None`, and the
+  supplied id stays unused; that combination is not an error. A supplied
+  `Some(id)` participates in the pairwise-distinctness check before
+  `begin_verification_bundle` regardless of the eventual count.
+- `None` declares that the run must reject nothing. The first terminal
+  rejection fails the run with `EngineError::InvalidPlan` before any rejected
+  writer append; no bundle is published, and normal cleanup removes partial
+  staging exactly as in section 10.3.
+
+Both combinations are decidable at the moment of the triggering event; no
+outcome depends on caller prediction of the rejection count.
 
 ### 10.6 Security boundary for raw values
 
@@ -1423,6 +1513,11 @@ pub struct VerificationIdentities {
     pub snapshot_id: Uuid,
     pub dataset_id: Uuid,
     pub validation_report_artifact_id: Uuid,
+    /// Deterministic protocol (section 10.5): `Some(id)` authorizes the
+    /// rejected artifact under that id when terminal rejections occur and is
+    /// unused, without error, at zero rejections. `None` declares the run
+    /// must reject nothing; the first terminal rejection is
+    /// `EngineError::InvalidPlan` before any rejected writer append.
     pub rejected_rows_artifact_id: Option<Uuid>,
     pub deduplication_report_artifact_id: Uuid,
     pub session_id: Uuid,
@@ -1685,7 +1780,7 @@ beyond its configured 512 KiB SQLite page cache.
 
 ## 13. Preview relationship
 
-E4-C0-R3 does **not** extend `PreviewResult`, `PreviewRequest`, or the E3
+E4-C0 does **not** extend `PreviewResult`, `PreviewRequest`, or the E3
 preview execution path.
 
 - The E3 preview contract in Issue #50 (and its current PR #53 revision)
@@ -1793,7 +1888,7 @@ The sanitization sentinel is
 | ID | Criterion | Automated evidence |
 | --- | --- | --- |
 | V01 | Validate true passes; false Warning keeps accepted row and emits only a warning finding; false Error rejects; null is failure | Fixture per severity with true/false/null predicate columns; accepted rows, validation findings, rejected payloads, and summaries match. Null predicate is never a pass. |
-| V02 | All pass, all terminal-reject, and empty source | Accepted/report/rejected presence and counts match; empty source yields accepted snapshot plus two zero-row reports and `rejected_rows = None`. |
+| V02 | All pass, all terminal-reject, and empty source | Accepted/report/rejected presence and counts match; empty source yields accepted snapshot plus two zero-row reports and `rejected_rows = None`. A `Some(rejected_rows_artifact_id)` run with zero terminal rejections publishes no rejected artifact and fails nothing; supplying `rejected_rows_artifact_id = None` on a run that terminally rejects fails `InvalidPlan` before any rejected writer append with no bundle visible (section 10.5). |
 | V03 | Cross-batch global dedup first-seen | Distinct keys span at least three execution chunks/envelopes; only the lowest `source_row_ordinal` per key is first-seen at the rule; each later row produces one rejected payload and one duplicate finding. |
 | V04 | Connector partition invariance | Two partitionings of the same ordered rows produce identical accepted rows, validation findings, rejected rows, duplicate findings, schemas, summaries, and envelope boundaries. |
 | V05 | Null, NaN, `-0.0`/`+0.0` key equality | Null duplicates null; all NaN bit patterns group together; `-0.0` and `+0.0` are duplicates; finite distinct floats remain distinct. |
@@ -1804,25 +1899,25 @@ The sanitization sentinel is
 | V10 | Bundle atomicity | Inject failure during commit after accepted partition install; neither accepted snapshot nor any report/rejected artifact is independently visible; rollback cleans all files. |
 | V11 | Zero-rejection rule | No rejected artifact row is inserted when terminal rejection count is zero; storage creates no empty DatasetSnapshot for rejected rows. |
 | V12 | Dedup index ownership and recovery | Failure-inject lock-first creation after each creation step; a pre-existing `.sqlite` or `.lock` returns `AlreadyExists` and is never deleted; a newly created first file is rolled back on second-file failure; recovery scans the union of both suffixes, removes orphan/pairs only under the maintenance gate after acquiring the lock when present, and never removes an active locked pair. |
-| V13 | Dedup index permissions and page cap | Temp dir mode `0700`, DB file mode `0600`; `PRAGMA max_page_count` equals `MAX_DEDUP_INDEX_PAGES`; disk > 8 GiB fails `BoundExceeded`. |
+| V13 | Dedup index permissions and page cap | Temp dir mode `0700`, DB file mode `0600`; `PRAGMA max_page_count` equals `MAX_DEDUP_INDEX_PAGES`; disk > 8 GiB fails `BoundExceeded`; a test-side `PRAGMA max_page_count` reduction on the opened index is permitted instrumentation to prove exhaustion without writing 8 GiB. |
 | V14 | Memory ceiling | Instrumented live-payload counter shows `<= 6` and no seventh payload; allocator/SQLite cache stay within section 12.2; source grep and allocator prove no in-memory `HashSet`/`HashMap` dedup index. |
 | V15 | Secret sentinel | Sentinel appears in a failing cell but not in `EngineError` Display/Debug, `sanitized_summary()` JSON, event metadata, reports, or provenance summaries. |
 | V16 | Retry determinism | Retry after recovery/fresh run id with identical inputs/identities produces identical artifacts and partition boundaries; pre-existing active dedup file is never deleted. |
 | V17 | Utf8 and Binary key equality | Exact byte equality; empty string/binary distinct from null; no normalization/collation. |
 | V18 | Timestamp key boundary and equality | Millisecond/Microsecond/Nanosecond same-type same-epoch duplicates; `Timestamp { unit: Second }`, `List`, and `Struct` keys are preflight `TypeError`. |
 | V19 | Canonical key bytes and collision safety | Golden vectors for every supported tag, including `timezone: None` vs `Some` presence encoding; different values never produce equal bytes; SQLite BLOB PK is the only duplicate decision path. |
-| V20 | Key bounds | The 65th key column fails preflight; fixed-width key maxima are checked in preflight; every actual fixed-width, Utf8, and Binary key is encoded and checked immediately before SQLite insert, so an encoded key > 64 KiB fails `BoundExceeded` before any index write; the SQLite `max_page_count` cap also fails before bundle commit with no visible artifact. |
+| V20 | Key bounds | The 65th key column fails preflight; fixed-width key maxima are checked in preflight; every actual fixed-width, Utf8, and Binary key is encoded and checked immediately before SQLite insert, the running-length counter aborts before extending past the cap, and an encoded key > 64 KiB fails `BoundExceeded` before any index write; the SQLite `max_page_count` cap also fails before bundle commit with no visible artifact. |
 | V21 | Schema/ColumnId/original value preservation | Rejected schema field order and metadata match logical Scan output + nine control fields; ColumnIds unchanged; Arrow values equal source values including null/NaN/`-0.0`; at most one payload per source row. |
 | V22 | Validation message safety and length | Explicit E4 preflight rejects empty-after-trim, > 1,024 bytes, and secret-like message; exact safe message stored once per `RuleRef` in the validation rule summary; absent from errors/logs/events. |
 | V23 | Existing E2/E3 compatibility | `materialize` still returns `UnsupportedRule` for Validate/Deduplicate; `preview` behavior is unchanged by the E4 code path; no `PreviewResult` field changed. |
 | V24 | Provenance completeness and CI | Every artifact embeds committed `ArtifactProvenance`; callers provide only `ArtifactProvenanceInput`, while the engine supplies the verified canonical-plan SHA-256, contract versions, and compile-time `engine_build`; the writer supplies summary/content digest. The result includes `run_id`, `bundle_id`, distinct `artifact_id`, `session_id`, `LogicalInputRef`, FNV index, lineage, and injected times. CI checks pass in the later runtime PR; this docs PR modifies only the file named in section 2. |
-
 | V25 | Storage round-trip through bundle reader | Write a bundle containing accepted, validation summary/findings, rejected rows, and dedup summary/findings; load by `bundle_id`, by `run_id`, and by accepted snapshot id; open each `ArtifactSection` through `ArtifactBatchReader` and assert row/partition/manifest/section/provenance digest equality. |
 | V26 | Provenance draft vs committed | `VerificationBundleDraft` contains engine-assembled provenance with no summary/content_digest; after commit, every artifact provenance contains summary and content digest; `bundle_id` is distinct from `run_id`, `bundle_artifact_id`, and every child artifact id; `session_id` is present. |
 | V27 | Rule summaries and message once | `ValidationRuleSummary` contains evaluated/pass/fail/warning/error/null/false counts and message once per `RuleRef`; findings contain no message; `DedupRuleSummary` contains evaluated/unique/duplicate counts. |
 | V28 | Dedup insert typed first ordinal | `insert_first()` returns `Inserted` or `Duplicate` with `first_source_row_ordinal`; duplicate finding uses that ordinal even if the first-seen row is later rejected by Validate Error. |
 | V29 | Report resource math | Exactly `MAX_REPORT_ROWS = MAX_REPORT_PARTITIONS * REPORT_PACK_ROWS` and `MAX_REPORT_BYTES = MAX_REPORT_PARTITIONS * REPORT_PACK_BYTES`; limits are enforced after aggregating all sections of each report artifact and again at the two-report bundle ceiling; exceeding row/byte/partition limits fails `BoundExceeded`; no writer can emit a partition count above the applicable ceiling. |
 | V30 | Crash and maintenance recovery | Inject process crash at bundle states `Prepared` (including the journal-commit-before-staging window), `Staged`, `Installing`, and `Committing`, and at every dedup creation point in section 9.1; no partial bundle is visible; recovery under the maintenance gate removes the committed publication row, stale bundle staging, and every stale/orphan dedup suffix pair only after acquiring the lock when present; active bundle/index is untouched. |
+| V31 | FilterRows preserves Scan-output ordinals and payloads | Fixture applies `FilterRows` between the logical Scan output and a terminal Validate Error and a `Deduplicate` rule: every surviving row keeps its original Scan-output `source_row_ordinal` with stable gaps, and the maximum ordinal exceeds the surviving row count; each rejected payload and duplicate finding references the original ordinal and carries values equal to the logical Scan output row for that ordinal; mutating the ordinal sidecar without the payload, or the payload without the sidecar, fails the assertions (section 5.1). |
 
 ## 17. Stop conditions
 
