@@ -692,6 +692,28 @@ mod tests {
         index.close_and_delete().expect("close");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn temp_directory_and_database_permissions_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempDir::new().expect("temp");
+        let store = store(&temp);
+        let run_id = Uuid::from_u128(0xD090);
+        let _index = store
+            .open_dedup_index(run_id, Uuid::from_u128(1), at(1))
+            .expect("index");
+        let sqlite_mode = std::fs::metadata(dedup_sqlite_path(&store.inner, run_id))
+            .expect("sqlite metadata")
+            .permissions()
+            .mode();
+        assert_eq!(sqlite_mode & 0o777, 0o600, "dedup database must be 0600");
+        let root_mode = std::fs::metadata(dedup_temp_root(&store.inner))
+            .expect("temp root metadata")
+            .permissions()
+            .mode();
+        assert_eq!(root_mode & 0o777, 0o700, "dedup temp root must be 0700");
+    }
+
     #[test]
     fn lease_row_records_the_run_identity() {
         let temp = TempDir::new().expect("temp");

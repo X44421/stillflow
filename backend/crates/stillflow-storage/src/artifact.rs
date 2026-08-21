@@ -1465,6 +1465,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn report_limits_follow_the_contract_products() {
+        // Contract section 12: MAX_REPORT_ROWS and MAX_REPORT_BYTES are exact
+        // products of the partition ceiling and pack ceilings.
+        assert_eq!(
+            MAX_REPORT_ROWS,
+            MAX_REPORT_PARTITIONS as u64 * REPORT_PACK_ROWS as u64
+        );
+        assert_eq!(
+            MAX_REPORT_BYTES,
+            MAX_REPORT_PARTITIONS as u64 * REPORT_PACK_BYTES as u64
+        );
+        // The bundle-wide ceiling is exactly twice each per-report ceiling.
+        assert_eq!(MAX_BUNDLE_REPORT_ROWS, 2 * MAX_REPORT_ROWS);
+        assert_eq!(MAX_BUNDLE_REPORT_BYTES, 2 * MAX_REPORT_BYTES);
+        assert_eq!(MAX_BUNDLE_REPORT_PARTITIONS, 2 * MAX_REPORT_PARTITIONS);
+    }
+
     // Keep unused array builders referenced so clippy stays quiet about the
     // fixture helpers below.
     #[allow(dead_code)]
