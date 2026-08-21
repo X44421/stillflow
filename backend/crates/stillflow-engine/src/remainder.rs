@@ -141,6 +141,9 @@ impl CanonicalRebatcher {
         while remaining.num_rows() > 0 {
             let k = self.max_prefix(&remaining)?;
             if k == 0 {
+                // Section 10.4 canonical rebatcher: the single-envelope cap
+                // closed (or `pack_limit` was reached), so freeze a non-empty
+                // builder and retry this row against the empty builder.
                 if self.remainder_live() {
                     self.flush(base_bytes, &mut publish, tracker)?;
                     continue;
@@ -149,7 +152,7 @@ impl CanonicalRebatcher {
                     "a single transformed row exceeds MAX_BATCH_BYTES",
                 ));
             }
-            self.append_rows(&remaining, k)?;
+            self.append_rows(&remaining, k, tracker)?;
             remaining = remaining.slice(k, remaining.num_rows() - k);
             tracker.hold_incoming(if remaining.num_rows() == 0 {
                 0
@@ -157,7 +160,12 @@ impl CanonicalRebatcher {
                 remaining.get_array_memory_size()
             })?;
             tracker.hold_remainder(base_bytes.saturating_add(self.remainder_bytes()))?;
-            if self.should_flush() {
+            // Section 10.4 canonical rebatcher (and issue #46 §14): when the
+            // appended remainder now meets the row cap or the single-envelope
+            // byte cap, freeze eagerly. Both conditions are exact post-append
+            // cap states of the admission-sound enforced capacity — never
+            // transient-driven.
+            if self.rows >= self.pack_limit || self.remainder_bytes() >= MAX_BATCH_BYTES {
                 self.flush(base_bytes, &mut publish, tracker)?;
             }
         }
@@ -188,18 +196,13 @@ impl CanonicalRebatcher {
         Ok(())
     }
 
-    pub(crate) fn can_reserve_for_budget(
-        &self,
-        incoming: &RecordBatch,
-        k: usize,
-        budget: usize,
-    ) -> Result<bool, EngineError> {
-        Ok(self.admission_budget_peak(incoming, k)? <= budget)
-    }
-
-    /// Peak remainder-builder bytes during admission of `k` rows, including
-    /// old-buffer + new-buffer realloc transients.
-    pub(crate) fn admission_budget_peak(
+    /// Peak remainder-builder bytes during a realloc of the builder buffers
+    /// while appending `k` rows, including the old-buffer/new-buffer
+    /// transient. E3 §10.1(5)/§10.3: this is a memory-safety quantity only.
+    /// It never gates admission, public row/byte caps, or batch boundaries;
+    /// it feeds the independent peak pre-check that selects how the builder
+    /// buffers physically grow (section 10.2 peak law).
+    pub(crate) fn realloc_transient_peak(
         &self,
         incoming: &RecordBatch,
         k: usize,
@@ -225,6 +228,14 @@ impl CanonicalRebatcher {
         Ok(peak)
     }
 
+    /// Admission oracle for the canonical remainder builder: the exact
+    /// allocation-free prediction of `BatchEnvelope.byte_count()` for the
+    /// envelope that would result from appending the first `k` rows
+    /// (section 10.4). Because the builder shares the canonical buffer
+    /// layout of the finalized arrays, the enforced post-append builder
+    /// capacity equals this prediction minus per-array object sizes, so an
+    /// admitted prefix can never push the enforced `remainder_bytes()`
+    /// capacity over `MAX_BATCH_BYTES`.
     fn max_prefix(&self, incoming: &RecordBatch) -> Result<usize, EngineError> {
         let n = incoming.num_rows();
         if n == 0 {
@@ -238,7 +249,7 @@ impl CanonicalRebatcher {
         let mut high = high;
         while low < high {
             let mid = low + (high - low).div_ceil(2);
-            if self.can_reserve_for(incoming, mid)? {
+            if self.exact_bytes_after_append(incoming, mid)? <= MAX_BATCH_BYTES {
                 low = mid;
             } else {
                 high = mid - 1;
@@ -247,29 +258,31 @@ impl CanonicalRebatcher {
         Ok(low)
     }
 
-    /// Admission oracle for the canonical remainder builder: the exact
-    /// allocation-free prediction of the post-append builder capacity
-    /// including the old-buffer/new-buffer realloc transient. The prediction
-    /// counts every backing allocation the builder will own (validity
-    /// bitmaps included), so a admitted prefix can never push the enforced
-    /// `remainder_bytes()` capacity over `MAX_BATCH_BYTES`.
-    fn can_reserve_for(&self, incoming: &RecordBatch, k: usize) -> Result<bool, EngineError> {
-        self.can_reserve_for_budget(incoming, k, MAX_BATCH_BYTES)
-    }
-
-    fn append_rows(&mut self, incoming: &RecordBatch, k: usize) -> Result<(), EngineError> {
+    /// Append `k` admitted rows. The realloc transient is constrained by the
+    /// independent peak pre-check below: when the predicted one-shot
+    /// Append `k` admitted rows. The realloc transient is constrained by the
+    /// independent peak pre-check below, which verifies the predicted
+    /// old-buffer/new-buffer transient against the remaining engine-peak
+    /// headroom (section 10.2/§10.3 peak law). The pre-check never changes
+    /// which rows are admitted or when the builder freezes; the exact-need
+    /// `reserve_exact` growth is the minimum-transient physical strategy,
+    /// because old and new buffers necessarily coexist while copying.
+    fn append_rows(
+        &mut self,
+        incoming: &RecordBatch,
+        k: usize,
+        tracker: &mut MemoryTracker,
+    ) -> Result<(), EngineError> {
         if incoming.num_columns() != self.sinks.len() {
             return Err(EngineError::Internal("remainder column mismatch"));
         }
+        let transient_peak = self.realloc_transient_peak(incoming, k)?;
+        tracker.pre_check_realloc_peak(transient_peak, self.remainder_bytes())?;
         for (sink, array) in self.sinks.iter_mut().zip(incoming.columns()) {
             sink.append(array.as_ref(), k)?;
         }
         self.rows = self.rows.saturating_add(k);
         Ok(())
-    }
-
-    fn should_flush(&self) -> bool {
-        self.rows >= self.pack_limit || self.remainder_bytes() >= MAX_BATCH_BYTES
     }
 
     fn flush(
@@ -449,21 +462,21 @@ impl ColumnSink {
     ) -> (usize, usize) {
         match self {
             Self::Null => (0, 0),
-            Self::Boolean(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::Int8(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::UInt8(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::Int16(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::UInt16(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::Int32(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::UInt32(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::Float32(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::Date32(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::Int64(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::UInt64(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::Float64(b) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::TimestampMs(b, _) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::TimestampUs(b, _) => b.calculate_growth_peak_and_new_capacity(k),
-            Self::TimestampNs(b, _) => b.calculate_growth_peak_and_new_capacity(k),
+            Self::Boolean(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::Int8(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::UInt8(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::Int16(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::UInt16(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::Int32(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::UInt32(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::Float32(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::Date32(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::Int64(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::UInt64(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::Float64(b) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::TimestampMs(b, _) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::TimestampUs(b, _) => b.calculate_growth_peak_and_new_capacity(array, k),
+            Self::TimestampNs(b, _) => b.calculate_growth_peak_and_new_capacity(array, k),
             Self::Utf8(sink) | Self::Binary(sink) => {
                 sink.calculate_growth_peak_and_new_capacity(array, k)
             }
@@ -538,6 +551,12 @@ impl ColumnSink {
     }
 }
 
+fn reserve_bytes_exact(bytes: &mut Vec<u8>, needed_bytes: usize) {
+    if needed_bytes > bytes.len() {
+        bytes.reserve_exact(needed_bytes - bytes.len());
+    }
+}
+
 #[derive(Default)]
 struct BitPackedSink {
     bytes: Vec<u8>,
@@ -573,9 +592,7 @@ impl BitPackedSink {
 
     fn prepare_append(&mut self, additional_bits: usize) {
         let needed_bytes = self.bit_len.saturating_add(additional_bits).div_ceil(8);
-        if needed_bytes > self.bytes.len() {
-            self.bytes.reserve_exact(needed_bytes - self.bytes.len());
-        }
+        reserve_bytes_exact(&mut self.bytes, needed_bytes);
     }
 
     fn append_bit(&mut self, bit: bool) {
@@ -598,18 +615,120 @@ impl BitPackedSink {
     }
 }
 
+/// Validity bitmap sink whose allocation layout is canonical with the
+/// finalized envelope (E3 §10.4 rule 3). While every appended row is valid
+/// no backing allocation exists, because the finalized array owns no validity
+/// buffer at all; once a null appears the buffer is materialized with an
+/// exact `ceil(rows / 8)` capacity — precisely the capacity the finalized
+/// validity bitmap will own. This keeps the enforced builder capacity and
+/// the exact estimator consistent: an admission decision made on
+/// `candidate_envelope_bytes` can never be defeated by validity scratch the
+/// finalized envelope will not contain.
+struct LazyValiditySink {
+    bits: BitPackedSink,
+    leading_valid: usize,
+    has_null: bool,
+}
+
+impl LazyValiditySink {
+    fn new() -> Self {
+        Self {
+            bits: BitPackedSink::new(),
+            leading_valid: 0,
+            has_null: false,
+        }
+    }
+
+    fn has_null(&self) -> bool {
+        self.has_null
+    }
+
+    fn rows(&self) -> usize {
+        if self.has_null {
+            self.bits.bit_len
+        } else {
+            self.leading_valid
+        }
+    }
+
+    fn allocated_capacity_bytes(&self) -> usize {
+        self.bits.allocated_capacity_bytes()
+    }
+
+    fn capacity_bytes_after_append(&self, additional_bits: usize) -> usize {
+        let needed_bytes = self.rows().saturating_add(additional_bits).div_ceil(8);
+        self.bits.allocated_capacity_bytes().max(needed_bytes)
+    }
+
+    fn calculate_growth_peak_and_new_capacity(&self, additional_bits: usize) -> (usize, usize) {
+        let current = self.bits.allocated_capacity_bytes();
+        let needed_bytes = self.rows().saturating_add(additional_bits).div_ceil(8);
+        if needed_bytes > current {
+            (current.saturating_add(needed_bytes), needed_bytes)
+        } else {
+            (current, current)
+        }
+    }
+
+    fn materialize(&mut self) {
+        let nbytes = self.leading_valid.div_ceil(8);
+        self.bits.bytes = vec![0xFF_u8; nbytes];
+        self.bits.bit_len = self.leading_valid;
+        self.has_null = true;
+    }
+
+    fn prepare_append(&mut self, additional_bits: usize, any_null: bool) {
+        if !self.has_null {
+            if !any_null {
+                return;
+            }
+            self.materialize();
+        }
+        let needed_bytes = self
+            .bits
+            .bit_len
+            .saturating_add(additional_bits)
+            .div_ceil(8);
+        reserve_bytes_exact(&mut self.bits.bytes, needed_bytes);
+    }
+
+    fn append_bit(&mut self, valid: bool) {
+        if !self.has_null {
+            if valid {
+                self.leading_valid += 1;
+            } else {
+                self.materialize();
+                self.bits.append_bit(false);
+            }
+            return;
+        }
+        self.bits.append_bit(valid);
+    }
+
+    fn finish(&mut self) -> Option<BooleanBuffer> {
+        if !self.has_null {
+            // No validity buffer exists for an all-valid envelope, but the
+            // implicit leading-valid run must still reset for the next fill.
+            self.leading_valid = 0;
+            return None;
+        }
+        let buffer = self.bits.finish();
+        self.has_null = false;
+        self.leading_valid = 0;
+        Some(buffer)
+    }
+}
+
 struct ExactPrimitiveSink<T: arrow_array::ArrowPrimitiveType> {
     values: Vec<T::Native>,
-    validity: BitPackedSink,
-    all_valid: bool,
+    validity: LazyValiditySink,
 }
 
 impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
     fn new() -> Self {
         Self {
             values: Vec::new(),
-            validity: BitPackedSink::new(),
-            all_valid: true,
+            validity: LazyValiditySink::new(),
         }
     }
 
@@ -626,10 +745,10 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
             .values
             .capacity()
             .saturating_mul(std::mem::size_of::<T::Native>());
-        let validity_bytes = if self.all_valid {
-            0
-        } else {
+        let validity_bytes = if self.validity.has_null() {
             self.validity.allocated_capacity_bytes()
+        } else {
+            0
         };
         std::mem::size_of::<PrimitiveArray<T>>()
             .saturating_add(values_bytes)
@@ -648,7 +767,7 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
             .capacity()
             .max(self.values.len().saturating_add(k))
             .saturating_mul(slot);
-        let validity_bytes = if self.all_valid && !prefix_has_null(values, k) {
+        let validity_bytes = if !self.validity.has_null() && !prefix_has_null(values, k) {
             0
         } else {
             self.validity.capacity_bytes_after_append(k)
@@ -658,10 +777,23 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
             .saturating_add(validity_bytes)
     }
 
-    fn calculate_growth_peak_and_new_capacity(&self, k: usize) -> (usize, usize) {
+    fn calculate_growth_peak_and_new_capacity(
+        &self,
+        array: &dyn Array,
+        k: usize,
+    ) -> (usize, usize) {
+        let values = match array.as_any().downcast_ref::<PrimitiveArray<T>>() {
+            Some(values) => values,
+            None => {
+                return (
+                    self.allocated_capacity_bytes(),
+                    self.allocated_capacity_bytes(),
+                )
+            }
+        };
         let val_slot = std::mem::size_of::<T::Native>();
         let cur_val_cap = self.values.capacity();
-        let needed_val = self.values.len().saturating_add(k);
+        let needed_val = self.values.len().saturating_add(k.min(values.len()));
         let cur_val_bytes = cur_val_cap.saturating_mul(val_slot);
         let (val_transient, new_val_bytes) = if needed_val > cur_val_cap {
             let new_bytes = needed_val.saturating_mul(val_slot);
@@ -670,8 +802,14 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
             (cur_val_bytes, cur_val_bytes)
         };
 
+        let validity_bits = k.min(values.len());
         let (validity_transient, new_validity_bytes) =
-            self.validity.calculate_growth_peak_and_new_capacity(k);
+            if !self.validity.has_null() && !prefix_has_null(values, validity_bits) {
+                (self.validity.allocated_capacity_bytes(), 0)
+            } else {
+                self.validity
+                    .calculate_growth_peak_and_new_capacity(validity_bits)
+            };
 
         (
             val_transient.saturating_add(validity_transient),
@@ -679,9 +817,9 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
         )
     }
 
-    fn prepare_append(&mut self, k: usize) {
+    fn prepare_append(&mut self, k: usize, any_null: bool) {
         self.values.reserve_exact(k);
-        self.validity.prepare_append(k);
+        self.validity.prepare_append(k, any_null);
     }
 
     fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
@@ -690,10 +828,10 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
             .downcast_ref::<PrimitiveArray<T>>()
             .ok_or(EngineError::Internal("remainder expected primitive array"))?;
         let len = k.min(values.len());
-        self.prepare_append(len);
+        let any_null = prefix_has_null(values, len);
+        self.prepare_append(len, any_null);
         for index in 0..len {
             if values.is_null(index) {
-                self.all_valid = false;
                 self.validity.append_bit(false);
                 self.values.push(T::Native::default());
             } else {
@@ -706,29 +844,21 @@ impl<T: arrow_array::ArrowPrimitiveType> ExactPrimitiveSink<T> {
 
     fn finish(&mut self) -> Result<ArrayRef, EngineError> {
         let values = ScalarBuffer::from(std::mem::take(&mut self.values));
-        let validity_buf = self.validity.finish();
-        let nulls = if self.all_valid {
-            None
-        } else {
-            Some(NullBuffer::new(validity_buf))
-        };
-        self.all_valid = true;
+        let nulls = self.validity.finish().map(NullBuffer::new);
         Ok(Arc::new(PrimitiveArray::<T>::new(values, nulls)))
     }
 }
 
 struct ExactBooleanSink {
     values: BitPackedSink,
-    validity: BitPackedSink,
-    all_valid: bool,
+    validity: LazyValiditySink,
 }
 
 impl ExactBooleanSink {
     fn new() -> Self {
         Self {
             values: BitPackedSink::new(),
-            validity: BitPackedSink::new(),
-            all_valid: true,
+            validity: LazyValiditySink::new(),
         }
     }
 
@@ -741,10 +871,10 @@ impl ExactBooleanSink {
     #[allow(dead_code)]
     fn exact_array_bytes(&self, _rows: usize) -> usize {
         let values_bytes = self.values.allocated_capacity_bytes();
-        let validity_bytes = if self.all_valid {
-            0
-        } else {
+        let validity_bytes = if self.validity.has_null() {
             self.validity.allocated_capacity_bytes()
+        } else {
+            0
         };
         std::mem::size_of::<BooleanArray>()
             .saturating_add(values_bytes)
@@ -758,7 +888,7 @@ impl ExactBooleanSink {
         };
         let k = k.min(values.len());
         let values_bytes = self.values.capacity_bytes_after_append(k);
-        let validity_bytes = if self.all_valid && !prefix_has_null(values, k) {
+        let validity_bytes = if !self.validity.has_null() && !prefix_has_null(values, k) {
             0
         } else {
             self.validity.capacity_bytes_after_append(k)
@@ -768,18 +898,37 @@ impl ExactBooleanSink {
             .saturating_add(validity_bytes)
     }
 
-    fn calculate_growth_peak_and_new_capacity(&self, k: usize) -> (usize, usize) {
-        let (val_transient, val_new) = self.values.calculate_growth_peak_and_new_capacity(k);
-        let (valid_transient, valid_new) = self.validity.calculate_growth_peak_and_new_capacity(k);
+    fn calculate_growth_peak_and_new_capacity(
+        &self,
+        array: &dyn Array,
+        k: usize,
+    ) -> (usize, usize) {
+        let values = match array.as_any().downcast_ref::<BooleanArray>() {
+            Some(values) => values,
+            None => {
+                return (
+                    self.allocated_capacity_bytes(),
+                    self.allocated_capacity_bytes(),
+                )
+            }
+        };
+        let bits = k.min(values.len());
+        let (val_transient, val_new) = self.values.calculate_growth_peak_and_new_capacity(bits);
+        let (valid_transient, valid_new) =
+            if !self.validity.has_null() && !prefix_has_null(values, bits) {
+                (self.validity.allocated_capacity_bytes(), 0)
+            } else {
+                self.validity.calculate_growth_peak_and_new_capacity(bits)
+            };
         (
             val_transient.saturating_add(valid_transient),
             val_new.saturating_add(valid_new),
         )
     }
 
-    fn prepare_append(&mut self, k: usize) {
+    fn prepare_append(&mut self, k: usize, any_null: bool) {
         self.values.prepare_append(k);
-        self.validity.prepare_append(k);
+        self.validity.prepare_append(k, any_null);
     }
 
     fn append(&mut self, array: &dyn Array, k: usize) -> Result<(), EngineError> {
@@ -788,10 +937,10 @@ impl ExactBooleanSink {
             .downcast_ref::<BooleanArray>()
             .ok_or(EngineError::Ffi)?;
         let len = k.min(values.len());
-        self.prepare_append(len);
+        let any_null = prefix_has_null(values, len);
+        self.prepare_append(len, any_null);
         for index in 0..len {
             if values.is_null(index) {
-                self.all_valid = false;
                 self.validity.append_bit(false);
                 self.values.append_bit(false);
             } else {
@@ -804,13 +953,7 @@ impl ExactBooleanSink {
 
     fn finish(&mut self) -> Result<ArrayRef, EngineError> {
         let values_buf = self.values.finish();
-        let validity_buf = self.validity.finish();
-        let nulls = if self.all_valid {
-            None
-        } else {
-            Some(NullBuffer::new(validity_buf))
-        };
-        self.all_valid = true;
+        let nulls = self.validity.finish().map(NullBuffer::new);
         Ok(Arc::new(BooleanArray::new(values_buf, nulls)))
     }
 }
@@ -818,8 +961,7 @@ impl ExactBooleanSink {
 struct VariableBytes {
     offsets: Vec<i32>,
     values: Vec<u8>,
-    validity: BitPackedSink,
-    all_valid: bool,
+    validity: LazyValiditySink,
     data_bytes: usize,
 }
 
@@ -828,8 +970,7 @@ impl VariableBytes {
         Self {
             offsets: vec![0],
             values: Vec::new(),
-            validity: BitPackedSink::new(),
-            all_valid: true,
+            validity: LazyValiditySink::new(),
             data_bytes: 0,
         }
     }
@@ -844,10 +985,10 @@ impl VariableBytes {
 
     #[allow(dead_code)]
     fn exact_array_bytes(&self, _rows: usize, object_size: usize) -> usize {
-        let validity_bytes = if self.all_valid {
-            0
-        } else {
+        let validity_bytes = if self.validity.has_null() {
             self.validity.allocated_capacity_bytes()
+        } else {
+            0
         };
         object_size
             .saturating_add(self.offsets.capacity().saturating_mul(4))
@@ -863,7 +1004,7 @@ impl VariableBytes {
     ) -> usize {
         let k = k.min(array.len());
         let additional_data = array_data_bytes_for_slice(array, k);
-        let all_valid_after = self.all_valid && !prefix_has_null(array, k);
+        let all_valid_after = !self.validity.has_null() && !prefix_has_null(array, k);
         let validity_bytes = if all_valid_after {
             0
         } else {
@@ -902,7 +1043,11 @@ impl VariableBytes {
         };
 
         let (validity_transient, new_validity_bytes) =
-            self.validity.calculate_growth_peak_and_new_capacity(k);
+            if !self.validity.has_null() && !prefix_has_null(array, k) {
+                (self.validity.allocated_capacity_bytes(), 0)
+            } else {
+                self.validity.calculate_growth_peak_and_new_capacity(k)
+            };
 
         let cur_values_cap = self.values.capacity();
         let needed_values = self.values.len().saturating_add(additional_data);
@@ -924,16 +1069,15 @@ impl VariableBytes {
         )
     }
 
-    fn prepare_append(&mut self, rows: usize, data_bytes: usize) {
+    fn prepare_append(&mut self, rows: usize, data_bytes: usize, any_null: bool) {
         self.offsets.reserve_exact(rows);
-        self.validity.prepare_append(rows);
+        self.validity.prepare_append(rows, any_null);
         self.values.reserve_exact(data_bytes);
     }
 
     fn append_value(&mut self, payload: Option<&[u8]>) -> Result<(), EngineError> {
         match payload {
             None => {
-                self.all_valid = false;
                 self.validity.append_bit(false);
             }
             Some(bytes) => {
@@ -953,12 +1097,7 @@ impl VariableBytes {
     ) -> Result<(OffsetBuffer<i32>, Buffer, Option<NullBuffer>), EngineError> {
         let offsets = OffsetBuffer::new(ScalarBuffer::from(std::mem::take(&mut self.offsets)));
         let values = Buffer::from_vec(std::mem::take(&mut self.values));
-        let validity_buf = self.validity.finish();
-        let nulls = if self.all_valid {
-            None
-        } else {
-            Some(NullBuffer::new(validity_buf))
-        };
+        let nulls = self.validity.finish().map(NullBuffer::new);
         *self = Self::new();
         Ok((offsets, values, nulls))
     }
@@ -1037,7 +1176,7 @@ fn utf8_range_bytes(array: &StringArray, offset: usize, k: usize) -> usize {
 fn append_utf8(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Result<(), EngineError> {
     if let Some(values) = array.as_any().downcast_ref::<StringArray>() {
         let len = k.min(values.len());
-        return append_utf8_values(sink, len, |index| {
+        return append_utf8_values(sink, len, values, |index| {
             (!values.is_null(index)).then(|| values.value(index).as_bytes())
         });
     }
@@ -1046,7 +1185,7 @@ fn append_utf8(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Result<
         .downcast_ref::<arrow_array::StringViewArray>()
     {
         let len = k.min(values.len());
-        return append_utf8_values(sink, len, |index| {
+        return append_utf8_values(sink, len, values, |index| {
             (!values.is_null(index)).then(|| values.value(index).as_bytes())
         });
     }
@@ -1055,7 +1194,7 @@ fn append_utf8(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Result<
         .downcast_ref::<arrow_array::LargeStringArray>()
     {
         let len = k.min(values.len());
-        return append_utf8_values(sink, len, |index| {
+        return append_utf8_values(sink, len, values, |index| {
             (!values.is_null(index)).then(|| values.value(index).as_bytes())
         });
     }
@@ -1065,12 +1204,14 @@ fn append_utf8(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Result<
 fn append_utf8_values<'a>(
     sink: &mut VariableBytes,
     len: usize,
+    array: &dyn Array,
     value_at: impl Fn(usize) -> Option<&'a [u8]>,
 ) -> Result<(), EngineError> {
     let data_bytes = (0..len)
         .filter_map(|index| value_at(index).map(<[u8]>::len))
         .fold(0_usize, usize::saturating_add);
-    sink.prepare_append(len, data_bytes);
+    let any_null = prefix_has_null(array, len);
+    sink.prepare_append(len, data_bytes, any_null);
     for index in 0..len {
         sink.append_value(value_at(index))?;
     }
@@ -1087,7 +1228,8 @@ fn append_binary(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Resul
         .filter(|&index| !values.is_null(index))
         .map(|index| values.value(index).len())
         .fold(0_usize, usize::saturating_add);
-    sink.prepare_append(len, data_bytes);
+    let any_null = prefix_has_null(values, len);
+    sink.prepare_append(len, data_bytes, any_null);
     for index in 0..len {
         if values.is_null(index) {
             sink.append_value(None)?;

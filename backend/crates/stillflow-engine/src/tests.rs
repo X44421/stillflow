@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arrow_array::{Array, Int32Array, Int64Array, RecordBatch, StringArray};
+use arrow_buffer::{Buffer as ArrowBuffer, OffsetBuffer, ScalarBuffer};
 use async_trait::async_trait;
 use chrono::Utc;
 use stillflow_connectors::{
@@ -2260,7 +2261,18 @@ async fn t44_phased_allocator_excludes_storage_encode() {
     assert!(report.storage_append_phase_peak > 0);
     assert!(envelope_bytes <= MAX_BATCH_BYTES);
     assert!(report.polars_phase_peak <= MAX_BATCH_BYTES);
-    assert!(report.remainder_phase_peak <= MAX_BATCH_BYTES);
+    // Issue #46 T44 freezes the phase-peak law as "(a) Polars working set of
+    // one chunk + (b) remainder builder / freeze-move + 5 MiB <=
+    // MAX_ENGINE_PEAK_BYTES; (c) storage append is recorded and excluded".
+    // Phase peak (b) includes the old-buffer/new-buffer realloc transient,
+    // which section 10.1 rule 5 tracks separately from the enforced
+    // remainder capacity: it is bounded by this peak sum, never by
+    // MAX_BATCH_BYTES, and never by admission.
+    let phased_peak_sum = report
+        .polars_phase_peak
+        .saturating_add(report.remainder_phase_peak)
+        .saturating_add(MAX_OPERATOR_STATE_BYTES);
+    assert!(phased_peak_sum <= MAX_ENGINE_PEAK_BYTES);
     let total_live_engine = envelope_bytes
         .saturating_add(report.polars_phase_peak)
         .saturating_add(report.remainder_phase_peak)
@@ -3761,7 +3773,13 @@ async fn p05_k_zero_realloc_transient_preserves_rows() {
     assert_eq!(result.rows_returned, 2);
     assert!(!result.bytes_truncated);
     assert!(result.source_exhausted);
-    assert_eq!(result.batches.len(), 2);
+    // Section 10.4 canonical rebatching: both rows fit the aggregate byte
+    // cap by the exact estimator (candidate_envelope_bytes <= byte_limit),
+    // so the canonical response is one envelope. The append-time realloc
+    // transient (~old + new builder buffers) exceeds `byte_limit` only
+    // momentarily, which section 10.3 permits; it is constrained by the
+    // independent peak pre-check and must not freeze the builder early.
+    assert_eq!(result.batches.len(), 1);
     drop(_guard);
 }
 
@@ -3825,7 +3843,10 @@ async fn p05_utf8_capacity_partition_invariance() {
         assert_eq!(left.row_count(), right.row_count());
         assert_eq!(left.byte_count(), right.byte_count());
     }
-    assert_eq!(result_a.batches.len(), 2);
+    // Section 10.4 canonicalization law: boundaries are a pure function of
+    // the ordered target-output rows and the exact estimator, so both
+    // partitionings produce the same single envelope here.
+    assert_eq!(result_a.batches.len(), 1);
     drop(_guard);
 }
 
@@ -3861,7 +3882,10 @@ async fn p05_internal_reserve_segmentation_preserves_lowered_chunk() {
     assert_eq!(result.rows_returned, 3);
     assert!(!result.bytes_truncated);
     assert!(result.source_exhausted);
-    assert_eq!(result.batches.len(), 2);
+    // Section 10.4: all three rows fit the aggregate byte cap by the exact
+    // estimator, so the canonical response is one envelope regardless of how
+    // the builder's internal reserves segmented the appends.
+    assert_eq!(result.batches.len(), 1);
     drop(_guard);
 }
 
@@ -3902,7 +3926,12 @@ async fn p05_simultaneous_row_and_byte_truncation_with_m_gt_p() {
     assert_eq!(result.rows_returned, 1);
     assert!(result.rows_truncated);
     assert!(result.bytes_truncated);
-    assert!(result.source_exhausted);
+    // P05.3 freezes this flag set: the lookahead stops at first-of event 2
+    // (target-output row `row_limit + 1`), so the stream is never polled to
+    // terminal `None` and `source_exhausted` stays `false` (section 9.3:
+    // `source_exhausted` cannot be `true` together with `rows_truncated`).
+    assert!(!result.scan_truncated);
+    assert!(!result.source_exhausted);
     assert!(!result.batches.is_empty());
     drop(_guard);
 }
@@ -3914,42 +3943,63 @@ async fn p05_exact_source_byte_boundary_with_lookahead() {
     let connection = connection();
     let source = asset(connection.id());
 
-    fn two_row_envelope_with_target_bytes(
+    // P05.5 freezes the byte-boundary semantics, not the fixture shape: any
+    // legitimate Arrow construction whose `get_array_memory_size()` equals
+    // the target exactly is valid. Builder-produced capacities come in
+    // allocation quanta and cannot hit 67,108,864, so this helper hand-builds
+    // a two-row UTF-8 array with exact-capacity buffers (one value buffer of
+    // exactly `values_bytes` bytes, one offsets buffer of exactly three
+    // `i32`) and calibrates the fixed overhead from its own construction.
+    fn exact_byte_utf8_envelope(
         schema: &LogicalSchema,
         asset_id: Uuid,
         target: usize,
         sequence: u64,
     ) -> stillflow_core::BatchEnvelope {
-        let empty = utf8_envelope_values(
-            schema,
-            asset_id,
-            vec![String::new(), String::new()],
-            sequence,
-        );
-        let overhead = empty.byte_count();
-        let mut len = target.saturating_sub(overhead) / 2;
-        for _ in 0..6 {
-            let envelope = utf8_envelope_values(
-                schema,
-                asset_id,
-                vec!["a".repeat(len), "b".repeat(len)],
-                sequence,
+        use stillflow_core::BatchEnvelope;
+        let factory =
+            BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), asset_id).expect("factory");
+        let build = |values_bytes: usize| -> BatchEnvelope {
+            // `Vec::with_capacity` allocates exactly `values_bytes` bytes and
+            // `Buffer::from_vec` adopts the whole allocation, so the frozen
+            // values-buffer capacity is exact (no 64-byte MutableBuffer
+            // rounding).
+            let mut data = Vec::with_capacity(values_bytes);
+            let first_row = vec![b'a'; values_bytes / 2];
+            data.extend_from_slice(&first_row);
+            let second_row = vec![b'b'; values_bytes - values_bytes / 2];
+            data.extend_from_slice(&second_row);
+            assert_eq!(data.capacity(), values_bytes, "exact values capacity");
+
+            // Exactly three i32 entries; `vec![]` allocates the exact
+            // capacity so the frozen offsets buffer stays deterministic.
+            let offsets = vec![0_i32, (values_bytes / 2) as i32, values_bytes as i32];
+            let array = StringArray::new(
+                OffsetBuffer::new(ScalarBuffer::from(offsets)),
+                ArrowBuffer::from_vec(data),
+                None,
             );
-            let bytes = envelope.byte_count();
-            if bytes == target {
-                return envelope;
-            }
-            if bytes < target {
-                len = len.saturating_add((target - bytes).div_ceil(2));
-            } else {
-                len = len.saturating_sub((bytes - target).div_ceil(2));
-            }
-        }
-        panic!("could not construct exact source byte boundary");
+            let batch = RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(array)])
+                .expect("batch");
+            factory.try_build(sequence, batch).expect("envelope")
+        };
+
+        // Fixed overhead of this exact layout: array object sizes plus the
+        // three-entry offsets buffer, measured on the zero-length values
+        // buffer so no builder quantum can leak into the calibration.
+        let overhead = build(0).byte_count();
+        assert!(target > overhead, "target must exceed the fixed overhead");
+        let envelope = build(target - overhead);
+        assert_eq!(
+            envelope.byte_count(),
+            target,
+            "hand-built fixture must hit the exact source-byte boundary"
+        );
+        envelope
     }
 
     let target = crate::PREVIEW_MAX_SOURCE_BYTES_SCANNED;
-    let boundary = two_row_envelope_with_target_bytes(&schema, source.id, target, 0);
+    let boundary = exact_byte_utf8_envelope(&schema, source.id, target, 0);
     let lookahead = utf8_envelope_values(&schema, source.id, vec!["lookahead".to_owned()], 1);
     let (engine, connector) =
         engine_with(schema.clone(), vec![boundary, lookahead.clone()], true).await;

@@ -136,11 +136,6 @@ pub(crate) async fn preview(
     let mut source_exhausted = false;
     let mut visible_prefix_closed = false;
     let mut target_rows_seen = 0_usize;
-    // Set when the aggregate byte cap closes the visible prefix while the
-    // rows_truncated outcome is already decided. The flag-completion
-    // lookahead must then finish polling the stream to its terminal item so
-    // `source_exhausted` reports what the connector actually produced.
-    let mut drain_to_terminal = false;
 
     loop {
         context.ensure_active().map_err(map_context_error)?;
@@ -247,13 +242,14 @@ pub(crate) async fn preview(
                 PushOutcome::ByteClosed => {
                     bytes_truncated = true;
                     visible_prefix_closed = true;
-                    if target_rows_seen > request.row_limit {
-                        rows_truncated = true;
-                        drain_to_terminal = true;
-                    }
                 }
             }
-            if target_rows_seen > request.row_limit && !drain_to_terminal {
+            if target_rows_seen > request.row_limit {
+                // Section 9.3 first-of rule, event 2: lowering produced
+                // target-output row `row_limit + 1`, so `rows_truncated` is
+                // decided and the flag-completion lookahead stops here. No
+                // further stream poll happens, so `source_exhausted` stays
+                // `false` (it can never co-occur with `rows_truncated`).
                 rows_truncated = true;
                 visible_prefix_closed = true;
                 break;
@@ -261,6 +257,12 @@ pub(crate) async fn preview(
         }
         tracker.drop_envelope()?;
 
+        if rows_truncated {
+            // First-of event 2 already closed the lookahead; the unlowered
+            // remainder of this envelope is the at-most-one-envelope overread
+            // and no scan-cap classification may override the stop.
+            break;
+        }
         if mid_envelope_scan_close {
             scan_truncated = true;
             break;
@@ -287,38 +289,7 @@ pub(crate) async fn preview(
             }
             break;
         }
-        if drain_to_terminal && !scan_truncated {
-            // The visible prefix was closed by the byte cap with the
-            // rows_truncated outcome already known. Finish the stream to its
-            // terminal item: drained envelopes are observed and dropped
-            // without entering Polars, the accumulator, or the scanned
-            // counters, so the input scan caps cannot close here.
-            loop {
-                context.ensure_active().map_err(map_context_error)?;
-                match stream.next().await {
-                    Some(Ok(envelope)) => {
-                        source_rows_observed =
-                            source_rows_observed.saturating_add(envelope.row_count());
-                        source_bytes_observed =
-                            source_bytes_observed.saturating_add(envelope.byte_count());
-                        if source_rows_observed > PREVIEW_MAX_SOURCE_ROWS_OBSERVED
-                            || source_bytes_observed > PREVIEW_MAX_SOURCE_BYTES_OBSERVED
-                        {
-                            return Err(EngineError::BoundExceeded(
-                                "preview source observed counters exceeded their ceilings",
-                            ));
-                        }
-                    }
-                    Some(Err(error)) => return Err(EngineError::from_connector(error)),
-                    None => source_exhausted = true,
-                }
-                if source_exhausted {
-                    break;
-                }
-            }
-            break;
-        }
-        if rows_truncated || scan_truncated || source_exhausted {
+        if scan_truncated || source_exhausted {
             break;
         }
     }
@@ -360,11 +331,13 @@ pub(crate) async fn preview(
             "preview source counters exceeded a frozen scan cap",
         ));
     }
-    // `source_exhausted` excludes `scan_truncated`: a scan-cap stop always
-    // leaves the stream non-terminal, while the flag-completion drain may
-    // observe terminal `None` after the response prefix closed, including
-    // when `rows_truncated` was already decided at byte closure.
-    if source_exhausted && scan_truncated {
+    // Section 9.3: `source_exhausted` reports terminal `None` and is never
+    // derived from the other flags. It cannot co-occur with `scan_truncated`
+    // (a scan-cap stop leaves the stream non-terminal) nor with
+    // `rows_truncated` (first-of event 2 stops the lookahead before any
+    // further poll). It may co-occur with `bytes_truncated` when the stream
+    // was polled to terminal `None` after byte truncation.
+    if source_exhausted && (scan_truncated || rows_truncated) {
         return Err(EngineError::Internal(
             "source_exhausted contradicts truncation flags",
         ));
@@ -577,28 +550,21 @@ impl PreviewAccumulator {
                 return Ok(PushOutcome::ByteClosed);
             }
 
-            let builder_budget = self.byte_limit.saturating_sub(self.finalized_bytes);
-            if !self
-                .rebatcher
-                .can_reserve_for_budget(&incoming, 1, builder_budget)?
-                && self.rebatcher.rows() > 0
-            {
-                // The append would transiently exceed the remaining response
-                // budget (old builder buffers live while grown buffers are
-                // allocated). Freeze the non-empty builder first so the
-                // realloc transient stays inside the section 10.2 peak law;
-                // the row is then retried against the empty builder. This is
-                // a memory-safety flush only: it never changes public
-                // rows/bytes/truncation outcomes.
-                self.flush_builder(tracker)?;
-                continue;
-            }
+            // Section 10.3 reserve-before-allocate: the aggregate cap above
+            // is the admission oracle, and because the builder shares the
+            // canonical buffer layout of the finalized arrays, the admitted
+            // `candidate_envelope_bytes` already bounds the post-append
+            // `response_allocated_capacity_after(p)`. The realloc transient
+            // is a memory-safety quantity only (section 10.1 rule 5): it may
+            // exceed `byte_limit` momentarily and is constrained by the
+            // independent peak pre-check inside `append_rows`, never by an
+            // admission or flush decision.
 
             #[cfg(test)]
             {
-                let admission_peak = self.rebatcher.admission_budget_peak(&incoming, 1)?;
+                let transient_peak = self.rebatcher.realloc_transient_peak(&incoming, 1)?;
                 tracker.record_response_budget_peak(
-                    self.finalized_bytes.saturating_add(admission_peak),
+                    self.finalized_bytes.saturating_add(transient_peak),
                 );
             }
 
