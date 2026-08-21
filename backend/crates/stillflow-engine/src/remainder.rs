@@ -188,9 +188,17 @@ impl CanonicalRebatcher {
         Ok(())
     }
 
+    pub(crate) fn can_reserve_for_budget(
+        &self,
+        incoming: &RecordBatch,
+        k: usize,
+        budget: usize,
+    ) -> Result<bool, EngineError> {
+        Ok(self.admission_budget_peak(incoming, k)? <= budget)
+    }
+
     /// Peak remainder-builder bytes during admission of `k` rows, including
     /// old-buffer + new-buffer realloc transients.
-    #[allow(dead_code)]
     pub(crate) fn admission_budget_peak(
         &self,
         incoming: &RecordBatch,
@@ -230,13 +238,23 @@ impl CanonicalRebatcher {
         let mut high = high;
         while low < high {
             let mid = low + (high - low).div_ceil(2);
-            if self.exact_bytes_after_append(incoming, mid)? <= MAX_BATCH_BYTES {
+            if self.can_reserve_for(incoming, mid)? {
                 low = mid;
             } else {
                 high = mid - 1;
             }
         }
         Ok(low)
+    }
+
+    /// Admission oracle for the canonical remainder builder: the exact
+    /// allocation-free prediction of the post-append builder capacity
+    /// including the old-buffer/new-buffer realloc transient. The prediction
+    /// counts every backing allocation the builder will own (validity
+    /// bitmaps included), so a admitted prefix can never push the enforced
+    /// `remainder_bytes()` capacity over `MAX_BATCH_BYTES`.
+    fn can_reserve_for(&self, incoming: &RecordBatch, k: usize) -> Result<bool, EngineError> {
+        self.can_reserve_for_budget(incoming, k, MAX_BATCH_BYTES)
     }
 
     fn append_rows(&mut self, incoming: &RecordBatch, k: usize) -> Result<(), EngineError> {
@@ -251,7 +269,7 @@ impl CanonicalRebatcher {
     }
 
     fn should_flush(&self) -> bool {
-        self.rows >= self.pack_limit || self.exact_current_bytes() >= MAX_BATCH_BYTES
+        self.rows >= self.pack_limit || self.remainder_bytes() >= MAX_BATCH_BYTES
     }
 
     fn flush(
