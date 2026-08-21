@@ -48,6 +48,14 @@ pub enum StorageError {
     RowLimitExceeded { actual: u64, maximum: u64 },
     #[error("snapshot stored byte count {actual} exceeds limit {maximum}")]
     StoredByteLimitExceeded { actual: u64, maximum: u64 },
+    #[error("artifact row count {actual} exceeds limit {maximum}")]
+    ArtifactRowLimitExceeded { actual: u64, maximum: u64 },
+    #[error("artifact stored byte count {actual} exceeds limit {maximum}")]
+    ArtifactByteLimitExceeded { actual: u64, maximum: u64 },
+    #[error("artifact partition count {actual} exceeds limit {maximum}")]
+    ArtifactPartitionLimitExceeded { actual: u32, maximum: u32 },
+    #[error("dedup key uses {actual} bytes; maximum is {maximum}")]
+    DedupKeyLimitExceeded { actual: usize, maximum: usize },
     #[error("timestamp ordering is invalid for {0}")]
     InvalidTimestampOrder(&'static str),
     #[error("checked arithmetic failed for {0}")]
