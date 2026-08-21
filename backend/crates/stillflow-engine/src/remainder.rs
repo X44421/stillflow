@@ -190,6 +190,7 @@ impl CanonicalRebatcher {
 
     /// Peak remainder-builder bytes during admission of `k` rows, including
     /// old-buffer + new-buffer realloc transients.
+    #[allow(dead_code)]
     pub(crate) fn admission_budget_peak(
         &self,
         incoming: &RecordBatch,

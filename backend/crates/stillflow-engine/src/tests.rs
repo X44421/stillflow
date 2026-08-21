@@ -3883,20 +3883,18 @@ async fn p05_simultaneous_row_and_byte_truncation_with_m_gt_p() {
     let byte_limit = one.byte_count() + 1;
 
     let values = (0..10).map(|_| "a".repeat(1_000)).collect::<Vec<_>>();
-    let (engine, _) =
-        engine_with(schema.clone(), vec![utf8_batch(&schema, source.id, values)], true).await;
+    let (engine, _) = engine_with(
+        schema.clone(),
+        vec![utf8_batch(&schema, source.id, values)],
+        true,
+    )
+    .await;
     let plan = scan_materialize_plan(source.id, None);
     let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
 
     let result = engine
         .preview(preview_request(
-            plan,
-            scan,
-            connection,
-            source,
-            schema,
-            2,
-            byte_limit,
+            plan, scan, connection, source, schema, 2, byte_limit,
         ))
         .await
         .expect("simultaneous row and byte truncation");
@@ -3905,7 +3903,7 @@ async fn p05_simultaneous_row_and_byte_truncation_with_m_gt_p() {
     assert!(result.rows_truncated);
     assert!(result.bytes_truncated);
     assert!(result.source_exhausted);
-    assert!(result.batches.len() >= 1);
+    assert!(!result.batches.is_empty());
     drop(_guard);
 }
 
@@ -3942,9 +3940,9 @@ async fn p05_exact_source_byte_boundary_with_lookahead() {
                 return envelope;
             }
             if bytes < target {
-                len = len.saturating_add((target - bytes + 1) / 2);
+                len = len.saturating_add((target - bytes).div_ceil(2));
             } else {
-                len = len.saturating_sub((bytes - target + 1) / 2);
+                len = len.saturating_sub((bytes - target).div_ceil(2));
             }
         }
         panic!("could not construct exact source byte boundary");
@@ -3954,7 +3952,7 @@ async fn p05_exact_source_byte_boundary_with_lookahead() {
     let boundary = two_row_envelope_with_target_bytes(&schema, source.id, target, 0);
     let lookahead = utf8_envelope_values(&schema, source.id, vec!["lookahead".to_owned()], 1);
     let (engine, connector) =
-        engine_with(schema.clone(), vec![boundary, lookahead], true).await;
+        engine_with(schema.clone(), vec![boundary, lookahead.clone()], true).await;
     let plan = scan_materialize_plan(source.id, None);
     let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
 
@@ -4525,12 +4523,8 @@ async fn p10_no_schema_override_inspects_once() {
     let (schema, _) = int_schema();
     let connection = connection();
     let source = asset(connection.id());
-    let (engine, connector) = engine_with(
-        schema.clone(),
-        vec![int_batch(&schema, source.id, 3)],
-        true,
-    )
-    .await;
+    let (engine, connector) =
+        engine_with(schema.clone(), vec![int_batch(&schema, source.id, 3)], true).await;
     let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
     let mut request = preview_request(
         plan,
@@ -4542,7 +4536,10 @@ async fn p10_no_schema_override_inspects_once() {
         PREVIEW_DEFAULT_BYTE_LIMIT,
     );
     request.schema_override = None;
-    let result = engine.preview(request).await.expect("preview without override");
+    let result = engine
+        .preview(request)
+        .await
+        .expect("preview without override");
     assert_eq!(connector.inspect_count.load(Ordering::SeqCst), 1);
     assert_eq!(connector.read_count.load(Ordering::SeqCst), 1);
     assert!(result.source_exhausted);
