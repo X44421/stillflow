@@ -201,7 +201,9 @@ impl MemoryTracker {
             report.allocator_reallocation_count = allocator_reallocation_count();
             report.allocator_peak_bytes = polars.max(remainder).max(storage);
         }
-        let allocator_overlay = polars.saturating_add(remainder).saturating_add(storage);
+        // Issue #46 T23/T44: the storage-append Parquet encode phase is
+        // recorded but excluded from the engine ceiling.
+        let allocator_overlay = polars.saturating_add(remainder);
         report.peak_engine_bytes = report
             .peak_engine_bytes
             .max(self.operator_state_bytes.saturating_add(allocator_overlay));
@@ -309,6 +311,35 @@ impl MemoryTracker {
         self.refresh()
     }
 
+    /// Independent peak pre-check for builder realloc transients (E3
+    /// §10.1 rule 5 / §10.2 / §10.3). The predicted old-buffer/new-buffer
+    /// transient is a memory-safety quantity: it never gates admission,
+    /// public caps, or batch boundaries. It is instead verified against the
+    /// peak law at the only place it can be enforced — immediately before
+    /// the physical growth — using the exact-need reserve as the
+    /// minimum-transient strategy (old and new buffers necessarily coexist
+    /// while copying). A breach means the structural peak proof of section
+    /// 10.3 no longer holds for this transition and fails loudly, exactly
+    /// like the other defensive internal-bound assertions.
+    pub(crate) fn pre_check_realloc_peak(
+        &self,
+        transient_peak: usize,
+        superseded_builder_bytes: usize,
+    ) -> Result<(), EngineError> {
+        // The accounted engine total already contains the builder's current
+        // buffers (`superseded_builder_bytes`); the transient peak replaces
+        // them with the peak builder footprint, so only the difference is
+        // projected on top of the engine total.
+        let projected = self
+            .engine_bytes()
+            .saturating_sub(superseded_builder_bytes)
+            .saturating_add(transient_peak);
+        if projected > self.peak_limit {
+            return Err(EngineError::peak_exceeded());
+        }
+        Ok(())
+    }
+
     fn live_payloads(&self) -> u8 {
         u8::from(self.envelope_live)
             + u8::from(self.polars_live || self.incoming_live)
@@ -338,7 +369,9 @@ impl MemoryTracker {
         self.report.polars_phase_peak = self.report.polars_phase_peak.max(polars);
         self.report.remainder_phase_peak = self.report.remainder_phase_peak.max(remainder);
         self.report.storage_append_phase_peak = self.report.storage_append_phase_peak.max(storage);
-        let allocator_overlay = polars.saturating_add(remainder).saturating_add(storage);
+        // Issue #46 T23/T44: the storage-append Parquet encode phase is
+        // recorded but excluded from the engine ceiling.
+        let allocator_overlay = polars.saturating_add(remainder);
         self.report.peak_engine_bytes = self
             .report
             .peak_engine_bytes
