@@ -469,13 +469,41 @@ impl SnapshotStore {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StorageError::database("begin bundle journal transaction"))?;
+        // Symmetric identity reservation (contract 10.5): every identity that
+        // maps to a `partitions/<id>` directory — the accepted snapshot id and
+        // each artifact id — must be free across BOTH families. It may not be
+        // held by an ordinary snapshot (committed or pending), by any pending
+        // bundle journal row, or by any committed bundle, regardless of which
+        // column carries it. A `None` rejected id binds SQL NULL, which never
+        // matches.
         let conflict: bool = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM verification_bundles WHERE bundle_id = ?1)
-                  OR EXISTS(SELECT 1 FROM bundle_publications WHERE bundle_id = ?1)
-                  OR EXISTS(SELECT 1 FROM snapshots WHERE id = ?2 AND state = 1)
-                  OR EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?2)",
-                params![bundle_id.to_string(), draft.accepted.id().to_string()],
+                "SELECT EXISTS(SELECT 1 FROM snapshots
+                                 WHERE id IN (?1, ?2, ?3, ?4, ?5, ?6))
+                   OR EXISTS(SELECT 1 FROM publications
+                              WHERE snapshot_id IN (?1, ?2, ?3, ?4, ?5, ?6))
+                   OR EXISTS(SELECT 1 FROM bundle_publications WHERE
+                              bundle_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR accepted_snapshot_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR bundle_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR validation_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR rejected_rows_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR deduplication_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6))
+                   OR EXISTS(SELECT 1 FROM verification_bundles WHERE
+                              bundle_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR accepted_snapshot_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR bundle_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR validation_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR rejected_rows_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR deduplication_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6))",
+                params![
+                    bundle_id.to_string(),
+                    draft.accepted.id().to_string(),
+                    draft.provenance.input.artifact_id.to_string(),
+                    draft.validation_report_artifact_id.to_string(),
+                    draft.rejected_rows_artifact_id.map(|id| id.to_string()),
+                    draft.deduplication_report_artifact_id.to_string(),
+                ],
                 |row| row.get(0),
             )
             .map_err(|_| StorageError::database("check bundle identity conflicts"))?;
@@ -2200,16 +2228,54 @@ mod tests {
     }
 
     fn bundle_draft(rejected_authorized: bool) -> VerificationBundleDraft {
+        draft_with_ids(
+            RUN,
+            BUNDLE,
+            BUNDLE_ARTIFACT,
+            ACCEPTED,
+            VALIDATION,
+            rejected_authorized.then_some(REJECTED),
+            DEDUP,
+        )
+    }
+
+    /// Builds a fully explicit draft so reservation tests can compose
+    /// arbitrary (possibly conflicting) identity sets.
+    fn draft_with_ids(
+        run: u128,
+        bundle: u128,
+        bundle_artifact: u128,
+        accepted: u128,
+        validation: u128,
+        rejected: Option<u128>,
+        dedup: u128,
+    ) -> VerificationBundleDraft {
         let provenance = ArtifactProvenanceDraft {
-            input: provenance_input(),
+            input: ArtifactProvenanceInput {
+                run_id: Uuid::from_u128(run),
+                bundle_id: Uuid::from_u128(bundle),
+                artifact_id: Uuid::from_u128(bundle_artifact),
+                artifact_kind: ArtifactKind::VerificationBundle,
+                session_id: Uuid::from_u128(0xE408),
+                input: stillflow_core::LogicalInputRef {
+                    input: stillflow_core::InputRef::Asset {
+                        asset_id: Uuid::from_u128(SOURCE_ASSET),
+                    },
+                    version_digest: [0x5A; 32],
+                },
+                lineage: std::collections::BTreeSet::from([Uuid::from_u128(0xE409)]),
+                created_at: at(CREATED),
+                started_at: at(STARTED),
+                committed_at: at(COMMITTED),
+            },
             plan_fingerprint: [0x21; 32],
             canonical_plan_digest: [0x22; 32],
             engine_contract_version: 1,
             engine_build: "test-engine-build".to_owned(),
             verification_contract_version: VERIFICATION_CONTRACT_VERSION,
         };
-        let accepted = SnapshotDraft::try_new(
-            Uuid::from_u128(ACCEPTED),
+        let accepted_draft = SnapshotDraft::try_new(
+            Uuid::from_u128(accepted),
             Uuid::from_u128(0xE410),
             Uuid::from_u128(0xE411),
             Uuid::from_u128(SOURCE_ASSET),
@@ -2221,10 +2287,10 @@ mod tests {
         .expect("accepted draft");
         VerificationBundleDraft::try_new(
             provenance,
-            accepted,
-            Uuid::from_u128(VALIDATION),
-            rejected_authorized.then(|| Uuid::from_u128(REJECTED)),
-            Uuid::from_u128(DEDUP),
+            accepted_draft,
+            Uuid::from_u128(validation),
+            rejected.map(Uuid::from_u128),
+            Uuid::from_u128(dedup),
         )
         .expect("bundle draft")
     }
@@ -2833,5 +2899,172 @@ mod tests {
             writer.append_rejected_rows(&section_envelope(rejected_schema, 0, 1, BTreeMap::new())),
             Err(StorageError::InvalidDraft(_))
         ));
+    }
+
+    // ---- Symmetric identity reservation (E4-S1-R1 blocker C) ----
+
+    fn ordinary_snapshot_draft(id: u128) -> SnapshotDraft {
+        SnapshotDraft::try_new(
+            Uuid::from_u128(id),
+            Uuid::from_u128(0xE410),
+            Uuid::from_u128(0xE411),
+            Uuid::from_u128(SOURCE_ASSET),
+            source_schema().as_ref().clone(),
+            std::collections::BTreeSet::from([Uuid::from_u128(0xE412)]),
+            Some(95),
+            at(CREATED),
+        )
+        .expect("snapshot draft")
+    }
+
+    /// Any pending bundle reserves every one of its directory-mapped ids
+    /// against both publication families: a second bundle reusing the
+    /// accepted id, and an ordinary snapshot reusing a child artifact id,
+    /// are both refused before any staging exists.
+    #[test]
+    fn begin_rejects_ids_reserved_by_pending_bundle_across_families() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        let _pending = begin(&store, true);
+
+        let conflicting_accepted = draft_with_ids(
+            RUN + 0x100,
+            BUNDLE + 0x100,
+            BUNDLE_ARTIFACT + 0x100,
+            ACCEPTED,
+            VALIDATION + 0x100,
+            Some(REJECTED + 0x100),
+            DEDUP + 0x100,
+        );
+        assert!(matches!(
+            store.begin_verification_bundle(conflicting_accepted, at(STARTED)),
+            Err(StorageError::AlreadyExists(_))
+        ));
+
+        let child_id_conflict =
+            store.begin_snapshot(ordinary_snapshot_draft(VALIDATION), at(STARTED));
+        assert!(matches!(
+            child_id_conflict,
+            Err(StorageError::AlreadyExists(_))
+        ));
+    }
+
+    /// Prevention half: while a bundle claim over S is pending, an ordinary
+    /// publication of S is refused outright.
+    #[test]
+    fn begin_snapshot_reusing_pending_bundle_accepted_id_is_refused() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        let _pending = begin(&store, true);
+        assert!(matches!(
+            store.begin_snapshot(ordinary_snapshot_draft(ACCEPTED), at(STARTED)),
+            Err(StorageError::AlreadyExists(_))
+        ));
+    }
+
+    /// The mandated recovery-safety regression, expressed against the only
+    /// reachable historical state (the fix makes the live double-claim
+    /// impossible at begin time): a committed ordinary snapshot whose id also
+    /// appears on a stale foreign bundle journal row survives recovery
+    /// untouched, files included. Deterministic: no sleeps, no races.
+    #[test]
+    fn recovery_never_deletes_ordinary_snapshot_committed_after_stale_claim() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+
+        let mut snapshot_writer = store
+            .begin_snapshot(ordinary_snapshot_draft(ACCEPTED), at(STARTED))
+            .expect("ordinary begin");
+        snapshot_writer
+            .append(&accepted_envelope(0, vec![9, 9, 9]))
+            .expect("append");
+        snapshot_writer.commit().expect("ordinary commit");
+
+        // Historical residue: a since-crashed bundle claim over the same id,
+        // stamped older than the recovery cutoff.
+        let connection = open_connection(&store.inner).expect("connection");
+        connection
+            .execute(
+                "INSERT INTO bundle_publications(
+                     bundle_id, run_id, accepted_snapshot_id, bundle_artifact_id,
+                     validation_report_artifact_id, rejected_rows_artifact_id,
+                     deduplication_report_artifact_id, started_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)",
+                params![
+                    Uuid::from_u128(0xE4F0).to_string(),
+                    Uuid::from_u128(0xE4F1).to_string(),
+                    Uuid::from_u128(ACCEPTED).to_string(),
+                    Uuid::from_u128(0xE4F2).to_string(),
+                    Uuid::from_u128(0xE4F3).to_string(),
+                    Uuid::from_u128(0xE4F4).to_string(),
+                    format_timestamp(&at(STARTED)),
+                ],
+            )
+            .expect("inject stale foreign claim");
+
+        let report = store
+            .recover(at(COMMITTED), Duration::ZERO, MAX_MAINTENANCE_CANDIDATES)
+            .expect("recover");
+        assert!(report.recovered() >= 1, "stale claim must be reclaimed");
+
+        store
+            .load_manifest(Uuid::from_u128(ACCEPTED))
+            .expect("committed manifest survives recovery");
+        store
+            .verify_snapshot(Uuid::from_u128(ACCEPTED))
+            .expect("partition files survive recovery");
+
+        let second = store
+            .recover(at(COMMITTED), Duration::ZERO, MAX_MAINTENANCE_CANDIDATES)
+            .expect("second recover");
+        assert_eq!(second.examined(), 0, "recovery must be idempotent");
+        assert_eq!(second.recovered(), 0, "recovery must be idempotent");
+    }
+
+    /// Recovery must also respect ids owned by a committed bundle when a
+    /// foreign stale journal row (hand-injected to represent any historical
+    /// state) references them.
+    #[test]
+    fn recovery_never_deletes_ids_owned_by_committed_bundle_from_stale_row() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        publish_standard_bundle(&store, false);
+
+        let connection = open_connection(&store.inner).expect("connection");
+        connection
+            .execute(
+                "INSERT INTO bundle_publications(
+                     bundle_id, run_id, accepted_snapshot_id, bundle_artifact_id,
+                     validation_report_artifact_id, rejected_rows_artifact_id,
+                     deduplication_report_artifact_id, started_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)",
+                params![
+                    Uuid::from_u128(0xE4F0).to_string(),
+                    Uuid::from_u128(0xE4F1).to_string(),
+                    Uuid::from_u128(ACCEPTED).to_string(),
+                    Uuid::from_u128(BUNDLE_ARTIFACT).to_string(),
+                    Uuid::from_u128(0xE4F2).to_string(),
+                    Uuid::from_u128(0xE4F3).to_string(),
+                    format_timestamp(&at(STARTED)),
+                ],
+            )
+            .expect("inject stale foreign claim");
+
+        store
+            .recover(at(COMMITTED), Duration::ZERO, MAX_MAINTENANCE_CANDIDATES)
+            .expect("recover");
+
+        store
+            .load_manifest(Uuid::from_u128(ACCEPTED))
+            .expect("accepted partition directory survives");
+        store
+            .load_verification_bundle(Uuid::from_u128(BUNDLE))
+            .expect("committed bundle survives with all artifacts");
+
+        let second = store
+            .recover(at(COMMITTED), Duration::ZERO, MAX_MAINTENANCE_CANDIDATES)
+            .expect("second recover");
+        assert_eq!(second.examined(), 0);
+        assert_eq!(second.recovered(), 0);
     }
 }

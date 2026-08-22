@@ -855,21 +855,33 @@ fn insert_publication(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|_| StorageError::database("begin publication transaction"))?;
-    let existing_snapshot: bool = transaction
+    // Symmetric identity reservation (contract 10.5): the snapshot id maps to
+    // a `partitions/<id>` directory, so it must also be free of any bundle
+    // claim — pending journal rows and committed bundles alike — in addition
+    // to the ordinary snapshot families.
+    let existing_identity: bool = transaction
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id = ?1)
+                   OR EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?1)
+                   OR EXISTS(SELECT 1 FROM bundle_publications WHERE
+                              bundle_id = ?1
+                           OR accepted_snapshot_id = ?1
+                           OR bundle_artifact_id = ?1
+                           OR validation_report_artifact_id = ?1
+                           OR rejected_rows_artifact_id = ?1
+                           OR deduplication_report_artifact_id = ?1)
+                   OR EXISTS(SELECT 1 FROM verification_bundles WHERE
+                              bundle_id = ?1
+                           OR accepted_snapshot_id = ?1
+                           OR bundle_artifact_id = ?1
+                           OR validation_report_artifact_id = ?1
+                           OR rejected_rows_artifact_id = ?1
+                           OR deduplication_report_artifact_id = ?1)",
             params![snapshot_id.to_string()],
             |row| row.get(0),
         )
         .map_err(|_| StorageError::database("check existing snapshot identity"))?;
-    let existing_publication: bool = transaction
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?1)",
-            params![snapshot_id.to_string()],
-            |row| row.get(0),
-        )
-        .map_err(|_| StorageError::database("check existing publication identity"))?;
-    if existing_snapshot || existing_publication {
+    if existing_identity {
         return Err(StorageError::AlreadyExists(snapshot_id));
     }
     transaction
@@ -1562,6 +1574,15 @@ fn recover_bundles(
             .into_iter()
             .flatten()
             {
+                // Per-identity ownership guard: another claimant may have
+                // committed this id after the stale journal row was written
+                // (ordinary snapshot or a different bundle). Recovery never
+                // deletes a directory whose id is now visible or owned by any
+                // other live publication (contract 10.4; V30 safety).
+                if identity_owned_elsewhere(inner, artifact_id, publication.bundle_id)? {
+                    checked_increment(&mut report.ignored, "recovery ignored count")?;
+                    continue;
+                }
                 remove_uuid_directory(
                     &partitions_root(inner),
                     artifact_id,
@@ -1581,6 +1602,40 @@ fn recover_bundles(
         checked_increment(&mut report.recovered, "recovery recovered count")?;
     }
     Ok(())
+}
+
+/// Returns `true` when `id` is owned by anything other than the stale bundle
+/// being recovered: an ordinary snapshot row, or another bundle's committed
+/// row or pending journal claim over the same identity.
+fn identity_owned_elsewhere(
+    inner: &StoreInner,
+    id: Uuid,
+    exclude_bundle_id: Uuid,
+) -> Result<bool, StorageError> {
+    let connection = open_connection(inner)?;
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id = ?1)
+                   OR EXISTS(SELECT 1 FROM verification_bundles WHERE
+                              bundle_id <> ?2
+                           AND (bundle_id = ?1
+                             OR accepted_snapshot_id = ?1
+                             OR bundle_artifact_id = ?1
+                             OR validation_report_artifact_id = ?1
+                             OR rejected_rows_artifact_id = ?1
+                             OR deduplication_report_artifact_id = ?1))
+                   OR EXISTS(SELECT 1 FROM bundle_publications WHERE
+                              bundle_id <> ?2
+                           AND (bundle_id = ?1
+                             OR accepted_snapshot_id = ?1
+                             OR bundle_artifact_id = ?1
+                             OR validation_report_artifact_id = ?1
+                             OR rejected_rows_artifact_id = ?1
+                             OR deduplication_report_artifact_id = ?1))",
+            params![id.to_string(), exclude_bundle_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| StorageError::database("check bundle identity ownership"))
 }
 
 fn bundle_is_visible(inner: &StoreInner, bundle_id: Uuid) -> Result<bool, StorageError> {
