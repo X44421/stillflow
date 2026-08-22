@@ -3204,6 +3204,62 @@ fn int_envelope_values(
     factory.try_build(sequence, batch).expect("envelope")
 }
 
+/// Builds an envelope whose `byte_count()` is exactly `target` bytes.
+///
+/// A legitimate Arrow construction whose `get_array_memory_size()` equals
+/// the target exactly is valid. Builder-produced capacities come in
+/// allocation quanta and cannot hit 67,108,864, so this helper hand-builds
+/// a two-row UTF-8 array with exact-capacity buffers (one value buffer of
+/// exactly `values_bytes` bytes, one offsets buffer of exactly three
+/// `i32`) and calibrates the fixed overhead from its own construction.
+fn exact_byte_utf8_envelope(
+    schema: &LogicalSchema,
+    asset_id: Uuid,
+    target: usize,
+    sequence: u64,
+) -> stillflow_core::BatchEnvelope {
+    use stillflow_core::BatchEnvelope;
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), asset_id).expect("factory");
+    let build = |values_bytes: usize| -> BatchEnvelope {
+        // `Vec::with_capacity` allocates exactly `values_bytes` bytes and
+        // `Buffer::from_vec` adopts the whole allocation, so the frozen
+        // values-buffer capacity is exact (no 64-byte MutableBuffer
+        // rounding).
+        let mut data = Vec::with_capacity(values_bytes);
+        let first_row = vec![b'a'; values_bytes / 2];
+        data.extend_from_slice(&first_row);
+        let second_row = vec![b'b'; values_bytes - values_bytes / 2];
+        data.extend_from_slice(&second_row);
+        assert_eq!(data.capacity(), values_bytes, "exact values capacity");
+
+        // Exactly three i32 entries; `vec![]` allocates the exact
+        // capacity so the frozen offsets buffer stays deterministic.
+        let offsets = vec![0_i32, (values_bytes / 2) as i32, values_bytes as i32];
+        let array = StringArray::new(
+            OffsetBuffer::new(ScalarBuffer::from(offsets)),
+            ArrowBuffer::from_vec(data),
+            None,
+        );
+        let batch = RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(array)])
+            .expect("batch");
+        factory.try_build(sequence, batch).expect("envelope")
+    };
+
+    // Fixed overhead of this exact layout: array object sizes plus the
+    // three-entry offsets buffer, measured on the zero-length values
+    // buffer so no builder quantum can leak into the calibration.
+    let overhead = build(0).byte_count();
+    assert!(target > overhead, "target must exceed the fixed overhead");
+    let envelope = build(target - overhead);
+    assert_eq!(
+        envelope.byte_count(),
+        target,
+        "hand-built fixture must hit the exact source-byte boundary"
+    );
+    envelope
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn p01_target_cutoff_for_each_supported_node() {
     let _guard = exclusive_test_lock().lock().await;
@@ -3947,59 +4003,7 @@ async fn p05_exact_source_byte_boundary_with_lookahead() {
 
     // P05.5 freezes the byte-boundary semantics, not the fixture shape: any
     // legitimate Arrow construction whose `get_array_memory_size()` equals
-    // the target exactly is valid. Builder-produced capacities come in
-    // allocation quanta and cannot hit 67,108,864, so this helper hand-builds
-    // a two-row UTF-8 array with exact-capacity buffers (one value buffer of
-    // exactly `values_bytes` bytes, one offsets buffer of exactly three
-    // `i32`) and calibrates the fixed overhead from its own construction.
-    fn exact_byte_utf8_envelope(
-        schema: &LogicalSchema,
-        asset_id: Uuid,
-        target: usize,
-        sequence: u64,
-    ) -> stillflow_core::BatchEnvelope {
-        use stillflow_core::BatchEnvelope;
-        let factory =
-            BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), asset_id).expect("factory");
-        let build = |values_bytes: usize| -> BatchEnvelope {
-            // `Vec::with_capacity` allocates exactly `values_bytes` bytes and
-            // `Buffer::from_vec` adopts the whole allocation, so the frozen
-            // values-buffer capacity is exact (no 64-byte MutableBuffer
-            // rounding).
-            let mut data = Vec::with_capacity(values_bytes);
-            let first_row = vec![b'a'; values_bytes / 2];
-            data.extend_from_slice(&first_row);
-            let second_row = vec![b'b'; values_bytes - values_bytes / 2];
-            data.extend_from_slice(&second_row);
-            assert_eq!(data.capacity(), values_bytes, "exact values capacity");
-
-            // Exactly three i32 entries; `vec![]` allocates the exact
-            // capacity so the frozen offsets buffer stays deterministic.
-            let offsets = vec![0_i32, (values_bytes / 2) as i32, values_bytes as i32];
-            let array = StringArray::new(
-                OffsetBuffer::new(ScalarBuffer::from(offsets)),
-                ArrowBuffer::from_vec(data),
-                None,
-            );
-            let batch = RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(array)])
-                .expect("batch");
-            factory.try_build(sequence, batch).expect("envelope")
-        };
-
-        // Fixed overhead of this exact layout: array object sizes plus the
-        // three-entry offsets buffer, measured on the zero-length values
-        // buffer so no builder quantum can leak into the calibration.
-        let overhead = build(0).byte_count();
-        assert!(target > overhead, "target must exceed the fixed overhead");
-        let envelope = build(target - overhead);
-        assert_eq!(
-            envelope.byte_count(),
-            target,
-            "hand-built fixture must hit the exact source-byte boundary"
-        );
-        envelope
-    }
-
+    // the target exactly is valid; see `exact_byte_utf8_envelope`.
     let target = crate::PREVIEW_MAX_SOURCE_BYTES_SCANNED;
     let boundary = exact_byte_utf8_envelope(&schema, source.id, target, 0);
     let lookahead = utf8_envelope_values(&schema, source.id, vec!["lookahead".to_owned()], 1);
@@ -4325,17 +4329,32 @@ async fn p08_cancellation_and_deadline() {
 #[tokio::test]
 async fn p08_cancellation_during_flag_completion_lookahead() {
     let _guard = exclusive_test_lock().lock().await;
-    let (schema, _) = int_schema();
+    let (schema, _) = utf8_schema();
     let connection = connection();
     let source = asset(connection.id());
-    let boundary = int_batch(&schema, source.id, PREVIEW_MAX_SOURCE_ROWS_SCANNED as i64);
+    // The flag-completion lookahead is reached through the source-byte scan
+    // cap: one envelope whose byte_count() equals
+    // PREVIEW_MAX_SOURCE_BYTES_SCANNED closes the scan budget exactly at the
+    // envelope boundary, so the engine polls the stream once more to
+    // classify the stop (scan-truncated vs source-exhausted). The stream
+    // pends after that envelope was served, parking the lookahead poll on a
+    // cancellable wait. A row-count fixture cannot reach this state: §9.3
+    // first-of event 2 stops scanning before any second poll once a chunk
+    // lowers more than row_limit target rows.
+    let boundary = exact_byte_utf8_envelope(
+        &schema,
+        source.id,
+        crate::PREVIEW_MAX_SOURCE_BYTES_SCANNED,
+        0,
+    );
     let (engine, connector) =
         engine_with_pending_after(schema.clone(), vec![boundary], 1, true).await;
     let token = stillflow_core::RequestContext::default()
         .cancellation()
         .clone();
     let engine = Arc::new(engine);
-    let (plan, scan, _, _, _, _) = preview_pipeline_plan(source.id);
+    let plan = scan_materialize_plan(source.id, None);
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
     let mut request = preview_request(
         plan,
         scan,
@@ -4343,7 +4362,7 @@ async fn p08_cancellation_during_flag_completion_lookahead() {
         source,
         schema,
         1_000,
-        PREVIEW_DEFAULT_BYTE_LIMIT,
+        crate::PREVIEW_MAX_BYTE_LIMIT,
     );
     request.context = stillflow_core::RequestContext::with_cancellation(token.clone());
     let handle = tokio::spawn(async move { engine.preview(request).await });
@@ -4352,6 +4371,11 @@ async fn p08_cancellation_during_flag_completion_lookahead() {
     loop {
         tokio::task::yield_now().await;
         if connector.poll_count.load(Ordering::SeqCst) >= 2 {
+            break;
+        }
+        // If the preview task already finished, surface its real outcome
+        // through the join below instead of masking it with this deadline.
+        if handle.is_finished() {
             break;
         }
         assert!(
