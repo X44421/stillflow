@@ -39,11 +39,11 @@ pub use manifest::{
 pub use store::{SnapshotBatchReader, SnapshotStore, SnapshotWriter};
 
 pub(crate) use manifest::build_snapshot;
+#[cfg(test)]
+pub(crate) use store::acquire_maintenance;
 pub(crate) use store::{
     abort_bundle_publication, acquire_activity, create_exact_directory, ensure_private_directory,
     format_timestamp, insert_visible_snapshot, integrity_error, load_manifest_inner,
     open_connection, partitions_root, read_partition, staging_root, sync_directory,
     write_envelope_parquet, ActivityGuard, ActivityKind, StoreInner,
 };
-#[cfg(test)]
-pub(crate) use store::acquire_maintenance;

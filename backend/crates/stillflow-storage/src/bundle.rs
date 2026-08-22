@@ -192,6 +192,15 @@ impl VerificationBundle {
     }
 }
 
+/// Deterministic test hook at the Prepared-window boundary (journal
+/// committed, staging not yet created). Test-only; always `None` in
+/// production builds.
+#[cfg(test)]
+#[allow(clippy::type_complexity)]
+pub(crate) static PREPARED_WINDOW_HOOK: std::sync::Mutex<
+    Option<std::sync::Arc<dyn Fn(&StoreInner, Uuid) + Send + Sync>>,
+> = std::sync::Mutex::new(None);
+
 /// Engine-assembled draft handed to `begin_verification_bundle` (contract
 /// sections 7.3, 10.5, and 11). Validated before any storage I/O.
 #[derive(Debug, Clone)]
@@ -533,6 +542,23 @@ impl SnapshotStore {
             .commit()
             .map_err(|_| StorageError::database("commit bundle publication journal"))?;
         drop(connection);
+
+        // Deterministic test hook at the exact Prepared-window boundary: the
+        // publication journal is committed and the staging directory does not
+        // exist yet. The order-sensitivity test asserts both facts here, so a
+        // regression that creates staging before the journal commit fails the
+        // invariant.
+        #[cfg(test)]
+        {
+            let hook = PREPARED_WINDOW_HOOK
+                .lock()
+                .expect("prepared window hook mutex")
+                .as_ref()
+                .cloned();
+            if let Some(hook) = hook {
+                hook(inner, bundle_id);
+            }
+        }
 
         let staging_dir = staging_root(inner).join(bundle_id.to_string());
         if let Err(error) = create_exact_directory(&staging_dir, "create bundle staging directory")
@@ -1196,9 +1222,24 @@ impl VerificationBundleWriter {
             return Ok(());
         }
 
-        // Validate finding payloads before any filesystem write.
-        if section_id == ArtifactSectionId::ValidationFinding {
-            let (warnings, errors) = count_severities(envelope)?;
+        // Validate finding payloads before any filesystem write, but apply
+        // the tallies only AFTER the ceiling check so a refused pack leaves
+        // the summary counts untouched (E4-S1-R1 evidence gap: no tally
+        // pollution on a failed append).
+        let severity_tallies = if section_id == ArtifactSectionId::ValidationFinding {
+            Some(count_severities(envelope)?)
+        } else {
+            None
+        };
+
+        let canonical = canonical_batch_bytes(envelope.payload())?;
+        let envelope_rows = u64::try_from(envelope.row_count())
+            .map_err(|_| StorageError::ArithmeticOverflow("envelope row count"))?;
+        let stored = u64::try_from(canonical.len())
+            .map_err(|_| StorageError::ArithmeticOverflow("canonical byte count"))?;
+        self.ensure_section_limits(section_index, envelope_rows, stored)?;
+
+        if let Some((warnings, errors)) = severity_tallies {
             let section = &mut self.sections[section_index];
             section.warning_count = section
                 .warning_count
@@ -1209,13 +1250,6 @@ impl VerificationBundleWriter {
                 .checked_add(errors)
                 .ok_or(StorageError::ArithmeticOverflow("error count"))?;
         }
-
-        let canonical = canonical_batch_bytes(envelope.payload())?;
-        let envelope_rows = u64::try_from(envelope.row_count())
-            .map_err(|_| StorageError::ArithmeticOverflow("envelope row count"))?;
-        let stored = u64::try_from(canonical.len())
-            .map_err(|_| StorageError::ArithmeticOverflow("canonical byte count"))?;
-        self.ensure_section_limits(section_index, envelope_rows, stored)?;
 
         let section = &mut self.sections[section_index];
         let sequence = u32::try_from(section.partitions.len())
@@ -2608,32 +2642,53 @@ mod tests {
     fn prepared_journal_window_is_recovered() {
         let temp = TempDir::new().expect("temp");
         let store = open_store(&temp);
-        // Simulate the Prepared state: journal committed, no staging yet.
+
+        // Block staging creation so begin aborts right after the Prepared
+        // window; the pre-created regular file makes create_exact_directory
+        // fail deterministically.
+        let blocking_file = staging_root(&store.inner).join(Uuid::from_u128(BUNDLE).to_string());
+        std::fs::write(&blocking_file, b"not a directory").expect("block staging");
+
+        // Order-sensitivity: at the moment staging creation is about to run,
+        // the journal row must already be committed and no staging directory
+        // may exist. A regression that creates staging before committing the
+        // journal row fails these assertions inside production code.
+        let observed = Arc::new(std::sync::Mutex::new(None::<(bool, bool)>));
         {
-            let connection = open_connection(&store.inner).expect("connection");
-            connection
-                .execute(
-                    "INSERT INTO bundle_publications(
-                         bundle_id, run_id, accepted_snapshot_id, bundle_artifact_id,
-                         validation_report_artifact_id, rejected_rows_artifact_id,
-                         deduplication_report_artifact_id, started_at_utc
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    rusqlite::params![
-                        Uuid::from_u128(BUNDLE).to_string(),
-                        Uuid::from_u128(RUN).to_string(),
-                        Uuid::from_u128(ACCEPTED).to_string(),
-                        Uuid::from_u128(BUNDLE_ARTIFACT).to_string(),
-                        Uuid::from_u128(VALIDATION).to_string(),
-                        Uuid::from_u128(REJECTED).to_string(),
-                        Uuid::from_u128(DEDUP).to_string(),
-                        format_timestamp(&at(STARTED)),
-                    ],
-                )
-                .expect("journal insert");
+            let observed = Arc::clone(&observed);
+            *PREPARED_WINDOW_HOOK.lock().expect("hook") =
+                Some(Arc::new(move |inner: &StoreInner, bundle_id: Uuid| {
+                    let connection = open_connection(inner).expect("connection");
+                    let journal: i64 = connection
+                        .query_row(
+                            "SELECT COUNT(*) FROM bundle_publications WHERE bundle_id = ?1",
+                            params![bundle_id.to_string()],
+                            |row| row.get(0),
+                        )
+                        .expect("journal count");
+                    let staging_exists_as_dir =
+                        staging_root(inner).join(bundle_id.to_string()).is_dir();
+                    *observed.lock().expect("observed") =
+                        Some((journal == 1, !staging_exists_as_dir));
+                }));
         }
-        store
-            .recover(at(COMMITTED), Duration::ZERO, MAX_MAINTENANCE_CANDIDATES)
-            .expect("recover");
+
+        assert!(
+            store
+                .begin_verification_bundle(bundle_draft(true), at(STARTED))
+                .is_err(),
+            "blocked staging must abort the publication"
+        );
+        *PREPARED_WINDOW_HOOK.lock().expect("hook") = None;
+
+        let observed = observed.lock().expect("observed").take();
+        assert_eq!(
+            observed,
+            Some((true, true)),
+            "journal-before-staging ordering must hold at the window boundary"
+        );
+
+        // The aborted attempt leaves no journal row behind.
         let connection = open_connection(&store.inner).expect("connection");
         let journal: i64 = connection
             .query_row("SELECT COUNT(*) FROM bundle_publications", [], |row| {
@@ -2720,9 +2775,27 @@ mod tests {
                 "failed commit must remove installed directories"
             );
         }
+        // Contract 10.3 loader assertions, using lookups that cannot hit the
+        // sabotage row (bundle 0xE4F0): the attempted bundle is invisible and
+        // the accepted snapshot never became visible.
         assert!(store
-            .load_verification_bundle_by_run_id(Uuid::from_u128(RUN))
+            .load_verification_bundle(Uuid::from_u128(BUNDLE))
             .is_err());
+        assert!(
+            store.load_manifest(Uuid::from_u128(ACCEPTED)).is_err(),
+            "the accepted snapshot row must be rolled back"
+        );
+        let manifests: i64 = {
+            let connection = open_connection(&store.inner).expect("connection");
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM artifact_manifests WHERE bundle_id = ?1",
+                    params![Uuid::from_u128(BUNDLE).to_string()],
+                    |row| row.get(0),
+                )
+                .expect("manifest count")
+        };
+        assert_eq!(manifests, 0, "no artifact manifest rows may survive");
     }
 
     #[test]
@@ -2755,6 +2828,100 @@ mod tests {
         assert!(matches!(
             writer.ensure_section_limits(index, 1, 1),
             Err(StorageError::ArtifactRowLimitExceeded { .. })
+        ));
+
+        // Byte branch: one staged partition at the exact byte ceiling plus a
+        // single extra byte must fail on bytes, not rows.
+        {
+            let section = writer
+                .sections
+                .iter_mut()
+                .find(|section| section.section_id == ArtifactSectionId::ValidationFinding)
+                .expect("section");
+            section.partitions.clear();
+            section.partitions.push(
+                ArtifactPartition::try_new(
+                    0,
+                    1,
+                    MAX_REPORT_BYTES,
+                    crate::ContentDigest::from_bytes([0xAB; 32]),
+                )
+                .expect("staged partition"),
+            );
+        }
+        let index = writer
+            .sections
+            .iter()
+            .position(|section| section.section_id == ArtifactSectionId::ValidationFinding)
+            .expect("index");
+        assert!(matches!(
+            writer.ensure_section_limits(index, 0, 1),
+            Err(StorageError::ArtifactByteLimitExceeded { .. })
+        ));
+
+        // Partition branch: filling every report partition slot fails the
+        // candidate partition even with zero rows and bytes.
+        {
+            let section = writer
+                .sections
+                .iter_mut()
+                .find(|section| section.section_id == ArtifactSectionId::ValidationFinding)
+                .expect("section");
+            section.partitions.clear();
+            for sequence in 0..MAX_REPORT_PARTITIONS {
+                section.partitions.push(
+                    ArtifactPartition::try_new(
+                        sequence,
+                        1,
+                        1,
+                        crate::ContentDigest::from_bytes([0xAC; 32]),
+                    )
+                    .expect("staged partition"),
+                );
+            }
+        }
+        assert!(matches!(
+            writer.ensure_section_limits(index, 0, 0),
+            Err(StorageError::ArtifactPartitionLimitExceeded { .. })
+        ));
+
+        // Bundle-wide ceiling ordering: because the bundle row/byte/partition
+        // ceilings are exactly twice the per-report ceilings, any aggregate
+        // that would cross a bundle ceiling necessarily crosses a per-report
+        // ceiling first, so the per-artifact gate always fires first. This is
+        // pinned here: crossing the bundle sum (both reports near their max)
+        // surfaces the per-report row limit, never a bundle-branched error.
+        {
+            for section in &mut writer.sections {
+                section.partitions.clear();
+            }
+            let near_max = MAX_REPORT_ROWS - 10;
+            for (section_id, digest_byte) in [
+                (ArtifactSectionId::ValidationFinding, 0xB1_u8),
+                (ArtifactSectionId::DedupRuleSummary, 0xB2),
+            ] {
+                let section = writer
+                    .sections
+                    .iter_mut()
+                    .find(|section| section.section_id == section_id)
+                    .expect("report section");
+                section.partitions.push(
+                    ArtifactPartition::try_new(
+                        0,
+                        near_max,
+                        1,
+                        crate::ContentDigest::from_bytes([digest_byte; 32]),
+                    )
+                    .expect("staged partition"),
+                );
+            }
+        }
+        assert!(matches!(
+            writer.ensure_section_limits(index, 11, 0),
+            Err(StorageError::ArtifactRowLimitExceeded {
+                maximum: MAX_REPORT_ROWS,
+                ..
+            })
         ));
     }
 
@@ -3077,5 +3244,305 @@ mod tests {
             .expect("second recover");
         assert_eq!(second.examined(), 0);
         assert_eq!(second.recovered(), 0);
+    }
+
+    // ---- E4-S1-R1 evidence gaps ----
+
+    fn open_store_with_limits(temp: &TempDir, max_partitions: u32) -> SnapshotStore {
+        let limits =
+            StorageLimits::try_new(64, max_partitions, 1_000_000_000, 1_000_000_000_000, 8, 8)
+                .expect("configured limits");
+        SnapshotStore::open(temp.path(), limits).expect("store")
+    }
+
+    fn publish_with_severities(store: &SnapshotStore, severities: &[&str]) -> VerificationBundle {
+        let mut writer = begin(store, false);
+        writer
+            .append_accepted(&accepted_envelope(0, vec![1]))
+            .expect("accepted append");
+        writer
+            .append_validation_rule_summary(&section_envelope(
+                Arc::new(artifact::validation_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("summary append");
+        let finding_schema = Arc::new(artifact::validation_finding_section_schema());
+        let mut severity = BTreeMap::new();
+        severity.insert(
+            "severity",
+            Arc::new(StringArray::from(severities.to_vec())) as ArrayRef,
+        );
+        writer
+            .append_validation_findings(&section_envelope(
+                finding_schema,
+                0,
+                severities.len(),
+                severity,
+            ))
+            .expect("findings append");
+        writer
+            .append_dedup_rule_summary(&section_envelope(
+                Arc::new(artifact::dedup_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("dedup summary append");
+        writer
+            .append_duplicate_findings(&section_envelope(
+                Arc::new(artifact::duplicate_finding_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("duplicate append");
+        writer.commit(at(COMMITTED)).expect("commit")
+    }
+
+    /// V02 branch: `Some(rejected_rows_artifact_id)` with zero terminal
+    /// rejections publishes successfully, keeps the id unused, and never
+    /// materializes a rejected artifact.
+    #[test]
+    fn some_authorized_rejected_id_with_zero_rejections_publishes_cleanly() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        let mut writer = begin(&store, true); // Some(REJECTED) authorized
+        writer
+            .append_accepted(&accepted_envelope(0, vec![1, 2]))
+            .expect("accepted");
+        writer
+            .append_validation_rule_summary(&section_envelope(
+                Arc::new(artifact::validation_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("summary");
+        writer
+            .append_dedup_rule_summary(&section_envelope(
+                Arc::new(artifact::dedup_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("dedup summary");
+        let bundle = writer.commit(at(COMMITTED)).expect("commit");
+        assert_eq!(bundle.membership().rejected_rows_artifact_id(), None);
+        assert!(bundle.rejected_rows().is_none());
+        assert!(store.load_manifest(Uuid::from_u128(REJECTED)).is_err());
+    }
+
+    /// Append-level byte ceiling: with the staged aggregate driven to just
+    /// under the frozen per-report byte ceiling, a real (tiny) append crosses
+    /// it and is refused before any write — and leaves the severity tallies
+    /// untouched. The next valid pack commits with correct counts.
+    #[test]
+    fn byte_limit_append_refuses_and_keeps_tallies_clean() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        let mut writer = begin(&store, true);
+        let finding_schema = Arc::new(artifact::validation_finding_section_schema());
+
+        // Stage the report aggregate to MAX_REPORT_BYTES - 1024 so any real
+        // envelope tips it over the frozen ceiling.
+        {
+            let section = writer
+                .sections
+                .iter_mut()
+                .find(|section| section.section_id == ArtifactSectionId::ValidationFinding)
+                .expect("section");
+            section.partitions.push(
+                ArtifactPartition::try_new(
+                    0,
+                    1,
+                    MAX_REPORT_BYTES - 1024,
+                    crate::ContentDigest::from_bytes([0xAD; 32]),
+                )
+                .expect("staged partition"),
+            );
+        }
+
+        let mut pack = BTreeMap::new();
+        pack.insert(
+            "severity",
+            Arc::new(StringArray::from(vec!["warning", "error"])) as ArrayRef,
+        );
+        assert!(matches!(
+            writer.append_validation_findings(&section_envelope(
+                finding_schema.clone(),
+                0,
+                2,
+                pack
+            )),
+            Err(StorageError::ArtifactByteLimitExceeded { .. })
+        ));
+
+        // The refused pack must not have touched the tallies.
+        {
+            let section = writer
+                .sections
+                .iter()
+                .find(|section| section.section_id == ArtifactSectionId::ValidationFinding)
+                .expect("section");
+            assert_eq!(section.warning_count, 0);
+            assert_eq!(section.error_count, 0);
+        }
+
+        // Remove the synthetic pressure; the same pack now appends cleanly.
+        {
+            let section = writer
+                .sections
+                .iter_mut()
+                .find(|section| section.section_id == ArtifactSectionId::ValidationFinding)
+                .expect("section");
+            section.partitions.clear();
+        }
+        // The refused pack burned its sequence slot (monotonic envelope
+        // contract); the retry continues from the next sequence.
+        let mut retry = BTreeMap::new();
+        retry.insert(
+            "severity",
+            Arc::new(StringArray::from(vec!["warning", "error"])) as ArrayRef,
+        );
+        writer
+            .append_validation_findings(&section_envelope(finding_schema, 1, 2, retry))
+            .expect("valid pack after refusal");
+
+        let bundle = writer.commit(at(COMMITTED)).expect("commit");
+        let provenance = bundle.validation_report().provenance();
+        assert_eq!(provenance.summary.finding_count, 2);
+        assert_eq!(provenance.summary.warning_count, 1);
+        assert_eq!(provenance.summary.error_count, 1);
+    }
+
+    /// Append-level partition ceiling through configured storage limits on
+    /// the rejected-rows path (snapshot limits family).
+    #[test]
+    fn configured_partition_limit_fails_at_append_time() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store_with_limits(&temp, 2);
+        let mut writer = begin(&store, true);
+        let rejected_schema =
+            Arc::new(artifact::rejected_rows_section_schema(&source_schema()).expect("rejected"));
+        for sequence in 0..2_u64 {
+            writer
+                .append_rejected_rows(&section_envelope(
+                    rejected_schema.clone(),
+                    sequence,
+                    1,
+                    BTreeMap::new(),
+                ))
+                .expect("first two packs fit");
+        }
+        assert!(matches!(
+            writer.append_rejected_rows(&section_envelope(rejected_schema, 2, 1, BTreeMap::new())),
+            Err(StorageError::PartitionLimitExceeded {
+                actual: 3,
+                maximum: 2
+            })
+        ));
+    }
+
+    /// A single severity flip changes the committed validation-report digest
+    /// and the committed bundle digest.
+    #[test]
+    fn severity_flip_changes_committed_digests() {
+        let temp_a = TempDir::new().expect("temp a");
+        let store_a = open_store(&temp_a);
+        let bundle_a = publish_with_severities(&store_a, &["warning", "error"]);
+        let temp_b = TempDir::new().expect("temp b");
+        let store_b = open_store(&temp_b);
+        let bundle_b = publish_with_severities(&store_b, &["error", "error"]);
+
+        assert_ne!(
+            bundle_a.validation_report().provenance().content_digest,
+            bundle_b.validation_report().provenance().content_digest
+        );
+        assert_ne!(
+            bundle_a.provenance().content_digest,
+            bundle_b.provenance().content_digest
+        );
+        assert_eq!(
+            bundle_a
+                .validation_report()
+                .provenance()
+                .summary
+                .warning_count,
+            1
+        );
+        assert_eq!(
+            bundle_b
+                .validation_report()
+                .provenance()
+                .summary
+                .warning_count,
+            0
+        );
+    }
+
+    /// A truncated installed Parquet partition fails closed with the typed
+    /// integrity error during bundle load.
+    #[test]
+    fn truncated_partition_fails_closed_with_integrity() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        publish_standard_bundle(&store, true);
+
+        let directory =
+            crate::partitions_root(&store.inner).join(Uuid::from_u128(ACCEPTED).to_string());
+        let file = std::fs::read_dir(&directory)
+            .expect("partition dir")
+            .next()
+            .expect("partition file")
+            .expect("entry")
+            .path();
+        let bytes = std::fs::read(&file).expect("read partition");
+
+        // Truncation is caught by the physical length gate first.
+        std::fs::write(&file, &bytes[..bytes.len() / 3]).expect("truncate");
+        assert!(matches!(
+            store.load_verification_bundle(Uuid::from_u128(BUNDLE)),
+            Err(StorageError::Integrity {
+                kind: crate::IntegrityFailure::LengthMismatch,
+                ..
+            })
+        ));
+
+        // Same-length tampering is caught by the physical digest gate.
+        let mut flipped = bytes.clone();
+        let middle = flipped.len() / 2;
+        flipped[middle] ^= 0xFF;
+        std::fs::write(&file, &flipped).expect("rewrite partition");
+        assert!(matches!(
+            store.load_verification_bundle(Uuid::from_u128(BUNDLE)),
+            Err(StorageError::Integrity {
+                kind: crate::IntegrityFailure::DigestMismatch,
+                ..
+            })
+        ));
+    }
+
+    /// Corrupt persisted membership JSON fails closed with the typed
+    /// serialization error instead of panicking or returning partial data.
+    #[test]
+    fn corrupt_membership_json_fails_closed_with_serialization() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        publish_standard_bundle(&store, true);
+
+        let connection = open_connection(&store.inner).expect("connection");
+        connection
+            .execute(
+                "UPDATE verification_bundles SET membership_json = '{broken' WHERE bundle_id = ?1",
+                params![Uuid::from_u128(BUNDLE).to_string()],
+            )
+            .expect("corrupt membership");
+
+        assert!(matches!(
+            store.load_verification_bundle(Uuid::from_u128(BUNDLE)),
+            Err(StorageError::Serialization(_))
+        ));
     }
 }
