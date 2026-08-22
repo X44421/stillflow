@@ -2254,7 +2254,7 @@ fn t46_near_64mib_export_transition_respects_bounds() {
         let slice = batch.slice(0, k);
         let frame = crate::ffi::record_batch_to_dataframe(&slice).expect("import");
         let (transformed, deferred) =
-            crate::lower::transform(frame, &schema, &steps).expect("transform");
+            crate::lower::transform(frame, &schema, &steps, Vec::new()).expect("transform");
         let target_schema =
             stillflow_core::logical_schema_to_arrow(&manifest_schema_with_derived(&schema))
                 .expect("arrow schema");

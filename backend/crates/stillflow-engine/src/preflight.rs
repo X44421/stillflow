@@ -41,6 +41,32 @@ pub(crate) async fn preflight(
     schema_override: Option<&LogicalSchema>,
     context: &RequestContext,
 ) -> Result<PreparedPlan, EngineError> {
+    preflight_inner(
+        registry,
+        plan,
+        connection,
+        asset,
+        schema_override,
+        context,
+        false,
+    )
+    .await
+}
+
+/// Shared E2 preflight. With `verification = true` the E4 routing rules
+/// (`Rule::Validate` / `Rule::Deduplicate`) are admitted instead of
+/// rejected so the E4-S2 path can apply its own rule checks on top of the
+/// shared checks (contract section 10.1 step 2). The public E2 behavior
+/// is unchanged.
+pub(crate) async fn preflight_inner(
+    registry: &ConnectorRegistry,
+    plan: &LogicalPlan,
+    connection: &SourceConnection,
+    asset: &SourceAsset,
+    schema_override: Option<&LogicalSchema>,
+    context: &RequestContext,
+    verification: bool,
+) -> Result<PreparedPlan, EngineError> {
     context.ensure_active().map_err(map_context_error)?;
     if context
         .remaining()
@@ -52,9 +78,14 @@ pub(crate) async fn preflight(
     validate_plan_exprs_iterative(plan)?;
     plan.validate()
         .map_err(|_| EngineError::InvalidPlan("logical plan failed validation"))?;
-    if compiled_plan_bytes(plan) > MAX_COMPILED_PLAN_BYTES {
+    let compiled_plan_budget = if verification {
+        crate::verification::VERIFICATION_MAX_COMPILED_PLAN_BYTES
+    } else {
+        MAX_COMPILED_PLAN_BYTES
+    };
+    if compiled_plan_bytes(plan) > compiled_plan_budget {
         return Err(EngineError::BoundExceeded(
-            "compiled plan exceeds MAX_COMPILED_PLAN_BYTES",
+            "compiled plan exceeds the compiled-plan budget",
         ));
     }
     for (node_id, node) in &plan.nodes {
@@ -127,21 +158,23 @@ pub(crate) async fn preflight(
                         "apply-rules count is outside the authorized range",
                     ));
                 }
-                for rule in rules {
-                    match rule {
-                        Rule::Validate { .. } => {
-                            return Err(EngineError::UnsupportedRule {
-                                node: node_id.as_uuid(),
-                                kind: "validate",
-                            });
+                if !verification {
+                    for rule in rules {
+                        match rule {
+                            Rule::Validate { .. } => {
+                                return Err(EngineError::UnsupportedRule {
+                                    node: node_id.as_uuid(),
+                                    kind: "validate",
+                                });
+                            }
+                            Rule::Deduplicate { .. } => {
+                                return Err(EngineError::UnsupportedRule {
+                                    node: node_id.as_uuid(),
+                                    kind: "deduplicate",
+                                });
+                            }
+                            _ => {}
                         }
-                        Rule::Deduplicate { .. } => {
-                            return Err(EngineError::UnsupportedRule {
-                                node: node_id.as_uuid(),
-                                kind: "deduplicate",
-                            });
-                        }
-                        _ => {}
                     }
                 }
                 steps.push(CompiledStep::Rules {
@@ -174,7 +207,7 @@ pub(crate) async fn preflight(
     };
     let scan_output = project_schema(&authorized, &scan_projection)?;
     reject_paused_schema(&scan_output)?;
-    let materialize_schema = propagate_schema(&scan_output, &steps)?;
+    let materialize_schema = propagate_schema(&scan_output, &steps, verification)?;
     reject_paused_schema(&materialize_schema)?;
 
     Ok(PreparedPlan {
@@ -188,7 +221,7 @@ pub(crate) async fn preflight(
     })
 }
 
-fn linearize(
+pub(crate) fn linearize(
     plan: &LogicalPlan,
 ) -> Result<Vec<(PlanNodeId, stillflow_plan::PlanNode)>, EngineError> {
     let mut scans = Vec::new();
@@ -336,7 +369,7 @@ fn reject_paused_rule_exprs(rule: &Rule) -> Result<(), EngineError> {
     }
 }
 
-fn compiled_plan_bytes(plan: &LogicalPlan) -> usize {
+pub(crate) fn compiled_plan_bytes(plan: &LogicalPlan) -> usize {
     let mut bytes = plan.nodes.len().saturating_mul(64);
     for node in plan.nodes.values() {
         bytes = bytes.saturating_add(match &node.kind {
@@ -447,6 +480,7 @@ pub(crate) fn project_schema(
 fn propagate_schema(
     scan_output: &LogicalSchema,
     steps: &[CompiledStep],
+    verification: bool,
 ) -> Result<LogicalSchema, EngineError> {
     let mut schema = scan_output.clone();
     for step in steps {
@@ -457,7 +491,7 @@ fn propagate_schema(
             }
             CompiledStep::Rules { rules } => {
                 for rule in rules {
-                    schema = apply_rule_schema(schema, rule)?;
+                    schema = apply_rule_schema(schema, rule, verification)?;
                 }
             }
         }
@@ -465,7 +499,11 @@ fn propagate_schema(
     Ok(schema)
 }
 
-fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSchema, EngineError> {
+pub(crate) fn apply_rule_schema(
+    mut schema: LogicalSchema,
+    rule: &Rule,
+    verification: bool,
+) -> Result<LogicalSchema, EngineError> {
     match rule {
         Rule::Rename { column, to } => {
             schema
@@ -608,6 +646,10 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
             crate::typing::require_boolean(predicate, &schema)?;
             Ok(schema)
         }
+        // Validate and Deduplicate never change the working schema. The
+        // shared E2 path still rejects them (V23); the verification path
+        // admits them and applies its own rule checks (contract 10.1).
+        Rule::Validate { .. } | Rule::Deduplicate { .. } if verification => Ok(schema),
         Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
             node: uuid::Uuid::nil(),
             kind: "validate",
