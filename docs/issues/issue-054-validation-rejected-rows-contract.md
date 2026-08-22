@@ -10,16 +10,20 @@
 > Also supersedes: C0 `d33f45610620c03afe253cdc0b4aef7468fa5dd8`
 > Risk: High
 > Issue: #54 (contract)
-> PR: #57 draft (actual PR number; C0 header said expected #55 and is corrected here)
+> PR: #57 (merged at `d77e9392d7ac3cbe63fd55bfcb2056cfd921d9f0`);
+> R6 review PR: #77
 > Parent: Issue #46 revision R3, merged at
 > `32f1c53d9903f66aeaca1c2676c0b81abfb2a702` in PR #47
-> Authorized E4 base: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`
+> Authorized E4 base (historical, R5): `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`;
+> R6 implementation base: pending post-approval decision — rebuild from the
+> latest accepted `main` per the closing rule below
 > Storage facts base: `main@473c65b` (PR #62 merged storage publication/recovery inventory)
 > Branch: `agent/issue-054-validation-rejected-rows-contract` (R5);
 > R6 branch: `agent/issue-054-contract-r6`
 > Last updated: 2026-08-22 (R6: E4-S1 storage error authorization and
 > accepted-partition digest binding)
-> Review: PR #57 remains under Request-changes review. C0, C0-R1, C0-R2,
+> Review: PR #57 was merged at `d77e9392d7ac3cbe63fd55bfcb2056cfd921d9f0`
+> after its review cycle; C0, C0-R1, C0-R2,
 > C0-R3, and C0-R4 were not approved. R4 closed the report `ColumnId`,
 > canonical digest/encoding, journal-before-staging recovery, and SQLite
 > initialization/memory-limit blockers. R5 closes the independent
@@ -168,7 +172,7 @@ E5 job/API work.
 
 | R5 blocker (independent acceptance review of PR #74 head `38eb594cacc38da56bc0929871a3dec0a3d3c11c`) | R6 disposition |
 | --- | --- |
-| V13's bounded page-cap exhaustion requires a typed storage error, but any new public error is a stop condition under Issue #73, and E4 error mapping is outside E4-S1 scope | §9.4 authorizes exactly one new public variant, `StorageError::DedupIndexLimitExceeded { resource: &'static str, maximum: u64 }`, raised when SQLite reports SQLITE_FULL against `PRAGMA max_page_count`. Its engine-side classification (`ErrorCategory::InvalidData`) is authorized at E4-S1. The `StorageError → EngineError::BoundExceeded` conversion stays out of E4-S1 and is frozen to E4-S2: exactly one site — the storage-error arm of `materialize_verification`'s error mapping — maps this variant, `DedupKeyLimitExceeded`, and the artifact/partition/row/byte limit variants to `EngineError::BoundExceeded` per §10.8. No other mapping change is authorized before that PR. Alternative considered and rejected: reverting to generic `StorageError::Database`, which leaves V13's bounded-error wording unsatisfiable |
+| V13's bounded page-cap exhaustion requires a typed storage error, but any new public error is a stop condition under Issue #73, and E4 error mapping is outside E4-S1 scope | §9.4 gains the frozen typed-error semantics: classification condition (SQLite reports SQLITE_FULL against the effective `PRAGMA max_page_count`), exact `resource` value `"page"`, `maximum` fixed to the production ceiling `MAX_DEDUP_INDEX_PAGES` regardless of any test-side pragma reduction (V13 asserts this field identity), E4-S1 classification `InvalidData` and non-retry, and exactly one E4-S2 conversion site — the `materialize_verification` storage-error arm — mapping this variant together with `DedupKeyLimitExceeded` and the artifact/partition/row/byte limit variants to `EngineError::BoundExceeded` per §10.8. No other mapping change is authorized before that PR. Alternative considered and rejected: reverting to generic `StorageError::Database`, which leaves V13's bounded-error wording unsatisfiable |
 | §8.1.1 does not freeze the two identity slots, value sources, batch count, ordering, or append/load canonicalization protocol for accepted `SnapshotPartition` digests; any encoding ambiguity is a stop condition | §8.1.1 gains the frozen "Accepted-partition `partition_digest` binding" subsection below |
 
 ## 4. Scope
@@ -802,8 +806,10 @@ as follows:
   accepted snapshot owns no `ArtifactSectionId`;
 - `row_count`: the logical Scan output row count carried by the partition
   (the single envelope appended for that partition);
-- `stored_byte_count`: the canonical logical payload byte count — the sum of
-  the partition's canonical-batch length prefixes. The physical Parquet file
+- `stored_byte_count`: the canonical logical payload byte count —
+  `Σ canonical_batch_bytes.len()` over the partition's batches, excluding
+  the four-byte `u32(batch_len)` length encodings themselves. The physical
+  Parquet file
   length and file digest remain E3 facts on
   `SnapshotManifest`/`SnapshotPartition` and never enter this preimage;
 - `canonical_batch_count`: `1` — E4-C0 appends exactly one envelope per
@@ -813,8 +819,9 @@ as follows:
   records (`row_count` Σ row_count, `stored_byte_count` Σ stored_byte_count,
   `partition_count` = record count), not the physical `SnapshotStats`.
 
-The writer records these canonical facts at append time, before any
-filesystem write. The loader recomputes them by decoding each installed
+The writer derives these canonical facts before any filesystem write, and
+records them into the writer state only after the partition file write and
+all limit checks succeed. The loader recomputes them by decoding each installed
 Parquet partition — whose physical length and file-digest gates run first —
 and re-canonicalizing; any mismatch fails closed with the typed integrity or
 manifest error. Bundles persisted by earlier interim builds carry
@@ -1223,6 +1230,24 @@ strict SQLite memory cap. The contract does not claim it enforces a hard
 dedup page/byte caps, and the engine/storage peak laws. The runtime must
 document and test the actual memory behavior rather than treating
 `cache_size` as a hard ceiling.
+
+**Typed page-cap exhaustion error (R6).** When a SQLite operation fails
+because the database reached its effective `PRAGMA max_page_count`,
+storage raises
+`StorageError::DedupIndexLimitExceeded { resource: &'static str,
+maximum: u64 }`:
+
+- classification condition: the SQLite result code is SQLITE_FULL
+  (`ffi::ErrorCode::DiskFull`);
+- `resource`: the exact string `"page"`;
+- `maximum`: the frozen production ceiling `MAX_DEDUP_INDEX_PAGES`
+  (2,097,152) — never a test-side reduced effective value, even when V13
+  instrumentation lowers the live PRAGMA; V13 asserts this field identity;
+- E4-S1 classification: `ErrorCategory::InvalidData`; the error is
+  terminal for the attempt and is not retried;
+- E4-S2: converted to `EngineError::BoundExceeded` at exactly one site —
+  the storage-error arm of `materialize_verification`'s error mapping
+  (§3.7, §10.8). No other conversion exists.
 
 The creation protocol has explicit crash points after lock-file creation,
 after lock acquisition, after SQLite-file creation, after SQLite open, and
