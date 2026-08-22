@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 2,
+  "revision": 3,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "679cab637e7b1764f0333133a86ffeddc775c397",
-  "updated_at": "2026-08-22T06:25:54Z",
+  "updated_at": "2026-08-22T09:39:36Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -264,7 +264,7 @@
     {
       "id": "T53-T71",
       "title": "E3 Preview and memory-law convergence",
-      "status": "hold",
+      "status": "queued",
       "mode": "write",
       "owner": null,
       "target_pr": 53,
@@ -284,8 +284,10 @@
       ],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "PR #71 head 2b9fdcb is approved but must converge into PR #53 before final main merge. Explicitly queue this task before claim."
+      "updated_at": "2026-08-22T09:39:36Z",
+      "notes": "Source PR #71 exact head 2b9fdcb716a66a0ff92cedd82825f533c16b6250 is approved for merge only into target branch agent/issue-052-node-preview-runtime at expected head c50e3c937b3494f56ed6cda19c47a83aff36de93. Claim must re-fetch both heads and stop on mismatch. Mark #71 Ready, merge with an exact source-head guard, wait for the new #53-head dual-toolchain CI, then complete with that full result head and CI URL. Do not merge or rebase #53 into main; hand off to a separately dispatched T53-REBIND/acceptance sequence.",
+      "queued_by": "maintainer:chatgpt-workmode",
+      "queue_reason": "User-authorized E3 convergence dispatch after exact-head independent approval of PR #71; merge PR #71 only into PR #53 branch, then stop before any main integration."
     },
     {
       "id": "E23-REVIEW",
