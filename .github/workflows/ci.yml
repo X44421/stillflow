@@ -23,8 +23,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
-  backend-msrv:
-    name: Backend checks (Rust 1.85.0)
+  # Backend gates are split into independently identifiable checks so a
+  # failure names its toolchain and gate without reading logs (DX-F0, #85).
+  # The commands below are one-to-one with the former combined jobs and must
+  # not be weakened, skipped, or retried away.
+
+  backend-fmt-msrv:
+    name: Backend fmt (Rust 1.85.0)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,11 +44,43 @@ jobs:
           workspaces: backend
           shared-key: backend-1.85.0
       - run: cargo fmt --all -- --check
+
+  backend-clippy-msrv:
+    name: Backend clippy (Rust 1.85.0)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          shared-key: backend-1.85.0
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  backend-tests-msrv:
+    name: Backend tests (Rust 1.85.0, serial)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          shared-key: backend-1.85.0
       - run: cargo test --workspace -- --test-threads=1
 
-  backend-stable:
-    name: Backend checks (stable)
+  backend-fmt-stable:
+    name: Backend fmt (stable)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,5 +95,37 @@ jobs:
           workspaces: backend
           shared-key: backend-stable
       - run: cargo fmt --all -- --check
+
+  backend-clippy-stable:
+    name: Backend clippy (stable)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          shared-key: backend-stable
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  backend-tests-stable:
+    name: Backend tests (stable, serial)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          shared-key: backend-stable
       - run: cargo test --workspace -- --test-threads=1
