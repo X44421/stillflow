@@ -447,6 +447,8 @@ provides the surface on the inventory base. No row on this base is
 | Duplicate | `DetailPanel` shows `Duplicates` percentage; `duckdb.ts` computes `duplicates` with `row_number()` for `deduplicate` nodes and sample data | `mock` (local DuckDB-WASM computation) |
 | Quality score | `DetailPanel` displays `Quality Score`; `duckdb.ts` computes `100 - nullCount / (totalRows * 4) * 100`, clamped to `0..=100` | `mock` (local formula, not backend-supported) |
 
+> S3 note (issue #79): the frontend symbols cited above — `ActivityPanel` (`src/components/ActivityPanel.tsx`) and the unused types `PreviewColumn` / `DataPreviewResult` in `src/types.ts` — were removed from `src` by the dead-code cleanup slice S3 (branch `agent/issue-079-s3-dead-code-cleanup`). The rows remain accurate as statements about their evidence base `main@89aab25`; they describe history, not current tree state.
+
 ## 8. Q-C0 missing object matrix
 
 | Object / capability | Status on `main@89aab2551b8f73a32ed575bf75b3e3866b39d37c` | Evidence / gap |
@@ -488,7 +490,7 @@ inventory.
 | --- | --- | --- | --- |
 | Exact vs sampled metrics | Are Q0 metrics exact on the bounded scan or sampled? | Only head/prefix preview sampling is implemented; all connectors reject `Reservoir`/`Random`; no profiler accumulators exist | Q-C0 |
 | Deterministic sampling method/seed | Which deterministic seed/source is used if sampling is allowed? | `SamplingStrategy` enum exists; no deterministic seed field or sampling implementation exists | Q-C0; Q-R1 if sampling becomes real |
-| Exact vs approximate distinct counts | Must distinct counts be exact, or may Q0 use approximate algorithms? | `PreviewColumn.distinctCount` exists only as an unused frontend type; no backend distinct accumulator exists | Q-C0; operator-state limits |
+| Exact vs approximate distinct counts | Must distinct counts be exact, or may Q0 use approximate algorithms? | `PreviewColumn.distinctCount` exists only as an unused frontend type; no backend distinct accumulator exists (S3 note, issue #79: this type was removed from `src` by slice S3; row speaks to base `main@89aab25`) | Q-C0; operator-state limits |
 | Top-K and histogram policies | What are the top-K and histogram bounds? | No backend top-values/histogram types or policies exist; no frontend surface exists | Q-C0 |
 | Numeric summary and overflow behavior | Define min/max/mean/distribution and overflow behavior | No backend numeric accumulator or overflow policy exists | Q-C0 |
 | Utf8/Binary length accounting | How are string/binary lengths and invalid values counted? | No backend length/invalid-value policy exists | Q-C0 |

@@ -24,32 +24,6 @@
   }
 }
 
-@layer components {
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .node-card {
-    @apply bg-white rounded-xl border border-gray-200 px-4 py-3 shadow-sm flex items-center gap-3 min-w-[220px] relative transition-all duration-200;
-  }
-  .node-card:hover {
-    @apply shadow-md border-gray-300;
-  }
-  .node-card.selected {
-    @apply border-gray-900 shadow-lg ring-1 ring-gray-900;
-  }
-  .connector-line {
-    @apply w-0.5 bg-gray-300 mx-auto;
-    height: 40px;
-  }
-  .connector-arrow {
-    @apply text-gray-300;
-  }
-}
-
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
@@ -57,13 +31,4 @@
 
 .animate-pulse-dot {
   animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
-@keyframes progress-bar {
-  0% { width: 0%; }
-  100% { width: 67%; }
-}
-
-.animate-progress {
-  animation: progress-bar 2s ease-out forwards;
 }

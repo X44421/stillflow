@@ -13,10 +13,6 @@ import { CollapseButton } from '../icons';
 interface IconSidebarProps {
   activeIcon?: number;
   onIconClick?: (index: number) => void;
-  activeView?: 'graph' | 'data';
-  assetsVisible?: boolean;
-  onViewChange?: (view: 'graph' | 'data') => void;
-  onToggleAssets?: () => void;
 }
 
 const icons = [

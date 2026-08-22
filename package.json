@@ -15,10 +15,8 @@
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
     "@heroicons/react": "^2.2.0",
-    "clsx": "2.1.1",
     "react": "19.2.6",
-    "react-dom": "19.2.6",
-    "tailwind-merge": "3.4.0"
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.17",

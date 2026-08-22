@@ -5,20 +5,16 @@ interface HeaderProps {
   running?: boolean;
   progress?: number;
   onRunAll?: () => void;
-  onSearch?: (query: string) => void;
   savedLabel?: string;
   statusLabel?: string;
-  error?: string | null;
 }
 
 const Header: React.FC<HeaderProps> = ({
   running = false,
   progress = 0,
   onRunAll,
-  onSearch: _onSearch,
   savedLabel = 'Saved 2m ago',
   statusLabel = 'Published',
-  error: _error,
 }) => {
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
@@ -51,10 +47,6 @@ const Header: React.FC<HeaderProps> = ({
             type="text"
             placeholder="Search nodes…"
             className="h-8 w-44 pl-8 pr-3 text-[13px] border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-gray-300 focus:outline-none transition-colors placeholder:text-gray-400"
-            onChange={(e) => {
-              const ev = new CustomEvent('opencode:search-nodes', { detail: e.target.value });
-              window.dispatchEvent(ev);
-            }}
           />
         </div>
         <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
