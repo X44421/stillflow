@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 0,
+  "revision": 1,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "679cab637e7b1764f0333133a86ffeddc775c397",
-  "updated_at": "2026-08-22T06:05:20Z",
+  "updated_at": "2026-08-22T06:18:43Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -80,9 +80,9 @@
     {
       "id": "T78-REVIEW",
       "title": "Independent review of the R6 P0 contract completion",
-      "status": "dispatched",
+      "status": "done",
       "mode": "review",
-      "owner": null,
+      "owner": "external:e4-g0-r6c-review",
       "target_pr": 78,
       "target_branch": "agent/issue-054-contract-r6-completion",
       "expected_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
@@ -95,13 +95,18 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Read-only and exact-head bound; may run beside the single PR #74 writer."
+      "updated_at": "2026-08-22T06:18:43Z",
+      "completed_at": "2026-08-22T06:18:43Z",
+      "result_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32553844659",
+      "evidence_url": "https://github.com/X44421/stillflow/pull/78#issuecomment-5378310732",
+      "completion_note": "APPROVE FOR DOCS MERGE; exact head/base, one-file +19/-19 diff and three-job CI binding independently verified.",
+      "notes": "Read-only and exact-head bound; any head change invalidates this acceptance."
     },
     {
       "id": "T78-MERGE",
       "title": "Merge the approved R6 P0 contract completion",
-      "status": "blocked",
+      "status": "queued",
       "mode": "maintenance",
       "owner": null,
       "target_pr": 78,
@@ -119,8 +124,8 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Must be explicitly moved to queued after exact-head approval."
+      "updated_at": "2026-08-22T06:18:43Z",
+      "notes": "Exact-head review completed. Available for a separate maintainer claim; no merge has been executed."
     },
     {
       "id": "T74-P1B",
@@ -273,8 +278,7 @@
       ],
       "depends_on": [],
       "conflicts_with": [
-        "E23-OPT",
-        "E4-R1"
+        "E23-OPT"
       ],
       "lease_expires_at": null,
       "started_at": null,
@@ -323,8 +327,7 @@
         "E23-REVIEW"
       ],
       "conflicts_with": [
-        "T53-T71",
-        "E4-R1"
+        "T53-T71"
       ],
       "lease_expires_at": null,
       "started_at": null,

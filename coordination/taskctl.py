@@ -18,6 +18,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -121,14 +122,30 @@ def validate_registry(registry: dict[str, Any]) -> None:
             raise RegistryError(f"{task_id}: locks must be an array")
         if not isinstance(task.get("depends_on", []), list):
             raise RegistryError(f"{task_id}: depends_on must be an array")
+        if not isinstance(task.get("conflicts_with", []), list):
+            raise RegistryError(f"{task_id}: conflicts_with must be an array")
         for dependency in task.get("depends_on", []):
             if dependency not in tasks:
                 raise RegistryError(f"{task_id}: unknown dependency {dependency}")
+        for conflict in task.get("conflicts_with", []):
+            if conflict not in tasks:
+                raise RegistryError(f"{task_id}: unknown conflicting task {conflict}")
+            if conflict == task_id:
+                raise RegistryError(f"{task_id}: task cannot conflict with itself")
+        expected_head = task.get("expected_head")
+        if expected_head and not re.fullmatch(r"[0-9a-f]{40}", expected_head):
+            raise RegistryError(f"{task_id}: expected_head must be a full lowercase SHA")
         if task["status"] == "running":
             if not task.get("owner"):
                 raise RegistryError(f"{task_id}: running task needs an owner")
             if not task.get("lease_expires_at"):
                 raise RegistryError(f"{task_id}: running task needs a lease")
+            for lock_key in task.get("locks", []):
+                lock = registry["locks"].get(lock_key)
+                if not lock or lock.get("task_id") != task_id:
+                    raise RegistryError(
+                        f"{task_id}: running task does not own requested lock {lock_key}"
+                    )
 
     for lock_key, lock in registry["locks"].items():
         if not isinstance(lock_key, str) or not lock_key:
@@ -158,6 +175,17 @@ def active_lock_conflicts(
     registry: dict[str, Any], task: dict[str, Any], now: datetime
 ) -> list[str]:
     conflicts: list[str] = []
+    tasks = task_map(registry)
+    for other_id, other in tasks.items():
+        if other_id == task["id"] or other["status"] != "running":
+            continue
+        if (
+            other_id in task.get("conflicts_with", [])
+            or task["id"] in other.get("conflicts_with", [])
+        ):
+            conflicts.append(
+                f"task conflict with {other_id} / {other.get('owner')} (running)"
+            )
     for lock_key in task.get("locks", []):
         held = registry["locks"].get(lock_key)
         if not held or held.get("task_id") == task["id"]:
@@ -228,6 +256,8 @@ def complete_in_memory(
         raise RegistryError(f"{task_id} is not running under owner {agent}")
     if task["mode"] == "write" and not result_head:
         raise RegistryError("write tasks require --result-head on completion")
+    if result_head and not re.fullmatch(r"[0-9a-f]{40}", result_head):
+        raise RegistryError("--result-head must be a full lowercase SHA")
     now = iso(utc_now())
     release_task_locks(registry, task_id)
     task.update(
@@ -492,6 +522,8 @@ def command_claim(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
 def command_adopt(remote: RemoteRegistry, args: argparse.Namespace) -> None:
     agent = require_agent(args.agent)
+    if args.lease_minutes <= 0:
+        raise RegistryError("lease minutes must be positive")
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
@@ -516,6 +548,8 @@ def command_adopt(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
 def command_heartbeat(remote: RemoteRegistry, args: argparse.Namespace) -> None:
     agent = require_agent(args.agent)
+    if args.lease_minutes <= 0:
+        raise RegistryError("lease minutes must be positive")
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
@@ -557,6 +591,17 @@ def command_pause(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
 def command_complete(remote: RemoteRegistry, args: argparse.Namespace) -> None:
     agent = require_agent(args.agent)
+    snapshot = remote.read_registry()
+    task = get_task(snapshot, args.task_id)
+    if task["mode"] == "write" and task.get("target_branch"):
+        if not args.result_head:
+            raise RegistryError("write tasks require --result-head on completion")
+        actual = remote.target_branch_head(task["target_branch"])
+        if actual != args.result_head:
+            raise RegistryError(
+                f"{args.task_id} completion head mismatch: "
+                f"reported {args.result_head}, remote {actual}"
+            )
 
     def mutate(registry: dict[str, Any]) -> None:
         complete_in_memory(
