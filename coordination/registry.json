@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 3,
+  "revision": 4,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "679cab637e7b1764f0333133a86ffeddc775c397",
-  "updated_at": "2026-08-22T09:39:36Z",
+  "source_main_sha": "f16666e59896e2d8bae3b79e188b8f567bb8c534",
+  "updated_at": "2026-08-22T09:56:29Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -361,6 +361,40 @@
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
       "notes": "Do not start before PR #74 is accepted and merged."
+    },
+    {
+      "id": "DX-F0",
+      "title": "Layered backend development feedback loop",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_pr": null,
+      "target_branch": "main",
+      "result_branch": "agent/issue-085-backend-feedback-loop",
+      "expected_head": "f16666e59896e2d8bae3b79e188b8f567bb8c534",
+      "locks": [
+        "branch:agent/issue-085-backend-feedback-loop",
+        "workflow:ci",
+        "devx:backend-feedback"
+      ],
+      "paths": [
+        "bacon.toml",
+        "docs/development/backend-feedback-loop.md",
+        "backend/README.md",
+        ".github/workflows/ci.yml"
+      ],
+      "acceptance_keys": [
+        "dx:local-bacon-jobs",
+        "dx:serial-engine-feedback",
+        "dx:independent-ci-checks",
+        "dx:feedback-guide"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T09:56:29Z",
+      "notes": "Canonical task: Issue #85. Claim against exact main head before creating result branch. Runtime tracing, E5-E1, OPS-O1, scenario harnesses, taskctl changes, and every backend Rust/Cargo path are explicitly out of scope. The workflow lock must be released before any later Issue #79 S5 CI/build-gate slice begins."
     }
   ],
   "locks": {
