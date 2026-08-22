@@ -34,7 +34,7 @@ const TOMBSTONED_STATE: i64 = 2;
 
 #[derive(Clone)]
 pub struct SnapshotStore {
-    inner: Arc<StoreInner>,
+    pub(crate) inner: Arc<StoreInner>,
 }
 
 impl fmt::Debug for SnapshotStore {
@@ -47,27 +47,27 @@ impl fmt::Debug for SnapshotStore {
     }
 }
 
-struct StoreInner {
-    root: PathBuf,
-    limits: StorageLimits,
+pub(crate) struct StoreInner {
+    pub(crate) root: PathBuf,
+    pub(crate) limits: StorageLimits,
     _root_lock: File,
-    activity: Mutex<ActivityState>,
+    pub(crate) activity: Mutex<ActivityState>,
 }
 
 #[derive(Debug, Default)]
-struct ActivityState {
+pub(crate) struct ActivityState {
     readers: u16,
     publishers: u16,
     maintenance: bool,
 }
 
 #[derive(Clone, Copy)]
-enum ActivityKind {
+pub(crate) enum ActivityKind {
     Reader,
     Publisher,
 }
 
-struct ActivityGuard {
+pub(crate) struct ActivityGuard {
     inner: Arc<StoreInner>,
     kind: ActivityKind,
     active: bool,
@@ -89,7 +89,7 @@ impl Drop for ActivityGuard {
     }
 }
 
-struct MaintenanceGuard {
+pub(crate) struct MaintenanceGuard {
     inner: Arc<StoreInner>,
     active: bool,
 }
@@ -293,7 +293,9 @@ impl SnapshotStore {
             checked_increment(&mut report.recovered, "recovery recovered count")?;
         }
 
+        recover_bundles(&self.inner, &cutoff, max_candidates, &mut report)?;
         scan_orphan_staging(&self.inner, max_candidates, &mut report)?;
+        crate::dedup::recover_dedup_candidates(&self.inner, max_candidates, &mut report)?;
         Ok(report)
     }
 
@@ -559,7 +561,29 @@ fn prepare_root(root: &Path) -> Result<PathBuf, StorageError> {
         .map_err(|error| StorageError::io("canonicalize managed root", &error))?;
     ensure_managed_directory(&root.join("staging"), "prepare staging root")?;
     ensure_managed_directory(&root.join("partitions"), "prepare partitions root")?;
+    ensure_private_directory(&root.join("temp"))?;
     Ok(root)
+}
+
+/// Creates a `0700` (Unix) managed directory for owner-only temp state.
+pub(crate) fn ensure_private_directory(path: &Path) -> Result<(), StorageError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => Err(
+            StorageError::InvalidConfiguration("managed entry must be a non-symlink directory"),
+        ),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(|error| StorageError::io("create temp root", &error))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                    .map_err(|error| StorageError::io("restrict temp root permissions", &error))?;
+            }
+            Ok(())
+        }
+        Err(error) => Err(StorageError::io("inspect temp root", &error)),
+    }
 }
 
 fn ensure_managed_directory(path: &Path, operation: &'static str) -> Result<(), StorageError> {
@@ -586,7 +610,10 @@ fn reject_symlink_if_present(path: &Path, operation: &'static str) -> Result<(),
     }
 }
 
-fn create_exact_directory(path: &Path, operation: &'static str) -> Result<(), StorageError> {
+pub(crate) fn create_exact_directory(
+    path: &Path,
+    operation: &'static str,
+) -> Result<(), StorageError> {
     fs::create_dir(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
             StorageError::InvalidConfiguration("managed snapshot directory already exists")
@@ -596,11 +623,11 @@ fn create_exact_directory(path: &Path, operation: &'static str) -> Result<(), St
     })
 }
 
-fn staging_root(inner: &StoreInner) -> PathBuf {
+pub(crate) fn staging_root(inner: &StoreInner) -> PathBuf {
     inner.root.join("staging")
 }
 
-fn partitions_root(inner: &StoreInner) -> PathBuf {
+pub(crate) fn partitions_root(inner: &StoreInner) -> PathBuf {
     inner.root.join("partitions")
 }
 
@@ -628,7 +655,7 @@ fn final_partition_path(
     ))
 }
 
-fn open_connection(inner: &StoreInner) -> Result<Connection, StorageError> {
+pub(crate) fn open_connection(inner: &StoreInner) -> Result<Connection, StorageError> {
     let database_path = inner.root.join("metadata.sqlite3");
     reject_symlink_if_present(&database_path, "inspect metadata database")?;
     let connection = Connection::open(&database_path)
@@ -651,10 +678,72 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| StorageError::database("read storage schema version"))?;
     match version {
-        0 => migrate_to_version_one(connection),
-        1 => Ok(()),
+        0 => {
+            migrate_to_version_one(connection)?;
+            migrate_to_version_two(connection)
+        }
+        1 => migrate_to_version_two(connection),
+        2 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
+}
+
+/// Version two adds verification-bundle publication journal, membership, and
+/// artifact manifest tables. Existing snapshot rows are untouched.
+fn migrate_to_version_two(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version two"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE bundle_publications (
+                 bundle_id TEXT PRIMARY KEY NOT NULL,
+                 run_id TEXT NOT NULL,
+                 accepted_snapshot_id TEXT NOT NULL,
+                 bundle_artifact_id TEXT NOT NULL,
+                 validation_report_artifact_id TEXT NOT NULL,
+                 rejected_rows_artifact_id TEXT,
+                 deduplication_report_artifact_id TEXT NOT NULL,
+                 started_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE verification_bundles (
+                 bundle_id TEXT PRIMARY KEY NOT NULL,
+                 version INTEGER NOT NULL CHECK (version = 1),
+                 run_id TEXT NOT NULL UNIQUE,
+                 bundle_artifact_id TEXT NOT NULL UNIQUE,
+                 accepted_snapshot_id TEXT NOT NULL UNIQUE,
+                 validation_report_artifact_id TEXT NOT NULL UNIQUE,
+                 rejected_rows_artifact_id TEXT UNIQUE,
+                 deduplication_report_artifact_id TEXT NOT NULL UNIQUE,
+                 membership_json TEXT NOT NULL,
+                 provenance_json TEXT NOT NULL,
+                 committed_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE artifact_manifests (
+                 artifact_id TEXT PRIMARY KEY NOT NULL,
+                 bundle_id TEXT NOT NULL REFERENCES verification_bundles(bundle_id) ON DELETE CASCADE,
+                 kind TEXT NOT NULL,
+                 manifest_json TEXT NOT NULL,
+                 provenance_json TEXT NOT NULL
+             ) STRICT;
+
+             CREATE INDEX bundle_publications_stale_index
+             ON bundle_publications(started_at_utc, bundle_id);
+
+             CREATE INDEX verification_bundles_run_index
+             ON verification_bundles(run_id);
+
+             CREATE INDEX verification_bundles_snapshot_index
+             ON verification_bundles(accepted_snapshot_id);
+
+             PRAGMA user_version = 2;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version two"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version two"))
 }
 
 fn migrate_to_version_one(connection: &mut Connection) -> Result<(), StorageError> {
@@ -708,7 +797,7 @@ fn migrate_to_version_one(connection: &mut Connection) -> Result<(), StorageErro
         .map_err(|_| StorageError::database("commit storage migration"))
 }
 
-fn acquire_activity(
+pub(crate) fn acquire_activity(
     inner: &Arc<StoreInner>,
     kind: ActivityKind,
 ) -> Result<ActivityGuard, StorageError> {
@@ -741,7 +830,9 @@ fn acquire_activity(
     })
 }
 
-fn acquire_maintenance(inner: &Arc<StoreInner>) -> Result<MaintenanceGuard, StorageError> {
+pub(crate) fn acquire_maintenance(
+    inner: &Arc<StoreInner>,
+) -> Result<MaintenanceGuard, StorageError> {
     let mut state = inner
         .activity
         .lock()
@@ -766,21 +857,33 @@ fn insert_publication(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|_| StorageError::database("begin publication transaction"))?;
-    let existing_snapshot: bool = transaction
+    // Symmetric identity reservation (contract 10.5): the snapshot id maps to
+    // a `partitions/<id>` directory, so it must also be free of any bundle
+    // claim — pending journal rows and committed bundles alike — in addition
+    // to the ordinary snapshot families.
+    let existing_identity: bool = transaction
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id = ?1)
+                   OR EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?1)
+                   OR EXISTS(SELECT 1 FROM bundle_publications WHERE
+                              bundle_id = ?1
+                           OR accepted_snapshot_id = ?1
+                           OR bundle_artifact_id = ?1
+                           OR validation_report_artifact_id = ?1
+                           OR rejected_rows_artifact_id = ?1
+                           OR deduplication_report_artifact_id = ?1)
+                   OR EXISTS(SELECT 1 FROM verification_bundles WHERE
+                              bundle_id = ?1
+                           OR accepted_snapshot_id = ?1
+                           OR bundle_artifact_id = ?1
+                           OR validation_report_artifact_id = ?1
+                           OR rejected_rows_artifact_id = ?1
+                           OR deduplication_report_artifact_id = ?1)",
             params![snapshot_id.to_string()],
             |row| row.get(0),
         )
         .map_err(|_| StorageError::database("check existing snapshot identity"))?;
-    let existing_publication: bool = transaction
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?1)",
-            params![snapshot_id.to_string()],
-            |row| row.get(0),
-        )
-        .map_err(|_| StorageError::database("check existing publication identity"))?;
-    if existing_snapshot || existing_publication {
+    if existing_identity {
         return Err(StorageError::AlreadyExists(snapshot_id));
     }
     transaction
@@ -800,11 +903,21 @@ fn write_partition(
     envelope: &BatchEnvelope,
 ) -> Result<SnapshotPartition, StorageError> {
     let path = staged_partition_path(staging_dir, sequence);
+    let (row_count, stored_byte_count, digest) = write_envelope_parquet(&path, envelope)?;
+    SnapshotPartition::try_new(sequence, row_count, stored_byte_count, digest)
+}
+
+/// Encodes one envelope as an immutable Parquet partition file and returns
+/// its row count, encoded byte length, and SHA-256 file digest.
+pub(crate) fn write_envelope_parquet(
+    path: &Path,
+    envelope: &BatchEnvelope,
+) -> Result<(u64, u64, ContentDigest), StorageError> {
     let file = OpenOptions::new()
         .create_new(true)
         .read(true)
         .write(true)
-        .open(&path)
+        .open(path)
         .map_err(|error| StorageError::io("create staged Parquet partition", &error))?;
     let properties = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
@@ -829,7 +942,7 @@ fn write_partition(
     let digest = digest_file(&mut file)?;
     let row_count = u64::try_from(envelope.row_count())
         .map_err(|_| StorageError::ArithmeticOverflow("partition row count"))?;
-    SnapshotPartition::try_new(sequence, row_count, stored_byte_count, digest)
+    Ok((row_count, stored_byte_count, digest))
 }
 
 fn remove_staged_partition(staging_dir: &Path, sequence: u32) {
@@ -872,7 +985,7 @@ fn create_final_snapshot_directory(
 }
 
 #[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), StorageError> {
+pub(crate) fn sync_directory(path: &Path) -> Result<(), StorageError> {
     let directory = File::open(path)
         .map_err(|error| StorageError::io("open directory for synchronization", &error))?;
     directory
@@ -881,11 +994,30 @@ fn sync_directory(path: &Path) -> Result<(), StorageError> {
 }
 
 #[cfg(not(unix))]
-fn sync_directory(_path: &Path) -> Result<(), StorageError> {
+pub(crate) fn sync_directory(_path: &Path) -> Result<(), StorageError> {
     Ok(())
 }
 
 fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<(), StorageError> {
+    let mut connection = open_connection(inner)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin manifest transaction"))?;
+    insert_visible_snapshot(&transaction, manifest, true)?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit visible snapshot manifest"))
+}
+
+/// Inserts one visible snapshot manifest plus its partitions and completes
+/// the snapshot publication journal inside an open transaction. Bundle
+/// commits reuse this with `require_publications_journal = false` because
+/// their journal lives in `bundle_publications`.
+pub(crate) fn insert_visible_snapshot(
+    transaction: &rusqlite::Transaction<'_>,
+    manifest: &SnapshotManifest,
+    require_publications_journal: bool,
+) -> Result<(), StorageError> {
     let snapshot = manifest.snapshot();
     let schema_json = serde_json::to_string(snapshot.schema())
         .map_err(|_| StorageError::Serialization("encode logical schema"))?;
@@ -897,21 +1029,22 @@ fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<()
     let partition_count = i64::from(stats.partition_count());
     let quality_score = snapshot.quality_score().map(i64::from);
 
-    let mut connection = open_connection(inner)?;
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| StorageError::database("begin manifest transaction"))?;
-    let journal_exists: bool = transaction
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?1)",
-            params![snapshot.id().to_string()],
-            |row| row.get(0),
-        )
-        .map_err(|_| StorageError::database("verify publication journal"))?;
-    if !journal_exists {
-        return Err(StorageError::InvalidManifest(
-            "publication journal is missing",
-        ));
+    // Only direct snapshot publications carry a `publications` journal row;
+    // bundle children become visible through the bundle journal instead and
+    // must not touch it (contract 10.4).
+    if require_publications_journal {
+        let journal_exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM publications WHERE snapshot_id = ?1)",
+                params![snapshot.id().to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| StorageError::database("verify publication journal"))?;
+        if !journal_exists {
+            return Err(StorageError::InvalidManifest(
+                "publication journal is missing",
+            ));
+        }
     }
     transaction
         .execute(
@@ -955,20 +1088,20 @@ fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<()
             )
             .map_err(|_| StorageError::database("insert partition manifest"))?;
     }
-    let deleted = transaction
-        .execute(
-            "DELETE FROM publications WHERE snapshot_id = ?1",
-            params![snapshot.id().to_string()],
-        )
-        .map_err(|_| StorageError::database("complete publication journal"))?;
-    if deleted != 1 {
-        return Err(StorageError::InvalidManifest(
-            "publication journal completion count is invalid",
-        ));
+    if require_publications_journal {
+        let deleted = transaction
+            .execute(
+                "DELETE FROM publications WHERE snapshot_id = ?1",
+                params![snapshot.id().to_string()],
+            )
+            .map_err(|_| StorageError::database("complete publication journal"))?;
+        if deleted != 1 {
+            return Err(StorageError::InvalidManifest(
+                "publication journal completion count is invalid",
+            ));
+        }
     }
-    transaction
-        .commit()
-        .map_err(|_| StorageError::database("commit visible snapshot manifest"))
+    Ok(())
 }
 
 struct RawSnapshotRow {
@@ -986,7 +1119,7 @@ struct RawSnapshotRow {
     created_at: String,
 }
 
-fn load_manifest_inner(
+pub(crate) fn load_manifest_inner(
     inner: &StoreInner,
     snapshot_id: Uuid,
 ) -> Result<SnapshotManifest, StorageError> {
@@ -1122,7 +1255,7 @@ fn load_manifest_inner(
     SnapshotManifest::try_new(snapshot, partitions)
 }
 
-fn read_partition(
+pub(crate) fn read_partition(
     inner: &StoreInner,
     snapshot: &DatasetSnapshot,
     partition: &SnapshotPartition,
@@ -1262,7 +1395,11 @@ fn read_partition(
     })
 }
 
-fn integrity_error(snapshot_id: Uuid, sequence: u32, kind: IntegrityFailure) -> StorageError {
+pub(crate) fn integrity_error(
+    snapshot_id: Uuid,
+    sequence: u32,
+    kind: IntegrityFailure,
+) -> StorageError {
     StorageError::Integrity {
         snapshot_id,
         sequence,
@@ -1287,6 +1424,18 @@ fn snapshot_is_visible(inner: &StoreInner, snapshot_id: Uuid) -> Result<bool, St
             |row| row.get(0),
         )
         .map_err(|_| StorageError::database("check snapshot visibility"))
+}
+
+fn bundle_identity_exists(inner: &StoreInner, id: Uuid) -> Result<bool, StorageError> {
+    let connection = open_connection(inner)?;
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM bundle_publications WHERE bundle_id = ?1)
+              OR EXISTS(SELECT 1 FROM verification_bundles WHERE bundle_id = ?1)",
+            params![id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| StorageError::database("check bundle staging ownership"))
 }
 
 fn publication_exists(inner: &StoreInner, snapshot_id: Uuid) -> Result<bool, StorageError> {
@@ -1323,6 +1472,194 @@ fn stale_publications(
         ids.push(parse_uuid(&value, "publication identity")?);
     }
     Ok(ids)
+}
+
+struct RawBundlePublicationRow {
+    bundle_id: String,
+    accepted_snapshot_id: String,
+    bundle_artifact_id: String,
+    validation_report_artifact_id: String,
+    rejected_rows_artifact_id: Option<String>,
+    deduplication_report_artifact_id: String,
+}
+
+struct RawBundlePublication {
+    bundle_id: Uuid,
+    accepted_snapshot_id: Uuid,
+    bundle_artifact_id: Uuid,
+    validation_report_artifact_id: Uuid,
+    rejected_rows_artifact_id: Option<Uuid>,
+    deduplication_report_artifact_id: Uuid,
+}
+
+fn stale_bundle_publications(
+    inner: &StoreInner,
+    cutoff: &str,
+    maximum: u32,
+) -> Result<Vec<RawBundlePublication>, StorageError> {
+    let connection = open_connection(inner)?;
+    let mut statement = connection
+        .prepare(
+            "SELECT bundle_id, accepted_snapshot_id, bundle_artifact_id,
+                    validation_report_artifact_id, rejected_rows_artifact_id,
+                    deduplication_report_artifact_id
+             FROM bundle_publications
+             WHERE started_at_utc <= ?1 ORDER BY started_at_utc, bundle_id LIMIT ?2",
+        )
+        .map_err(|_| StorageError::database("prepare stale bundle publication query"))?;
+    let rows = statement
+        .query_map(params![cutoff, i64::from(maximum)], |row| {
+            Ok(RawBundlePublicationRow {
+                bundle_id: row.get::<_, String>(0)?,
+                accepted_snapshot_id: row.get::<_, String>(1)?,
+                bundle_artifact_id: row.get::<_, String>(2)?,
+                validation_report_artifact_id: row.get::<_, String>(3)?,
+                rejected_rows_artifact_id: row.get::<_, Option<String>>(4)?,
+                deduplication_report_artifact_id: row.get::<_, String>(5)?,
+            })
+        })
+        .map_err(|_| StorageError::database("query stale bundle publications"))?;
+    let mut publications = Vec::new();
+    for row in rows {
+        let raw = row.map_err(|_| StorageError::database("read stale bundle publication"))?;
+        let parse = |value: String, label: &'static str| -> Result<Uuid, StorageError> {
+            Uuid::parse_str(&value).map_err(|_| StorageError::InvalidManifest(label))
+        };
+        publications.push(RawBundlePublication {
+            bundle_id: parse(raw.bundle_id, "bundle identity")?,
+            accepted_snapshot_id: parse(raw.accepted_snapshot_id, "accepted snapshot identity")?,
+            bundle_artifact_id: parse(raw.bundle_artifact_id, "bundle artifact identity")?,
+            validation_report_artifact_id: parse(
+                raw.validation_report_artifact_id,
+                "validation report artifact identity",
+            )?,
+            rejected_rows_artifact_id: raw
+                .rejected_rows_artifact_id
+                .map(|value| parse(value, "rejected rows artifact identity"))
+                .transpose()?,
+            deduplication_report_artifact_id: parse(
+                raw.deduplication_report_artifact_id,
+                "deduplication report artifact identity",
+            )?,
+        });
+    }
+    Ok(publications)
+}
+
+/// Recovers stale verification-bundle publications under the maintenance
+/// gate (contract 10.4). A committed journal row without a visible bundle is
+/// rolled back together with its staging and any installed artifact
+/// directories; a visible bundle only loses staging residue.
+fn recover_bundles(
+    inner: &StoreInner,
+    cutoff: &str,
+    maximum: u32,
+    report: &mut RecoveryReport,
+) -> Result<(), StorageError> {
+    for publication in stale_bundle_publications(inner, cutoff, maximum)? {
+        checked_increment(&mut report.examined, "recovery examined count")?;
+        let bundle_visible = bundle_is_visible(inner, publication.bundle_id)?;
+        if !bundle_visible {
+            remove_uuid_directory(
+                &staging_root(inner),
+                publication.bundle_id,
+                SymlinkPolicy::Ignore,
+                "remove unpublished bundle staging",
+            )?;
+            for artifact_id in [
+                Some(publication.accepted_snapshot_id),
+                Some(publication.bundle_artifact_id),
+                Some(publication.validation_report_artifact_id),
+                publication.rejected_rows_artifact_id,
+                Some(publication.deduplication_report_artifact_id),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                // Per-identity ownership guard: another claimant may have
+                // committed this id after the stale journal row was written
+                // (ordinary snapshot or a different bundle). Recovery never
+                // deletes a directory whose id is now visible or owned by any
+                // other live publication (contract 10.4; V30 safety).
+                if identity_owned_elsewhere(inner, artifact_id, publication.bundle_id)? {
+                    checked_increment(&mut report.ignored, "recovery ignored count")?;
+                    continue;
+                }
+                remove_uuid_directory(
+                    &partitions_root(inner),
+                    artifact_id,
+                    SymlinkPolicy::Ignore,
+                    "remove unpublished bundle artifact directory",
+                )?;
+            }
+        } else {
+            remove_uuid_directory(
+                &staging_root(inner),
+                publication.bundle_id,
+                SymlinkPolicy::Ignore,
+                "remove committed bundle staging residue",
+            )?;
+        }
+        delete_bundle_publication(inner, publication.bundle_id)?;
+        checked_increment(&mut report.recovered, "recovery recovered count")?;
+    }
+    Ok(())
+}
+
+/// Returns `true` when `id` is owned by anything other than the stale bundle
+/// being recovered: an ordinary snapshot row, or another bundle's committed
+/// row or pending journal claim over the same identity.
+fn identity_owned_elsewhere(
+    inner: &StoreInner,
+    id: Uuid,
+    exclude_bundle_id: Uuid,
+) -> Result<bool, StorageError> {
+    let connection = open_connection(inner)?;
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id = ?1)
+                   OR EXISTS(SELECT 1 FROM verification_bundles WHERE
+                              bundle_id <> ?2
+                           AND (bundle_id = ?1
+                             OR accepted_snapshot_id = ?1
+                             OR bundle_artifact_id = ?1
+                             OR validation_report_artifact_id = ?1
+                             OR rejected_rows_artifact_id = ?1
+                             OR deduplication_report_artifact_id = ?1))
+                   OR EXISTS(SELECT 1 FROM bundle_publications WHERE
+                              bundle_id <> ?2
+                           AND (bundle_id = ?1
+                             OR accepted_snapshot_id = ?1
+                             OR bundle_artifact_id = ?1
+                             OR validation_report_artifact_id = ?1
+                             OR rejected_rows_artifact_id = ?1
+                             OR deduplication_report_artifact_id = ?1))",
+            params![id.to_string(), exclude_bundle_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| StorageError::database("check bundle identity ownership"))
+}
+
+fn bundle_is_visible(inner: &StoreInner, bundle_id: Uuid) -> Result<bool, StorageError> {
+    let connection = open_connection(inner)?;
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM verification_bundles WHERE bundle_id = ?1)",
+            params![bundle_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| StorageError::database("check bundle visibility"))
+}
+
+fn delete_bundle_publication(inner: &StoreInner, bundle_id: Uuid) -> Result<(), StorageError> {
+    let connection = open_connection(inner)?;
+    connection
+        .execute(
+            "DELETE FROM bundle_publications WHERE bundle_id = ?1",
+            params![bundle_id.to_string()],
+        )
+        .map(|_| ())
+        .map_err(|_| StorageError::database("delete bundle publication journal"))
 }
 
 fn eligible_tombstones(
@@ -1375,6 +1712,11 @@ fn scan_orphan_staging(
             continue;
         };
         checked_increment(&mut report.examined, "recovery examined count")?;
+        if bundle_identity_exists(inner, snapshot_id)? {
+            // Bundle-owned staging is handled by `recover_bundles` when its
+            // publication is stale; it is never an orphan here.
+            continue;
+        }
         if publication_exists(inner, snapshot_id)? {
             checked_increment(&mut report.ignored, "recovery ignored count")?;
             continue;
@@ -1415,6 +1757,17 @@ fn abort_publication(inner: &StoreInner, snapshot_id: Uuid) {
     let _ = connection.execute(
         "DELETE FROM publications WHERE snapshot_id = ?1",
         params![snapshot_id.to_string()],
+    );
+}
+
+/// Best-effort removal of one bundle publication journal row.
+pub(crate) fn abort_bundle_publication(inner: &StoreInner, bundle_id: Uuid) {
+    let Ok(connection) = open_connection(inner) else {
+        return;
+    };
+    let _ = connection.execute(
+        "DELETE FROM bundle_publications WHERE bundle_id = ?1",
+        params![bundle_id.to_string()],
     );
 }
 
@@ -1479,11 +1832,14 @@ fn cutoff_timestamp(
     Ok(format_timestamp(&cutoff))
 }
 
-fn format_timestamp(timestamp: &DateTime<Utc>) -> String {
+pub(crate) fn format_timestamp(timestamp: &DateTime<Utc>) -> String {
     timestamp.to_rfc3339_opts(SecondsFormat::Nanos, true)
 }
 
-fn parse_timestamp(value: &str, operation: &'static str) -> Result<DateTime<Utc>, StorageError> {
+pub(crate) fn parse_timestamp(
+    value: &str,
+    operation: &'static str,
+) -> Result<DateTime<Utc>, StorageError> {
     DateTime::parse_from_rfc3339(value)
         .map(|timestamp| timestamp.with_timezone(&Utc))
         .map_err(|_| StorageError::InvalidManifest(operation))
@@ -1608,6 +1964,10 @@ mod tests {
         values
     }
 
+    fn open_store_for_test(temp: &TempDir) -> SnapshotStore {
+        SnapshotStore::open(temp.path(), StorageLimits::default()).expect("store")
+    }
+
     #[test]
     fn migration_is_idempotent_and_future_versions_fail_closed() {
         let temp = TempDir::new().expect("temp directory");
@@ -1620,25 +1980,92 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
+
+        // A legacy version-one database migrates forward to version two and
+        // gains the bundle tables (contract 10.4 persistence).
+        let legacy = TempDir::new().expect("legacy temp directory");
+        let connection =
+            Connection::open(legacy.path().join("metadata.sqlite3")).expect("legacy database");
+        connection
+            .execute_batch(
+                "CREATE TABLE publications (
+                     snapshot_id TEXT PRIMARY KEY NOT NULL,
+                     started_at_utc TEXT NOT NULL
+                 ) STRICT;
+                 CREATE TABLE snapshots (
+                     id TEXT PRIMARY KEY NOT NULL,
+                     version INTEGER NOT NULL CHECK (version = 1),
+                     dataset_id TEXT NOT NULL,
+                     session_id TEXT NOT NULL,
+                     source_asset_id TEXT NOT NULL,
+                     schema_json TEXT NOT NULL,
+                     schema_fingerprint TEXT NOT NULL CHECK (length(schema_fingerprint) = 64),
+                     row_count INTEGER NOT NULL CHECK (row_count >= 0),
+                     stored_byte_count INTEGER NOT NULL CHECK (stored_byte_count >= 0),
+                     partition_count INTEGER NOT NULL CHECK (partition_count >= 0),
+                     lineage_json TEXT NOT NULL,
+                     quality_score INTEGER CHECK (quality_score BETWEEN 0 AND 100),
+                     created_at_utc TEXT NOT NULL,
+                     state INTEGER NOT NULL CHECK (state IN (1, 2)),
+                     tombstoned_at_utc TEXT,
+                     CHECK ((state = 1 AND tombstoned_at_utc IS NULL)
+                         OR (state = 2 AND tombstoned_at_utc IS NOT NULL))
+                 ) STRICT;
+                 CREATE TABLE partitions (
+                     snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+                     sequence INTEGER NOT NULL CHECK (sequence >= 0),
+                     row_count INTEGER NOT NULL CHECK (row_count > 0),
+                     stored_byte_count INTEGER NOT NULL CHECK (stored_byte_count > 0),
+                     sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+                     PRIMARY KEY (snapshot_id, sequence)
+                 ) STRICT;
+                 CREATE INDEX snapshots_tombstone_index
+                 ON snapshots(state, tombstoned_at_utc, id);
+                 PRAGMA user_version = 1;",
+            )
+            .expect("create legacy v1 database");
+        drop(connection);
+        drop(open_store_for_test(&legacy));
+        let connection =
+            Connection::open(legacy.path().join("metadata.sqlite3")).expect("migrated database");
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("read migrated version");
+        assert_eq!(version, 2);
+        for table in [
+            "bundle_publications",
+            "verification_bundles",
+            "artifact_manifests",
+        ] {
+            let present: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("table lookup");
+            assert_eq!(present, 1, "table {table} must exist after migration");
+        }
+        drop(connection);
 
         let future = TempDir::new().expect("future temp directory");
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 2;")
+            .execute_batch("PRAGMA user_version = 3;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(2))
+            Err(StorageError::UnsupportedStorageVersion(3))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     #[test]

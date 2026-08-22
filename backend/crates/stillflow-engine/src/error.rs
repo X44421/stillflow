@@ -256,7 +256,12 @@ fn storage_category(error: &StorageError) -> ErrorCategory {
         | StorageError::EnvelopeLimitExceeded { .. }
         | StorageError::PartitionLimitExceeded { .. }
         | StorageError::RowLimitExceeded { .. }
-        | StorageError::StoredByteLimitExceeded { .. } => ErrorCategory::InvalidData,
+        | StorageError::StoredByteLimitExceeded { .. }
+        | StorageError::ArtifactRowLimitExceeded { .. }
+        | StorageError::ArtifactByteLimitExceeded { .. }
+        | StorageError::ArtifactPartitionLimitExceeded { .. }
+        | StorageError::DedupKeyLimitExceeded { .. }
+        | StorageError::DedupIndexLimitExceeded { .. } => ErrorCategory::InvalidData,
         StorageError::ArithmeticOverflow(_)
         | StorageError::Integrity { .. }
         | StorageError::Io { .. }

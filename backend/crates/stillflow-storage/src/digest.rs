@@ -17,6 +17,10 @@ impl ContentDigest {
         &self.0
     }
 
+    pub(crate) const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
     pub fn try_from_hex(value: &str) -> Result<Self, StorageError> {
         if value.len() != 64 {
             return Err(StorageError::InvalidManifest("invalid SHA-256 length"));
