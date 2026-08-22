@@ -1,7 +1,14 @@
 # Issue #50 Implementation Contract: node-level Preview (E3-C0)
 
-> Status: Frozen for architecture review (not approved)
-> Revision: C0-R3
+> Status: Approved (frozen), with E3-R4 runtime addendum under PR #53
+> Revision: C0-R3 (E3-R4 addendum)
+> Approved SHA: `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`
+> Architecture approval: fourth architecture review; no remaining P0/P1
+> blockers.
+> Merge record: PR #51 merged as
+> `da3d03b81f32ebb2940eecd23649039227c10ad7`; contract branch deleted.
+> This approved contract entered `main` again through PR #49 merge commit
+> `85502cbebb1fab461fe42d30fe019ad20613aa7c`.
 > Supersedes: C0 `a57589edc160739130b3d5375134c003613b9d0e`, C0-R1
 > `e821f8ad477608f8bcd47bf5791af5ac935a6c13`, and C0-R2
 > `eef99e6a8e4d7b0af4fc5dc41951f6a964a8e6ae`
@@ -10,13 +17,11 @@
 > Parent contract: Issue #46 revision R3, merged at
 > `32f1c53d9903f66aeaca1c2676c0b81abfb2a702` in PR #47
 > Authorized base: `main@4b65204cfdb69c73389fba77cf4fd9715e94cba`
-> Branch: `agent/issue-050-node-preview-contract`
-> Last updated: 2026-08-15
-> Review: PR #51 remains draft with Request changes. C0, C0-R1, and C0-R2
-> were not approved. This C0-R3 revision resolves the exact-byte estimator
-> and p-selection/append lifecycle blockers; architecture approval binds
-> exactly one new commit SHA of this file. Runtime implementation starts
-> only after that approval.
+> Branch: contract branch deleted after merge
+> Last updated: 2026-08-16
+> Runtime authorization: Issue #52, branch
+> `agent/issue-052-node-preview-runtime`, based on
+> `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`.
 
 This document freezes the public contract and objective acceptance matrix for
 Engine E3-C0 node-level Preview. It does **not** authorize any Rust runtime
@@ -300,7 +305,7 @@ E3 must not re-implement or fork any of the following:
 ## 8. Frozen resource ceilings
 
 All limits are hard ceilings. Exceeding a maximum fails with the error named
-in section 13. No TBD value is permitted.
+in section 13. No placeholder value is permitted.
 
 | Resource | Ceiling | Default | Source |
 | --- | --- | --- | --- |
@@ -521,7 +526,7 @@ response_allocated_capacity =
     sum of the capacities of every unique backing allocation owned by
     finalized response BatchEnvelope payloads
     + sum of current allocated capacities of every in-progress response
-      builder buffer
+      builder buffer after the most recent append/freeze
 ```
 
 Rules for `response_allocated_capacity`:
@@ -543,6 +548,11 @@ Rules for `response_allocated_capacity`:
 4. Freezing the in-progress builder into a `BatchEnvelope` is move/freeze:
    the backing allocations change owner, but are not duplicated or counted
    twice.
+5. A realloc transient (old buffer still live while a new buffer is being
+   allocated) is **not** part of `response_allocated_capacity`. It is
+   tracked separately as `builder_realloc_transient(p)` and is bounded by
+   the section 10.2 peak law. It must never be used as an admission oracle
+   for public row/byte caps or batch boundaries.
 
 ### 10.2 Coexistence and peak law
 
@@ -550,9 +560,10 @@ At every instant of one `preview` call the live columnar payloads are at
 most three:
 
 ```text
-connector envelope allocated capacity   <= MAX_BATCH_BYTES        (64 MiB)
-current export transition               <= MAX_BATCH_BYTES        (64 MiB)
-response allocated capacity             <= byte_limit             (<= 50 MiB)
+connector envelope allocated capacity       <= MAX_BATCH_BYTES        (64 MiB)
+current export transition                   <= MAX_BATCH_BYTES        (64 MiB)
+finalized + post-append builder capacity    <= byte_limit             (<= 50 MiB)
+builder realloc transient                   <= PREVIEW_PEAK_ENGINE_BYTES (tracked separately)
 
 operator state (including response metadata) <= MAX_OPERATOR_STATE_BYTES
 peak                                          <= PREVIEW_PEAK_ENGINE_BYTES (183 MiB)
@@ -676,18 +687,18 @@ At that peak the `p`-row source arrays and the newly allocated destination
 builder capacity coexist; after the bounded copy completes the source
 arrays are dropped and must not be double-counted.
 
-Response append pre-allocation law, checked **before** any builder reserve
-or reallocation for `p` rows:
+Response append reserve-before-allocate requirement:
 
-```text
-other_response_capacity + old_capacity + requested_new_capacity <= byte_limit
-```
-
-where `other_response_capacity` excludes the buffer being grown,
-`old_capacity` is that buffer's current allocated capacity, and
-`requested_new_capacity` is the exact capacity requested for the `p`-row
-copy. `builder_realloc_transient(p)` is the capacity of old buffers still
-live during reallocation.
+- Before any builder reserve or reallocation for `p` rows, the
+  implementation must ensure the **post-append**
+  `response_allocated_capacity_after(p) <= byte_limit`.
+- `builder_realloc_transient(p)` is the capacity of old buffers still live
+  during reallocation. It is a memory-safety quantity only. It must never be
+  used as an admission oracle and must never change public `rows_returned`,
+  `bytes_returned`, `rows_truncated`, `bytes_truncated`, or batch boundaries.
+- The implementation still performs reserve-before-allocate, but a transient
+  realloc peak is permitted to exceed `byte_limit`; it is bounded by the
+  section 10.2 peak law.
 
 The peak law for every `(n, p)` transition is:
 
@@ -700,11 +711,13 @@ connector envelope allocated capacity
 <= PREVIEW_PEAK_ENGINE_BYTES
 ```
 
-Because `export_prefix_transition(n, p) <= MAX_BATCH_BYTES`, the response
-contribution including its realloc transient is `<= byte_limit <= 50 MiB`
-by the pre-allocation law, the envelope is `<= MAX_BATCH_BYTES`, and
-operator state is `<= 5 MiB`, the 183 MiB ceiling is proven for
-`n != m`, `m != p`, and every Filter/FilterRows case.
+Because `export_prefix_transition(n, p) <= MAX_BATCH_BYTES`,
+`response_allocated_capacity_after(p) <= byte_limit <= 50 MiB`, the envelope
+is `<= MAX_BATCH_BYTES`, and operator state is `<= 5 MiB`, the 183 MiB
+ceiling is proven for `n != m`, `m != p`, and every Filter/FilterRows case
+provided the implementation demonstrates that `builder_realloc_transient(p)`
+fits in the remaining peak budget. The exact estimator in section 10.4
+remains the only admission oracle for public output.
 
 ### 10.4 Exact candidate-byte estimator and canonical Preview rebatching
 
@@ -1183,11 +1196,12 @@ capacity records:
   not add to `source_rows_scanned` / `source_bytes_scanned` a second time.
 - live columnar payload count is `<= 3` while a connector envelope is split
   into at least two E2 chunks and finalized response batches remain live;
-- `response_allocated_capacity <= byte_limit` at every instant, including
-  the old-buffer/new-buffer realloc transient;
-- every builder reserve/realloc obeys
-  `other_response_capacity + old_capacity + requested_new_capacity <=
-  byte_limit` before allocation;
+- finalized + post-append `response_allocated_capacity <= byte_limit`;
+- the old-buffer/new-buffer realloc transient is tracked separately and is
+  **not** an admission oracle; it must not change public output, and the
+  peak sum of section 10.3 is `<= PREVIEW_PEAK_ENGINE_BYTES`;
+- every builder reserve/realloc still performs reserve-before-allocate and
+  keeps the post-append capacity `<= byte_limit`;
 - `export_prefix_transition(n, p) <= MAX_BATCH_BYTES`, connector envelope
   capacity `<= MAX_BATCH_BYTES`, and operator state `<= 5 MiB`;
 - the peak sum of section 10.3 is `<= PREVIEW_PEAK_ENGINE_BYTES`
