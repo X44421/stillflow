@@ -209,7 +209,8 @@ pub(crate) async fn preview(
                 &target_arrow,
                 &context,
                 &mut tracker,
-            )?;
+            )
+            .await?;
             source_rows_scanned = source_rows_scanned.saturating_add(consumed_rows);
             offset = offset.saturating_add(consumed_rows);
             target_rows_seen = target_rows_seen.saturating_add(batch.num_rows());
@@ -388,7 +389,7 @@ fn take_forced_export_retry() -> bool {
     })
 }
 
-fn lower_chunk(
+async fn lower_chunk(
     slice: arrow_array::RecordBatch,
     prepared: &PreparedPlan,
     target_arrow: &arrow_schema::SchemaRef,
@@ -433,6 +434,12 @@ fn lower_chunk(
             ));
         }
         n = (n / 2).max(1);
+        // Cooperative scheduling point between the bounded shrink-retry
+        // attempts. Each attempt is a synchronous export cascade step, so
+        // without this yield the entire retry sequence starves the executor
+        // and a cancellation or deadline can never be observed mid-cascade —
+        // the retry would deterministically finish ahead of any cancel signal.
+        tokio::task::yield_now().await;
     }
 }
 
@@ -692,8 +699,8 @@ mod estimator_tests {
         assert_eq!(exact, actual);
     }
 
-    #[test]
-    fn n_shrink_retry_halves_until_feasible() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn n_shrink_retry_halves_until_feasible() {
         let id = stillflow_core::ColumnId::from_uuid(uuid::Uuid::from_u128(12));
         let schema = Arc::new(
             LogicalSchema::new(vec![
@@ -727,6 +734,7 @@ mod estimator_tests {
             &RequestContext::default(),
             &mut tracker,
         )
+        .await
         .unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(consumed, 2);
