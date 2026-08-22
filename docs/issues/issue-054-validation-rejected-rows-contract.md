@@ -1,8 +1,9 @@
-# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R5)
+# Issue #54 Implementation Contract: validation, rejected rows, and exact deduplication (E4-C0-R6)
 
 > Status: Frozen for architecture review (not approved)
-> Revision: C0-R5
-> Supersedes: C0-R4 `e9fc94b9b2ebacf4a8501b53a1f8f7b3d23ade52` (Request changes)
+> Revision: C0-R6
+> Supersedes: C0-R5 (merged at `d77e9392d7ac3cbe63fd55bfcb2056cfd921d9f0` in PR #57)
+> Also supersedes: C0-R4 `e9fc94b9b2ebacf4a8501b53a1f8f7b3d23ade52` (Request changes)
 > Also supersedes: C0-R3 `cf4f0bdd7207c0a961d05e56ac69bf26578b42da` (Request changes)
 > Also supersedes: C0-R2 `2a35bced9e2eb8b35a9e4679c8698d15bbb6b941` (Request changes)
 > Also supersedes: C0-R1 `e5b70db4bfdfd9546842c138d50ec815440725fc`
@@ -14,8 +15,10 @@
 > `32f1c53d9903f66aeaca1c2676c0b81abfb2a702` in PR #47
 > Authorized E4 base: `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`
 > Storage facts base: `main@473c65b` (PR #62 merged storage publication/recovery inventory)
-> Branch: `agent/issue-054-validation-rejected-rows-contract`
-> Last updated: 2026-08-21 (R5 after Request changes)
+> Branch: `agent/issue-054-validation-rejected-rows-contract` (R5);
+> R6 branch: `agent/issue-054-contract-r6`
+> Last updated: 2026-08-22 (R6: E4-S1 storage error authorization and
+> accepted-partition digest binding)
 > Review: PR #57 remains under Request-changes review. C0, C0-R1, C0-R2,
 > C0-R3, and C0-R4 were not approved. R4 closed the report `ColumnId`,
 > canonical digest/encoding, journal-before-staging recovery, and SQLite
@@ -26,6 +29,14 @@
 > deterministic `rejected_rows_artifact_id` input/error protocol (P1), the
 > FilterRows ordinal/payload acceptance item (P1), and eight precision or
 > editorial items (P2). No runtime design was added.
+> R6 closes the independent acceptance review of PR #74 head
+> `38eb594cacc38da56bc0929871a3dec0a3d3c11c`: it authorizes exactly one new
+> public storage error variant required by V13's bounded-exhaustion wording
+> and freezes its E4-S2 `EngineError::BoundExceeded` conversion site (P0),
+> and it freezes the accepted-partition `partition_digest` slot binding,
+> value sources, batch count, ordering, and append/load canonicalization
+> protocol that §8.1.1 left ambiguous (P0). No runtime design beyond those
+> two authorizations was added.
 > Architecture approval binds exactly one new commit SHA of this file. E4
 > runtime remains paused until that approval and must then rebuild from the
 > latest accepted `main`.
@@ -152,6 +163,13 @@ E5 job/API work.
 - No compatibility shim is provided for Join/Union execution, DuckDB SQL,
   SQLx, arbitrary engine code, approximate deduplication, or hash-only
   deduplication.
+
+### 3.7 R6 additions closed by this revision
+
+| R5 blocker (independent acceptance review of PR #74 head `38eb594cacc38da56bc0929871a3dec0a3d3c11c`) | R6 disposition |
+| --- | --- |
+| V13's bounded page-cap exhaustion requires a typed storage error, but any new public error is a stop condition under Issue #73, and E4 error mapping is outside E4-S1 scope | §9.4 authorizes exactly one new public variant, `StorageError::DedupIndexLimitExceeded { resource: &'static str, maximum: u64 }`, raised when SQLite reports SQLITE_FULL against `PRAGMA max_page_count`. Its engine-side classification (`ErrorCategory::InvalidData`) is authorized at E4-S1. The `StorageError → EngineError::BoundExceeded` conversion stays out of E4-S1 and is frozen to E4-S2: exactly one site — the storage-error arm of `materialize_verification`'s error mapping — maps this variant, `DedupKeyLimitExceeded`, and the artifact/partition/row/byte limit variants to `EngineError::BoundExceeded` per §10.8. No other mapping change is authorized before that PR. Alternative considered and rejected: reverting to generic `StorageError::Database`, which leaves V13's bounded-error wording unsatisfiable |
+| §8.1.1 does not freeze the two identity slots, value sources, batch count, ordering, or append/load canonicalization protocol for accepted `SnapshotPartition` digests; any encoding ambiguity is a stop condition | §8.1.1 gains the frozen "Accepted-partition `partition_digest` binding" subsection below |
 
 ## 4. Scope
 
@@ -774,6 +792,33 @@ digest is also its provenance content digest; no separate formula exists for
 it. In the bundle-provenance preimage below, the accepted snapshot child
 therefore contributes `accepted_snapshot_manifest_digest` as both its
 `child_manifest_digest` and its `child_content_digest`.
+
+**Accepted-partition `partition_digest` binding (R6).** For each accepted
+`SnapshotPartition` the shared `ArtifactPartition.digest` formula is bound
+as follows:
+
+- artifact slot: the committed `snapshot_id`;
+- section-slot byte: the `ArtifactKind::AcceptedSnapshot` tag `0x02` — the
+  accepted snapshot owns no `ArtifactSectionId`;
+- `row_count`: the logical Scan output row count carried by the partition
+  (the single envelope appended for that partition);
+- `stored_byte_count`: the canonical logical payload byte count — the sum of
+  the partition's canonical-batch length prefixes. The physical Parquet file
+  length and file digest remain E3 facts on
+  `SnapshotManifest`/`SnapshotPartition` and never enter this preimage;
+- `canonical_batch_count`: `1` — E4-C0 appends exactly one envelope per
+  accepted partition; batches appear in logical sequence order;
+- partitions are sorted by strictly increasing `sequence`;
+- the snapshot-level preimage statistics are the sums over these canonical
+  records (`row_count` Σ row_count, `stored_byte_count` Σ stored_byte_count,
+  `partition_count` = record count), not the physical `SnapshotStats`.
+
+The writer records these canonical facts at append time, before any
+filesystem write. The loader recomputes them by decoding each installed
+Parquet partition — whose physical length and file-digest gates run first —
+and re-canonicalizing; any mismatch fails closed with the typed integrity or
+manifest error. Bundles persisted by earlier interim builds carry
+physical-file digests and therefore fail closed under this binding.
 
 The bundle-level provenance is not a child `ArtifactManifest`. Its
 `content_digest` is
@@ -1899,7 +1944,7 @@ The sanitization sentinel is
 | V10 | Bundle atomicity | Inject failure during commit after accepted partition install; neither accepted snapshot nor any report/rejected artifact is independently visible; rollback cleans all files. |
 | V11 | Zero-rejection rule | No rejected artifact row is inserted when terminal rejection count is zero; storage creates no empty DatasetSnapshot for rejected rows. |
 | V12 | Dedup index ownership and recovery | Failure-inject lock-first creation after each creation step; a pre-existing `.sqlite` or `.lock` returns `AlreadyExists` and is never deleted; a newly created first file is rolled back on second-file failure; recovery scans the union of both suffixes, removes orphan/pairs only under the maintenance gate after acquiring the lock when present, and never removes an active locked pair. |
-| V13 | Dedup index permissions and page cap | Temp dir mode `0700`, DB file mode `0600`; `PRAGMA max_page_count` equals `MAX_DEDUP_INDEX_PAGES`; disk > 8 GiB fails `BoundExceeded`; a test-side `PRAGMA max_page_count` reduction on the opened index is permitted instrumentation to prove exhaustion without writing 8 GiB. |
+| V13 | Dedup index permissions and page cap | Temp dir mode `0700`, DB file mode `0600`; `PRAGMA max_page_count` equals `MAX_DEDUP_INDEX_PAGES`; disk > 8 GiB fails `BoundExceeded`; a test-side `PRAGMA max_page_count` reduction on the opened index is permitted instrumentation to prove exhaustion without writing 8 GiB. R6: exhaustion surfaces as the typed `StorageError::DedupIndexLimitExceeded`; its `EngineError::BoundExceeded` counterpart lands at the frozen E4-S2 conversion site (§3.7). |
 | V14 | Memory ceiling | Instrumented live-payload counter shows `<= 6` and no seventh payload; allocator/SQLite cache stay within section 12.2; source grep and allocator prove no in-memory `HashSet`/`HashMap` dedup index. |
 | V15 | Secret sentinel | Sentinel appears in a failing cell but not in `EngineError` Display/Debug, `sanitized_summary()` JSON, event metadata, reports, or provenance summaries. |
 | V16 | Retry determinism | Retry after recovery/fresh run id with identical inputs/identities produces identical artifacts and partition boundaries; pre-existing active dedup file is never deleted. |
@@ -1910,8 +1955,8 @@ The sanitization sentinel is
 | V21 | Schema/ColumnId/original value preservation | Rejected schema field order and metadata match logical Scan output + nine control fields; ColumnIds unchanged; Arrow values equal source values including null/NaN/`-0.0`; at most one payload per source row. |
 | V22 | Validation message safety and length | Explicit E4 preflight rejects empty-after-trim, > 1,024 bytes, and secret-like message; exact safe message stored once per `RuleRef` in the validation rule summary; absent from errors/logs/events. |
 | V23 | Existing E2/E3 compatibility | `materialize` still returns `UnsupportedRule` for Validate/Deduplicate; `preview` behavior is unchanged by the E4 code path; no `PreviewResult` field changed. |
-| V24 | Provenance completeness and CI | Every artifact embeds committed `ArtifactProvenance`; callers provide only `ArtifactProvenanceInput`, while the engine supplies the verified canonical-plan SHA-256, contract versions, and compile-time `engine_build`; the writer supplies summary/content digest. The result includes `run_id`, `bundle_id`, distinct `artifact_id`, `session_id`, `LogicalInputRef`, FNV index, lineage, and injected times. CI checks pass in the later runtime PR; this docs PR modifies only the file named in section 2. |
-| V25 | Storage round-trip through bundle reader | Write a bundle containing accepted, validation summary/findings, rejected rows, and dedup summary/findings; load by `bundle_id`, by `run_id`, and by accepted snapshot id; open each `ArtifactSection` through `ArtifactBatchReader` and assert row/partition/manifest/section/provenance digest equality. |
+| V24 | Provenance completeness and CI | Every artifact embeds committed `ArtifactProvenance`; callers provide only `ArtifactProvenanceInput`, while the engine supplies the verified canonical-plan SHA-256, contract versions, and compile-time `engine_build`; the writer supplies summary/content digest. The result includes `run_id`, `bundle_id`, distinct `artifact_id`, `session_id`, `LogicalInputRef`, FNV index, lineage, and injected times. CI checks pass in the later runtime PR; this docs PR modifies only the file named in section 2. R6: accepted-snapshot provenance digests follow the accepted-partition binding in §8.1.1. |
+| V25 | Storage round-trip through bundle reader | Write a bundle containing accepted, validation summary/findings, rejected rows, and dedup summary/findings; load by `bundle_id`, by `run_id`, and by accepted snapshot id; open each `ArtifactSection` through `ArtifactBatchReader` and assert row/partition/manifest/section/provenance digest equality. R6: accepted digests are pinned against hard-coded external literals, writer-settings independence (identical logical data under different Parquet compression yields identical digests), value-flip sensitivity, and reopen fidelity. |
 | V26 | Provenance draft vs committed | `VerificationBundleDraft` contains engine-assembled provenance with no summary/content_digest; after commit, every artifact provenance contains summary and content digest; `bundle_id` is distinct from `run_id`, `bundle_artifact_id`, and every child artifact id; `session_id` is present. |
 | V27 | Rule summaries and message once | `ValidationRuleSummary` contains evaluated/pass/fail/warning/error/null/false counts and message once per `RuleRef`; findings contain no message; `DedupRuleSummary` contains evaluated/unique/duplicate counts. |
 | V28 | Dedup insert typed first ordinal | `insert_first()` returns `Inserted` or `Duplicate` with `first_source_row_ordinal`; duplicate finding uses that ordinal even if the first-seen row is later rejected by Validate Error. |
@@ -1968,3 +2013,7 @@ Stop and return to contract review if implementation needs:
 - PR #53 may still revise the E3 public surface. E4 runtime must not start
   until PR #53 merges and must reconcile only section 13 against the merged
   API.
+- Bundles persisted while the accepted-partition binding was unfrozen
+  (pre-R6 interim builds) carry physical-file digests and fail closed on
+  load under the §8.1.1 R6 binding. None exist outside development
+  fixtures.
