@@ -1236,24 +1236,6 @@ dedup page/byte caps, and the engine/storage peak laws. The runtime must
 document and test the actual memory behavior rather than treating
 `cache_size` as a hard ceiling.
 
-**Typed page-cap exhaustion error (R6).** When a SQLite operation fails
-because the database reached its effective `PRAGMA max_page_count`,
-storage raises
-`StorageError::DedupIndexLimitExceeded { resource: &'static str,
-maximum: u64 }`:
-
-- classification condition: the SQLite result code is SQLITE_FULL
-  (`ffi::ErrorCode::DiskFull`);
-- `resource`: the exact string `"page"`;
-- `maximum`: the frozen production ceiling `MAX_DEDUP_INDEX_PAGES`
-  (2,097,152) — never a test-side reduced effective value, even when V13
-  instrumentation lowers the live PRAGMA; V13 asserts this field identity;
-- E4-S1 classification: `ErrorCategory::InvalidData`; the error is
-  terminal for the attempt and is not retried;
-- E4-S2: converted to `EngineError::BoundExceeded` at exactly one site —
-  the storage-error arm of `materialize_verification`'s error mapping
-  (§3.7, §10.8). No other conversion exists.
-
 The creation protocol has explicit crash points after lock-file creation,
 after lock acquisition, after SQLite-file creation, after SQLite open, and
 after lease initialization. A crash at any point is recoverable because the
@@ -1350,6 +1332,24 @@ impl DedupIndex {
 | Total index rows per run | at most `MAX_SNAPSHOT_ROWS` across all namespaces |
 | Temp directory / file modes | `0700` / `0600` (Unix) |
 | Active ownership | exclusive OS lock on `dedup_{run_id}.lock`; never deleted while held |
+
+**Typed page-cap exhaustion error (R6).** When a SQLite operation fails
+because the database reached its effective `PRAGMA max_page_count`,
+storage raises
+`StorageError::DedupIndexLimitExceeded { resource: &'static str,
+maximum: u64 }`:
+
+- classification condition: the SQLite result code is SQLITE_FULL
+  (`ffi::ErrorCode::DiskFull`);
+- `resource`: the exact string `"page"`;
+- `maximum`: the frozen production ceiling `MAX_DEDUP_INDEX_PAGES`
+  (2,097,152) — never a test-side reduced effective value, even when V13
+  instrumentation lowers the live PRAGMA; V13 asserts this field identity;
+- E4-S1 classification: `ErrorCategory::InvalidData`; the error is
+  terminal for the attempt and is not retried;
+- E4-S2: converted to `EngineError::BoundExceeded` at exactly one site —
+  the storage-error arm of `materialize_verification`'s error mapping
+  (§3.7, §10.8). No other conversion exists.
 
 ## 10. Atomic publication and security
 
@@ -1974,7 +1974,7 @@ The sanitization sentinel is
 | V10 | Bundle atomicity | Inject failure during commit after accepted partition install; neither accepted snapshot nor any report/rejected artifact is independently visible; rollback cleans all files. |
 | V11 | Zero-rejection rule | No rejected artifact row is inserted when terminal rejection count is zero; storage creates no empty DatasetSnapshot for rejected rows. |
 | V12 | Dedup index ownership and recovery | Failure-inject lock-first creation after each creation step; a pre-existing `.sqlite` or `.lock` returns `AlreadyExists` and is never deleted; a newly created first file is rolled back on second-file failure; recovery scans the union of both suffixes, removes orphan/pairs only under the maintenance gate after acquiring the lock when present, and never removes an active locked pair. |
-| V13 | Dedup index permissions and page cap | Temp dir mode `0700`, DB file mode `0600`; `PRAGMA max_page_count` equals `MAX_DEDUP_INDEX_PAGES`; disk > 8 GiB fails `BoundExceeded`; a test-side `PRAGMA max_page_count` reduction on the opened index is permitted instrumentation to prove exhaustion without writing 8 GiB. R6: exhaustion surfaces as the typed `StorageError::DedupIndexLimitExceeded`; its `EngineError::BoundExceeded` counterpart lands at the frozen E4-S2 conversion site (§3.7). |
+| V13 | Dedup index permissions and page cap | Temp dir mode `0700`, DB file mode `0600`; `PRAGMA max_page_count` equals `MAX_DEDUP_INDEX_PAGES`; disk > 8 GiB fails `BoundExceeded`; a test-side `PRAGMA max_page_count` reduction on the opened index is permitted instrumentation to prove exhaustion without writing 8 GiB. R6: exhaustion surfaces as the typed `StorageError::DedupIndexLimitExceeded`; its `EngineError::BoundExceeded` counterpart lands at the frozen E4-S2 conversion site (§3.7). R7 automated evidence asserts the full observable-field identity, not merely the error type: `resource == "page"`; `maximum == u64::from(MAX_DEDUP_INDEX_PAGES)` — held at the production value even while the test-side PRAGMA reduction proves exhaustion; and the E4-S1 mapping is `ErrorCategory::InvalidData` with no retry. |
 | V14 | Memory ceiling | Instrumented live-payload counter shows `<= 6` and no seventh payload; allocator/SQLite cache stay within section 12.2; source grep and allocator prove no in-memory `HashSet`/`HashMap` dedup index. |
 | V15 | Secret sentinel | Sentinel appears in a failing cell but not in `EngineError` Display/Debug, `sanitized_summary()` JSON, event metadata, reports, or provenance summaries. |
 | V16 | Retry determinism | Retry after recovery/fresh run id with identical inputs/identities produces identical artifacts and partition boundaries; pre-existing active dedup file is never deleted. |
