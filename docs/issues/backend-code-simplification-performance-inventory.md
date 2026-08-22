@@ -108,11 +108,12 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 
 **F1【事实】predict 调用次数 = 1 + I，其中 0 ≤ I ≤ ⌈log₂ remaining⌉**：`largest_feasible_k`（predict.rs:143–170）先做单行探针 `predict(1,…)`（:154），再在 `[low, high]`（high 初始化为当轮 remaining）上二分，每轮调用一次 `predict(mid,…)`（:163）。I 为实际迭代轮数，随分支路径与数据变化；⌈log₂ remaining⌉ 只是该轮 remaining 的最坏情况上界，不是所有切片的恒等式。每轮都是完整重算，结果间不共享中间量。
 
-**F2【事实】PredictedSchema 克隆次数 = 每 predict 一次 + 每 step/rule 一次**：
-- 每次 predict 入口克隆：predict.rs:106 `let mut working = schema.clone();`
-- Project 分支 :233、Filter 分支 :245 各克隆一次；每条规则入口 :264 `let mut next = working.clone();`
+**F2【事实】PredictedSchema 克隆次数 = 每次 predict `1 + Q + R` 次**（Q = 该切片 plan 中 Project/Filter step 数，R = 展开后规则总数）：
+- 每次 predict 入口克隆一次：predict.rs:106 `let mut working = schema.clone();`
+- 每个非 Rules step（Project/Filter，经 predict_step）各克隆一次：Project :233、Filter :245
+- 每条规则经 predict_rule 各克隆一次：:264 `let mut next = working.clone();`
 - `PredictedColumn` 含 `String name` 与 `LogicalType`（List/Struct 内含 Vec），clone 非浅拷贝【静态推断：成本随列数线性】。
-- 推断公式【静态推断】：每切片 schema 克隆次数 = (1 + R) × (1 + I)——1 + I 即该切片 predict 的实际调用次数（上界见 F1）。
+- 推断公式【静态推断】：每切片 schema 克隆次数 = (1 + Iᵢ) × (1 + Q + R)——(1 + Iᵢ) 即该切片 predict 的实际调用次数（上界见 F1）。
 
 **F3【事实】ColumnId 线性查找**：`column()`/`column_mut()`（predict.rs:70–75/77–82）实现为 `iter().find(...)`，O(cols)；Rename :267、Trim :276/:281、ReplaceLiteral :320、FillNull :348、Cast :380/:399 均经此路径；DeriveColumn 另有全表唯一性扫描 :292–295。
 
@@ -131,8 +132,8 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 
 **I1【静态推断】放大公式（按切片求和的上界形式）**：设 envelope N 行、变宽列数 V、规则总数 R；切片 i 的行数为 kᵢ、剩余行为 remainingᵢ = N − offsetᵢ、预测轮数 Iᵢ 满足 0 ≤ Iᵢ ≤ ⌈log₂ remainingᵢ⌉（F1）：
 - 行访问量（width 刷新主导项）≈ Σᵢ (1+Iᵢ) × V × kᵢ
-- schema 克隆 ≈ Σᵢ (1+R) × (1+Iᵢ)
-- column_physical_sum 全量重算 ≈ Σᵢ (1+Iᵢ) × (R+c)
+- schema 克隆 ≈ Σᵢ (1+Q+R) × (1+Iᵢ)
+- column_physical_sum 全量重算 ≈ Σᵢ (1+Iᵢ) × (1+Q+R_resum)——+1 为 predict 入口度量（predict.rs:109），Q 同样计入（Project 分支 :241）；R_resum ≤ R 仅计 DropColumn/Trim/ReplaceLiteral/FillNull/Cast（Rename :268、DeriveColumn :312–313、FilterRows :423 不触发全量重算）
 k̄ 平均化表述弃用——轮数上限跟随每轮各自的 remaining。1024 列 × 128 规则 × 万行 envelope 时各项为乘性放大；确切量级须 §6 B1 实测。
 
 **H1【待测假设】** 二分搜索中相邻 predict(mid) 的计算高度重叠，可被"编译期规则游标 + 增量宽度表"消除且不改变准入字节结果（§7 候选 1）。验证门：B1 基准 + 内存律测试 t43/t46/t47/t52/t55/t56（tests.rs:2114/2225/2278/2541/2677/2747）全绿。
@@ -257,21 +258,22 @@ k̄ 平均化表述弃用——轮数上限跟随每轮各自的 remaining。102
 | CPU time | getrusage(RUSAGE_SELF) utime+stime 差分，或 `/usr/bin/time -v` |
 | peak RSS | ru_maxrss（getrusage） |
 | allocation count/bytes | 全局分配器挂钩计数（仿 stillflow-engine 现有 test_alloc::PhasedAlloc 模式，lib.rs:301），以 cargo feature / cfg(test) 门控启用 |
-| 文件实际读取字节数 | /proc/<pid>/io read_bytes 差分；或计数 `Read` wrapper |
+| 逻辑读取字节（解析遍数与消费范围的判定依据） | 计数 `Read` wrapper 或逐 reader 字节计数——与解码器/校验器实际消费的字节范围一一对应 |
+| 物理块设备 I/O | `/proc/<pid>/io read_bytes` 差分——受 OS 页缓存影响，仅作缓存相关观测，不得单独用于解析遍数或逻辑字节数的判定 |
 | 调用次数（predict invocation / reader construction / schema clone） | feature 门控的计数插桩，仅基准构建启用 |
 
 ### 6.1 B1：Engine prediction
 
-- fixture：进程内构造 RecordBatch（不经 connector）。列数 ∈ {64, 256, 1024}（一半 utf8@64B 变长值、一半 i64）；规则数 ∈ {1, 32, 128}（DeriveColumn-Utf8 / Cast / Rename / DropColumn 混合）；每 envelope 10,000 行；plan 形态 scan → ApplyRules → materialize。
+- fixture：进程内构造 RecordBatch（不经 connector）。列数 ∈ {64, 256, 1024}（一半 utf8@64B 变长值、一半 i64）；规则数 ∈ {1, 32, 128}（DeriveColumn-Utf8 / Cast / Rename / DropColumn 混合）；step 维度 Q ∈ {0, 2}——在 scan 与 ApplyRules 之间插入 Project+Filter 两步的变体，覆盖 F2 中非 Rules step 的克隆路径（rule-only plan 无法暴露该遗漏）；每 envelope 10,000 行；plan 形态 scan → [Project → Filter]? → ApplyRules → materialize。
 - command 形态：`cargo test -p stillflow-engine --release <pred_bench> -- --ignored --nocapture`（未来实现时的形态）。
-- 预期观测量：largest_feasible_k 的 wall/CPU；predict 调用次数（含逐切片迭代轮数 I 的分布——检验 F1 上界而非恒等式）；PredictedSchema 克隆次数；column_physical_sum 执行次数；peak RSS；alloc count/bytes。用于检验 §3.1 I1 公式的实测形状。
+- 预期观测量：largest_feasible_k 的 wall/CPU；predict 调用次数（含逐切片迭代轮数 I 的分布——检验 F1 上界而非恒等式）；PredictedSchema 克隆次数（须能按 (1+Q+R)×(1+I) 分解核对，区分 Q/R 来源）；column_physical_sum 执行次数；peak RSS；alloc count/bytes。用于检验 §3.1 I1 公式的实测形状。
 - 通过/停止条件：先记录基线；后续优化 PR 必须给出相对基线的实测对比，且 t43/t46/t47/t52/t55/t56 内存律测试全绿；任一回归或 peak RSS 越过 MAX_ENGINE_PEAK_BYTES 即停止并回退。
 
 ### 6.2 B2：Connector ingestion
 
 - fixture：本地生成的 CSV/JSONL/Parquet 文件各一；列数 ∈ {10, 100}；行数 ∈ {100,000, 1,000,000}；utf8 列含 32–96 字节变长值；生成脚本置于一次性目录，不提交。
 - command 形态：`cargo test -p stillflow-connector-local-tabular --release <read_bench> -- --ignored`。
-- 预期观测量：端到端 read_batches 的 wall/CPU/RSS/alloc；实际读取字节（CSV 应 ≈ 文件大小 × 解析遍数——直接检验 C1 的"2×"）；解析 pass 计数；reader 构造计数（Parquet 每 chunk 重建假设）。
+- 预期观测量：端到端 read_batches 的 wall/CPU/RSS/alloc；**逻辑读取字节**（计数 wrapper：完整读取时 CSV 应 ≈ 文件大小 × 解析遍数；限行读取时 ≈ 已消费前缀 × 遍数）与 **parser invocation 计数**共同验证 C1 的双遍结论；物理块设备 I/O 仅作参考观测（/proc read_bytes 受页缓存影响，口径见 §6.0）；reader 构造计数（Parquet 每 chunk 重建假设）。
 - 通过/停止条件：记录基线；单遍解码候选须保持 typed-drift 错误分类不变且 memory_bound RSS 门（64 MiB 源峰值增量 ≤32 MiB）不回退；否则停止。
 
 ### 6.3 B3：Snapshot storage
