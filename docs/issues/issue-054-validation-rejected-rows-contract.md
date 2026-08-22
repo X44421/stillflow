@@ -73,9 +73,14 @@ separate Preview interpretation of Validate/Deduplicate.
 
 ## 2. Source policy and branch discipline
 
-- The authorized E4 base is `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`.
-- This branch is created from that exact commit. It must not merge, rebase
-  onto, or cherry-pick from PR #53, PR #49, or any historical branch.
+- Historical R5 fact: the authorized E4 base was
+  `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`, and the R5-era contract
+  branch was created from that exact commit. That branch must not merge,
+  rebase onto, or cherry-pick from PR #53, PR #49, or any historical branch.
+- R6 implementation base: pending the post-approval decision this revision
+  requires; once approved, the implementation branch starts from the latest
+  accepted `main` per the closing rule of the review header. No runtime
+  branch may claim the historical R5 SHA as its base.
 - The docs-only storage inventory PR #62 was merged into `main@473c65b` and is
   merged into this branch solely to bind E4 bundle publication/recovery to the
   verified storage facts in
