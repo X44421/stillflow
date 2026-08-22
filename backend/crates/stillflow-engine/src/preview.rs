@@ -209,7 +209,8 @@ pub(crate) async fn preview(
                 &target_arrow,
                 &context,
                 &mut tracker,
-            )?;
+            )
+            .await?;
             source_rows_scanned = source_rows_scanned.saturating_add(consumed_rows);
             offset = offset.saturating_add(consumed_rows);
             target_rows_seen = target_rows_seen.saturating_add(batch.num_rows());
@@ -245,6 +246,11 @@ pub(crate) async fn preview(
                 }
             }
             if target_rows_seen > request.row_limit {
+                // Section 9.3 first-of rule, event 2: lowering produced
+                // target-output row `row_limit + 1`, so `rows_truncated` is
+                // decided and the flag-completion lookahead stops here. No
+                // further stream poll happens, so `source_exhausted` stays
+                // `false` (it can never co-occur with `rows_truncated`).
                 rows_truncated = true;
                 visible_prefix_closed = true;
                 break;
@@ -252,6 +258,12 @@ pub(crate) async fn preview(
         }
         tracker.drop_envelope()?;
 
+        if rows_truncated {
+            // First-of event 2 already closed the lookahead; the unlowered
+            // remainder of this envelope is the at-most-one-envelope overread
+            // and no scan-cap classification may override the stop.
+            break;
+        }
         if mid_envelope_scan_close {
             scan_truncated = true;
             break;
@@ -278,7 +290,7 @@ pub(crate) async fn preview(
             }
             break;
         }
-        if rows_truncated || scan_truncated || source_exhausted {
+        if scan_truncated || source_exhausted {
             break;
         }
     }
@@ -320,7 +332,13 @@ pub(crate) async fn preview(
             "preview source counters exceeded a frozen scan cap",
         ));
     }
-    if source_exhausted && (rows_truncated || scan_truncated) {
+    // Section 9.3: `source_exhausted` reports terminal `None` and is never
+    // derived from the other flags. It cannot co-occur with `scan_truncated`
+    // (a scan-cap stop leaves the stream non-terminal) nor with
+    // `rows_truncated` (first-of event 2 stops the lookahead before any
+    // further poll). It may co-occur with `bytes_truncated` when the stream
+    // was polled to terminal `None` after byte truncation.
+    if source_exhausted && (scan_truncated || rows_truncated) {
         return Err(EngineError::Internal(
             "source_exhausted contradicts truncation flags",
         ));
@@ -371,7 +389,7 @@ fn take_forced_export_retry() -> bool {
     })
 }
 
-fn lower_chunk(
+async fn lower_chunk(
     slice: arrow_array::RecordBatch,
     prepared: &PreparedPlan,
     target_arrow: &arrow_schema::SchemaRef,
@@ -416,6 +434,12 @@ fn lower_chunk(
             ));
         }
         n = (n / 2).max(1);
+        // Cooperative scheduling point between the bounded shrink-retry
+        // attempts. Each attempt is a synchronous export cascade step, so
+        // without this yield the entire retry sequence starves the executor
+        // and a cancellation or deadline can never be observed mid-cascade —
+        // the retry would deterministically finish ahead of any cancel signal.
+        tokio::task::yield_now().await;
     }
 }
 
@@ -533,12 +557,26 @@ impl PreviewAccumulator {
                 return Ok(PushOutcome::ByteClosed);
             }
 
+            // Section 10.3 reserve-before-allocate: the aggregate cap above
+            // is the admission oracle, and because the builder shares the
+            // canonical buffer layout of the finalized arrays, the admitted
+            // `candidate_envelope_bytes` already bounds the post-append
+            // `response_allocated_capacity_after(p)`. The realloc transient
+            // is a memory-safety quantity only (section 10.1 rule 5): it may
+            // exceed `byte_limit` momentarily and is constrained by the
+            // independent peak pre-check inside `append_rows`, never by an
+            // admission or flush decision.
+
             #[cfg(test)]
             {
-                let admission_peak = self.rebatcher.admission_budget_peak(&incoming, 1)?;
-                tracker.record_response_budget_peak(
-                    self.finalized_bytes.saturating_add(admission_peak),
-                );
+                // Section 10.2 evidence separation: this sample is the
+                // post-append response_allocated_capacity (finalized bytes +
+                // admitted builder bytes), never the realloc transient.
+                // Section 10.1 rule 5 forbids transients inside
+                // `response_allocated_capacity`; the transient is tracked
+                // independently by the remainder allocator phase and
+                // pre-checked inside `append_rows`.
+                tracker.record_response_budget_peak(candidate_total);
             }
 
             let accepted = incoming.slice(0, 1);
@@ -661,8 +699,8 @@ mod estimator_tests {
         assert_eq!(exact, actual);
     }
 
-    #[test]
-    fn n_shrink_retry_halves_until_feasible() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn n_shrink_retry_halves_until_feasible() {
         let id = stillflow_core::ColumnId::from_uuid(uuid::Uuid::from_u128(12));
         let schema = Arc::new(
             LogicalSchema::new(vec![
@@ -696,6 +734,7 @@ mod estimator_tests {
             &RequestContext::default(),
             &mut tracker,
         )
+        .await
         .unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(consumed, 2);
