@@ -1,0 +1,368 @@
+{
+  "schema_version": 1,
+  "revision": 0,
+  "repository": "X44421/stillflow",
+  "coordination_branch": "coordination/task-registry",
+  "source_main_sha": "679cab637e7b1764f0333133a86ffeddc775c397",
+  "updated_at": "2026-08-22T06:05:20Z",
+  "policy": {
+    "terminal_statuses": [
+      "done",
+      "cancelled_duplicate"
+    ],
+    "claimable_statuses": [
+      "queued",
+      "dispatched"
+    ],
+    "default_lease_minutes": 90,
+    "one_writer_per_branch": true,
+    "review_head_binding_required": true,
+    "blind_retry_after_conflict": false
+  },
+  "tasks": [
+    {
+      "id": "T74-R2",
+      "title": "E4-S1-R2",
+      "status": "running",
+      "mode": "write",
+      "owner": "external:e4-s1-r2",
+      "target_pr": 74,
+      "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
+      "expected_head": "bc430aa4ee4a1d5a79c738d0580ef7ad5deea2b3",
+      "locks": [
+        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
+      ],
+      "acceptance_keys": [
+        "e4s1:r2"
+      ],
+      "depends_on": [],
+      "conflicts_with": [
+        "T74-P1A",
+        "T74-P1B",
+        "T74-MIGRATE"
+      ],
+      "lease_expires_at": "2026-08-22T08:05:20Z",
+      "started_at": "2026-08-22T06:05:20Z",
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Current exclusive writer for PR #74. Transfer the placeholder owner to the actual WSL agent before its first heartbeat."
+    },
+    {
+      "id": "T74-P1A",
+      "title": "Dedup open/recovery two-stage barrier",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_pr": 74,
+      "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
+      ],
+      "paths": [
+        "backend/crates/stillflow-storage/src/dedup.rs"
+      ],
+      "acceptance_keys": [
+        "pr74:dedup-open-two-stage-barrier"
+      ],
+      "depends_on": [
+        "T74-R2"
+      ],
+      "conflicts_with": [
+        "T74-R2",
+        "T74-P1B",
+        "T74-MIGRATE"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Was reported running, but is queued to remove the same-branch writer conflict. After R2, deduplicate by acceptance key before re-dispatch."
+    },
+    {
+      "id": "T78-REVIEW",
+      "title": "Independent review of the R6 P0 contract completion",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "target_pr": 78,
+      "target_branch": "agent/issue-054-contract-r6-completion",
+      "expected_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
+      "locks": [],
+      "acceptance_keys": [
+        "r6:typed-error-section-9.4",
+        "r6:v13-observable-fields"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Read-only and exact-head bound; may run beside the single PR #74 writer."
+    },
+    {
+      "id": "T78-MERGE",
+      "title": "Merge the approved R6 P0 contract completion",
+      "status": "blocked",
+      "mode": "maintenance",
+      "owner": null,
+      "target_pr": 78,
+      "target_branch": "agent/issue-054-contract-r6-completion",
+      "expected_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
+      "locks": [
+        "main:merge"
+      ],
+      "acceptance_keys": [
+        "pr78:merge"
+      ],
+      "depends_on": [
+        "T78-REVIEW"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Must be explicitly moved to queued after exact-head approval."
+    },
+    {
+      "id": "T74-P1B",
+      "title": "Bundle-wide ceiling boundary evidence",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_pr": 74,
+      "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
+      ],
+      "paths": [
+        "backend/crates/stillflow-storage/src/bundle.rs"
+      ],
+      "acceptance_keys": [
+        "pr74:bundle-row-extra-21",
+        "pr74:bundle-byte-dual-full-plus-one",
+        "pr74:bundle-partition-dual-full-plus-one"
+      ],
+      "depends_on": [
+        "T74-R2",
+        "T74-P1A"
+      ],
+      "conflicts_with": [
+        "T74-R2",
+        "T74-P1A",
+        "T74-MIGRATE"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Cancel as duplicate if R2 already covers every acceptance key."
+    },
+    {
+      "id": "T74-MIGRATE",
+      "title": "Rebase PR #74 onto the post-PR #78 accepted main",
+      "status": "blocked",
+      "mode": "write",
+      "owner": null,
+      "target_pr": 74,
+      "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
+      ],
+      "acceptance_keys": [
+        "pr74:post-r6c-base-migration"
+      ],
+      "depends_on": [
+        "T78-MERGE",
+        "T74-R2",
+        "T74-P1A",
+        "T74-P1B"
+      ],
+      "conflicts_with": [
+        "T74-R2",
+        "T74-P1A",
+        "T74-P1B"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Requires backup refs, range-diff, force-with-lease and a fresh CI run."
+    },
+    {
+      "id": "T74-ACCEPT",
+      "title": "Final independent E4-S1 acceptance",
+      "status": "blocked",
+      "mode": "review",
+      "owner": null,
+      "target_pr": 74,
+      "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
+      "expected_head": null,
+      "locks": [],
+      "acceptance_keys": [
+        "pr74:final-independent-acceptance"
+      ],
+      "depends_on": [
+        "T74-MIGRATE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Any new PR #74 commit invalidates this review."
+    },
+    {
+      "id": "T74-MERGE",
+      "title": "Merge the approved E4-S1 runtime",
+      "status": "blocked",
+      "mode": "maintenance",
+      "owner": null,
+      "target_pr": 74,
+      "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
+      "expected_head": null,
+      "locks": [
+        "main:merge"
+      ],
+      "acceptance_keys": [
+        "pr74:merge"
+      ],
+      "depends_on": [
+        "T74-ACCEPT"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Must bind the approved exact head and record the resulting main merge SHA."
+    },
+    {
+      "id": "T76-CLOSE",
+      "title": "O0-D0 documentation convergence",
+      "status": "wait_maintainer",
+      "mode": "maintenance",
+      "owner": null,
+      "target_pr": 76,
+      "target_branch": "agent/issue-075-backend-optimization-inventory",
+      "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
+      "locks": [],
+      "acceptance_keys": [
+        "pr76:body-one-file-correction",
+        "pr76:ready-merge"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Correct PR-body metadata only; no code commit."
+    },
+    {
+      "id": "T53-T71",
+      "title": "E3 Preview and memory-law convergence",
+      "status": "hold",
+      "mode": "write",
+      "owner": null,
+      "target_pr": 53,
+      "target_branch": "agent/issue-052-node-preview-runtime",
+      "expected_head": "c50e3c937b3494f56ed6cda19c47a83aff36de93",
+      "locks": [
+        "branch:agent/issue-052-node-preview-runtime",
+        "engine:stillflow-engine"
+      ],
+      "acceptance_keys": [
+        "e3:preview-memory-law",
+        "e3:preview-envelope-invariants"
+      ],
+      "depends_on": [],
+      "conflicts_with": [
+        "E23-OPT",
+        "E4-R1"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "PR #71 head 2b9fdcb is approved but must converge into PR #53 before final main merge. Explicitly queue this task before claim."
+    },
+    {
+      "id": "E23-REVIEW",
+      "title": "Post-merge E2/E3 evidence review",
+      "status": "blocked",
+      "mode": "review",
+      "owner": null,
+      "target_pr": null,
+      "target_branch": "main",
+      "expected_head": null,
+      "locks": [],
+      "acceptance_keys": [
+        "e23:post-merge-review"
+      ],
+      "depends_on": [
+        "T53-T71",
+        "T76-CLOSE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Bind to the final E3 merge SHA; reuse PR #76 facts instead of repeating inventory."
+    },
+    {
+      "id": "E23-OPT",
+      "title": "Evidence-driven E2/E3 optimization",
+      "status": "blocked",
+      "mode": "write",
+      "owner": null,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_head": null,
+      "locks": [
+        "engine:stillflow-engine"
+      ],
+      "acceptance_keys": [
+        "e23:single-benchmarked-hotspot"
+      ],
+      "depends_on": [
+        "E23-REVIEW"
+      ],
+      "conflicts_with": [
+        "T53-T71",
+        "E4-R1"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Create one Issue and one PR per benchmarked hotspot; never bundle multiple optimizations."
+    },
+    {
+      "id": "E4-S2",
+      "title": "Exact deduplication index",
+      "status": "blocked",
+      "mode": "write",
+      "owner": null,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_head": null,
+      "locks": [
+        "storage:dedup-index"
+      ],
+      "acceptance_keys": [
+        "e4s2:exact-dedup-index"
+      ],
+      "depends_on": [
+        "T74-MERGE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-22T06:05:20Z",
+      "notes": "Do not start before PR #74 is accepted and merged."
+    }
+  ],
+  "locks": {
+    "branch:agent/issue-073-e4-artifact-verification-bundle-storage": {
+      "task_id": "T74-R2",
+      "owner": "external:e4-s1-r2",
+      "expected_head": "bc430aa4ee4a1d5a79c738d0580ef7ad5deea2b3",
+      "acquired_at": "2026-08-22T06:05:20Z",
+      "lease_expires_at": "2026-08-22T08:05:20Z"
+    }
+  }
+}
