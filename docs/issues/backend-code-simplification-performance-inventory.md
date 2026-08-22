@@ -106,13 +106,13 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 
 ### 3.1 Engine prediction：`largest_feasible_k → predict → predict_step / predict_rule`
 
-**F1【事实】predict 调用次数 = 1 + ⌈log₂(可行上界)⌉**：`largest_feasible_k`（predict.rs:143–170）先做单行探针 `predict(1,…)`（:154），随后二分搜索 `predict(mid,…)`（:161–168，调用点 :163）。每轮二分都是完整重算，结果间不共享中间量。
+**F1【事实】predict 调用次数 = 1 + I，其中 0 ≤ I ≤ ⌈log₂ remaining⌉**：`largest_feasible_k`（predict.rs:143–170）先做单行探针 `predict(1,…)`（:154），再在 `[low, high]`（high 初始化为当轮 remaining）上二分，每轮调用一次 `predict(mid,…)`（:163）。I 为实际迭代轮数，随分支路径与数据变化；⌈log₂ remaining⌉ 只是该轮 remaining 的最坏情况上界，不是所有切片的恒等式。每轮都是完整重算，结果间不共享中间量。
 
 **F2【事实】PredictedSchema 克隆次数 = 每 predict 一次 + 每 step/rule 一次**：
 - 每次 predict 入口克隆：predict.rs:106 `let mut working = schema.clone();`
 - Project 分支 :233、Filter 分支 :245 各克隆一次；每条规则入口 :264 `let mut next = working.clone();`
 - `PredictedColumn` 含 `String name` 与 `LogicalType`（List/Struct 内含 Vec），clone 非浅拷贝【静态推断：成本随列数线性】。
-- 推断公式【静态推断】：每切片 schema 克隆次数 ≈ (1 + R) × (1 + ⌈log₂ k⌉)，R 为展开后规则总数。
+- 推断公式【静态推断】：每切片 schema 克隆次数 = (1 + R) × (1 + I)——1 + I 即该切片 predict 的实际调用次数（上界见 F1）。
 
 **F3【事实】ColumnId 线性查找**：`column()`/`column_mut()`（predict.rs:70–75/77–82）实现为 `iter().find(...)`，O(cols)；Rename :267、Trim :276/:281、ReplaceLiteral :320、FillNull :348、Cast :380/:399 均经此路径；DeriveColumn 另有全表唯一性扫描 :292–295。
 
@@ -129,11 +129,11 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 
 **F8【事实】导出转换模型对每列字节双重计算**：`predict_export_transition` :477–503 的第一循环 :484–487 与第二循环 :491–500 各调一次 `column_physical_bytes`，同一列同一参数算两遍。
 
-**I1【静态推断】放大公式**：设 envelope N 行、平均可行切片 k̄、变宽列数 V、规则总数 R、切片数 S=⌈N/k̄⌉：
-- 行访问量 ≈ S × (1+⌈log₂ k̄⌉) × V × k̄（width 刷新主导项）
-- schema 克隆 ≈ S × (1+R) × (2+⌈log₂ k̄⌉)
-- column_physical_sum 全量重算 ≈ S × (1+⌈log₂ k̄⌉) × (R+c)
-1024 列 × 128 规则 × 万行 envelope 时各项为乘性放大；确切量级须 §6 B1 实测。
+**I1【静态推断】放大公式（按切片求和的上界形式）**：设 envelope N 行、变宽列数 V、规则总数 R；切片 i 的行数为 kᵢ、剩余行为 remainingᵢ = N − offsetᵢ、预测轮数 Iᵢ 满足 0 ≤ Iᵢ ≤ ⌈log₂ remainingᵢ⌉（F1）：
+- 行访问量（width 刷新主导项）≈ Σᵢ (1+Iᵢ) × V × kᵢ
+- schema 克隆 ≈ Σᵢ (1+R) × (1+Iᵢ)
+- column_physical_sum 全量重算 ≈ Σᵢ (1+Iᵢ) × (R+c)
+k̄ 平均化表述弃用——轮数上限跟随每轮各自的 remaining。1024 列 × 128 规则 × 万行 envelope 时各项为乘性放大；确切量级须 §6 B1 实测。
 
 **H1【待测假设】** 二分搜索中相邻 predict(mid) 的计算高度重叠，可被"编译期规则游标 + 增量宽度表"消除且不改变准入字节结果（§7 候选 1）。验证门：B1 基准 + 内存律测试 t43/t46/t47/t52/t55/t56（tests.rs:2114/2225/2278/2541/2677/2747）全绿。
 
@@ -148,14 +148,14 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 - Pass B 校验器（与解码全程锁步）：read.rs:156–162 在同一文件的独立句柄上开第二个 `csv::Reader`；prepare 阶段仅比对 header（:163–183）；该 reader 存入 `CsvState.validator`（read.rs:67）存活整个流。
 - Pass C Polars 解码：:184–188 mmap 句柄 + `CsvReadOptions.batched(None)`；schema 显式提供 :141（无 Polars 侧推理）；chunk_size = min(4,096, batch_size) :144。
 - 锁步校验：:377 `next_batches(1)` 之后 :379 `validate_rows` → :488–531 `validator.read_record`（:492）逐行重读同一段文本：宽度检查 :513、逐单元格 `csv_value_matches` :520–528（日期走 chrono 解析 :559–571）。
-- 结论：每个 CSV 字节被解析两次，另有有界的推理第三遍【事实】；Pass B/C 结果不共享——校验只产出布尔/错误，解码产出类型化帧【事实】。同一次 prepare 中同一文件被打开三次：read.rs:94、:121、:156【事实】。
+- 结论：完整读取（无 max_rows 截断）时每个 CSV 字节约被解析两遍——Polars 解码与 csv 校验器对同一范围锁步消费；限行读取时两条解析器只消费对应前缀、对该已消费前缀进行双解析；另有有界的推理第三遍【事实，按实际读取范围限定】。Pass B/C 结果不共享——校验只产出布尔/错误，解码产出类型化帧【事实】。同一次 prepare 中同一文件被打开三次：read.rs:94、:121、:156【事实】。
 
-**C2【事实】JSON 行级 ≥3 次解析（顶层数组形 ≥4 次）**：
-1. framing：json_stream.rs:92–239（NDJSON 行装配 :148–174；数组形逐字节括号扫描 :196–239，单对象字节上限 MAX_BATCH_BYTES :295–303）；
-2. 数组形专用 `IgnoredAny` 语法预解析 json_stream.rs:122 → :314–321，结果仅为一个被丢弃的合法位【事实】；
-3. serde_json 投影+校验解析 read.rs:862–885（visitor :614–651），每行物化为 `Value` 树；
-4. 重序列化 NDJSON：read.rs:436 函数局部 `Vec` 缓冲 + :449–456 `serde_json::to_writer`；
-5. Polars JsonLines 再解析：read.rs:464–477 `JsonReader::new(Cursor::new(encoded))`。
+**C2【事实】JSON 每行的处理阶段——语义 JSON 解析：NDJSON 两遍 / 顶层数组形三遍；另有 framing 与序列化各一遍**（计数口径：括号扫描与行装配属 framing 遍历，不计为语义解析；`serde_json::to_writer` 是序列化输出，不是解析）：
+1. framing 遍历：json_stream.rs:92–239——NDJSON 行装配 :148–174；顶层数组形逐字节括号扫描 :196–239（单对象字节上限 MAX_BATCH_BYTES :295–303）。
+2. （仅数组形）`IgnoredAny` 语法预解析 json_stream.rs:122 → :314–321：语义解析第 1 遍，产物只是一个被丢弃的合法位。
+3. serde_json 投影+校验解析 read.rs:862–885（visitor :614–651）：语义解析再下一遍，每行物化为 `Value` 树。
+4. 序列化：read.rs:436 函数局部 `Vec` 缓冲 + :449–456 `serde_json::to_writer` 写回 NDJSON 字节。
+5. Polars JsonLines 语义解析：read.rs:464–477 `JsonReader::new(Cursor::new(encoded))`。
 缓冲按 chunk 有界【事实】，但为函数局部变量，每次 refill 重新分配。
 
 **C3【事实】Parquet 每批次重建 reader**：read.rs:397–411 = `file.try_clone()` + `ParquetReader::new` + `set_metadata(Arc clone)` :405 + `projection.clone()` :407 + `(offset, rows)` 切片 :408。footer 元数据在 prepare 时已取并缓存（:216–237），故 footer 不随 chunk 重析【事实，对照 vendored polars-io 0.46 reader.rs:181–197 的 set_metadata 语义】；但 reader 对象与读取计划每 chunk 重建。同一请求内 Parquet magic 校验 ×2（inspect.rs:24; read.rs:215）、footer/schema 读取 ×2（inspect.rs:26–41; read.rs:216–233）【事实】。
@@ -175,20 +175,20 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 | JSON framing | json_stream.rs:92–239 | contract-mandated |
 | JSON IgnoredAny 预解析 | json_stream.rs:122,314–321 | likely-incidental |
 | JSON 投影+校验解析 | read.rs:862–885 | contract-mandated |
-| JSON NDJSON 往返 + Polars 再解析 | read.rs:436–477 | likely-incidental |
+| JSON 重序列化 + Polars 第二次语义解析 | read.rs:436–477 | likely-incidental |
 | Parquet magic ×2 / footer ×2 | inspect.rs:24,26–41; read.rs:215–237 | likely-incidental 重复 |
 | Parquet 每 chunk reader 重建 | read.rs:397–411 | needs-verification |
 | vstack 累积 / bridge rechunk+空值掩码 | read.rs:351; bridge/mod.rs:49,104–114 | contract-mandated |
 
 负发现【事实】：无 digest/integrity pass；无 LazyFrame/LazyCsvReader；无 payload 帧 clone（clone 均为 schema/元数据/索引向量）；CSV/JSON 游标跨批持续、无按批归零重启。
 
-**H2【待测假设】** 单遍解码（校验信息从解码帧派生，或验证融合进解码管线）可在保持 typed-drift 错误分类与 RSS 门的前提下消除 CSV 第二全文解析与 JSON 重序列化+再解析。验证门：B2 基准 + tests/local_tabular.rs + tests/memory_bound.rs:15–16,107–110（64 MiB 源峰值增量 ≤32 MiB 的既有硬门）。
+**H2【待测假设】** 单遍解码（校验信息从解码帧派生，或验证融合进解码管线）可在保持 typed-drift 错误分类与 RSS 门的前提下消除 CSV 第二全文解析，并把 JSON 语义解析遍数降为数组形 3→1、NDJSON 2→1，同时省去中间 NDJSON 缓冲。验证门：B2 基准 + tests/local_tabular.rs + tests/memory_bound.rs:15–16,107–110（64 MiB 源峰值增量 ≤32 MiB 的既有硬门）。
 
 ### 3.3 Snapshot storage
 
 **S1【事实】写路径摘要需要第二次全文件读**：`write_partition`（store.rs:797–833）序列 = `create_new` 打开 staging 文件 :803–808 → `ArrowWriter::try_new(file,…)` 直写 + SNAPPY / row group=MAX_BATCH_ROWS :810–817 → `into_inner()`+`sync_all()` :818–822 → 字节量取 fstat（:823–826，非重读）→ `seek(SeekFrom::Start(0))` :827 + `digest_file` 全量重读 :829（digest.rs:64–77，64 KiB 栈块）；行数取自内存 envelope :830–831。commit 为纯 rename + 目录 fsync（:850–861）加单个 SQLite 事务（:888–972）。成因【事实】：最终文件名内容寻址 `{seq}-{sha256}.parquet`（:624–628），摘要必须在 install 前存在。
 
-**S2【事实】读路径恰好两遍物理读**：`read_partition` :1125–1263 = symlink/长度 stats :1132–1171 → `digest_file` 全文校验 :1175（失败即 `IntegrityFailure::DigestMismatch` :1176–1182）→ rewind :1183 → Parquet footer + 流式解码并 drain 至尽 :1192–1242（单分区单批不变量 :1236–1242）。无解密。`verify_snapshot` :197–205 对全部分区重复该双遍流程——总读放大恰为 2× 分区字节【静态推断，由上述调用顺序直接得出】。
+**S2【事实·逻辑读取两遍；物理 I/O 另计】**：`read_partition` :1125–1263 的逻辑读取顺序 = symlink/长度 stats :1132–1171 → `digest_file` 对全文做一次完整顺序读取 :1175（失败即 `IntegrityFailure::DigestMismatch` :1176–1182）→ rewind :1183 → Parquet footer + seek/range 解码并 drain 至尽 :1192–1242（单分区单批不变量 :1236–1242）。无解密。代码可证明的是**逻辑读取两遍**（digest 顺序读 + 解码 range 读）；真实块设备 I/O 量取决于 OS page cache 命中与 Parquet 访问模式，不能由调用顺序静态断言为恰好 2× 物理读。`verify_snapshot` :197–205 对全部分区重复该双遍逻辑读取流程。
 
 **S3【事实】manifest 与分区遍历无 N+1 读**：manifest 存于 SQLite 行而非文件；`load_manifest_inner` :989–1123 = 单行 header 查询 :994–1000 + 一条有序分区查询 :1087–1090 + 容量预分配 Vec :1103–1105；读取侧分区推进为内存索引 :533。serde_json 仅用于 schema/lineage 两列（:1034、:1063）。
 
@@ -205,7 +205,7 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 
 **S6 负发现**【事实】：写字节量非重读（fstat）；行数/统计非回读（无 Parquet footer 回读）；读路径无 N+1 SQL；manifest 非整文件解析；每侧恰一次 digest 调用（无二次哈希）；全 crate 无 read_to_end/mmap/BufReader/BufWriter；append 零 SQL；零行 envelope 不创建分区文件（:414–416）。
 
-**H3【待测假设】** 写路径 tee 化可省一次全文读（页缓存通常吸收该重读，收益集中在冷缓存与大分区场景）；读路径 tee 化把 2× 物理读降为 1×。两者均须 B3 基准与 checksum fail-closed 故障注入测试（store.rs:1914–1976）守护。
+**H3【待测假设】** 写路径 tee 化可省一次全文逻辑读（该重读常被页缓存吸收，收益集中在冷缓存与大分区场景）；读路径 tee 化把逻辑读取从两遍降为一遍——物理 I/O 的实际降幅取决于缓存命中与访问模式，须经 B3 实测。两者均须 B3 基准与 checksum fail-closed 故障注入测试（store.rs:1914–1976）守护。
 
 ## 4. 禁止盲目精简的代码
 
@@ -224,7 +224,7 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 | 必要重复 | 正确性/合同直接要求，不可去除 | 读路径 digest 校验语义（store.rs:1175）；LogicalSchema↔Arrow 边界双表示（batch.rs:299–578）；CSV typed-drift 校验行为 |
 | 可生成重复 | 机械逐类型样板，可用宏/泛型生成 | ffi.rs map_i8…map_u64 十个逐类型映射（:191–241）；remainder.rs ColumnSink 的逐 primitive 分支（:203+） |
 | 偶然重复 | 同一请求内的冗余防御或重复计算 | Parquet magic ×2（inspect.rs:24; read.rs:215）与 footer ×2（inspect.rs:26–41; read.rs:216–233）；predict_export_transition 双循环（predict.rs:486/:492）；CSV header 复查 vs 推理期 header 校验 |
-| 热路径重复 | 主数据通路上的乘性重复处理 | CSV 第二全文解析（read.rs:487–531）；JSON ≥3 次解析链（read.rs:436–477）；PredictedSchema 每 step 克隆 × 二分（predict.rs:106/264×:163）；rule 后 column_physical_sum 全量重算 |
+| 热路径重复 | 主数据通路上的乘性重复处理 | CSV 锁步第二解析（与解码同范围，read.rs:487–531）；JSON 多阶段处理链（framing + 至多三次语义解析 + 一次序列化，read.rs:436–477、json_stream.rs:92–239）；PredictedSchema 每 step 克隆 × 二分（predict.rs:106/264×:163）；rule 后 column_physical_sum 全量重算 |
 
 区分原则【建议】：偶然/热路径重复是精简候选；必要重复的实现策略仅在外部可观测语义（错误类别、失败时机、fail-closed 行为）保持不变时可优化；可生成重复属低风险清理。
 
@@ -264,7 +264,7 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 
 - fixture：进程内构造 RecordBatch（不经 connector）。列数 ∈ {64, 256, 1024}（一半 utf8@64B 变长值、一半 i64）；规则数 ∈ {1, 32, 128}（DeriveColumn-Utf8 / Cast / Rename / DropColumn 混合）；每 envelope 10,000 行；plan 形态 scan → ApplyRules → materialize。
 - command 形态：`cargo test -p stillflow-engine --release <pred_bench> -- --ignored --nocapture`（未来实现时的形态）。
-- 预期观测量：largest_feasible_k 的 wall/CPU；predict 调用次数；PredictedSchema 克隆次数；column_physical_sum 执行次数；peak RSS；alloc count/bytes。用于检验 §3.1 I1 公式的实测形状。
+- 预期观测量：largest_feasible_k 的 wall/CPU；predict 调用次数（含逐切片迭代轮数 I 的分布——检验 F1 上界而非恒等式）；PredictedSchema 克隆次数；column_physical_sum 执行次数；peak RSS；alloc count/bytes。用于检验 §3.1 I1 公式的实测形状。
 - 通过/停止条件：先记录基线；后续优化 PR 必须给出相对基线的实测对比，且 t43/t46/t47/t52/t55/t56 内存律测试全绿；任一回归或 peak RSS 越过 MAX_ENGINE_PEAK_BYTES 即停止并回退。
 
 ### 6.2 B2：Connector ingestion
@@ -278,7 +278,7 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 
 - fixture：独立 store 目录；分区数 ∈ {1, 1,024, 16,384}，每分区一个批次（≤65,536 行 × 混合列型）；分别测 append、read、verify_snapshot 三相。
 - command 形态：`cargo test -p stillflow-storage --release <storage_bench> -- --ignored`。
-- 预期观测量：分相 wall/CPU/RSS；实际读取字节（验证 S2 的 2× 读放大假设）；SQLite 语句/连接计数；fsync 次数（可选 strace）。
+- 预期观测量：分相 wall/CPU/RSS；逻辑读取字节数（计数 `Read` wrapper）与 `/proc/<pid>/io read_bytes` 差分并列记录——后者受页缓存影响、反映物理 I/O，不得单独作为解析遍数或逻辑字节数的判定依据；SQLite 语句/连接计数；fsync 次数（可选 strace）。用于检验 S2 的双遍逻辑读取假设及 tee 化后的物理 I/O 变化。
 - 通过/停止条件：记录基线；单次有界读取候选须保持 checksum fail-closed 测试（store.rs:1914–1976）与 recovery/GC 测试组全绿；失败即停。
 
 ## 7. 后续任务排序
@@ -288,8 +288,8 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 | # | 候选 PR | 预期收益（结构性假设，须经基准证实） | 合同风险 | 验证方法 | 启动依赖 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Engine compiled-rule / reusable prediction cursor | 消除 O(log k) 次全量重算与每 step schema 克隆，预测降为单次增量扫描【待测假设 H1】 | 中高：准入 oracle 必须逐字节等价于现有 predict | B1 + 内存律测试组 t43/t46/t47/t52/t55/t56 | predict.rs 归 main 所有；启动前与 #53 对 consume_envelope 的改动作行号级冲突复查 |
-| 2 | Connector single-pass decode | CSV 移除第二全文解析器；JSON 由 ≥3 次解析降为 1 次【待测假设 H2】 | 中：typed-drift 错误行为已被测试固化 | B2 + tests/local_tabular.rs + tests/memory_bound.rs | O0-D0 批准后即可启动；与 #53/#71/#74 零代码重叠（不同 crate） |
-| 3 | Snapshot single-pass bounded verification | 写路径省一次全文重读；读路径 2×→1× 物理读【待测假设 H3】 | 中：读侧校验的失败时机变化需合同注记；持久化格式不变 | B3 + checksum fail-closed + recovery/GC 测试组 | B3 基线 + 内存证明完成；storage crate 与 #74 重叠，须串行或协调 |
+| 2 | Connector single-pass decode | CSV 移除第二全文解析器；JSON 语义解析遍数数组形 3→1、NDJSON 2→1，并移除中间 NDJSON 缓冲【待测假设 H2】 | 中：typed-drift 错误行为已被测试固化 | B2 + tests/local_tabular.rs + tests/memory_bound.rs | O0-D0 批准后即可启动；与 #53/#71/#74 零代码重叠（不同 crate） |
+| 3 | Snapshot single-pass bounded verification | 写路径省一次全文逻辑读；读路径逻辑读取由两遍降为一遍（物理 I/O 降幅实测）【待测假设 H3】 | 中：读侧校验的失败时机变化需合同注记；持久化格式不变 | B3 + checksum fail-closed + recovery/GC 测试组 | B3 基线 + 内存证明完成；storage crate 与 #74 重叠，须串行或协调 |
 | 4 | 模块拆分与测试外移 | store.rs(2,179 行)/preflight.rs(849)/read.rs(1,008) 职责解耦，缩小后续改动冲突面 | 低：纯结构，逐 crate 小步 | 全套测试 + git diff 面审查 | store.rs 拆分排在 #74 之后或协调；engine 文件拆分在 #53 合并后进行 |
 
 排序建议【建议】：2 → 1 → 3 → 4（按冲突面从小到大；候选 2 与三条活跃 PR 零重叠，可在本盘点获批后立即启动）。
