@@ -866,35 +866,51 @@ mod tests {
 
     /// Blocker D, exclusion half: while an opener is parked inside its
     /// critical section (guard held, `.lock` created, flock not yet taken),
-    /// the maintenance gate must be unavailable to recovery. Barrier
-    /// synchronization only; no timing.
+    /// the maintenance gate must be unavailable to recovery. Two independent
+    /// barriers make this exact: `entered` proves the opener sits inside
+    /// `PRE_FLOCK_HOOK` still holding its activity guard; `release` keeps it
+    /// parked there until the maintenance-gate probe has been recorded and
+    /// any guard it won has been dropped. Barrier synchronization only; no
+    /// sleep, timeout, or scheduling assumption.
     #[test]
     fn open_critical_section_excludes_recovery_via_activity_guard() {
         let temp = TempDir::new().expect("temp");
         let store = store(&temp);
         let run_id = Uuid::from_u128(0xD066);
 
-        let barrier = Arc::new(std::sync::Barrier::new(2));
-        let hook_barrier = Arc::clone(&barrier);
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let hook_entered = Arc::clone(&entered);
+        let hook_release = Arc::clone(&release);
         *PRE_FLOCK_HOOK.lock().expect("hook") = Some(Arc::new(move || {
-            hook_barrier.wait();
+            // Announce arrival inside the open window, then stay parked
+            // there until the driving test has probed the maintenance gate.
+            hook_entered.wait();
+            hook_release.wait();
         }));
 
+        // Every synchronization and cleanup step below precedes the
+        // assertions, so even a failing probe releases the opener, clears
+        // the hook, and joins the thread instead of hanging or leaking
+        // state into later tests.
         let opener_store = store.clone();
         let handle = std::thread::spawn(move || {
             opener_store.open_dedup_index(run_id, Uuid::from_u128(1), at(1))
         });
 
-        barrier.wait(); // opener holds the guard inside its critical section
+        entered.wait(); // opener holds the guard between .lock creation and flock
         let gate = crate::acquire_maintenance(&store.inner);
+        let busy = matches!(gate, Err(StorageError::Busy(_)));
+        drop(gate); // release any guard this probe may have won
+
+        release.wait(); // unpark the opener; it completes its open
+        *PRE_FLOCK_HOOK.lock().expect("hook") = None;
+        let result = handle.join().expect("opener thread");
+
         assert!(
-            matches!(gate, Err(StorageError::Busy(_))),
+            busy,
             "recovery gate must be excluded while the open window is live"
         );
-        // Release the opener by clearing the hook; it completes its open.
-        *PRE_FLOCK_HOOK.lock().expect("hook") = None;
-
-        let result = handle.join().expect("opener thread");
         let index = result.expect("index opens after the window");
         index
             .insert_first(Uuid::from_u128(9), 0, &key(8), 0)

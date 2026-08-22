@@ -2885,17 +2885,23 @@ mod tests {
             Err(StorageError::ArtifactPartitionLimitExceeded { .. })
         ));
 
-        // Bundle-wide ceiling ordering: because the bundle row/byte/partition
-        // ceilings are exactly twice the per-report ceilings, any aggregate
-        // that would cross a bundle ceiling necessarily crosses a per-report
-        // ceiling first, so the per-artifact gate always fires first. This is
-        // pinned here: crossing the bundle sum (both reports near their max)
-        // surfaces the per-report row limit, never a bundle-branched error.
+        // Bundle-wide ceiling ordering, three isomorphic shapes. Every
+        // bundle ceiling is exactly twice its per-report ceiling, so staging
+        // both reports at ceiling − 10 and driving the candidate +21 puts
+        // the owning report exactly 11 over its own ceiling while the bundle
+        // sum lands exactly one over the bundle ceiling: both gates armed at
+        // once, and the public arithmetic must surface the per-report error
+        // first. Each proof pins the exact `actual` and `maximum`.
+        const CANDIDATE_EXTRA: u64 = 21;
+        const OVER_CEILING_ROWS: u64 = MAX_REPORT_ROWS + 11;
+        const OVER_CEILING_BYTES: u64 = MAX_REPORT_BYTES + 11;
+
+        // Row shape.
         {
+            let near_max = MAX_REPORT_ROWS - 10;
             for section in &mut writer.sections {
                 section.partitions.clear();
             }
-            let near_max = MAX_REPORT_ROWS - 10;
             for (section_id, digest_byte) in [
                 (ArtifactSectionId::ValidationFinding, 0xB1_u8),
                 (ArtifactSectionId::DedupRuleSummary, 0xB2),
@@ -2916,13 +2922,89 @@ mod tests {
                 );
             }
         }
-        assert!(matches!(
-            writer.ensure_section_limits(index, 11, 0),
-            Err(StorageError::ArtifactRowLimitExceeded {
-                maximum: MAX_REPORT_ROWS,
-                ..
-            })
-        ));
+        match writer.ensure_section_limits(index, CANDIDATE_EXTRA, 0) {
+            Err(StorageError::ArtifactRowLimitExceeded { actual, maximum }) => {
+                assert_eq!(actual, OVER_CEILING_ROWS);
+                assert_eq!(maximum, MAX_REPORT_ROWS);
+            }
+            other => panic!("per-report row limit must fire first, got {other:?}"),
+        }
+
+        // Byte shape: identical staging at the byte ceiling − 10, candidate
+        // +21 bytes. The per-report byte gate must beat a bundle byte sum of
+        // exactly MAX_BUNDLE_REPORT_BYTES + 1.
+        {
+            let near_max = MAX_REPORT_BYTES - 10;
+            for section in &mut writer.sections {
+                section.partitions.clear();
+            }
+            for (section_id, digest_byte) in [
+                (ArtifactSectionId::ValidationFinding, 0xB3_u8),
+                (ArtifactSectionId::DedupRuleSummary, 0xB4),
+            ] {
+                let section = writer
+                    .sections
+                    .iter_mut()
+                    .find(|section| section.section_id == section_id)
+                    .expect("report section");
+                section.partitions.push(
+                    ArtifactPartition::try_new(
+                        0,
+                        1,
+                        near_max,
+                        crate::ContentDigest::from_bytes([digest_byte; 32]),
+                    )
+                    .expect("staged partition"),
+                );
+            }
+        }
+        match writer.ensure_section_limits(index, 0, CANDIDATE_EXTRA) {
+            Err(StorageError::ArtifactByteLimitExceeded { actual, maximum }) => {
+                assert_eq!(actual, OVER_CEILING_BYTES);
+                assert_eq!(maximum, MAX_REPORT_BYTES);
+            }
+            other => panic!("per-report byte limit must fire first, got {other:?}"),
+        }
+
+        // Partition shape: both reports filled to MAX_REPORT_PARTITIONS
+        // legal partitions each (sequences strictly increasing from zero,
+        // 1 row / 1 byte apiece so no row or byte limit can pre-fire). The
+        // prospective candidate implicitly adds one partition to the
+        // validation report: own report = ceiling + 1, bundle sum =
+        // MAX_BUNDLE_REPORT_PARTITIONS + 1; the per-report gate must win.
+        {
+            for section in &mut writer.sections {
+                section.partitions.clear();
+            }
+            for (section_id, digest_byte) in [
+                (ArtifactSectionId::ValidationFinding, 0xB5_u8),
+                (ArtifactSectionId::DedupRuleSummary, 0xB6),
+            ] {
+                let section = writer
+                    .sections
+                    .iter_mut()
+                    .find(|section| section.section_id == section_id)
+                    .expect("report section");
+                for sequence in 0..MAX_REPORT_PARTITIONS {
+                    section.partitions.push(
+                        ArtifactPartition::try_new(
+                            sequence,
+                            1,
+                            1,
+                            crate::ContentDigest::from_bytes([digest_byte; 32]),
+                        )
+                        .expect("staged partition"),
+                    );
+                }
+            }
+        }
+        match writer.ensure_section_limits(index, 0, 0) {
+            Err(StorageError::ArtifactPartitionLimitExceeded { actual, maximum }) => {
+                assert_eq!(actual, MAX_REPORT_PARTITIONS + 1);
+                assert_eq!(maximum, MAX_REPORT_PARTITIONS);
+            }
+            other => panic!("per-report partition limit must fire first, got {other:?}"),
+        }
     }
 
     #[test]
