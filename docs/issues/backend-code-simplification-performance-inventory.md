@@ -133,7 +133,7 @@ grep -n '#\[cfg(test)\]' <file>                        # 测试模块定位
 **I1【静态推断】放大公式（按切片求和的上界形式）**：设 envelope N 行、变宽列数 V、规则总数 R；切片 i 的行数为 kᵢ、剩余行为 remainingᵢ = N − offsetᵢ、预测轮数 Iᵢ 满足 0 ≤ Iᵢ ≤ ⌈log₂ remainingᵢ⌉（F1）：
 - 行访问量（width 刷新主导项）≈ Σᵢ (1+Iᵢ) × V × kᵢ
 - schema 克隆 ≈ Σᵢ (1+Q+R) × (1+Iᵢ)
-- column_physical_sum 全量重算 ≈ Σᵢ (1+Iᵢ) × (1+Q+R_resum)——+1 为 predict 入口度量（predict.rs:109），Q 同样计入（Project 分支 :241）；R_resum ≤ R 仅计 DropColumn/Trim/ReplaceLiteral/FillNull/Cast（Rename :268、DeriveColumn :312–313、FilterRows :423 不触发全量重算）
+- column_physical_sum 全量重算 ≈ Σᵢ (1+Iᵢ) × (1+P+R_resum)——+1 为 predict 入口度量（predict.rs:109）；P = Project step 数（0 ≤ P ≤ Q）：只有 Project 分支调用该函数（:241），Filter 分支 :244–246 仅克隆 schema 并返回 live_before，不计入；R_resum ≤ R 仅计 DropColumn/Trim/ReplaceLiteral/FillNull/Cast（Rename :268、DeriveColumn :312–313、FilterRows :423 不触发全量重算）
 k̄ 平均化表述弃用——轮数上限跟随每轮各自的 remaining。1024 列 × 128 规则 × 万行 envelope 时各项为乘性放大；确切量级须 §6 B1 实测。
 
 **H1【待测假设】** 二分搜索中相邻 predict(mid) 的计算高度重叠，可被"编译期规则游标 + 增量宽度表"消除且不改变准入字节结果（§7 候选 1）。验证门：B1 基准 + 内存律测试 t43/t46/t47/t52/t55/t56（tests.rs:2114/2225/2278/2541/2677/2747）全绿。
