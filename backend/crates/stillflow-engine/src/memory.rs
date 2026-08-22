@@ -39,6 +39,11 @@ pub struct MemoryReport {
     pub(crate) allocator_reallocation_count: usize,
     #[cfg(test)]
     pub(crate) allocator_peak_bytes: usize,
+    /// Maximum predicted old+new builder realloc transient fed to
+    /// `pre_check_realloc_peak` (E3 §10.2). Tracked separately from
+    /// `response_capacity_peak`, which never carries a transient.
+    #[cfg(test)]
+    pub(crate) predicted_realloc_peak: usize,
 }
 
 static GLOBAL_PHASE: AtomicU8 = AtomicU8::new(0);
@@ -213,6 +218,15 @@ impl MemoryTracker {
     #[cfg(test)]
     pub(crate) fn record_response_budget_peak(&mut self, peak: usize) {
         self.report.response_capacity_peak = self.report.response_capacity_peak.max(peak);
+    }
+
+    /// Records the predicted builder realloc transient (E3 §10.2 peak law).
+    /// This is a memory-safety quantity only: it is tracked separately from
+    /// `response_capacity_peak`, which by section 10.1 rule 5 never contains
+    /// a realloc transient.
+    #[cfg(test)]
+    pub(crate) fn record_predicted_realloc_peak(&mut self, peak: usize) {
+        self.report.predicted_realloc_peak = self.report.predicted_realloc_peak.max(peak);
     }
 
     pub(crate) fn record_chunk(&mut self, rows: usize, remainder_live: bool) {

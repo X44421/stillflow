@@ -562,10 +562,14 @@ impl PreviewAccumulator {
 
             #[cfg(test)]
             {
-                let transient_peak = self.rebatcher.realloc_transient_peak(&incoming, 1)?;
-                tracker.record_response_budget_peak(
-                    self.finalized_bytes.saturating_add(transient_peak),
-                );
+                // Section 10.2 evidence separation: this sample is the
+                // post-append response_allocated_capacity (finalized bytes +
+                // admitted builder bytes), never the realloc transient.
+                // Section 10.1 rule 5 forbids transients inside
+                // `response_allocated_capacity`; the transient is tracked
+                // independently by the remainder allocator phase and
+                // pre-checked inside `append_rows`.
+                tracker.record_response_budget_peak(candidate_total);
             }
 
             let accepted = incoming.slice(0, 1);
