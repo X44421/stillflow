@@ -41,13 +41,10 @@ const typeLabel: Record<string, string> = {
 
 interface DatasetPanelProps {
   datasets?: Dataset[];
-  selectedId?: string | null;
-  importing?: boolean;
   onSelectDataset?: (dataset: Dataset) => void;
-  onImportCsv?: (file: File) => Promise<void>;
 }
 
-const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets, selectedId: _selectedId, importing: _importing, onSelectDataset, onImportCsv: _onImportCsv }) => {
+const DatasetPanel: React.FC<DatasetPanelProps> = ({ datasets: externalDatasets, onSelectDataset }) => {
   const datasets = externalDatasets ?? fallbackDatasets;
   const [activeTab, setActiveTab] = useState<'all' | 'source' | 'interim' | 'output'>('all');
   const [searchQuery, setSearchQuery] = useState('');

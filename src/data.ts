@@ -1,4 +1,4 @@
-import { Dataset, PipelineNode, TransformObject, PipelineNodeConfig, NodeType } from './types';
+import { Dataset, PipelineNode, TransformObject, PipelineNodeConfig } from './types';
 
 export const datasets: Dataset[] = [
   // Source
@@ -30,30 +30,6 @@ export const initialPipelineNodes: PipelineNode[] = [
   { id: 'n4', type: 'normalize', name: 'Normalize Text', description: 'Standardize name & email', rows: '1.2M rows', status: 'pending', config: { ...defaultConfig } },
   { id: 'n5', type: 'export', name: 'Export CSV', description: 'Write cleaned data', rows: '1.2M rows', status: 'pending', config: { ...defaultConfig } },
 ];
-
-export const transformToNodeType: Record<string, NodeType> = {
-  file: 'source',
-  filter: 'filter',
-  copy: 'deduplicate',
-  type: 'normalize',
-  upload: 'export',
-};
-
-export const nodeDefaultName: Record<string, string> = {
-  source: 'CSV Source',
-  filter: 'Filter',
-  deduplicate: 'Deduplicate',
-  normalize: 'Normalize Text',
-  export: 'Export CSV',
-};
-
-export const nodeDefaultDescription: Record<NodeType, string> = {
-  source: 'Import data',
-  filter: 'Keep matched rows',
-  deduplicate: 'Remove repeated records',
-  normalize: 'Standardize string values',
-  export: 'Write cleaned data',
-};
 
 export const transformObjects: TransformObject[] = [
   { id: 't1', name: 'CSV File', description: 'Import local CSV file', category: 'source', icon: 'file-text', available: true },
