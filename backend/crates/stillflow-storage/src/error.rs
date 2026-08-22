@@ -56,6 +56,11 @@ pub enum StorageError {
     ArtifactPartitionLimitExceeded { actual: u32, maximum: u32 },
     #[error("dedup key uses {actual} bytes; maximum is {maximum}")]
     DedupKeyLimitExceeded { actual: usize, maximum: usize },
+    #[error("dedup index exceeded its {resource} limit {maximum}")]
+    DedupIndexLimitExceeded {
+        resource: &'static str,
+        maximum: u64,
+    },
     #[error("timestamp ordering is invalid for {0}")]
     InvalidTimestampOrder(&'static str),
     #[error("checked arithmetic failed for {0}")]

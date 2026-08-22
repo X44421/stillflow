@@ -45,3 +45,5 @@ pub(crate) use store::{
     open_connection, partitions_root, read_partition, staging_root, sync_directory,
     write_envelope_parquet, ActivityGuard, ActivityKind, StoreInner,
 };
+#[cfg(test)]
+pub(crate) use store::acquire_maintenance;

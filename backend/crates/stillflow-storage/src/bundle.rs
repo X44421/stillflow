@@ -560,12 +560,23 @@ impl SnapshotStore {
     }
 
     /// Opens one run's exclusive temporary dedup index (contract 9.1).
+    ///
+    /// The whole open critical section runs under a reader-class activity
+    /// guard, which the maintenance gate excludes: recovery can therefore
+    /// never scan, classify, or unlink a `.lock` between its creation and its
+    /// flock (E4-S1-R1 blocker D). After the index returns, the OS flock plus
+    /// the in-open lock-identity revalidation carry ownership; no guard is
+    /// held for the index lifetime.
     pub fn open_dedup_index(
         &self,
         run_id: Uuid,
         bundle_id: Uuid,
         started_at: DateTime<Utc>,
     ) -> Result<DedupIndex, StorageError> {
+        // Reader class (not publisher) so a bundle flow already holding its
+        // publisher permit can still open its index; readers equally exclude
+        // maintenance/recovery.
+        let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
         dedup::open_dedup_index(&self.inner, run_id, bundle_id, started_at)
     }
 

@@ -260,7 +260,8 @@ fn storage_category(error: &StorageError) -> ErrorCategory {
         | StorageError::ArtifactRowLimitExceeded { .. }
         | StorageError::ArtifactByteLimitExceeded { .. }
         | StorageError::ArtifactPartitionLimitExceeded { .. }
-        | StorageError::DedupKeyLimitExceeded { .. } => ErrorCategory::InvalidData,
+        | StorageError::DedupKeyLimitExceeded { .. }
+        | StorageError::DedupIndexLimitExceeded { .. } => ErrorCategory::InvalidData,
         StorageError::ArithmeticOverflow(_)
         | StorageError::Integrity { .. }
         | StorageError::Io { .. }

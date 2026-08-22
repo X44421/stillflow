@@ -89,7 +89,7 @@ impl Drop for ActivityGuard {
     }
 }
 
-struct MaintenanceGuard {
+pub(crate) struct MaintenanceGuard {
     inner: Arc<StoreInner>,
     active: bool,
 }
@@ -830,7 +830,9 @@ pub(crate) fn acquire_activity(
     })
 }
 
-fn acquire_maintenance(inner: &Arc<StoreInner>) -> Result<MaintenanceGuard, StorageError> {
+pub(crate) fn acquire_maintenance(
+    inner: &Arc<StoreInner>,
+) -> Result<MaintenanceGuard, StorageError> {
     let mut state = inner
         .activity
         .lock()

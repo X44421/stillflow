@@ -31,6 +31,12 @@ pub const MAX_DEDUP_KEY_BYTES: usize = 64 * 1024;
 /// Disk ceiling per run (contract 9.4).
 pub const MAX_DEDUP_INDEX_DISK_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
+/// Deterministic concurrency-test hook parked between `.lock` creation and
+/// flock. Test-only; always `None` in production builds.
+#[cfg(test)]
+pub(crate) static PRE_FLOCK_HOOK: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>> =
+    std::sync::Mutex::new(None);
+
 /// Typed result of the exact keep-first insert decision (contract 9.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DedupInsert {
@@ -94,7 +100,7 @@ impl DedupIndex {
                     current
                 ],
             )
-            .map_err(|_| StorageError::database("insert dedup key"))?;
+            .map_err(|error| classified_sqlite_error("insert dedup key", error))?;
         if inserted == 1 {
             let updated = self
                 .inserted_rows
@@ -271,6 +277,22 @@ fn open_dedup_index_inner(
         })?;
     *lock_created_by_attempt = true;
     set_owner_only_permissions(lock_path);
+    // Deterministic test hook: parks the caller inside the open critical
+    // section between `.lock` creation and flock so concurrency tests can
+    // synchronize on the exact window without timing.
+    #[cfg(test)]
+    {
+        // Clone the hook out and release the mutex before invoking it so a
+        // hook that synchronizes with the driving test cannot self-deadlock.
+        let hook = PRE_FLOCK_HOOK
+            .lock()
+            .expect("pre-flock hook mutex")
+            .as_ref()
+            .cloned();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
     lock_file.try_lock_exclusive().map_err(|error| {
         if error.kind() == std::io::ErrorKind::WouldBlock {
             StorageError::Busy("dedup lock is held by an active run")
@@ -278,6 +300,13 @@ fn open_dedup_index_inner(
             StorageError::io("acquire dedup lock", &error)
         }
     })?;
+    // Lock-identity revalidation (E4-S1-R1 blocker D): a concurrent recovery
+    // pass must never have unlinked or replaced the lock between creation and
+    // acquisition. A live index may only be returned while the flock it holds
+    // still refers to the on-disk `.lock` (contract 9.1 step 3 / 9.4).
+    if !lock_file_identity_matches(&lock_file, lock_path) {
+        return Err(StorageError::Busy("dedup lock file lost during open"));
+    }
 
     // Step 2: while holding the lock, exclusively create the SQLite path.
     OpenOptions::new()
@@ -347,6 +376,46 @@ fn open_dedup_index_inner(
 fn set_owner_only_permissions(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+}
+
+/// Confirms the flocked file description still refers to the current on-disk
+/// `.lock`: same inode and device, and the path still exists with at least
+/// one link. Detects the recovery/open TOCTOU where an unlinked inode was
+/// locked after the directory entry disappeared.
+#[cfg(unix)]
+fn lock_file_identity_matches(file: &std::fs::File, path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(fd_metadata) = file.metadata() else {
+        return false;
+    };
+    let Ok(path_metadata) = fs::metadata(path) else {
+        return false;
+    };
+    fd_metadata.ino() == path_metadata.ino()
+        && fd_metadata.dev() == path_metadata.dev()
+        && path_metadata.nlink() > 0
+}
+
+/// Platforms without Unix inodes rely on the private 0700 temp root plus the
+/// maintenance gate; no unlink-during-open window exists there because only
+/// this crate deletes these files, always under the gate.
+#[cfg(not(unix))]
+fn lock_file_identity_matches(_file: &std::fs::File, _path: &std::path::Path) -> bool {
+    true
+}
+
+/// Maps SQLite page-cap exhaustion (SQLITE_FULL) to a typed bounded limit so
+/// callers can classify it instead of an unrelated internal fault.
+fn classified_sqlite_error(operation: &'static str, error: rusqlite::Error) -> StorageError {
+    if let rusqlite::Error::SqliteFailure(failure, _) = &error {
+        if failure.code == rusqlite::ffi::ErrorCode::DiskFull {
+            return StorageError::DedupIndexLimitExceeded {
+                resource: "page",
+                maximum: u64::from(MAX_DEDUP_INDEX_PAGES),
+            };
+        }
+    }
+    StorageError::database(operation)
 }
 
 #[cfg(not(unix))]
@@ -448,6 +517,7 @@ fn dedup_lock_is_active(inner: &StoreInner, run_id: Uuid) -> Result<bool, Storag
 mod tests {
     use super::*;
     use crate::{RecoveryReport, StorageLimits};
+    use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -681,7 +751,11 @@ mod tests {
             match index.insert_first(node, 0, &bytes, ordinal) {
                 Ok(_) => {}
                 Err(StorageError::RowLimitExceeded { .. }) => {}
-                Err(StorageError::Database(_)) => {
+                Err(StorageError::DedupIndexLimitExceeded {
+                    resource: "page",
+                    maximum,
+                }) => {
+                    assert_eq!(maximum, u64::from(MAX_DEDUP_INDEX_PAGES));
                     hit_limit = true;
                     break;
                 }
@@ -690,6 +764,177 @@ mod tests {
         }
         assert!(hit_limit, "the page cap must stop unbounded growth");
         index.close_and_delete().expect("close");
+    }
+
+    /// The frozen page ceiling is set verbatim on every opened index.
+    #[test]
+    fn max_page_count_pragma_matches_the_frozen_constant() {
+        let temp = TempDir::new().expect("temp");
+        let store = store(&temp);
+        let index = store
+            .open_dedup_index(Uuid::from_u128(0xD061), Uuid::from_u128(1), at(1))
+            .expect("index");
+        let configured: i64 = index
+            .connection
+            .as_ref()
+            .expect("connection")
+            .query_row("PRAGMA max_page_count", [], |row| row.get(0))
+            .expect("pragma");
+        assert_eq!(configured, i64::from(MAX_DEDUP_INDEX_PAGES));
+        index.close_and_delete().expect("close");
+    }
+
+    /// A lone pre-existing `.lock` (crash points 1–2 of section 9.1) fails
+    /// closed with `AlreadyExists` and the file survives byte-identical.
+    #[test]
+    fn lone_lock_open_path_fails_closed_and_preserves_the_file() {
+        let temp = TempDir::new().expect("temp");
+        let store = store(&temp);
+        let run_id = Uuid::from_u128(0xD062);
+        let lock_path = dedup_lock_path(&store.inner, run_id);
+        std::fs::write(&lock_path, b"prior-attempt").expect("seed lock");
+        assert!(matches!(
+            store.open_dedup_index(run_id, Uuid::from_u128(1), at(1)),
+            Err(StorageError::AlreadyExists(id)) if id == run_id
+        ));
+        assert_eq!(
+            std::fs::read(&lock_path).expect("lock contents"),
+            b"prior-attempt"
+        );
+        assert!(!dedup_sqlite_path(&store.inner, run_id).exists());
+    }
+
+    /// Recovery removes a lone free `.lock` and keeps a held one — both
+    /// branches of the union-scan leaf that earlier builds left unpinned.
+    #[test]
+    fn recovery_handles_lone_lock_candidates_by_liveness() {
+        let temp = TempDir::new().expect("temp");
+        let store = store(&temp);
+
+        let free = Uuid::from_u128(0xD063);
+        std::fs::write(dedup_lock_path(&store.inner, free), b"").expect("free lock");
+
+        let held = Uuid::from_u128(0xD064);
+        let held_file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dedup_lock_path(&store.inner, held))
+            .expect("held lock file");
+        fs2::FileExt::try_lock_exclusive(&held_file).expect("hold lock");
+
+        let mut report = RecoveryReport::default();
+        recover_dedup_candidates(&store.inner, crate::MAX_MAINTENANCE_CANDIDATES, &mut report)
+            .expect("recover");
+        assert!(
+            !dedup_lock_path(&store.inner, free).exists(),
+            "free removed"
+        );
+        assert!(dedup_lock_path(&store.inner, held).exists(), "held kept");
+        drop(held_file);
+    }
+
+    /// A valid SQLite file stranded without lock or lease (crash between
+    /// SQLite-file creation and open/lease) is an orphan candidate: refused
+    /// at open with `AlreadyExists`, reclaimed by recovery.
+    #[test]
+    fn sqlite_without_lock_or_lease_is_refused_then_reclaimed() {
+        let temp = TempDir::new().expect("temp");
+        let store = store(&temp);
+        let run_id = Uuid::from_u128(0xD065);
+        let sqlite_path = dedup_sqlite_path(&store.inner, run_id);
+        // A real SQLite database without dedup tables or a lease row.
+        {
+            let connection = rusqlite::Connection::open(&sqlite_path).expect("seed db");
+            connection
+                .execute_batch("CREATE TABLE marker(x INTEGER);")
+                .expect("schema");
+        }
+        assert!(matches!(
+            store.open_dedup_index(run_id, Uuid::from_u128(1), at(1)),
+            Err(StorageError::AlreadyExists(_))
+        ));
+        assert!(
+            sqlite_path.exists(),
+            "pre-existing db never deleted on open"
+        );
+        let mut report = RecoveryReport::default();
+        recover_dedup_candidates(&store.inner, crate::MAX_MAINTENANCE_CANDIDATES, &mut report)
+            .expect("recover");
+        assert!(!sqlite_path.exists(), "orphan reclaimed by recovery");
+    }
+
+    /// Blocker D, exclusion half: while an opener is parked inside its
+    /// critical section (guard held, `.lock` created, flock not yet taken),
+    /// the maintenance gate must be unavailable to recovery. Barrier
+    /// synchronization only; no timing.
+    #[test]
+    fn open_critical_section_excludes_recovery_via_activity_guard() {
+        let temp = TempDir::new().expect("temp");
+        let store = store(&temp);
+        let run_id = Uuid::from_u128(0xD066);
+
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let hook_barrier = Arc::clone(&barrier);
+        *PRE_FLOCK_HOOK.lock().expect("hook") = Some(Arc::new(move || {
+            hook_barrier.wait();
+        }));
+
+        let opener_store = store.clone();
+        let handle = std::thread::spawn(move || {
+            opener_store.open_dedup_index(run_id, Uuid::from_u128(1), at(1))
+        });
+
+        barrier.wait(); // opener holds the guard inside its critical section
+        let gate = crate::acquire_maintenance(&store.inner);
+        assert!(
+            matches!(gate, Err(StorageError::Busy(_))),
+            "recovery gate must be excluded while the open window is live"
+        );
+        // Release the opener by clearing the hook; it completes its open.
+        *PRE_FLOCK_HOOK.lock().expect("hook") = None;
+
+        let result = handle.join().expect("opener thread");
+        let index = result.expect("index opens after the window");
+        index
+            .insert_first(Uuid::from_u128(9), 0, &key(8), 0)
+            .expect("insert into freshly opened index");
+        index.close_and_delete().expect("close");
+        *PRE_FLOCK_HOOK.lock().expect("hook") = None;
+    }
+
+    /// Blocker D, liveness half: if the lock file disappears during the open
+    /// window (the exact unlink the old race allowed), the opener must fail
+    /// closed instead of returning an index whose flock no longer guards any
+    /// directory entry.
+    #[test]
+    fn lost_lock_during_open_fails_closed_without_residue() {
+        let temp = TempDir::new().expect("temp");
+        let store = store(&temp);
+        let run_id = Uuid::from_u128(0xD067);
+        let lock_path = dedup_lock_path(&store.inner, run_id);
+
+        let unlink_lock = {
+            let lock_path = lock_path.clone();
+            move || {
+                let _ = std::fs::remove_file(&lock_path);
+            }
+        };
+        *PRE_FLOCK_HOOK.lock().expect("hook") = Some(Arc::new(unlink_lock));
+
+        let opener_store = store.clone();
+        let result = opener_store
+            .open_dedup_index(run_id, Uuid::from_u128(1), at(1))
+            .err()
+            .expect("open must fail");
+        *PRE_FLOCK_HOOK.lock().expect("hook") = None;
+
+        assert!(
+            matches!(result, StorageError::Busy(message) if message.contains("lost")),
+            "unlinked lock must fail the open: {result:?}"
+        );
+        assert!(!dedup_sqlite_path(&store.inner, run_id).exists());
+        assert!(!lock_path.exists());
     }
 
     #[cfg(unix)]
