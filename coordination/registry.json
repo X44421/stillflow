@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 1,
+  "revision": 2,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "679cab637e7b1764f0333133a86ffeddc775c397",
-  "updated_at": "2026-08-22T06:18:43Z",
+  "updated_at": "2026-08-22T06:25:54Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -111,6 +111,7 @@
       "owner": null,
       "target_pr": 78,
       "target_branch": "agent/issue-054-contract-r6-completion",
+      "result_branch": "main",
       "expected_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
       "locks": [
         "main:merge"
@@ -222,6 +223,7 @@
       "owner": null,
       "target_pr": 74,
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
+      "result_branch": "main",
       "expected_head": null,
       "locks": [
         "main:merge"

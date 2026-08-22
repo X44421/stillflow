@@ -135,6 +135,11 @@ def validate_registry(registry: dict[str, Any]) -> None:
         expected_head = task.get("expected_head")
         if expected_head and not re.fullmatch(r"[0-9a-f]{40}", expected_head):
             raise RegistryError(f"{task_id}: expected_head must be a full lowercase SHA")
+        result_branch = task.get("result_branch")
+        if result_branch is not None and (
+            not isinstance(result_branch, str) or not result_branch
+        ):
+            raise RegistryError(f"{task_id}: result_branch must be a non-empty string")
         if task["status"] == "running":
             if not task.get("owner"):
                 raise RegistryError(f"{task_id}: running task needs an owner")
@@ -254,8 +259,8 @@ def complete_in_memory(
     task = get_task(registry, task_id)
     if task["status"] != "running" or task.get("owner") != agent:
         raise RegistryError(f"{task_id} is not running under owner {agent}")
-    if task["mode"] == "write" and not result_head:
-        raise RegistryError("write tasks require --result-head on completion")
+    if (task["mode"] == "write" or task.get("result_branch")) and not result_head:
+        raise RegistryError("this task requires --result-head on completion")
     if result_head and not re.fullmatch(r"[0-9a-f]{40}", result_head):
         raise RegistryError("--result-head must be a full lowercase SHA")
     now = iso(utc_now())
@@ -593,14 +598,21 @@ def command_complete(remote: RemoteRegistry, args: argparse.Namespace) -> None:
     agent = require_agent(args.agent)
     snapshot = remote.read_registry()
     task = get_task(snapshot, args.task_id)
-    if task["mode"] == "write" and task.get("target_branch"):
-        if not args.result_head:
-            raise RegistryError("write tasks require --result-head on completion")
-        actual = remote.target_branch_head(task["target_branch"])
-        if actual != args.result_head:
+    effective_result_head = args.result_head
+    if task["mode"] == "review":
+        verify_bound_head(remote, task)
+        effective_result_head = effective_result_head or task.get("expected_head")
+    completion_branch = task.get("result_branch")
+    if not completion_branch and task["mode"] == "write":
+        completion_branch = task.get("target_branch")
+    if completion_branch:
+        if not effective_result_head:
+            raise RegistryError("this task requires --result-head on completion")
+        actual = remote.target_branch_head(completion_branch)
+        if actual != effective_result_head:
             raise RegistryError(
                 f"{args.task_id} completion head mismatch: "
-                f"reported {args.result_head}, remote {actual}"
+                f"reported {effective_result_head}, remote {actual}"
             )
 
     def mutate(registry: dict[str, Any]) -> None:
@@ -608,7 +620,7 @@ def command_complete(remote: RemoteRegistry, args: argparse.Namespace) -> None:
             registry,
             args.task_id,
             agent,
-            args.result_head,
+            effective_result_head,
             args.ci,
             args.note,
         )
@@ -792,6 +804,28 @@ def command_self_test(_remote: RemoteRegistry, _args: argparse.Namespace) -> Non
                 "depends_on": [],
                 "lease_expires_at": None,
             },
+            {
+                "id": "C",
+                "title": "merge-like maintenance",
+                "status": "queued",
+                "mode": "maintenance",
+                "owner": None,
+                "result_branch": "main",
+                "locks": [],
+                "depends_on": [],
+                "lease_expires_at": None,
+            },
+            {
+                "id": "D",
+                "title": "explicit task conflict",
+                "status": "queued",
+                "mode": "maintenance",
+                "owner": None,
+                "locks": [],
+                "depends_on": [],
+                "conflicts_with": ["C"],
+                "lease_expires_at": None,
+            },
         ],
         "locks": {},
     }
@@ -805,8 +839,26 @@ def command_self_test(_remote: RemoteRegistry, _args: argparse.Namespace) -> Non
         raise RegistryError("self-test failed: conflicting claim was accepted")
     complete_in_memory(registry, "A", "agent-a", "1" * 40, None, None)
     claim_in_memory(registry, "B", "agent-b", 90)
+    claim_in_memory(registry, "C", "agent-c", 90)
+    try:
+        claim_in_memory(registry, "D", "agent-d", 90)
+    except RegistryError:
+        pass
+    else:
+        raise RegistryError("self-test failed: explicit task conflict was accepted")
+    try:
+        complete_in_memory(registry, "C", "agent-c", None, None, None)
+    except RegistryError:
+        pass
+    else:
+        raise RegistryError("self-test failed: merge result head was not required")
+    complete_in_memory(registry, "C", "agent-c", "2" * 40, None, None)
+    claim_in_memory(registry, "D", "agent-d", 90)
     validate_registry(registry)
-    print("self-test passed: conflict rejected, release observed, next claim accepted")
+    print(
+        "self-test passed: lock/task conflicts rejected, releases observed, "
+        "merge head required"
+    )
 
 
 def add_agent_argument(parser: argparse.ArgumentParser) -> None:
