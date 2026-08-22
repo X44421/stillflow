@@ -259,8 +259,6 @@ impl CanonicalRebatcher {
     }
 
     /// Append `k` admitted rows. The realloc transient is constrained by the
-    /// independent peak pre-check below: when the predicted one-shot
-    /// Append `k` admitted rows. The realloc transient is constrained by the
     /// independent peak pre-check below, which verifies the predicted
     /// old-buffer/new-buffer transient against the remaining engine-peak
     /// headroom (section 10.2/§10.3 peak law). The pre-check never changes
@@ -278,6 +276,8 @@ impl CanonicalRebatcher {
         }
         let transient_peak = self.realloc_transient_peak(incoming, k)?;
         tracker.pre_check_realloc_peak(transient_peak, self.remainder_bytes())?;
+        #[cfg(test)]
+        tracker.record_predicted_realloc_peak(transient_peak);
         for (sink, array) in self.sinks.iter_mut().zip(incoming.columns()) {
             sink.append(array.as_ref(), k)?;
         }
@@ -618,12 +618,19 @@ impl BitPackedSink {
 /// Validity bitmap sink whose allocation layout is canonical with the
 /// finalized envelope (E3 §10.4 rule 3). While every appended row is valid
 /// no backing allocation exists, because the finalized array owns no validity
-/// buffer at all; once a null appears the buffer is materialized with an
-/// exact `ceil(rows / 8)` capacity — precisely the capacity the finalized
-/// validity bitmap will own. This keeps the enforced builder capacity and
-/// the exact estimator consistent: an admission decision made on
-/// `candidate_envelope_bytes` can never be defeated by validity scratch the
-/// finalized envelope will not contain.
+/// buffer at all; once a null appears the buffer is materialized exactly once
+/// at the final `ceil((rows + pending) / 8)` capacity of the current append —
+/// precisely the capacity the finalized validity bitmap will own. The
+/// materialized bytes carry the real leading-valid bits and zero padding:
+/// bits past `leading_valid` inside the last partial byte stay clear until a
+/// real row occupies them, so an appended null can never inherit a stale
+/// valid bit. Materializing at the final size also keeps the predicted
+/// growth peak equal to the physical allocator peak — an intermediate
+/// materialize followed by `reserve_exact` would pay a second old+new
+/// transient that the section 10.2 pre-check cannot see. This keeps the
+/// enforced builder capacity and the exact estimator consistent: an
+/// admission decision made on `candidate_envelope_bytes` can never be
+/// defeated by validity scratch the finalized envelope will not contain.
 struct LazyValiditySink {
     bits: BitPackedSink,
     leading_valid: usize,
@@ -670,25 +677,38 @@ impl LazyValiditySink {
         }
     }
 
-    fn materialize(&mut self) {
-        let nbytes = self.leading_valid.div_ceil(8);
-        self.bits.bytes = vec![0xFF_u8; nbytes];
+    fn materialize(&mut self, total_bits: usize) {
+        // One-shot allocation at the final post-append capacity. The old
+        // implicit leading-valid run is re-encoded into its real bits and
+        // every bit past `leading_valid` stays clear, so a later appended
+        // null cannot read back as valid; and because the buffer is already
+        // at its final size, no second realloc (and no unpredicted old+new
+        // transient) can occur while the pending rows are appended.
+        let mut bytes = vec![0_u8; total_bits.div_ceil(8)];
+        let full_bytes = self.leading_valid / 8;
+        let trailing_bits = self.leading_valid % 8;
+        bytes[..full_bytes].fill(0xFF);
+        if trailing_bits > 0 {
+            bytes[full_bytes] = (1_u8 << trailing_bits) - 1;
+        }
+        bytes.truncate(self.leading_valid.div_ceil(8));
+        self.bits.bytes = bytes;
         self.bits.bit_len = self.leading_valid;
         self.has_null = true;
     }
 
     fn prepare_append(&mut self, additional_bits: usize, any_null: bool) {
+        let total_bits = self.rows().saturating_add(additional_bits);
         if !self.has_null {
             if !any_null {
                 return;
             }
-            self.materialize();
+            // First null of this fill: materialize once at the exact final
+            // capacity so appending the pending bits needs no further growth.
+            self.materialize(total_bits);
+            return;
         }
-        let needed_bytes = self
-            .bits
-            .bit_len
-            .saturating_add(additional_bits)
-            .div_ceil(8);
+        let needed_bytes = total_bits.div_ceil(8);
         reserve_bytes_exact(&mut self.bits.bytes, needed_bytes);
     }
 
@@ -696,10 +716,10 @@ impl LazyValiditySink {
         if !self.has_null {
             if valid {
                 self.leading_valid += 1;
-            } else {
-                self.materialize();
-                self.bits.append_bit(false);
+                return;
             }
+            self.prepare_append(1, true);
+            self.bits.append_bit(false);
             return;
         }
         self.bits.append_bit(valid);
@@ -1238,4 +1258,190 @@ fn append_binary(sink: &mut VariableBytes, array: &dyn Array, k: usize) -> Resul
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod validity_sink_tests {
+    use super::*;
+    use crate::memory::{
+        alloc_peaks, allocator_reallocation_count, enter_phase, reset_alloc_peaks,
+    };
+    use crate::tests::exclusive_test_lock;
+
+    /// Review P0: appending a null after an implicit valid run must keep the
+    /// bitmap bit-exact. The materialized partial byte carries only the real
+    /// leading-valid bits, so the appended null cannot inherit a stale valid
+    /// bit from the old `0xFF` fill.
+    #[test]
+    fn materialized_bitmap_keeps_null_after_implicit_valid_run() {
+        let _lock = exclusive_test_lock().blocking_lock();
+        let mut sink = LazyValiditySink::new();
+        sink.append_bit(true);
+        sink.prepare_append(1, true);
+        sink.append_bit(false);
+        assert_eq!(sink.bits.bit_len, 2);
+        assert_eq!(&sink.bits.bytes, &[0b0000_0001]);
+        let buffer = sink.finish().expect("validity buffer");
+        assert_eq!(buffer.len(), 2);
+        assert!(buffer.value(0));
+        assert!(!buffer.value(1));
+    }
+
+    /// Real bit values across the 7 -> 8 -> 9 bit boundaries, including the
+    /// review case "append a null after exactly 8 implicit valid rows": the
+    /// ninth bit must be genuinely clear (`[0xFF, 0x00]`).
+    #[test]
+    fn bit_boundaries_at_seven_eight_nine_hold_real_values() {
+        let _lock = exclusive_test_lock().blocking_lock();
+        let mut sink = LazyValiditySink::new();
+        for _ in 0..7 {
+            sink.append_bit(true);
+        }
+        sink.prepare_append(2, true);
+        sink.append_bit(false);
+        sink.append_bit(true);
+        assert_eq!(sink.bits.bit_len, 9);
+        assert_eq!(&sink.bits.bytes, &[0b0111_1111, 0b0000_0001]);
+
+        let mut sink = LazyValiditySink::new();
+        for _ in 0..8 {
+            sink.append_bit(true);
+        }
+        sink.prepare_append(1, true);
+        sink.append_bit(false);
+        assert_eq!(sink.bits.bit_len, 9);
+        assert_eq!(&sink.bits.bytes, &[0xFF, 0x00]);
+    }
+
+    /// Review P0: the first materialize must allocate once at the final
+    /// capacity. The predicted growth peak (and new capacity) must equal what
+    /// the allocator physically observes — measured here under the phased
+    /// test allocator with zero reallocations.
+    ///
+    /// The phased allocator counters are process-global, so allocations from
+    /// concurrently running sibling tests land inside this measurement
+    /// window. Every attempt performs the identical deterministic operation
+    /// sequence; polluted samples are discarded and the window is retried
+    /// until one clean sample verifies the invariant exactly.
+    #[test]
+    fn first_materialize_allocates_once_at_predicted_capacity() {
+        let _lock = exclusive_test_lock().blocking_lock();
+
+        // Allocator-independent state assertions: one-shot materialize at the
+        // final capacity, real leading bits, clear padding.
+        let mut sink = LazyValiditySink::new();
+        for _ in 0..8 {
+            sink.append_bit(true);
+        }
+        sink.prepare_append(1, true);
+        sink.append_bit(false);
+        assert_eq!(sink.bits.allocated_capacity_bytes(), 2);
+        assert_eq!(&sink.bits.bytes, &[0xFF, 0x00]);
+
+        let mut verified = false;
+        for _ in 0..128 {
+            let mut probe = LazyValiditySink::new();
+            for _ in 0..8 {
+                probe.append_bit(true);
+            }
+            let (predicted_peak, _) = probe.calculate_growth_peak_and_new_capacity(1);
+            assert_eq!(predicted_peak, 2);
+            reset_alloc_peaks();
+            let phase = enter_phase(AllocatorPhase::Remainder);
+            probe.prepare_append(1, true);
+            probe.append_bit(false);
+            let (polars, remainder, storage) = alloc_peaks();
+            let reallocs = allocator_reallocation_count();
+            drop(phase);
+            if polars == 0 && storage == 0 && reallocs == 0 && remainder == predicted_peak {
+                verified = true;
+                break;
+            }
+        }
+        assert!(
+            verified,
+            "no unpolluted allocator window: the one-shot materialize must \
+             allocate exactly the predicted final capacity with zero reallocs"
+        );
+    }
+
+    /// Growth of an already-materialized sink keeps matching its prediction:
+    /// one exact-need realloc whose old+new transient equals the predicted
+    /// peak. The whole fill runs inside the tracked remainder phase so every
+    /// buffer carries allocator headers and the live counters stay exact.
+    /// Polluted samples from sibling threads are retried like in
+    /// `first_materialize_allocates_once_at_predicted_capacity`.
+    #[test]
+    fn growth_of_materialized_sink_matches_predicted_transient() {
+        let _lock = exclusive_test_lock().blocking_lock();
+
+        // Allocator-independent state assertions for the full fill.
+        let mut sink = LazyValiditySink::new();
+        for _ in 0..4 {
+            sink.append_bit(true);
+        }
+        sink.prepare_append(2, true);
+        sink.append_bit(true);
+        sink.append_bit(false);
+        assert_eq!(sink.bits.bit_len, 6);
+        assert_eq!(sink.bits.allocated_capacity_bytes(), 1);
+        sink.prepare_append(3, false);
+        for _ in 0..3 {
+            sink.append_bit(true);
+        }
+        assert_eq!(sink.bits.allocated_capacity_bytes(), 2);
+        assert_eq!(sink.bits.bit_len, 9);
+        assert_eq!(&sink.bits.bytes, &[0b1101_1111, 0b0000_0001]);
+
+        let mut verified = false;
+        for _ in 0..128 {
+            let mut probe = LazyValiditySink::new();
+            reset_alloc_peaks();
+            let phase = enter_phase(AllocatorPhase::Remainder);
+            // Build the fill inside the tracked phase so every buffer carries
+            // allocator headers and live accounting stays exact.
+            for _ in 0..4 {
+                probe.append_bit(true);
+            }
+            probe.prepare_append(2, true);
+            probe.append_bit(true);
+            probe.append_bit(false);
+            let (predicted_peak, _) = probe.calculate_growth_peak_and_new_capacity(3);
+            assert_eq!(predicted_peak, 3);
+            probe.prepare_append(3, false);
+            for _ in 0..3 {
+                probe.append_bit(true);
+            }
+            let (polars, remainder, storage) = alloc_peaks();
+            let reallocs = allocator_reallocation_count();
+            drop(phase);
+            if polars == 0 && storage == 0 && reallocs == 1 && remainder == predicted_peak {
+                verified = true;
+                break;
+            }
+        }
+        assert!(
+            verified,
+            "no unpolluted allocator window: the exact-need realloc must \
+             transiently hold old+new bytes equal to the predicted peak"
+        );
+    }
+
+    /// An all-valid fill still finalizes without a validity buffer, and the
+    /// implicit run resets for the next fill.
+    #[test]
+    fn all_valid_fill_finalizes_without_validity_buffer() {
+        let mut sink = LazyValiditySink::new();
+        for _ in 0..10 {
+            sink.append_bit(true);
+        }
+        assert!(sink.finish().is_none());
+        assert_eq!(sink.leading_valid, 0);
+        assert!(!sink.has_null());
+        // The next fill starts fresh: a null on its first row is honored.
+        sink.append_bit(false);
+        let buffer = sink.finish().expect("validity buffer");
+        assert_eq!(buffer.len(), 1);
+        assert!(!buffer.value(0));
+    }
 }
