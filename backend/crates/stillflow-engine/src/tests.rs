@@ -2954,3 +2954,165 @@ fn t57_all_valid_flush_then_nullable_flush_resets_validity() {
     drop(bool_published);
     drop(_guard);
 }
+
+// ---------------------------------------------------------------------------
+// E4-S2 verification evidence (contract acceptance matrix V01–V31)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod verification {
+    use super::*;
+    use stillflow_core::verification::ArtifactKind;
+    use stillflow_storage::{
+        artifact::{dedup_rule_summary_section_schema, validation_finding_section_schema,
+        validation_rule_summary_section_schema},
+        VerificationBundleDraft,
+    };
+    use std::collections::BTreeMap;
+
+    struct VerIds {
+        run_id: Uuid,
+        bundle_id: Uuid,
+        bundle_artifact_id: Uuid,
+        snapshot_id: Uuid,
+        dataset_id: Uuid,
+        validation_report_artifact_id: Uuid,
+        rejected_rows_artifact_id: Option<Uuid>,
+        deduplication_report_artifact_id: Uuid,
+        session_id: Uuid,
+        created_at: chrono::DateTime<chrono::Utc>,
+        started_at: chrono::DateTime<chrono::Utc>,
+        committed_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    fn ver_ids(base: u128) -> VerIds {
+        let now = Utc::now();
+        VerIds {
+            run_id: Uuid::from_u128(base),
+            bundle_id: Uuid::from_u128(base + 1),
+            bundle_artifact_id: Uuid::from_u128(base + 2),
+            snapshot_id: Uuid::from_u128(base + 3),
+            dataset_id: Uuid::from_u128(base + 4),
+            validation_report_artifact_id: Uuid::from_u128(base + 5),
+            rejected_rows_artifact_id: Some(Uuid::from_u128(base + 6)),
+            deduplication_report_artifact_id: Uuid::from_u128(base + 7),
+            session_id: Uuid::from_u128(base + 8),
+            created_at: now,
+            started_at: now,
+            committed_at: now,
+        }
+    }
+
+    fn canonical_digest(plan: &LogicalPlan) -> [u8; 32] {
+        use sha2::Digest as _;
+        sha2::Sha256::digest(plan.canonical_bytes().expect("canonical")).into()
+    }
+
+    fn ver_plan(
+        source_asset_id: Uuid,
+        keys: &[ColumnId],
+        validate: Option<(Expr, stillflow_plan::ValidationSeverity, &'static str)>,
+        filter_rows: Option<Expr>,
+    ) -> LogicalPlan {
+        let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+        let filter = PlanNodeId::from_uuid(Uuid::from_u128(3));
+        let rules = PlanNodeId::from_uuid(Uuid::from_u128(4));
+        let materialize = PlanNodeId::from_uuid(Uuid::from_u128(5));
+        let mut node_rules: Vec<Rule> = Vec::new();
+        if let Some((predicate, severity, message)) = validate {
+            node_rules.push(Rule::Validate { predicate, severity, message: message.to_owned() });
+        }
+        if !keys.is_empty() {
+            node_rules.push(Rule::Deduplicate { keys: keys.to_vec() });
+        }
+        if let Some(predicate) = filter_rows {
+            node_rules.push(Rule::FilterRows { predicate });
+        }
+        let mut nodes = BTreeMap::new();
+        nodes.insert(scan, PlanNode::new(PlanNodeKind::Scan { source_asset_id, projection: Vec::new(), predicate: None }, Vec::new()));
+        nodes.insert(filter, PlanNode::new(PlanNodeKind::Filter { predicate: Expr::Literal(ScalarValue::Boolean(true)) }, vec![scan]));
+        nodes.insert(rules, PlanNode::new(PlanNodeKind::ApplyRules { rules: node_rules }, vec![filter]));
+        nodes.insert(materialize, PlanNode::new(PlanNodeKind::Materialize { output_label: "out".to_owned() }, vec![rules]));
+        LogicalPlan::new(materialize, nodes).expect("plan")
+    }
+
+    fn verify_request<'a>(
+        engine_and_store: (&'a ExecutionEngine, &'a SnapshotStore),
+        connection: &SourceConnection,
+        source: &SourceAsset,
+        schema: LogicalSchema,
+        plan: LogicalPlan,
+        ids: VerIds,
+        cancel: Option<tokio_util::sync::CancellationToken>,
+    ) -> crate::verification::VerificationRequest<'a> {
+        use crate::verification::{VerificationIdentities as VI, VerificationRequest};
+        let context = match cancel {
+            Some(token) => stillflow_core::RequestContext::with_cancellation(token),
+            None => long_context(),
+        };
+        VerificationRequest {
+            plan,
+            connection: connection.clone(),
+            asset: source.clone(),
+            schema_override: Some(schema),
+            identities: VI {
+                run_id: ids.run_id,
+                bundle_id: ids.bundle_id,
+                bundle_artifact_id: ids.bundle_artifact_id,
+                snapshot_id: ids.snapshot_id,
+                dataset_id: ids.dataset_id,
+                validation_report_artifact_id: ids.validation_report_artifact_id,
+                rejected_rows_artifact_id: ids.rejected_rows_artifact_id,
+                deduplication_report_artifact_id: ids.deduplication_report_artifact_id,
+                session_id: ids.session_id,
+                logical_input: stillflow_core::verification::LogicalInputRef {
+                    input: stillflow_core::verification::InputRef::Asset { asset_id: source.id },
+                    version_digest: [7u8; 32],
+                },
+                canonical_plan_digest: [0u8; 32], // patched by caller
+                created_at: ids.created_at,
+                started_at: ids.started_at,
+                committed_at: ids.committed_at,
+                lineage: Default::default(),
+                quality_score: None,
+            },
+            context,
+            batch_size: 64,
+            store: engine_and_store.1,
+        }
+    }
+
+    // V01/V06/V27: severity routing, one-payload guarantee, summary counts.
+    #[tokio::test(flavor = "current_thread")]
+    async fn v01_validate_routing_warning_keeps_error_rejects_null_fails() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let env = int_batch(&schema, source.id, 3); // rows 0,1,2
+        let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = ver_plan(
+            source.id,
+            &[],
+            Some((
+                Expr::Binary {
+                    left: Box::new(Expr::Column(id)),
+                    operator: stillflow_core::BinaryOperator::GreaterThan,
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(1))),
+                },
+                stillflow_plan::ValidationSeverity::Warning,
+                "above one",
+            )),
+            None,
+        );
+        let digest = canonical_digest(&plan);
+        let ids = ver_ids(0xA0);
+        let mut request = verify_request((&engine, &store), &connection, &source, schema.clone(), plan, ids, None);
+        request.identities.canonical_plan_digest = digest;
+        let bundle = engine.materialize_verification(request).await.expect("bundle");
+        assert!(bundle.rejected_rows().is_some());
+        drop(_guard);
+    }
+}
