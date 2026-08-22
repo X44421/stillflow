@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 5,
+  "revision": 6,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "f16666e59896e2d8bae3b79e188b8f567bb8c534",
-  "updated_at": "2026-08-22T10:41:15Z",
+  "updated_at": "2026-08-22T10:42:22Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -369,7 +369,7 @@
       "mode": "write",
       "owner": null,
       "target_pr": null,
-      "target_branch": "agent/issue-085-backend-feedback-loop",
+      "target_branch": "main",
       "result_branch": "agent/issue-085-backend-feedback-loop",
       "expected_head": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
       "locks": [
@@ -393,10 +393,10 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-22T10:41:15Z",
+      "updated_at": "2026-08-22T10:42:22Z",
       "notes": "Canonical task: Issue #85. Claim against exact main head before creating result branch. Runtime tracing, E5-E1, OPS-O1, scenario harnesses, taskctl changes, and every backend Rust/Cargo path are explicitly out of scope. The workflow lock must be released before any later Issue #79 S5 CI/build-gate slice begins.",
       "head_bound_by": "ox-alpha-dxf0",
-      "head_bind_reason": "REBIND authorized by coordinator in session: BASE MOVED f16666e->ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a; delta f16666e..ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a is frontend/docs-only (#83/#84/#87), no backend/.github overlap with authorized files"
+      "head_bind_reason": "correct binding shape: target_branch=main (verification ref); result_branch stays agent/issue-085-backend-feedback-loop; REBIND f16666e->ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a authorized by coordinator"
     }
   ],
   "locks": {
