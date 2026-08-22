@@ -30,11 +30,12 @@ use stillflow_core::{
 use crate::artifact;
 
 use crate::artifact::{
-    accepted_snapshot_manifest_digest, canonical_batch_bytes, compute_artifact_provenance_digest,
-    compute_bundle_provenance_digest, compute_partition_digest, compute_section_digest,
-    ArtifactManifest, ArtifactPartition, ArtifactSection, ArtifactSectionId, ArtifactSectionStats,
-    MAX_BUNDLE_REPORT_BYTES, MAX_BUNDLE_REPORT_PARTITIONS, MAX_BUNDLE_REPORT_ROWS,
-    MAX_REPORT_BYTES, MAX_REPORT_PARTITIONS, MAX_REPORT_ROWS,
+    accepted_partition_canonical_digest, accepted_snapshot_manifest_digest, canonical_batch_bytes,
+    compute_artifact_provenance_digest, compute_bundle_provenance_digest, compute_partition_digest,
+    compute_section_digest, AcceptedCanonicalPartition, ArtifactManifest, ArtifactPartition,
+    ArtifactSection, ArtifactSectionId, ArtifactSectionStats, MAX_BUNDLE_REPORT_BYTES,
+    MAX_BUNDLE_REPORT_PARTITIONS, MAX_BUNDLE_REPORT_ROWS, MAX_REPORT_BYTES, MAX_REPORT_PARTITIONS,
+    MAX_REPORT_ROWS,
 };
 use crate::dedup::{self, DedupIndex};
 use crate::{
@@ -326,6 +327,10 @@ pub struct VerificationBundleWriter {
     accepted_next_sequence: u64,
     accepted_envelope_count: u32,
     accepted_partitions: Vec<SnapshotPartition>,
+    /// Logical per-partition digest inputs (contract 8.1.1): canonical Arrow
+    /// IPC bytes and canonical byte counts, kept strictly separate from the
+    /// physical `accepted_partitions` Parquet file facts.
+    accepted_canonical_partitions: Vec<AcceptedCanonicalPartition>,
     accepted_row_count: u64,
     accepted_stored_byte_count: u64,
     sections: Vec<SectionStaging>,
@@ -518,6 +523,7 @@ impl SnapshotStore {
             accepted_next_sequence: 0,
             accepted_envelope_count: 0,
             accepted_partitions: Vec::new(),
+            accepted_canonical_partitions: Vec::new(),
             accepted_row_count: 0,
             accepted_stored_byte_count: 0,
             sections: section_plan(draft)?,
@@ -820,9 +826,37 @@ fn load_bundle_inner(
     }
 
     let accepted_manifest = load_manifest_inner(inner, membership.accepted_snapshot_id)?;
+    // Recompute the logical accepted digest from the installed partitions:
+    // each Parquet file is decoded (physical E3 integrity is verified inside
+    // `read_partition`), re-canonicalized, and hashed with the frozen
+    // formula. Bundles committed by older interim builds carry physical-file
+    // digests and fail closed here with a typed mismatch.
+    let mut accepted_canonical_partitions: Vec<AcceptedCanonicalPartition> =
+        Vec::with_capacity(accepted_manifest.partitions().len());
+    for partition in accepted_manifest.partitions() {
+        let envelope = crate::read_partition(inner, accepted_manifest.snapshot(), partition)?;
+        let canonical = canonical_batch_bytes(envelope.payload())?;
+        let stored_byte_count = u64::try_from(canonical.len())
+            .map_err(|_| StorageError::ArithmeticOverflow("canonical byte count"))?;
+        let row_count = u64::try_from(envelope.row_count())
+            .map_err(|_| StorageError::ArithmeticOverflow("envelope row count"))?;
+        let digest = accepted_partition_canonical_digest(
+            membership.accepted_snapshot_id,
+            partition.sequence(),
+            row_count,
+            stored_byte_count,
+            std::slice::from_ref(&canonical),
+        );
+        accepted_canonical_partitions.push(AcceptedCanonicalPartition {
+            sequence: partition.sequence(),
+            row_count,
+            stored_byte_count,
+            digest,
+        });
+    }
     let accepted_digest = accepted_snapshot_manifest_digest(
         accepted_manifest.snapshot(),
-        accepted_manifest.partitions(),
+        &accepted_canonical_partitions,
     )?;
 
     let (validation_manifest, validation_provenance) =
@@ -980,6 +1014,22 @@ impl VerificationBundleWriter {
             });
         }
 
+        // Logical canonical facts are derived BEFORE any filesystem write so a
+        // canonicalization failure leaves the writer untouched (contract
+        // 8.1.1: accepted partition digests cover canonical Arrow IPC bytes,
+        // never the Parquet encoding).
+        let canonical = canonical_batch_bytes(envelope.payload())?;
+        let canonical_stored = u64::try_from(canonical.len())
+            .map_err(|_| StorageError::ArithmeticOverflow("canonical byte count"))?;
+        let canonical_digest = accepted_partition_canonical_digest(
+            self.draft.accepted.id(),
+            sequence,
+            envelope_rows,
+            canonical_stored,
+            std::slice::from_ref(&canonical),
+        );
+        drop(canonical);
+
         let path = self
             .staging_dir
             .join(format!("accepted-{sequence:010}.parquet"));
@@ -1003,6 +1053,13 @@ impl VerificationBundleWriter {
             file_bytes,
             file_digest,
         )?);
+        self.accepted_canonical_partitions
+            .push(AcceptedCanonicalPartition {
+                sequence,
+                row_count: envelope_rows,
+                stored_byte_count: canonical_stored,
+                digest: canonical_digest,
+            });
         self.accepted_row_count = row_count;
         self.accepted_stored_byte_count = stored_byte_count;
         Ok(())
@@ -1358,9 +1415,11 @@ impl VerificationBundleWriter {
         let snapshot = build_snapshot(&self.draft.accepted, stats)?;
         let accepted_manifest =
             SnapshotManifest::try_new(snapshot, self.accepted_partitions.clone())?;
+        // Logical digest: canonical Arrow IPC facts recorded on append, never
+        // Parquet file hashes (contract 8.1.1).
         let accepted_digest = accepted_snapshot_manifest_digest(
             accepted_manifest.snapshot(),
-            accepted_manifest.partitions(),
+            &self.accepted_canonical_partitions,
         )?;
 
         // ---- Assemble report and rejected manifests ----

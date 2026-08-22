@@ -19,14 +19,14 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use stillflow_core::{
-    ColumnId, DatasetSnapshot, LogicalField, LogicalSchema, LogicalSchemaFingerprint, LogicalType,
-    REJECTED_CANONICAL_PLAN_DIGEST_COLUMN_ID, REJECTED_INPUT_ID_COLUMN_ID,
+    ArtifactKind, ColumnId, DatasetSnapshot, LogicalField, LogicalSchema, LogicalSchemaFingerprint,
+    LogicalType, REJECTED_CANONICAL_PLAN_DIGEST_COLUMN_ID, REJECTED_INPUT_ID_COLUMN_ID,
     REJECTED_INPUT_KIND_COLUMN_ID, REJECTED_INPUT_VERSION_DIGEST_COLUMN_ID,
     REJECTED_KIND_COLUMN_ID, REJECTED_NODE_ID_COLUMN_ID, REJECTED_PLAN_FINGERPRINT_COLUMN_ID,
     REJECTED_RULE_ORDINAL_COLUMN_ID, REJECTED_SOURCE_ROW_ORDINAL_COLUMN_ID,
 };
 
-use crate::{ContentDigest, SnapshotPartition, StorageError, MAX_SNAPSHOT_PARTITIONS};
+use crate::{ContentDigest, StorageError, MAX_SNAPSHOT_PARTITIONS};
 
 /// Frozen report pack row limit per partition-sized envelope (contract 11).
 pub const REPORT_PACK_ROWS: usize = 1_024;
@@ -493,6 +493,32 @@ pub(crate) fn canonical_batch_bytes(batch: &RecordBatch) -> Result<Vec<u8>, Stor
     Ok(message[8..].to_vec())
 }
 
+/// Partition digest formula (contract 8.1.1), generalized over the
+/// section-slot byte. Report and rejected artifacts pass their frozen
+/// `ArtifactSectionId` tag; the accepted snapshot passes the
+/// `ArtifactKind::AcceptedSnapshot` tag (0x02) because it owns no section.
+pub(crate) fn compute_partition_digest_with_tag(
+    artifact_id: Uuid,
+    section_tag: u8,
+    sequence: u32,
+    row_count: u64,
+    stored_byte_count: u64,
+    canonical_batches: &[Vec<u8>],
+) -> ContentDigest {
+    let batch_count = u32::try_from(canonical_batches.len()).unwrap_or(u32::MAX);
+    let mut preimage = Preimage::new(PARTITION_DOMAIN);
+    preimage.uuid(artifact_id);
+    preimage.u8(section_tag);
+    preimage.u32(sequence);
+    preimage.u64(row_count);
+    preimage.u64(stored_byte_count);
+    preimage.u32(batch_count);
+    for batch in canonical_batches {
+        preimage.len_bytes(batch);
+    }
+    preimage.finalize()
+}
+
 /// Partition digest formula (contract 8.1.1).
 pub(crate) fn compute_partition_digest(
     artifact_id: Uuid,
@@ -502,18 +528,14 @@ pub(crate) fn compute_partition_digest(
     stored_byte_count: u64,
     canonical_batches: &[Vec<u8>],
 ) -> ContentDigest {
-    let batch_count = u32::try_from(canonical_batches.len()).unwrap_or(u32::MAX);
-    let mut preimage = Preimage::new(PARTITION_DOMAIN);
-    preimage.uuid(artifact_id);
-    preimage.u8(section_id.tag());
-    preimage.u32(sequence);
-    preimage.u64(row_count);
-    preimage.u64(stored_byte_count);
-    preimage.u32(batch_count);
-    for batch in canonical_batches {
-        preimage.len_bytes(batch);
-    }
-    preimage.finalize()
+    compute_partition_digest_with_tag(
+        artifact_id,
+        section_id.tag(),
+        sequence,
+        row_count,
+        stored_byte_count,
+        canonical_batches,
+    )
 }
 
 /// Section digest formula (contract 8.1.1); partitions must be sorted by
@@ -616,11 +638,51 @@ pub(crate) fn compute_artifact_provenance_digest(
     Ok(*preimage.finalize().as_bytes())
 }
 
+/// One accepted snapshot partition's LOGICAL digest inputs (contract 8.1.1):
+/// the canonical Arrow IPC batch bytes replace the physical Parquet file as
+/// the digest domain, and `stored_byte_count` is the canonical logical
+/// payload byte count, not the Parquet file length. Physical file digests and
+/// lengths remain in the E3 `SnapshotPartition`/`SnapshotManifest` values and
+/// stay fully separate from these logical values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AcceptedCanonicalPartition {
+    pub sequence: u32,
+    pub row_count: u64,
+    pub stored_byte_count: u64,
+    pub digest: ContentDigest,
+}
+
+/// Computes one accepted partition's logical digest with the frozen
+/// partition formula. The accepted snapshot owns no `ArtifactSectionId`, so
+/// the section-slot byte carries the `ArtifactKind::AcceptedSnapshot` tag
+/// (0x02) and the artifact slot carries the snapshot id; this is the literal
+/// application of contract 8.1.1 line "the same `ArtifactPartition.digest`
+/// formula used for report artifacts, applied to each accepted
+/// `SnapshotPartition`".
+pub(crate) fn accepted_partition_canonical_digest(
+    snapshot_id: Uuid,
+    sequence: u32,
+    row_count: u64,
+    stored_byte_count: u64,
+    canonical_batches: &[Vec<u8>],
+) -> ContentDigest {
+    compute_partition_digest_with_tag(
+        snapshot_id,
+        ArtifactKind::AcceptedSnapshot.tag(),
+        sequence,
+        row_count,
+        stored_byte_count,
+        canonical_batches,
+    )
+}
+
 /// Accepted-snapshot manifest digest (contract 8.1.1), computed from the
-/// committed `DatasetSnapshot` and its `SnapshotPartition` values.
+/// committed snapshot identity and the LOGICAL per-partition canonical
+/// records. Parquet compression, footer, and writer configuration cannot
+/// influence this digest; only decoded logical batch bytes can.
 pub(crate) fn accepted_snapshot_manifest_digest(
     snapshot: &DatasetSnapshot,
-    partitions: &[SnapshotPartition],
+    partitions: &[AcceptedCanonicalPartition],
 ) -> Result<[u8; 32], StorageError> {
     let mut preimage = Preimage::new(ACCEPTED_SNAPSHOT_DOMAIN);
     preimage.uuid(snapshot.id());
@@ -628,23 +690,37 @@ pub(crate) fn accepted_snapshot_manifest_digest(
     preimage.uuid(snapshot.session_id());
     preimage.uuid(snapshot.source_asset_id());
     preimage.digest_bytes(snapshot.schema_fingerprint().as_bytes());
-    preimage.u64(snapshot.stats().row_count());
-    preimage.u64(snapshot.stats().stored_byte_count());
-    preimage.u32(snapshot.stats().partition_count());
+    let mut row_count: u64 = 0;
+    let mut stored_byte_count: u64 = 0;
     let mut previous_sequence: Option<u32> = None;
     for partition in partitions {
         if let Some(previous) = previous_sequence {
-            if partition.sequence() <= previous {
+            if partition.sequence <= previous {
                 return Err(StorageError::InvalidManifest(
                     "snapshot partitions are not sorted by strictly increasing sequence",
                 ));
             }
         }
-        previous_sequence = Some(partition.sequence());
-        preimage.u32(partition.sequence());
-        preimage.u64(partition.row_count());
-        preimage.u64(partition.stored_byte_count());
-        preimage.digest(&partition.digest());
+        previous_sequence = Some(partition.sequence);
+        row_count = row_count
+            .checked_add(partition.row_count)
+            .ok_or(StorageError::ArithmeticOverflow("snapshot row count"))?;
+        stored_byte_count = stored_byte_count
+            .checked_add(partition.stored_byte_count)
+            .ok_or(StorageError::ArithmeticOverflow(
+                "snapshot stored byte count",
+            ))?;
+    }
+    preimage.u64(row_count);
+    preimage.u64(stored_byte_count);
+    let partition_count = u32::try_from(partitions.len())
+        .map_err(|_| StorageError::ArithmeticOverflow("snapshot partition count"))?;
+    preimage.u32(partition_count);
+    for partition in partitions {
+        preimage.u32(partition.sequence);
+        preimage.u64(partition.row_count);
+        preimage.u64(partition.stored_byte_count);
+        preimage.digest(&partition.digest);
     }
     Ok(*preimage.finalize().as_bytes())
 }
@@ -677,8 +753,10 @@ pub(crate) fn compute_bundle_provenance_digest(
         }
     }
     preimage.uuid(deduplication_report_artifact_id);
-    let child_count = u32::try_from(children.len()).unwrap_or(u32::MAX);
-    preimage.u32(child_count);
+    // Contract 8.1.1 (bundle-provenance formula) defines NO child-count slot,
+    // unlike every other formula whose counts are spelled inline. The child
+    // sequence itself is fixed: accepted snapshot, validation report, optional
+    // rejected rows, then deduplication report.
     for (child_artifact_id, child_manifest_digest, child_content_digest) in children {
         preimage.uuid(*child_artifact_id);
         preimage.digest_bytes(child_manifest_digest);
@@ -1396,8 +1474,13 @@ mod tests {
             DateTime::<Utc>::from_timestamp(1_700_000_000, 0).expect("time"),
         )
         .expect("snapshot");
-        let snapshot_partitions =
-            vec![SnapshotPartition::try_new(0, 4, 40, manual_digest(&[&[42]])).expect("partition")];
+        let snapshot_partition_digest = manual_digest(&[&[42]]);
+        let snapshot_partitions = vec![AcceptedCanonicalPartition {
+            sequence: 0,
+            row_count: 4,
+            stored_byte_count: 40,
+            digest: snapshot_partition_digest,
+        }];
         let accepted_digest =
             accepted_snapshot_manifest_digest(&accepted_snapshot, &snapshot_partitions)
                 .expect("accepted digest");
@@ -1415,7 +1498,7 @@ mod tests {
         accepted_expected.extend(le32(0));
         accepted_expected.extend(le64(4));
         accepted_expected.extend(le64(40));
-        accepted_expected.extend(len_prefixed(snapshot_partitions[0].digest().as_bytes()));
+        accepted_expected.extend(len_prefixed(snapshot_partition_digest.as_bytes()));
         assert_eq!(
             accepted_digest,
             manual_digest(&[&accepted_expected]).as_bytes().to_owned()
@@ -1446,7 +1529,7 @@ mod tests {
         bundle_expected.extend_from_slice(Uuid::from_u128(0xB021).as_bytes());
         bundle_expected.push(0x00);
         bundle_expected.extend_from_slice(Uuid::from_u128(0xB022).as_bytes());
-        bundle_expected.extend(le32(2));
+        // The frozen bundle-provenance formula has no child-count slot.
         for (id, manifest_part, content_part) in [
             (accepted_snapshot.id(), accepted_digest, accepted_digest),
             (
@@ -1490,5 +1573,213 @@ mod tests {
         let _ = UInt64Array::from(values);
         let _ = UInt32Array::from(ordinals);
         let _ = StringArray::from(text);
+    }
+
+    fn hex_digest(digest: ContentDigest) -> String {
+        digest
+            .as_bytes()
+            .iter()
+            .fold(String::new(), |mut out, byte| {
+                use std::fmt::Write as _;
+                let _ = write!(out, "{byte:02x}");
+                out
+            })
+    }
+
+    /// Walks an encapsulated IPC stream to the record-batch message and
+    /// returns its metadata length prefix. Test-only oracle helper over raw
+    /// `arrow-ipc` output; shares no code with `canonical_batch_bytes`.
+    fn batch_message_metadata_len(stream: &[u8]) -> usize {
+        assert_eq!(&stream[0..4], &[0xFF, 0xFF, 0xFF, 0xFF]);
+        let schema_meta_len = u32::from_le_bytes(stream[4..8].try_into().expect("prefix")) as usize;
+        let schema_end = 8 + schema_meta_len.div_ceil(8) * 8;
+        let message = &stream[schema_end..];
+        assert_eq!(&message[0..4], &[0xFF, 0xFF, 0xFF, 0xFF]);
+        u32::from_le_bytes(message[4..8].try_into().expect("prefix")) as usize
+    }
+
+    /// Hardcoded literal from a scratch binary over raw arrow-ipc 59.2.0
+    /// default (64-byte aligned) output — independent of this crate's
+    /// helpers. The vector's metadata block carries nonzero alignment
+    /// padding inside the length-prefixed region (asserted below), so the
+    /// literal fails any implementation that strips alignment padding,
+    /// retains framing bytes, or mis-slices the schema-message boundary.
+    #[test]
+    fn canonical_batch_bytes_match_hardcoded_arrow_ipc_literal() {
+        let schema = int_schema();
+        let batch = int_batch(&schema, vec![1, 2, 3]);
+        let canonical = canonical_batch_bytes(&batch).expect("canonical bytes");
+        assert_eq!(canonical.len(), 312);
+        let mut hasher = Sha256::new();
+        hasher.update(&canonical);
+        assert_eq!(
+            hex_digest(ContentDigest::from_bytes(hasher.finalize().into())),
+            "017255f9f7ec953af183a352180bb78e90bd0444cdf78f6227c89d8fe1661374"
+        );
+
+        // The default writer pads the flatbuffer tail INSIDE the
+        // length-prefixed metadata block. Re-encoding with 8-byte alignment
+        // yields a shorter block; the difference is exactly the padding that
+        // must stay part of the hashed region.
+        use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
+        let mut aligned8 = Vec::new();
+        {
+            let options = IpcWriteOptions::try_new(8, false, arrow_ipc::MetadataVersion::V5)
+                .expect("options");
+            let mut writer =
+                StreamWriter::try_new_with_options(&mut aligned8, batch.schema().as_ref(), options)
+                    .expect("stream");
+            writer.write(&batch).expect("write");
+            drop(writer);
+        }
+        let mut default_stream = Vec::new();
+        {
+            let mut writer =
+                StreamWriter::try_new(&mut default_stream, batch.schema().as_ref()).expect("s");
+            writer.write(&batch).expect("write");
+            drop(writer);
+        }
+        let len64 = batch_message_metadata_len(&default_stream);
+        let len8 = batch_message_metadata_len(&aligned8);
+        assert_eq!(len64, 184);
+        assert_eq!(len8, 136);
+        assert_eq!(len64 - len8, 48, "metadata padding must be nonzero");
+    }
+
+    /// Contract-literal bundle-provenance digests produced by an external
+    /// oracle implementing section 8.1.1 byte-for-byte. The frozen formula
+    /// has NO child-count slot; these literals fail any implementation that
+    /// adds one.
+    #[test]
+    fn bundle_provenance_digest_matches_contract_literal_without_child_count() {
+        let run_id = Uuid::from_u128(0xB001);
+        let bundle_id = Uuid::from_u128(0xB002);
+        let bundle_artifact_id = Uuid::from_u128(0xB003);
+        let accepted_id = Uuid::from_u128(0xB004);
+        let validation_id = Uuid::from_u128(0xB005);
+        let rejected_id = Uuid::from_u128(0xB006);
+        let dedup_id = Uuid::from_u128(0xB007);
+        let manifest_of = |k: u8| {
+            let mut value = [0u8; 32];
+            value.fill(0x10 + k);
+            value
+        };
+        let content_of = |k: u8| {
+            let mut value = [0u8; 32];
+            value.fill(0x20 + k);
+            value
+        };
+
+        let children_without_rejected: Vec<(Uuid, [u8; 32], [u8; 32])> = vec![
+            (accepted_id, manifest_of(0), content_of(0)),
+            (validation_id, manifest_of(1), content_of(1)),
+            (dedup_id, manifest_of(3), content_of(3)),
+        ];
+        assert_eq!(
+            hex_digest(ContentDigest::from_bytes(compute_bundle_provenance_digest(
+                run_id,
+                bundle_id,
+                bundle_artifact_id,
+                accepted_id,
+                validation_id,
+                None,
+                dedup_id,
+                &children_without_rejected,
+            ))),
+            "08270b9647a16768f7cd07e811a7593dbeef7cc42cf36d437fe2bb966c95da38"
+        );
+
+        let children_with_rejected: Vec<(Uuid, [u8; 32], [u8; 32])> = vec![
+            (accepted_id, manifest_of(0), content_of(0)),
+            (validation_id, manifest_of(1), content_of(1)),
+            (rejected_id, manifest_of(2), content_of(2)),
+            (dedup_id, manifest_of(3), content_of(3)),
+        ];
+        assert_eq!(
+            hex_digest(ContentDigest::from_bytes(compute_bundle_provenance_digest(
+                run_id,
+                bundle_id,
+                bundle_artifact_id,
+                accepted_id,
+                validation_id,
+                Some(rejected_id),
+                dedup_id,
+                &children_with_rejected,
+            ))),
+            "d39cfe24ac422b8dbfed7e31b4fe3f68ddd1907dbf41f2572f1d8d1e3ec2d17a"
+        );
+    }
+
+    /// Accepted partition digests cover decoded logical batch bytes only:
+    /// identical logical data under different Parquet compression settings
+    /// produces identical digests, and any logical value flip changes the
+    /// digest (contract 8.1.1 excludes Parquet framing from the domain).
+    #[test]
+    fn accepted_partition_digest_is_independent_of_parquet_writer_settings() {
+        use arrow_ipc::writer::StreamWriter as IpcWriter;
+        use parquet::arrow::ArrowWriter;
+        use parquet::basic::Compression;
+        use parquet::file::properties::WriterProperties;
+
+        let schema = int_schema();
+        let encode_parquet = |values: Vec<i64>, compressed: bool, path: &std::path::Path| {
+            let properties = WriterProperties::builder()
+                .set_compression(if compressed {
+                    Compression::SNAPPY
+                } else {
+                    Compression::UNCOMPRESSED
+                })
+                .build();
+            let file = std::fs::File::create(path).expect("create file");
+            let mut writer = ArrowWriter::try_new(
+                file,
+                logical_schema_to_arrow(schema.as_ref()).expect("arrow schema"),
+                Some(properties),
+            )
+            .expect("writer");
+            writer.write(&int_batch(&schema, values)).expect("write");
+            writer.into_inner().expect("finish");
+            std::fs::read(path).expect("read back")
+        };
+        let decode_canonical = |file: &[u8]| -> Vec<u8> {
+            use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+            let temp = tempfile::TempDir::new().expect("temp dir");
+            let path = temp.path().join("partition.parquet");
+            std::fs::write(&path, file).expect("write file");
+            let reader_file = std::fs::File::open(&path).expect("open file");
+            let builder = ParquetRecordBatchReaderBuilder::try_new(reader_file).expect("builder");
+            let reader = builder.with_batch_size(1024).build().expect("reader");
+            let batches: Vec<RecordBatch> = reader.map(|batch| batch.expect("batch")).collect();
+            assert_eq!(batches.len(), 1);
+            let mut buffer = Vec::new();
+            {
+                let mut writer =
+                    IpcWriter::try_new(&mut buffer, batches[0].schema().as_ref()).expect("ipc");
+                writer.write(&batches[0]).expect("write");
+                drop(writer);
+            }
+            buffer
+        };
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let snappy = encode_parquet(vec![1, 2, 3], true, &temp.path().join("snappy.parquet"));
+        let plain = encode_parquet(vec![1, 2, 3], false, &temp.path().join("plain.parquet"));
+        assert_ne!(snappy, plain, "physical encodings must differ");
+
+        let digest_for = |file: &[u8]| {
+            let canonical = decode_canonical(file);
+            accepted_partition_canonical_digest(
+                Uuid::from_u128(0xB100),
+                0,
+                3,
+                u64::try_from(canonical.len()).expect("canonical length"),
+                std::slice::from_ref(&canonical),
+            )
+        };
+        assert_eq!(digest_for(&snappy), digest_for(&plain));
+
+        let flipped_file =
+            encode_parquet(vec![1, 2, 4], true, &temp.path().join("flipped.parquet"));
+        assert_ne!(digest_for(&flipped_file), digest_for(&snappy));
     }
 }

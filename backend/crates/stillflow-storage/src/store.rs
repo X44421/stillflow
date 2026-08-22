@@ -1241,7 +1241,7 @@ pub(crate) fn load_manifest_inner(
     SnapshotManifest::try_new(snapshot, partitions)
 }
 
-fn read_partition(
+pub(crate) fn read_partition(
     inner: &StoreInner,
     snapshot: &DatasetSnapshot,
     partition: &SnapshotPartition,

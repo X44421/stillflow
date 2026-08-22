@@ -1199,6 +1199,36 @@ mod tests {
             absent.canonical_bytes().expect("canonical"),
             absent_expected
         );
+
+        // Every frozen unit tag is pinned positionally, including the two
+        // reserved-in-E4-C0 encodings: Second = 0x00 and Microsecond = 0x02.
+        for (unit, tag) in [
+            (TimeUnit::Second, 0x00_u8),
+            (TimeUnit::Microsecond, 0x02_u8),
+        ] {
+            let schema = LogicalSchema::new(vec![column(
+                2,
+                "t",
+                LogicalType::Timestamp {
+                    unit,
+                    timezone: None,
+                },
+            )])
+            .expect("schema");
+            let mut expected = Vec::new();
+            expected.extend_from_slice(&LOGICAL_SCHEMA_VERSION.to_le_bytes());
+            expected.extend_from_slice(&1_u32.to_le_bytes());
+            expected.extend_from_slice(&field_header("t", 2, false));
+            // Type descriptor only: unit tag plus timezone-presence byte.
+            expected.extend_from_slice(&[0x0F, tag, 0x00]);
+            expected.extend_from_slice(&metadata_block(&[]));
+            expected.extend_from_slice(&metadata_block(&[]));
+            assert_eq!(
+                schema.canonical_bytes().expect("canonical"),
+                expected,
+                "unit tag for {unit:?}"
+            );
+        }
     }
 
     #[test]
