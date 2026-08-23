@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 15,
+  "revision": 16,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
-  "updated_at": "2026-08-23T06:53:31Z",
+  "source_main_sha": "9c368cee186bffa4f55d5de5c80d7b2be6957135",
+  "updated_at": "2026-08-23T07:18:05Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -378,7 +378,7 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-23T06:28:27Z",
-      "notes": "REDEFINED by REGISTRY-R12 (rev 12). Old meaning 'standalone/exact dedup index' retired: dedup delivery landed inside E4-S1/PR #74. Canonical task: issue #80; delivery: PR #91 (Draft). Current state: independent acceptance RESERVED / REVIEW IN PROCESS handled by ANOTHER session; CLAIM record pending. DO NOT DUPLICATE: no other session may claim, accept, or touch #80/#91; E4-S2-R0-ACCEPT is out of scope everywhere else. Status 'hold' is deliberately unclaimable until that review session records its CLAIM/DONE. | REGISTRY-R13 maintainer freeze (engine-writer serialization): frozen execution order is T53-T71 first, then E4-S2-R1; the two must never hold engine:stillflow-engine concurrently. Forward lock declarations added here (branch lock on agent/issue-080-e4-verification-materialization plus engine:stillflow-engine, conflicts_with T53-T71); status stays hold/unclaimable and no claim is made by this revision. E4-S2-R1 may acquire the engine writer only after ALL of: (1) T53-T71 reaches a terminal state and releases engine:stillflow-engine; (2) this hold is lifted by the reserved acceptance session recording its CLAIM/DONE; (3) the maintainer explicitly authorizes the R1 fix round (PR #91 F1-F4). No other task, PR, or code branch was touched by REGISTRY-R13.",
+      "notes": "REDEFINED by REGISTRY-R12 (rev 12). Old meaning 'standalone/exact dedup index' retired: dedup delivery landed inside E4-S1/PR #74. Canonical task: issue #80; delivery: PR #91 (Draft). Current state: independent acceptance RESERVED / REVIEW IN PROCESS handled by ANOTHER session; CLAIM record pending. DO NOT DUPLICATE: no other session may claim, accept, or touch #80/#91; E4-S2-R0-ACCEPT is out of scope everywhere else. Status 'hold' is deliberately unclaimable until that review session records its CLAIM/DONE. | REGISTRY-R13 maintainer freeze (engine-writer serialization): frozen execution order is T53-T71 first, then E4-S2-R1; the two must never hold engine:stillflow-engine concurrently. Forward lock declarations added here (branch lock on agent/issue-080-e4-verification-materialization plus engine:stillflow-engine, conflicts_with T53-T71); status stays hold/unclaimable and no claim is made by this revision. E4-S2-R1 may acquire the engine writer only after ALL of: (1) T53-T71 reaches a terminal state and releases engine:stillflow-engine; (2) this hold is lifted by the reserved acceptance session recording its CLAIM/DONE; (3) the maintainer explicitly authorizes the R1 fix round (PR #91 F1-F4). No other task, PR, or code branch was touched by REGISTRY-R13. | REGISTRY-R16 maintainer frozen order (comment 5384765766): E4-S2-R1 additionally waits for order step 4 - REBIND #91 only after the T53-REBIND-ACCEPT sequence lands #53 into main; the R13 gates above are unchanged and now also serialized against T53-REBIND-ACCEPT (mutual conflicts_with).",
       "hold_reason": "independent acceptance RESERVED / REVIEW IN PROCESS handled by another session; CLAIM record pending",
       "canonical_issue": 80,
       "head_bound_by": "ox-alpha-coordinator",
@@ -443,7 +443,65 @@
       "updated_at": "2026-08-23T06:53:31Z",
       "completed_at": "2026-08-23T06:53:31Z",
       "completion_note": "Maintainer-authorized body-only correction (dispatch A2): re-read live GitHub state and appended a 'Status refresh' section to PR #89 (#71 merged as 90fb878e… into the #53 branch; #73 and #90 CLOSED; #80 OPEN now carrying Draft #91 with REQUEST CHANGES F1-F4; registry R11->R14). No commits pushed; head unchanged 3a84bb5a778a860929e95716efd7a3c07bbe375a; PR remains Draft/open. Applied via REST PATCH because gh pr edit is blocked by missing read:org token scope - environment limitation, reported, not a pass claim.",
-      "notes": "Docs-only governance action; zero lock occupancy; executed in parallel with T53-T71 without conflict. Any further #89 work beyond body metadata requires a new dispatch."
+      "notes": "Docs-only governance action; zero lock occupancy; executed in parallel with T53-T71 without conflict. Any further #89 work beyond body metadata requires a new dispatch. | Maintainer frozen order step 5 (comment 5384765766): before #89 merges, re-verify committed roadmap facts against live GitHub state once more."
+    },
+    {
+      "id": "DX-F0-MERGE",
+      "title": "Merge the reviewed DX-F0 feedback loop (#88) into main",
+      "status": "done",
+      "mode": "maintenance",
+      "owner": "ox-alpha-coordinator",
+      "target_pr": 88,
+      "target_branch": "agent/issue-085-backend-feedback-loop",
+      "result_branch": "main",
+      "expected_head": "9d218d3125b0ae4162e07967168a0475ad79a336",
+      "locks": [],
+      "acceptance_keys": [
+        "dxf0:merge"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-23T07:18:05Z",
+      "completed_at": "2026-08-23T07:18:05Z",
+      "result_head": "9c368cee186bffa4f55d5de5c80d7b2be6957135",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32569171934",
+      "completion_note": "Executed under maintainer frozen-order step 1 (Epic #81 receipt comment 5384765766; DX-F0-REVIEW PASS at comment 5384493487). Guards verified live before merge: PR head == expected 9d218d3125b0ae4162e07967168a0475ad79a336; base main @ ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a unmoved; CI run 32569171934 success on that exact head; mergeable CLEAN. #88 marked Ready and merged at 2026-08-23T07:16:18Z as merge commit 9c368cee186bffa4f55d5de5c80d7b2be6957135 with parents [ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a, 9d218d3125b0ae4162e07967168a0475ad79a336] verified post-merge.",
+      "notes": "main advanced ea54a52 -> 9c368ce; this new main SHA is the rebase target for T53-REBIND-ACCEPT."
+    },
+    {
+      "id": "T53-REBIND-ACCEPT",
+      "title": "Rebase #53 onto post-#88 main, fresh CI, independent acceptance, then main integration",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_pr": 53,
+      "target_branch": "agent/issue-052-node-preview-runtime",
+      "result_branch": "main",
+      "expected_head": "90fb878e2ace78a6e1c2698014bca5461f19db59",
+      "locks": [
+        "branch:agent/issue-052-node-preview-runtime",
+        "engine:stillflow-engine"
+      ],
+      "acceptance_keys": [
+        "t53rebind:rebase-onto-9c368cee",
+        "t53rebind:fresh-dual-toolchain-ci",
+        "t53rebind:independent-acceptance",
+        "t53rebind:main-integration-sha"
+      ],
+      "depends_on": [
+        "DX-F0-MERGE"
+      ],
+      "conflicts_with": [
+        "E4-S2"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-23T07:18:05Z",
+      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules.",
+      "queued_by": "maintainer:frozen-order-2026-08-23",
+      "queue_reason": "Maintainer order step 2 trigger satisfied by DX-F0-MERGE completion (main @ 9c368cee186bffa4f55d5de5c80d7b2be6957135)."
     }
   ],
   "locks": {}
