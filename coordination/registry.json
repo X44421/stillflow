@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 23,
+  "revision": 24,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T08:21:28.797Z",
+  "updated_at": "2026-08-23T08:32:46.290Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -255,7 +255,7 @@
     {
       "id": "T76-CLOSE",
       "title": "O0-D0 documentation convergence",
-      "status": "wait_maintainer",
+      "status": "dispatched",
       "mode": "maintenance",
       "owner": null,
       "target_pr": 76,
@@ -270,9 +270,11 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-23T05:57:20Z",
-      "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer.",
-      "verified_by": "ox-alpha-coordinator (REGISTRY-R12)"
+      "updated_at": "2026-08-23T08:32:46.290Z",
+      "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer. | REGISTRY-R24 dispatch: exact PR #76 head ceeaa1e113ce335a804c016dd9404c4937a01105 re-verified Open/Draft/MERGEABLE; authorized body-only current-status correction and evidence refresh. No commit, Ready, merge, issue closure, or branch deletion; stop after posting completion evidence for an independent exact-head acceptance.",
+      "verified_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "queued_by": "maintainer:status-query-autodispatch",
+      "queue_reason": "User-authorized maintainer dispatch: converge PR #76 metadata at exact head, then stop for independent docs acceptance."
     },
     {
       "id": "T53-T71",
@@ -508,6 +510,69 @@
       "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration. | REGISTRY-R18 checkpoint reached 2026-08-23T07:31:35Z: 23 commits rebased onto main 9c368cee… with zero conflicts and 23/23 identical patches (range-diff all '='); backup ref refs/backup/t53-rebind-pre-90fb878e pushed; force-with-lease moved the branch to rebind head a7a517c29a0509716d68a53c0baf0c32b0e483d8; fresh CI run 32625688994 = success, 7 green jobs (stable + Rust 1.85.0 x fmt/clippy/serial tests + Frontend). EXECUTION STOPPED at the approved checkpoint - AWAITING INDEPENDENT ACCEPTANCE before any main integration. Base-migration disclosure: the #53 historical base predated the post-#74/#88 mains, so the tree delta vs the pre-rebase head (+13079/-266 across 39 files) comes solely from base movement, not patch drift. | REGISTRY-R19: independent acceptance returned APPROVE FOR MAIN INTEGRATION (PR #53 comment 5384935921; approved base 9c368cee… head a7a517c…; range-diff independently reproduced 23/23 '='; CI 7/7 green, 327/0 tests per toolchain, engine 93/93). main:merge lock acquired by ox-alpha-coordinator at 2026-08-23T07:58:40Z; anchors re-verified exact; proceeding with the approved main integration. | REGISTRY-R20 completion at 2026-08-23T08:07:56Z: #53 marked Ready and merged at 2026-08-23T08:00:28Z under exact-head guard (head a7a517c…, base main 9c368cee…) as merge commit c0e828031f0141fa89e6b525b4314ebabd5f4f4e with verified parents [9c368cee…, a7a517c…]; main CI run 32627094649 = success 7/7 on the merge commit; issues #52 and #70 closed with delivery evidence; all three locks (branch, engine, main:merge) released. | REGISTRY-R21 correction: status field set to done (missed in R20; all other completion fields were already recorded there).",
       "queued_by": "maintainer:frozen-order-2026-08-23",
       "queue_reason": "Maintainer order step 2 trigger satisfied by DX-F0-MERGE completion (main @ 9c368cee186bffa4f55d5de5c80d7b2be6957135)."
+    },
+    {
+      "id": "T89-REBIND-R2",
+      "title": "Rebind PR #89 roadmap onto current main and refresh live facts",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_pr": 89,
+      "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
+      "expected_head": "f5407b4b71a6cca495548c24d26f06b97f444fbb",
+      "expected_main": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "locks": [
+        "branch:agent/issue-082-backend-roadmap-reconciliation"
+      ],
+      "paths": [
+        "docs/development/backend-completion-execution-checklist.md"
+      ],
+      "acceptance_keys": [
+        "pr89:rebind-to-c0e82803",
+        "pr89:preserve-b0-and-xr-roadmap",
+        "pr89:live-fact-refresh",
+        "pr89:one-file-diff"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-23T08:32:46.290Z",
+      "queued_by": "maintainer:status-query-autodispatch",
+      "queue_reason": "PR #89 contains the canonical roadmap plus #93 registration but diverges from current main after #53 integration; rebind and fact refresh are required before independent review.",
+      "notes": "At CLAIM, re-fetch PR #89 head and main; stop on either mismatch. Create backup ref before rewrite. Rebase the existing branch onto main c0e828031f0141fa89e6b525b4314ebabd5f4f4e, resolve only the authorized roadmap file, preserve the B0 reconciliation and F-XR0/#93 additions, reproduce range-diff/content mapping, refresh current GitHub facts in the document/body, run git diff --check and placeholder/link/dependency-graph checks, then force-with-lease. Keep PR Draft and stop at the new-head checkpoint for independent acceptance. Do not touch runtime, #80/#91, Ready, merge, close #82, or delete branches."
+    },
+    {
+      "id": "XR-D0",
+      "title": "Inventory current execution-backend coupling",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "canonical_issue": 94,
+      "target_pr": null,
+      "target_branch": "main",
+      "result_branch": "agent/issue-094-execution-backend-coupling-inventory",
+      "expected_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "locks": [
+        "branch:agent/issue-094-execution-backend-coupling-inventory"
+      ],
+      "paths": [
+        "docs/issues/execution-backend-coupling-inventory.md"
+      ],
+      "acceptance_keys": [
+        "xr:d0-public-surface-map",
+        "xr:d0-physical-coupling-map",
+        "xr:d0-operator-authority-matrices",
+        "xr:d0-contract-vs-implementation-evidence"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-23T08:32:46.290Z",
+      "queued_by": "maintainer:status-query-autodispatch",
+      "queue_reason": "Issue #93 architecture direction requires a source-bound inventory before XR-C0/ADR-002; docs-only work is independent of E4-S2 hold.",
+      "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91."
     }
   ],
   "locks": {}
