@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 32,
+  "revision": 33,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T10:10:24Z",
+  "updated_at": "2026-08-23T10:10:38Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -614,7 +614,7 @@
     {
       "id": "T89-ACCEPT-R3",
       "title": "Independent exact-head acceptance of rebound backend roadmap",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-r24acc",
       "target_pr": 89,
@@ -634,12 +634,15 @@
         "T89-REBIND-R2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-23T11:12:35Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-23T09:42:35Z",
-      "updated_at": "2026-08-23T09:42:35Z",
+      "updated_at": "2026-08-23T10:10:38Z",
       "queued_by": "maintainer:auto-followup-after-r24",
       "queue_reason": "PR #89 has been cleanly rebound to current main, refreshed, and stopped Draft at a green exact head; independent roadmap acceptance is required before maintainer merge decisions.",
-      "notes": "Read-only independent review. Reproduce exact head/base/one-file diff, validate the 2=2 rebase equivalence and the additional fact-refresh commit separately, re-read live GitHub facts, verify statuses/dependencies/gates and the Mermaid graph are acyclic, and confirm F-XR0/#93 is registration only and does not weaken ADR-001 or touch E4-S2. Publish APPROVE FOR DOCS MERGE or REQUEST CHANGES bound to the full head. No branch/body edits, Ready, merge, close #82, or branch deletion."
+      "notes": "Read-only independent review. Reproduce exact head/base/one-file diff, validate the 2=2 rebase equivalence and the additional fact-refresh commit separately, re-read live GitHub facts, verify statuses/dependencies/gates and the Mermaid graph are acyclic, and confirm F-XR0/#93 is registration only and does not weaken ADR-001 or touch E4-S2. Publish APPROVE FOR DOCS MERGE or REQUEST CHANGES bound to the full head. No branch/body edits, Ready, merge, close #82, or branch deletion.",
+      "completed_at": "2026-08-23T10:10:38Z",
+      "result_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
+      "completion_note": "APPROVE FOR DOCS MERGE; 2=2 rebase equivalence proven via stable patch-ids (37265e36..., 207c2aa0...), coordinator countersign; section 4.1 fact-refresh verified live row-by-row; Mermaid acyclic (51 nodes/59 edges); F-XR0/#93 registration-only confirmed; ADR-001 byte-identical. Evidence: https://github.com/X44421/stillflow/pull/89#issuecomment-5385454915"
     },
     {
       "id": "XR-D0-ACCEPT",
