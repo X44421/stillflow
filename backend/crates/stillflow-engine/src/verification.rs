@@ -288,6 +288,19 @@ pub(crate) fn encode_component<'a>(
     value: KeyValue<'a>,
     out: &mut KeyBytes,
 ) -> Result<(), EngineError> {
+    match declared {
+        LogicalType::List(_) | LogicalType::Struct(_) => {
+            return Err(EngineError::TypeError(
+                "list and struct keys are paused in E4-C0",
+            ));
+        }
+        LogicalType::Timestamp { unit: TimeUnit::Second, .. } => {
+            return Err(EngineError::TypeError(
+                "Timestamp Second keys are paused in E4-C0",
+            ));
+        }
+        _ => {}
+    }
     if matches!(value, KeyValue::Null) {
         return out.push(0x00);
     }
@@ -1123,7 +1136,7 @@ impl VerificationMemory {
     }
 
     pub(crate) fn hold_envelope(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.begin_hold(self.envelope_bytes, bytes, stillflow_core::MAX_BATCH_BYTES)?;
+        self.begin_hold(0, self.envelope_bytes, bytes, stillflow_core::MAX_BATCH_BYTES)?;
         self.envelope_bytes += bytes;
         self.check_peak()
     }
@@ -1135,7 +1148,7 @@ impl VerificationMemory {
     }
 
     pub(crate) fn hold_polars(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.begin_hold(self.polars_bytes, bytes, stillflow_core::MAX_BATCH_BYTES)?;
+        self.begin_hold(1, self.polars_bytes, bytes, stillflow_core::MAX_BATCH_BYTES)?;
         self.polars_bytes += bytes;
         self.check_peak()
     }
@@ -1148,7 +1161,7 @@ impl VerificationMemory {
 
     pub(crate) fn swap_envelope(&mut self, incoming: usize) -> Result<(), EngineError> {
         let previous = std::mem::take(&mut self.envelope_bytes);
-        self.end_hold(previous);
+        self.end_hold(0, previous);
         self.hold_envelope(incoming)
     }
 
@@ -1165,7 +1178,7 @@ impl VerificationMemory {
 
     pub(crate) fn release_accepted_remainder(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.accepted_remainder_bytes = self.accepted_remainder_bytes.saturating_sub(bytes);
-        self.end_hold(self.accepted_remainder_bytes);
+        self.end_hold(2, self.accepted_remainder_bytes);
         Ok(())
     }
 
@@ -1181,7 +1194,7 @@ impl VerificationMemory {
 
     pub(crate) fn release_rejected_remainder(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.rejected_remainder_bytes = self.rejected_remainder_bytes.saturating_sub(bytes);
-        self.end_hold(self.rejected_remainder_bytes);
+        self.end_hold(3, self.rejected_remainder_bytes);
         Ok(())
     }
 
@@ -1197,7 +1210,7 @@ impl VerificationMemory {
 
     pub(crate) fn release_validation_report(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.validation_report_bytes = self.validation_report_bytes.saturating_sub(bytes);
-        self.end_hold(self.validation_report_bytes);
+        self.end_hold(4, self.validation_report_bytes);
         Ok(())
     }
 
@@ -1208,7 +1221,7 @@ impl VerificationMemory {
 
     pub(crate) fn release_dedup_report(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.dedup_report_bytes = self.dedup_report_bytes.saturating_sub(bytes);
-        self.end_hold(self.dedup_report_bytes);
+        self.end_hold(5, self.dedup_report_bytes);
         Ok(())
     }
 
@@ -1791,18 +1804,21 @@ fn flush_validation_findings(
     let severities: Vec<&'static str> = run.val_findings.iter().map(|row| row.severity).collect();
     let outcomes: Vec<&'static str> = run.val_findings.iter().map(|row| row.outcome).collect();
     let batch = build_report_batch(&schema, &arrow, &mut |builders| {
+        // Frozen column order (artifact.rs): kind, id, version digest,
+        // SOURCE_ROW_ORDINAL, plan fingerprint, canonical digest, node,
+        // rule ordinal, severity, outcome.
         fill_text(&mut builders[0], inputs.input_kind, count)?;
         fill_text(&mut builders[1], &inputs.input_id, count)?;
         fill_text(&mut builders[2], &inputs.input_version_digest, count)?;
-        fill_text(&mut builders[3], &inputs.plan_fingerprint_hex, count)?;
-        fill_text(&mut builders[4], &inputs.canonical_plan_digest_hex, count)?;
-        fill_uuids(&mut builders[5], &node_ids)?;
-        fill_u32(&mut builders[6], &rule_ordinals)?;
+        fill_u64(&mut builders[3], &source_ordinals)?;
+        fill_text(&mut builders[4], &inputs.plan_fingerprint_hex, count)?;
+        fill_text(&mut builders[5], &inputs.canonical_plan_digest_hex, count)?;
+        fill_uuids(&mut builders[6], &node_ids)?;
+        fill_u32(&mut builders[7], &rule_ordinals)?;
         for index in 0..count {
-            fill_text(&mut builders[7], severities[index], 1)?;
-            fill_text(&mut builders[8], outcomes[index], 1)?;
+            fill_text(&mut builders[8], severities[index], 1)?;
+            fill_text(&mut builders[9], outcomes[index], 1)?;
         }
-        fill_u64(&mut builders[9], &source_ordinals)?;
         Ok(())
     })?;
     run.release_validation_rows(count)?;

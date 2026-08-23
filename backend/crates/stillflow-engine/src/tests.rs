@@ -3010,6 +3010,7 @@ mod verification {
 
     fn ver_plan(
         source_asset_id: Uuid,
+        projection: Vec<ColumnId>,
         keys: &[ColumnId],
         validate: Option<(Expr, stillflow_plan::ValidationSeverity, &'static str)>,
         filter_rows: Option<Expr>,
@@ -3029,7 +3030,7 @@ mod verification {
             node_rules.push(Rule::FilterRows { predicate });
         }
         let mut nodes = BTreeMap::new();
-        nodes.insert(scan, PlanNode::new(PlanNodeKind::Scan { source_asset_id, projection: Vec::new(), predicate: None }, Vec::new()));
+        nodes.insert(scan, PlanNode::new(PlanNodeKind::Scan { source_asset_id, projection, predicate: None }, Vec::new()));
         nodes.insert(filter, PlanNode::new(PlanNodeKind::Filter { predicate: Expr::Literal(ScalarValue::Boolean(true)) }, vec![scan]));
         nodes.insert(rules, PlanNode::new(PlanNodeKind::ApplyRules { rules: node_rules }, vec![filter]));
         nodes.insert(materialize, PlanNode::new(PlanNodeKind::Materialize { output_label: "out".to_owned() }, vec![rules]));
@@ -3095,6 +3096,7 @@ mod verification {
         let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
         let plan = ver_plan(
             source.id,
+            vec![schema.fields[0].id],
             &[],
             Some((
                 Expr::Binary {
@@ -3102,17 +3104,125 @@ mod verification {
                     operator: stillflow_core::BinaryOperator::GreaterThan,
                     right: Box::new(Expr::Literal(ScalarValue::Int64(1))),
                 },
-                stillflow_plan::ValidationSeverity::Warning,
+                stillflow_plan::ValidationSeverity::Error,
                 "above one",
             )),
             None,
         );
         let digest = canonical_digest(&plan);
         let ids = ver_ids(0xA0);
+        let bundle_id = ids.bundle_id;
+        let rejected_id = ids.rejected_rows_artifact_id.expect("authorized");
         let mut request = verify_request((&engine, &store), &connection, &source, schema.clone(), plan, ids, None);
         request.identities.canonical_plan_digest = digest;
         let bundle = engine.materialize_verification(request).await.expect("bundle");
-        assert!(bundle.rejected_rows().is_some());
+        let rejected = bundle.rejected_rows().expect("terminal rejections publish payload");
+        assert_eq!(rejected.manifest().artifact_id(), rejected_id);
+        let mut reader = store
+            .open_artifact_section(
+                bundle_id,
+                rejected_id,
+                stillflow_storage::ArtifactSectionId::RejectedRows,
+            )
+            .expect("open rejected section");
+        let mut payload_rows = 0usize;
+        while let Some(item) = reader.next() {
+            payload_rows += item.expect("envelope").row_count();
+        }
+        assert_eq!(payload_rows, 2);
+        assert_eq!(bundle.accepted().manifest().snapshot().stats().row_count(), 1);
         drop(_guard);
     }
+
+    use crate::EngineError;
+
+    fn reject_plan(source_id: Uuid, id: ColumnId) -> LogicalPlan {
+        ver_plan(source_id, vec![id], &[], Some((
+            Expr::Binary {
+                left: Box::new(Expr::Column(id)),
+                operator: stillflow_core::BinaryOperator::GreaterThan,
+                right: Box::new(Expr::Literal(ScalarValue::Int64(0))),
+            },
+            stillflow_plan::ValidationSeverity::Error,
+            "always fails",
+        )), None)
+    }
+
+    // V02: empty source publishes accepted + two zero-row reports; rejected
+    // stays absent even under Some(id) authorization.
+    #[tokio::test(flavor = "current_thread")]
+    async fn v02_empty_source_zero_rejection_protocol() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, _id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = reject_plan(source.id, schema.fields[0].id);
+        let digest = canonical_digest(&plan);
+        let ids = ver_ids(0xB0);
+        let mut request = verify_request((&engine, &store), &connection, &source, schema.clone(), plan, ids, None);
+        request.identities.canonical_plan_digest = digest;
+        let bundle = engine.materialize_verification(request).await.expect("bundle");
+        assert!(bundle.rejected_rows().is_none());
+        
+        assert_eq!(bundle.validation_report().manifest().sections().len(), 2);
+        assert_eq!(bundle.deduplication_report().manifest().sections().len(), 2);
+        drop(_guard);
+    }
+
+    // V02b: None authorization + terminal rejection fails InvalidPlan and
+    // publishes nothing (contract 10.5).
+    #[tokio::test(flavor = "current_thread")]
+    async fn v02b_unauthorized_rejection_fails_closed() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, _id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let env = int_batch(&schema, source.id, 2);
+        let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = reject_plan(source.id, schema.fields[0].id);
+        let digest = canonical_digest(&plan);
+        let ids = ver_ids(0xC0);
+        let mut request = verify_request((&engine, &store), &connection, &source, schema.clone(), plan, ids, None);
+        request.identities.canonical_plan_digest = digest;
+        request.identities.rejected_rows_artifact_id = None;
+        let run_id = request.identities.run_id;
+        let error = engine.materialize_verification(request).await.expect_err("must fail");
+        assert!(matches!(error, EngineError::InvalidPlan(_)));
+        assert!(store.load_verification_bundle_by_run_id(run_id).is_err());
+        drop(_guard);
+    }
+
+    // V23: E2 materialize keeps rejecting Validate rules.
+    #[tokio::test(flavor = "current_thread")]
+    async fn v23_materialize_still_rejects_validate() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, id) = int_schema(); // used by reject_plan below
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = reject_plan(source.id, schema.fields[0].id);
+        let error = engine
+            .materialize(ExecutionRequest {
+                plan,
+                connection: connection.clone(),
+                asset: source.clone(),
+                schema_override: Some(schema),
+                identities: identities(),
+                context: long_context(),
+                batch_size: 64,
+                store: &store,
+            })
+            .await
+            .expect_err("E2 must refuse");
+        assert!(matches!(error, EngineError::UnsupportedRule { kind: "validate", .. }));
+        drop(_guard);
+    }
+
 }
