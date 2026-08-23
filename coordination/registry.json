@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 16,
+  "revision": 17,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "9c368cee186bffa4f55d5de5c80d7b2be6957135",
-  "updated_at": "2026-08-23T07:18:05Z",
+  "updated_at": "2026-08-23T07:24:43Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -473,9 +473,9 @@
     {
       "id": "T53-REBIND-ACCEPT",
       "title": "Rebase #53 onto post-#88 main, fresh CI, independent acceptance, then main integration",
-      "status": "queued",
+      "status": "dispatched",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-coordinator",
       "target_pr": 53,
       "target_branch": "agent/issue-052-node-preview-runtime",
       "result_branch": "main",
@@ -496,13 +496,27 @@
       "conflicts_with": [
         "E4-S2"
       ],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-23T07:18:05Z",
-      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules.",
+      "lease_expires_at": "2026-08-23T08:54:43Z",
+      "started_at": "2026-08-23T07:24:43Z",
+      "updated_at": "2026-08-23T07:24:43Z",
+      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration.",
       "queued_by": "maintainer:frozen-order-2026-08-23",
       "queue_reason": "Maintainer order step 2 trigger satisfied by DX-F0-MERGE completion (main @ 9c368cee186bffa4f55d5de5c80d7b2be6957135)."
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/issue-052-node-preview-runtime": {
+      "task_id": "T53-REBIND-ACCEPT",
+      "owner": "ox-alpha-coordinator",
+      "expected_head": "90fb878e2ace78a6e1c2698014bca5461f19db59",
+      "acquired_at": "2026-08-23T07:24:43Z",
+      "lease_expires_at": "2026-08-23T08:54:43Z"
+    },
+    "engine:stillflow-engine": {
+      "task_id": "T53-REBIND-ACCEPT",
+      "owner": "ox-alpha-coordinator",
+      "acquired_at": "2026-08-23T07:24:43Z",
+      "lease_expires_at": "2026-08-23T08:54:43Z"
+    }
+  }
 }
