@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 25,
+  "revision": 26,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T08:37:40Z",
+  "updated_at": "2026-08-23T09:04:44Z",
   "policy": {
     "terminal_statuses": [
       "done",
