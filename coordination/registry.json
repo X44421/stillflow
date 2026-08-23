@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 33,
+  "revision": 34,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T10:10:38Z",
+  "updated_at": "2026-08-23T10:10:51Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -647,7 +647,7 @@
     {
       "id": "XR-D0-ACCEPT",
       "title": "Independent fact acceptance of execution-backend coupling inventory",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-r24acc",
       "canonical_issue": 94,
@@ -668,12 +668,15 @@
         "XR-D0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-23T11:12:49Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-23T09:42:49Z",
-      "updated_at": "2026-08-23T09:42:49Z",
+      "updated_at": "2026-08-23T10:10:51Z",
       "queued_by": "maintainer:auto-followup-after-r24",
       "queue_reason": "XR-D0 delivery is complete as one docs-only file with green exact-head CI; its factual inventory must be independently reproduced before XR-C0/ADR-002.",
-      "notes": "Read-only independent fact review. Do not trust counts or classifications. Sample and reproduce source citations across every crate and verify all public RecordBatch exposure, Polars confinement, DuckDB absence, operator support/rejection, runtime authority, test taxonomy, and nine disclosed gaps. Check facts are separated from inference/decision inputs and that no Backend trait/ADR is smuggled in. Publish APPROVE FOR FACT MERGE or REQUEST CHANGES bound to the full head. Do not edit, Ready, merge, close #94, start XR-C0, or touch #80/#91."
+      "notes": "Read-only independent fact review. Do not trust counts or classifications. Sample and reproduce source citations across every crate and verify all public RecordBatch exposure, Polars confinement, DuckDB absence, operator support/rejection, runtime authority, test taxonomy, and nine disclosed gaps. Check facts are separated from inference/decision inputs and that no Backend trait/ADR is smuggled in. Publish APPROVE FOR FACT MERGE or REQUEST CHANGES bound to the full head. Do not edit, Ready, merge, close #94, start XR-C0, or touch #80/#91.",
+      "completed_at": "2026-08-23T10:10:51Z",
+      "result_head": "3604536ed6ef18fc889617be088043906a3521e8",
+      "completion_note": "REQUEST CHANGES; ~246/250 assertions reproduce exactly; 4 source-backed blockers: A=L66 EngineError has 18 not 17 variants; B=L224 53 not 54 numbered tests; C=L98 production polars_data_type import mislabeled test-only; D=L45 DuckDB zero-occurrence overclaim (plan/lib.rs:3 doc-comment). Four small edits; structural findings sound; fresh fact review after fix should approve. Evidence: https://github.com/X44421/stillflow/pull/95#issuecomment-5385455025"
     }
   ],
   "locks": {}
