@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 27,
+  "revision": 28,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T09:13:18Z",
+  "updated_at": "2026-08-23T09:26:17.066Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -579,6 +579,95 @@
       "queue_reason": "Issue #93 architecture direction requires a source-bound inventory before XR-C0/ADR-002; docs-only work is independent of E4-S2 hold.",
       "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91. | REGISTRY-R27 done at 2026-08-23T09:13:18Z: single-file delivery docs/issues/execution-backend-coupling-inventory.md (326 lines) committed at result head 3604536ed6ef18fc889617be088043906a3521e8 on branch agent/issue-094-execution-backend-coupling-inventory from exact base c0e82803…; Draft PR #95 opened; CI run 32630256436 = success 7/7 on the result head; git diff --check and zero-placeholder checks green. Classification discipline: 61 [source fact] with path:symbol citations, 8 [accepted contract fact], 3 [static inference], 7 [requires experiment], 4 [XR-C0 decision input]. Branch lock released; stopped for independent fact review per scope.",
       "completed_at": "2026-08-23T09:13:18Z"
+    },
+    {
+      "id": "T76-ACCEPT",
+      "title": "Independent exact-head acceptance of O0-D0 inventory",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "target_pr": 76,
+      "target_branch": "agent/issue-075-backend-optimization-inventory",
+      "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32551940170",
+      "locks": [],
+      "acceptance_keys": [
+        "pr76:exact-head-and-one-file",
+        "pr76:source-fact-accuracy",
+        "pr76:measurement-vs-claim-discipline",
+        "pr76:body-current-status"
+      ],
+      "depends_on": [
+        "T76-CLOSE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-23T09:26:17.066Z",
+      "queued_by": "maintainer:auto-followup-after-r24",
+      "queue_reason": "R24 body convergence is complete at an unchanged exact head with one-file diff and green CI; independent docs acceptance is the next gate.",
+      "notes": "Read-only independent review. Re-fetch exact head, base, diff and CI. Do not trust author summary. Validate every material performance/complexity claim against source at the recorded historical base, verify formulas and fact/inference/experiment labels, confirm the PR body now distinguishes historical and current status, and check no implementation authorization is implied. Publish APPROVE FOR DOCS MERGE or REQUEST CHANGES bound to the full head. Do not edit body/branch, Ready, merge, close #75, or delete branch."
+    },
+    {
+      "id": "T89-ACCEPT-R3",
+      "title": "Independent exact-head acceptance of rebound backend roadmap",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "target_pr": 89,
+      "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
+      "expected_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
+      "expected_base": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32629393791",
+      "locks": [],
+      "acceptance_keys": [
+        "pr89:exact-head-base-ci",
+        "pr89:rebase-equivalence",
+        "pr89:live-roadmap-facts",
+        "pr89:acyclic-topology",
+        "pr89:xr93-authority-boundary"
+      ],
+      "depends_on": [
+        "T89-REBIND-R2"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-23T09:26:17.066Z",
+      "queued_by": "maintainer:auto-followup-after-r24",
+      "queue_reason": "PR #89 has been cleanly rebound to current main, refreshed, and stopped Draft at a green exact head; independent roadmap acceptance is required before maintainer merge decisions.",
+      "notes": "Read-only independent review. Reproduce exact head/base/one-file diff, validate the 2=2 rebase equivalence and the additional fact-refresh commit separately, re-read live GitHub facts, verify statuses/dependencies/gates and the Mermaid graph are acyclic, and confirm F-XR0/#93 is registration only and does not weaken ADR-001 or touch E4-S2. Publish APPROVE FOR DOCS MERGE or REQUEST CHANGES bound to the full head. No branch/body edits, Ready, merge, close #82, or branch deletion."
+    },
+    {
+      "id": "XR-D0-ACCEPT",
+      "title": "Independent fact acceptance of execution-backend coupling inventory",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "canonical_issue": 94,
+      "target_pr": 95,
+      "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
+      "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
+      "expected_base": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32630256436",
+      "locks": [],
+      "acceptance_keys": [
+        "xr:d0-exact-head-one-file",
+        "xr:d0-source-citation-reproduction",
+        "xr:d0-public-physical-boundary",
+        "xr:d0-operator-runtime-authority",
+        "xr:d0-decision-input-discipline"
+      ],
+      "depends_on": [
+        "XR-D0"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-23T09:26:17.066Z",
+      "queued_by": "maintainer:auto-followup-after-r24",
+      "queue_reason": "XR-D0 delivery is complete as one docs-only file with green exact-head CI; its factual inventory must be independently reproduced before XR-C0/ADR-002.",
+      "notes": "Read-only independent fact review. Do not trust counts or classifications. Sample and reproduce source citations across every crate and verify all public RecordBatch exposure, Polars confinement, DuckDB absence, operator support/rejection, runtime authority, test taxonomy, and nine disclosed gaps. Check facts are separated from inference/decision inputs and that no Backend trait/ADR is smuggled in. Publish APPROVE FOR FACT MERGE or REQUEST CHANGES bound to the full head. Do not edit, Ready, merge, close #94, start XR-C0, or touch #80/#91."
     }
   ],
   "locks": {}
