@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 14,
+  "revision": 15,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
-  "updated_at": "2026-08-23T06:43:19Z",
+  "updated_at": "2026-08-23T06:53:31Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -277,16 +277,13 @@
     {
       "id": "T53-T71",
       "title": "E3 Preview and memory-law convergence",
-      "status": "dispatched",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-coordinator",
       "target_pr": 53,
       "target_branch": "agent/issue-052-node-preview-runtime",
       "expected_head": "c50e3c937b3494f56ed6cda19c47a83aff36de93",
-      "locks": [
-        "branch:agent/issue-052-node-preview-runtime",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "e3:preview-memory-law",
         "e3:preview-envelope-invariants"
@@ -296,10 +293,14 @@
         "E23-OPT",
         "E4-S2"
       ],
-      "lease_expires_at": "2026-08-23T08:13:19Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-23T06:43:19Z",
-      "updated_at": "2026-08-23T06:43:19Z",
-      "notes": "Source PR #71 exact head 2b9fdcb716a66a0ff92cedd82825f533c16b6250 is approved for merge only into target branch agent/issue-052-node-preview-runtime at expected head c50e3c937b3494f56ed6cda19c47a83aff36de93. Claim must re-fetch both heads and stop on mismatch. Mark #71 Ready, merge with an exact source-head guard, wait for the new #53-head dual-toolchain CI, then complete with that full result head and CI URL. Do not merge or rebase #53 into main; hand off to a separately dispatched T53-REBIND/acceptance sequence. | REGISTRY-R13 engine-writer freeze: T53-T71 is the sole granted holder of engine:stillflow-engine while queued or running; E4-S2/E4-S2-R1 is serialized strictly behind it via mutual conflicts_with. On completion (new #53-head dual-toolchain CI recorded) release engine:stillflow-engine and stop before any main integration, per existing scope. | REGISTRY-R14 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T06:43:19Z (lease to 2026-08-23T08:13:19Z) under the REGISTRY-R13 engine-writer freeze; both heads re-verified exact at claim time.",
+      "updated_at": "2026-08-23T06:53:31Z",
+      "completed_at": "2026-08-23T06:53:31Z",
+      "result_head": "90fb878e2ace78a6e1c2698014bca5461f19db59",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32623819785",
+      "completion_note": "PR #71 merged at 2026-08-23T06:46:49Z under exact source-head guard; merge commit 90fb878e2ace78a6e1c2698014bca5461f19db59 has verified parents c50e3c937b34… + 2b9fdcb716a6…. Dual-toolchain CI run 32623819785 on the new #53-head: three jobs green (Backend stable, Backend Rust 1.85.0, Frontend), conclusion=success. Engine writer and branch lock released; execution stopped before any main integration per scope.",
+      "notes": "Source PR #71 exact head 2b9fdcb716a66a0ff92cedd82825f533c16b6250 is approved for merge only into target branch agent/issue-052-node-preview-runtime at expected head c50e3c937b3494f56ed6cda19c47a83aff36de93. Claim must re-fetch both heads and stop on mismatch. Mark #71 Ready, merge with an exact source-head guard, wait for the new #53-head dual-toolchain CI, then complete with that full result head and CI URL. Do not merge or rebase #53 into main; hand off to a separately dispatched T53-REBIND/acceptance sequence. | REGISTRY-R13 engine-writer freeze: T53-T71 is the sole granted holder of engine:stillflow-engine while queued or running; E4-S2/E4-S2-R1 is serialized strictly behind it via mutual conflicts_with. On completion (new #53-head dual-toolchain CI recorded) release engine:stillflow-engine and stop before any main integration, per existing scope. | REGISTRY-R14 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T06:43:19Z (lease to 2026-08-23T08:13:19Z) under the REGISTRY-R13 engine-writer freeze; both heads re-verified exact at claim time. | REGISTRY-R15 completion: done at 2026-08-23T06:53:31Z with result head 90fb878e2ace78a6e1c2698014bca5461f19db59 and green dual-toolchain CI (run 32623819785); locks released; no main integration performed.",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "User-authorized E3 convergence dispatch after exact-head independent approval of PR #71; merge PR #71 only into PR #53 branch, then stop before any main integration."
     },
@@ -421,21 +422,29 @@
       "completed_at": "2026-08-23T02:30:49Z",
       "result_head": "9d218d3125b0ae4162e07967168a0475ad79a336",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32569171934"
+    },
+    {
+      "id": "B0-R0-R1",
+      "title": "#89 stale roadmap status refresh (body-only)",
+      "status": "done",
+      "mode": "maintenance",
+      "owner": "ox-alpha-coordinator",
+      "target_pr": 89,
+      "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
+      "expected_head": "3a84bb5a778a860929e95716efd7a3c07bbe375a",
+      "locks": [],
+      "acceptance_keys": [
+        "b0r0r1:pr89-status-refresh"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": "2026-08-23T06:47:40Z",
+      "updated_at": "2026-08-23T06:53:31Z",
+      "completed_at": "2026-08-23T06:53:31Z",
+      "completion_note": "Maintainer-authorized body-only correction (dispatch A2): re-read live GitHub state and appended a 'Status refresh' section to PR #89 (#71 merged as 90fb878e… into the #53 branch; #73 and #90 CLOSED; #80 OPEN now carrying Draft #91 with REQUEST CHANGES F1-F4; registry R11->R14). No commits pushed; head unchanged 3a84bb5a778a860929e95716efd7a3c07bbe375a; PR remains Draft/open. Applied via REST PATCH because gh pr edit is blocked by missing read:org token scope - environment limitation, reported, not a pass claim.",
+      "notes": "Docs-only governance action; zero lock occupancy; executed in parallel with T53-T71 without conflict. Any further #89 work beyond body metadata requires a new dispatch."
     }
   ],
-  "locks": {
-    "branch:agent/issue-052-node-preview-runtime": {
-      "task_id": "T53-T71",
-      "owner": "ox-alpha-coordinator",
-      "expected_head": "c50e3c937b3494f56ed6cda19c47a83aff36de93",
-      "acquired_at": "2026-08-23T06:43:19Z",
-      "lease_expires_at": "2026-08-23T08:13:19Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "T53-T71",
-      "owner": "ox-alpha-coordinator",
-      "acquired_at": "2026-08-23T06:43:19Z",
-      "lease_expires_at": "2026-08-23T08:13:19Z"
-    }
-  }
+  "locks": {}
 }
