@@ -115,10 +115,14 @@ can be a thin client of this backend:
 
 ### 2.5 Registered future capabilities
 
-Track F registers SQL Connector (#9), native DuckDB (#10), Join/Union,
+Track F registers the deterministic Runtime/Physical Executor program (#93),
+SQL Connector (#9), native DuckDB (#10), Join/Union,
 SaaS/CDC/Airbyte/ConnectorX connectors, document/multimodal processing, and
 remote/distributed execution. None of them blocks any Phase 1, Phase 2, or
-Phase 3 gate. See section 20.
+Phase 3 gate. The #93 program is the architecture prerequisite for future
+automatic backend selection, SQL/DuckDB physical pushdown, Arrow-native
+kernels, GPU, and remote executors; registration alone authorizes no runtime
+change. See section 20.
 
 ## 3. Non-negotiable architecture rules
 
@@ -128,10 +132,28 @@ Phase 3 gate. See section 20.
   identity, Artifact state, and persistence. The API surface, Desktop app, CLI,
   and TypeScript code must never implement a second executor or duplicate any
   canonical algorithm.
-- Arrow is the public tabular boundary; Polars types remain engine-private.
-- Polars is the sole implementation of cleaning-rule semantics.
+- Arrow is the public bounded tabular interchange protocol; Polars types,
+  DuckDB handles, SQL strings, raw Arrow buffers, and future physical-plan
+  objects remain outside stable logical/domain APIs.
+- Until XR-C0/ADR-002 is accepted, Polars remains the sole implementation of
+  cleaning-rule semantics and the Phase 1 canonical executor. Registering #93
+  does not weaken this current rule.
+- The long-term #93 direction is a deterministic Runtime over stable
+  LogicalPlan semantics with private, capability-matched physical executors.
+  A backend decides how an authorized fragment executes; it never redefines
+  what a rule means.
+- Runtime authority retains cancellation, deadlines, resource/concurrency
+  bounds, execution identity, verification, recovery, and atomic
+  Artifact/Snapshot publication across every future executor.
+- Backend selection and fallback must be deterministic, provenance-bearing,
+  and gated by declared equivalence evidence. SQL/DuckDB pushdown may execute
+  only semantically proven fragments.
+- Arrow itself is not a backend; an Arrow-native kernel executor may become
+  one behind the same physical-execution contract.
 - AI proposes or explains executable objects; AI never directly mutates a
-  DataFrame or defines execution semantics.
+  DataFrame or defines deterministic bulk-cleaning semantics. Embedding,
+  document, or model operations use typed worker/effect contracts with
+  explicit provenance rather than impersonating a deterministic backend.
 - Preview is ephemeral and read-only. It never publishes Snapshot or Artifact
   payloads, and only provenance records about Preview may persist.
 - Final computational outputs are immutable and carry provenance.
@@ -282,7 +304,15 @@ flowchart TD
     end
     subgraph Optional and future
         QG1 --> AIC0["AI-C0"] --> AIR1["AI-R1"] --> AIA1["AI-A1"]
-        FUT["Track F: F-DB1/F-DB2/F-ENG1/F-CONN1/F-DOC1/F-DIST1"]
+        E5G1 --> XRD0["XR-D0 coupling inventory"] --> XRC0["XR-C0 / ADR-002"]
+        XRC0 --> XRR0["XR-R0 PolarsExecutor extraction"] --> XRR1["XR-R1 conformance"]
+        XRR1 --> XRA1["XR-A1 Arrow-native pilot"]
+        XRR1 --> XRS1["XR-S1 SQL pushdown"]
+        XRR1 --> XRD1["XR-D1 DuckDB executor"]
+        XRA1 --> XRG1["XR-G1 multi-executor gate"]
+        XRS1 --> XRG1
+        XRD1 --> XRG1
+        FUT["Track F: #93/F-DB1/F-DB2/F-ENG1/F-CONN1/F-DOC1/F-DIST1"]
     end
     E5G1 --> HGATES["H1/H2/H3 release gates"]
     QG1 --> HGATES
@@ -298,9 +328,12 @@ flowchart TD
 
 The graph is acyclic by construction: governance and active deliveries feed
 Phase 1 core; Phase 1 core feeds Phase 2/3 tracks; all gates converge on H.
-Track F nodes register intent only and depend on nothing and block nothing.
-Runtime work never begins from a contract or inventory branch; every runtime
-branch starts from the latest `main` containing its approved contract.
+Track F registrations block no Phase 1/2/3 or H gate. Their later
+implementations may still have internal dependencies: #93 runtime work follows
+E5-G1 and the Phase 1 deterministic backend gate, and SQL/DuckDB physical
+execution follows XR-C0 plus XR-R1. Runtime work never begins from a contract
+or inventory branch; every runtime branch starts from the latest `main`
+containing its approved contract.
 
 ## 8. Track B0 — roadmap and governance convergence
 
@@ -888,7 +921,9 @@ Profile, Quality, Drift, and Export objects exist.
 ## 20. Track F — registered future capabilities
 
 None of these items blocks the Phase 1, Phase 2, or Phase 3 gates. Each
-requires its own scope freeze before any implementation dispatch.
+requires its own scope freeze before any implementation dispatch. Track F
+registration records direction, not accepted runtime semantics; existing
+Phase 1 contracts remain authoritative until explicitly superseded.
 
 Scope reconciliation with Issue #11: the Phase 1 completion gate covers local
 files, Workbook, and S3-compatible sources. The SQL and DuckDB acceptance
@@ -898,23 +933,81 @@ document records that target resolution without editing Issue #11; B0-R1
 performs the amendment on the Issue itself. Until then, E5-G1 must not close
 #11 on the strength of Phase 1 evidence alone.
 
+### F-XR0 — Deterministic Runtime and physical executors (entry Issue #93)
+
+Issue #93 registers the long-term boundary: StillFlow is a deterministic data
+Runtime over stable LogicalPlan semantics, while Polars is the Phase 1
+canonical executor and first physical implementation rather than a public
+platform boundary.
+
+The frozen sequence is not yet authorized; each node requires its own CLAIM,
+exact base, contract, Draft PR, independent review, and acceptance:
+
+1. **XR-D0 — execution coupling inventory.** Read-only inventory of Polars
+   imports, Arrow/Polars conversion, lowering, executor-owned state, semantic
+   dependencies, and contract-versus-implementation tests. Only deliver
+   `docs/issues/execution-backend-coupling-inventory.md`.
+2. **XR-C0 — runtime abstraction contract / ADR-002.** Freeze
+   LogicalPlan/PhysicalPlan ownership, fragments, capabilities, deterministic
+   selection/fallback, provenance, error/resource laws, equivalence levels,
+   versioning, and compatibility. Preserve ADR-001 as history and name every
+   superseded statement.
+3. **XR-R0 — behavior-preserving PolarsExecutor extraction.** Introduce only a
+   private executor seam. Public APIs, logical canonical bytes, fingerprints,
+   Verification/Artifact identities, resource laws, and observable results
+   must remain unchanged; automatic backend selection remains forbidden.
+4. **XR-R1 — backend conformance harness.** Differential and golden evidence
+   covers NULL logic, casts, NaN and signed zero, Unicode, timezone, ordering,
+   repartitioning, batch boundaries, Verification/Artifact identity,
+   cancellation, bounds, and error mapping.
+5. **XR-A1 — Arrow-native pilot.** Prove the abstraction with a deliberately
+   narrow deterministic operator subset; Arrow remains the interchange
+   protocol and is not itself classified as an executor.
+6. **XR-S1 — SQL pushdown.** Start with safe
+   Scan/Projection/Filter/Limit fragments. Dialect behavior is explicit and
+   unsupported or unproven fragments remain on the canonical local executor.
+7. **XR-D1 — DuckDB physical integration.** Federation, joins, comparison,
+   preview SQL, and temporary materialization use the shared fragment,
+   provenance, cancellation, and resource contracts without introducing a
+   second rule language.
+8. **XR-G1 — multi-executor gate.** Automatic selection stays disabled until a
+   second executor passes its declared equivalence level and exact-head
+   acceptance proves deterministic selection, provenance, bounds, and no
+   regression to the Phase 1 Polars path.
+
+Execution portability is claimed at one explicit level only: plan portability,
+logical-result equivalence, canonical-artifact equivalence, or byte identity.
+GPU, remote, and distributed executors remain deferred until XR-G1 and stable
+single-process Job/Run semantics. AI/embedding/document operations remain
+typed worker/effect paths rather than interchangeable deterministic
+bulk-cleaning backends.
+
+Planning documents may begin after this registration. XR runtime
+implementation begins only after E4-G1, E5-G1, and the Phase 1 backend gate; it
+must not modify, re-scope, or delay E4-S2/#91.
+
 ### F-DB1 — SQL Connector (entry Issue #9)
 
 Re-freeze scope on the existing issue; PostgreSQL, MySQL/MariaDB, and SQLite
 discovery/inspection/bounded preview; credential handling, query timeouts,
 row/byte bounds, and a safe SQL policy. Must not define a second
-cleaning-rule language.
+cleaning-rule language. Connector/control-plane work may proceed independently;
+execution pushdown waits for XR-C0 and XR-R1.
 
 ### F-DB2 — Native DuckDB (entry Issue #10)
 
 Re-freeze scope on the existing issue; preview/federation/materialization
-only while Polars remains the canonical cleaning-semantics executor; explicit
-boundary against embedded/frontend DuckDB usage.
+only while Polars remains the Phase 1 canonical cleaning-semantics executor;
+explicit boundary against embedded/frontend DuckDB usage. Integration as an
+automatically selected physical executor waits for XR-C0 and XR-R1.
 
 ### F-ENG1 — Join / Union execution
 
 Independent contract covering schema, keys, ordering, memory/spill bounds,
 cancellation, and lineage. No bypass through open SQL or Polars expressions.
+Backend-neutral physical execution of Join/Union waits for XR-C0 and the
+conformance harness; a current canonical implementation may be contracted
+earlier without claiming portability.
 
 ### F-CONN1 — SaaS / CDC / Airbyte / ConnectorX connectors
 
