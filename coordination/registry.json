@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 24,
+  "revision": 25,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T08:32:46.290Z",
+  "updated_at": "2026-08-23T08:37:40Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -257,7 +257,7 @@
       "title": "O0-D0 documentation convergence",
       "status": "dispatched",
       "mode": "maintenance",
-      "owner": null,
+      "owner": "ox-alpha-coordinator",
       "target_pr": 76,
       "target_branch": "agent/issue-075-backend-optimization-inventory",
       "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
@@ -268,9 +268,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-23T08:32:46.290Z",
+      "lease_expires_at": "2026-08-23T10:07:40Z",
+      "started_at": "2026-08-23T08:37:40Z",
+      "updated_at": "2026-08-23T08:37:40Z",
       "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer. | REGISTRY-R24 dispatch: exact PR #76 head ceeaa1e113ce335a804c016dd9404c4937a01105 re-verified Open/Draft/MERGEABLE; authorized body-only current-status correction and evidence refresh. No commit, Ready, merge, issue closure, or branch deletion; stop after posting completion evidence for an independent exact-head acceptance.",
       "verified_by": "ox-alpha-coordinator (REGISTRY-R12)",
       "queued_by": "maintainer:status-query-autodispatch",
@@ -516,7 +516,7 @@
       "title": "Rebind PR #89 roadmap onto current main and refresh live facts",
       "status": "dispatched",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-coordinator",
       "target_pr": 89,
       "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
       "expected_head": "f5407b4b71a6cca495548c24d26f06b97f444fbb",
@@ -535,9 +535,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-23T08:32:46.290Z",
+      "lease_expires_at": "2026-08-23T10:07:40Z",
+      "started_at": "2026-08-23T08:37:40Z",
+      "updated_at": "2026-08-23T08:37:40Z",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "PR #89 contains the canonical roadmap plus #93 registration but diverges from current main after #53 integration; rebind and fact refresh are required before independent review.",
       "notes": "At CLAIM, re-fetch PR #89 head and main; stop on either mismatch. Create backup ref before rewrite. Rebase the existing branch onto main c0e828031f0141fa89e6b525b4314ebabd5f4f4e, resolve only the authorized roadmap file, preserve the B0 reconciliation and F-XR0/#93 additions, reproduce range-diff/content mapping, refresh current GitHub facts in the document/body, run git diff --check and placeholder/link/dependency-graph checks, then force-with-lease. Keep PR Draft and stop at the new-head checkpoint for independent acceptance. Do not touch runtime, #80/#91, Ready, merge, close #82, or delete branches."
@@ -547,7 +547,7 @@
       "title": "Inventory current execution-backend coupling",
       "status": "dispatched",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-coordinator",
       "canonical_issue": 94,
       "target_pr": null,
       "target_branch": "main",
@@ -567,13 +567,28 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-23T08:32:46.290Z",
+      "lease_expires_at": "2026-08-23T10:07:40Z",
+      "started_at": "2026-08-23T08:37:40Z",
+      "updated_at": "2026-08-23T08:37:40Z",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "Issue #93 architecture direction requires a source-bound inventory before XR-C0/ADR-002; docs-only work is independent of E4-S2 hold.",
       "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91."
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/issue-082-backend-roadmap-reconciliation": {
+      "task_id": "T89-REBIND-R2",
+      "owner": "ox-alpha-coordinator",
+      "expected_head": "f5407b4b71a6cca495548c24d26f06b97f444fbb",
+      "acquired_at": "2026-08-23T08:37:40Z",
+      "lease_expires_at": "2026-08-23T10:07:40Z"
+    },
+    "branch:agent/issue-094-execution-backend-coupling-inventory": {
+      "task_id": "XR-D0",
+      "owner": "ox-alpha-coordinator",
+      "expected_head": null,
+      "acquired_at": "2026-08-23T08:37:40Z",
+      "lease_expires_at": "2026-08-23T10:07:40Z"
+    }
+  }
 }
