@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 19,
+  "revision": 20,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "9c368cee186bffa4f55d5de5c80d7b2be6957135",
-  "updated_at": "2026-08-23T07:58:40Z",
+  "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+  "updated_at": "2026-08-23T08:07:56Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -378,7 +378,7 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-23T06:28:27Z",
-      "notes": "REDEFINED by REGISTRY-R12 (rev 12). Old meaning 'standalone/exact dedup index' retired: dedup delivery landed inside E4-S1/PR #74. Canonical task: issue #80; delivery: PR #91 (Draft). Current state: independent acceptance RESERVED / REVIEW IN PROCESS handled by ANOTHER session; CLAIM record pending. DO NOT DUPLICATE: no other session may claim, accept, or touch #80/#91; E4-S2-R0-ACCEPT is out of scope everywhere else. Status 'hold' is deliberately unclaimable until that review session records its CLAIM/DONE. | REGISTRY-R13 maintainer freeze (engine-writer serialization): frozen execution order is T53-T71 first, then E4-S2-R1; the two must never hold engine:stillflow-engine concurrently. Forward lock declarations added here (branch lock on agent/issue-080-e4-verification-materialization plus engine:stillflow-engine, conflicts_with T53-T71); status stays hold/unclaimable and no claim is made by this revision. E4-S2-R1 may acquire the engine writer only after ALL of: (1) T53-T71 reaches a terminal state and releases engine:stillflow-engine; (2) this hold is lifted by the reserved acceptance session recording its CLAIM/DONE; (3) the maintainer explicitly authorizes the R1 fix round (PR #91 F1-F4). No other task, PR, or code branch was touched by REGISTRY-R13. | REGISTRY-R16 maintainer frozen order (comment 5384765766): E4-S2-R1 additionally waits for order step 4 - REBIND #91 only after the T53-REBIND-ACCEPT sequence lands #53 into main; the R13 gates above are unchanged and now also serialized against T53-REBIND-ACCEPT (mutual conflicts_with).",
+      "notes": "REDEFINED by REGISTRY-R12 (rev 12). Old meaning 'standalone/exact dedup index' retired: dedup delivery landed inside E4-S1/PR #74. Canonical task: issue #80; delivery: PR #91 (Draft). Current state: independent acceptance RESERVED / REVIEW IN PROCESS handled by ANOTHER session; CLAIM record pending. DO NOT DUPLICATE: no other session may claim, accept, or touch #80/#91; E4-S2-R0-ACCEPT is out of scope everywhere else. Status 'hold' is deliberately unclaimable until that review session records its CLAIM/DONE. | REGISTRY-R13 maintainer freeze (engine-writer serialization): frozen execution order is T53-T71 first, then E4-S2-R1; the two must never hold engine:stillflow-engine concurrently. Forward lock declarations added here (branch lock on agent/issue-080-e4-verification-materialization plus engine:stillflow-engine, conflicts_with T53-T71); status stays hold/unclaimable and no claim is made by this revision. E4-S2-R1 may acquire the engine writer only after ALL of: (1) T53-T71 reaches a terminal state and releases engine:stillflow-engine; (2) this hold is lifted by the reserved acceptance session recording its CLAIM/DONE; (3) the maintainer explicitly authorizes the R1 fix round (PR #91 F1-F4). No other task, PR, or code branch was touched by REGISTRY-R13. | REGISTRY-R16 maintainer frozen order (comment 5384765766): E4-S2-R1 additionally waits for order step 4 - REBIND #91 only after the T53-REBIND-ACCEPT sequence lands #53 into main; the R13 gates above are unchanged and now also serialized against T53-REBIND-ACCEPT (mutual conflicts_with). | REGISTRY-R20: #53 main integration COMPLETE (merge c0e82803… into main, main CI run 32627094649 = 7/7 green); frozen-order step 4 gate is OPEN - REBIND #91 onto new main c0e82803… may proceed. The R13 gates remain: E4-S2 hold lift (reserved acceptance session CLAIM/DONE) and explicit maintainer authorization of the F1-F4 fix round are still required before E4-S2-R1 acquires the engine writer.",
       "hold_reason": "independent acceptance RESERVED / REVIEW IN PROCESS handled by another session; CLAIM record pending",
       "canonical_issue": 80,
       "head_bound_by": "ox-alpha-coordinator",
@@ -482,6 +482,9 @@
       "expected_head": "90fb878e2ace78a6e1c2698014bca5461f19db59",
       "rebind_result_head": "a7a517c29a0509716d68a53c0baf0c32b0e483d8",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32625688994",
+      "result_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "main_ci_url": "https://github.com/X44421/stillflow/actions/runs/32627094649",
+      "acceptance_evidence_url": "https://github.com/X44421/stillflow/pull/53#issuecomment-5384935921",
       "locks": [
         "branch:agent/issue-052-node-preview-runtime",
         "engine:stillflow-engine"
@@ -498,34 +501,14 @@
       "conflicts_with": [
         "E4-S2"
       ],
-      "lease_expires_at": "2026-08-23T08:54:43Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-23T07:24:43Z",
-      "updated_at": "2026-08-23T07:31:35Z",
-      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration. | REGISTRY-R18 checkpoint reached 2026-08-23T07:31:35Z: 23 commits rebased onto main 9c368cee… with zero conflicts and 23/23 identical patches (range-diff all '='); backup ref refs/backup/t53-rebind-pre-90fb878e pushed; force-with-lease moved the branch to rebind head a7a517c29a0509716d68a53c0baf0c32b0e483d8; fresh CI run 32625688994 = success, 7 green jobs (stable + Rust 1.85.0 x fmt/clippy/serial tests + Frontend). EXECUTION STOPPED at the approved checkpoint - AWAITING INDEPENDENT ACCEPTANCE before any main integration. Base-migration disclosure: the #53 historical base predated the post-#74/#88 mains, so the tree delta vs the pre-rebase head (+13079/-266 across 39 files) comes solely from base movement, not patch drift. | REGISTRY-R19: independent acceptance returned APPROVE FOR MAIN INTEGRATION (PR #53 comment 5384935921; approved base 9c368cee… head a7a517c…; range-diff independently reproduced 23/23 '='; CI 7/7 green, 327/0 tests per toolchain, engine 93/93). main:merge lock acquired by ox-alpha-coordinator at 2026-08-23T07:58:40Z; anchors re-verified exact; proceeding with the approved main integration.",
+      "updated_at": "2026-08-23T08:07:56Z",
+      "completed_at": "2026-08-23T08:00:28Z",
+      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration. | REGISTRY-R18 checkpoint reached 2026-08-23T07:31:35Z: 23 commits rebased onto main 9c368cee… with zero conflicts and 23/23 identical patches (range-diff all '='); backup ref refs/backup/t53-rebind-pre-90fb878e pushed; force-with-lease moved the branch to rebind head a7a517c29a0509716d68a53c0baf0c32b0e483d8; fresh CI run 32625688994 = success, 7 green jobs (stable + Rust 1.85.0 x fmt/clippy/serial tests + Frontend). EXECUTION STOPPED at the approved checkpoint - AWAITING INDEPENDENT ACCEPTANCE before any main integration. Base-migration disclosure: the #53 historical base predated the post-#74/#88 mains, so the tree delta vs the pre-rebase head (+13079/-266 across 39 files) comes solely from base movement, not patch drift. | REGISTRY-R19: independent acceptance returned APPROVE FOR MAIN INTEGRATION (PR #53 comment 5384935921; approved base 9c368cee… head a7a517c…; range-diff independently reproduced 23/23 '='; CI 7/7 green, 327/0 tests per toolchain, engine 93/93). main:merge lock acquired by ox-alpha-coordinator at 2026-08-23T07:58:40Z; anchors re-verified exact; proceeding with the approved main integration. | REGISTRY-R20 completion at 2026-08-23T08:07:56Z: #53 marked Ready and merged at 2026-08-23T08:00:28Z under exact-head guard (head a7a517c…, base main 9c368cee…) as merge commit c0e828031f0141fa89e6b525b4314ebabd5f4f4e with verified parents [9c368cee…, a7a517c…]; main CI run 32627094649 = success 7/7 on the merge commit; issues #52 and #70 closed with delivery evidence; all three locks (branch, engine, main:merge) released.",
       "queued_by": "maintainer:frozen-order-2026-08-23",
       "queue_reason": "Maintainer order step 2 trigger satisfied by DX-F0-MERGE completion (main @ 9c368cee186bffa4f55d5de5c80d7b2be6957135)."
     }
   ],
-  "locks": {
-    "branch:agent/issue-052-node-preview-runtime": {
-      "task_id": "T53-REBIND-ACCEPT",
-      "owner": "ox-alpha-coordinator",
-      "expected_head": "a7a517c29a0509716d68a53c0baf0c32b0e483d8",
-      "acquired_at": "2026-08-23T07:24:43Z",
-      "lease_expires_at": "2026-08-23T08:54:43Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "T53-REBIND-ACCEPT",
-      "owner": "ox-alpha-coordinator",
-      "acquired_at": "2026-08-23T07:24:43Z",
-      "lease_expires_at": "2026-08-23T08:54:43Z"
-    },
-    "main:merge": {
-      "task_id": "T53-REBIND-ACCEPT",
-      "owner": "ox-alpha-coordinator",
-      "expected_head": "9c368cee186bffa4f55d5de5c80d7b2be6957135",
-      "acquired_at": "2026-08-23T07:58:40Z",
-      "lease_expires_at": "2026-08-23T09:28:40Z"
-    }
-  }
+  "locks": {}
 }
