@@ -1,0 +1,110 @@
+# StillFlow — backend development feedback loop (DX-F0, Issue #85).
+#
+# Launch from the repository root:
+#
+#   bacon              # default job: fast workspace check
+#   bacon <job-name>   # any job declared below
+#
+# Contract of every job in this file:
+#   - read-only: no auto-fix (`--fix`), no lockfile updates (`cargo update`),
+#     no retry-on-failure logic;
+#   - no hidden warnings: warnings are surfaced, clippy denies them;
+#   - deterministic inputs only: no wall-clock seeds, no random data;
+#   - serial tests: Engine/storage fixtures rely on global-state discipline,
+#     so every `cargo test` job pins `--test-threads=1`;
+#   - no process-level test parallelism (no cargo-nextest): unproven safe for
+#     the current E3/E4 fixtures.
+#
+# All commands address the Cargo workspace living under `backend/` through
+# `--manifest-path`, so this root-level configuration works from the repo root.
+
+default_job = "check"
+
+# Tier 0 — fastest loop: compiler diagnostics over the whole backend workspace.
+[jobs.check]
+command = [
+    "cargo",
+    "check",
+    "--manifest-path",
+    "backend/Cargo.toml",
+    "--workspace",
+    "--all-targets",
+]
+
+# Same as `check`, forced onto the MSRV toolchain regardless of what the
+# active default is. Requires rustup with the 1.85.0 toolchain installed.
+[jobs.check-msrv]
+command = [
+    "cargo",
+    "+1.85.0",
+    "check",
+    "--manifest-path",
+    "backend/Cargo.toml",
+    "--workspace",
+    "--all-targets",
+]
+
+# Formatting gate — identical to CI. Never formats files (`--check` only).
+[jobs.fmt]
+command = [
+    "cargo",
+    "fmt",
+    "--manifest-path",
+    "backend/Cargo.toml",
+    "--all",
+    "--",
+    "--check",
+]
+
+# Lint gate — identical to CI. Warnings are hard errors.
+[jobs.clippy]
+command = [
+    "cargo",
+    "clippy",
+    "--manifest-path",
+    "backend/Cargo.toml",
+    "--workspace",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings",
+]
+
+# Tier 1 — focused serial library tests for the execution engine.
+[jobs.test-engine]
+command = [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "backend/Cargo.toml",
+    "-p",
+    "stillflow-engine",
+    "--lib",
+    "--",
+    "--test-threads=1",
+]
+
+# Tier 2 — full local gate: every workspace test, strictly serial.
+[jobs.test-workspace]
+command = [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "backend/Cargo.toml",
+    "--workspace",
+    "--",
+    "--test-threads=1",
+]
+
+# Override bacon's built-in `test` job (plain parallel `cargo test`) so the
+# convenient `bacon test` invocation cannot bypass the serial discipline.
+[jobs.test]
+command = [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "backend/Cargo.toml",
+    "--workspace",
+    "--",
+    "--test-threads=1",
+]
