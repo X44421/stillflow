@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 9,
+  "revision": 10,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "f16666e59896e2d8bae3b79e188b8f567bb8c534",
-  "updated_at": "2026-08-22T23:34:46Z",
+  "updated_at": "2026-08-23T01:57:02Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -391,9 +391,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-23T01:04:46Z",
+      "lease_expires_at": "2026-08-23T03:27:02Z",
       "started_at": "2026-08-22T10:42:32Z",
-      "updated_at": "2026-08-22T23:34:46Z",
+      "updated_at": "2026-08-23T01:57:02Z",
       "notes": "Canonical task: Issue #85. Claim against exact main head before creating result branch. Runtime tracing, E5-E1, OPS-O1, scenario harnesses, taskctl changes, and every backend Rust/Cargo path are explicitly out of scope. The workflow lock must be released before any later Issue #79 S5 CI/build-gate slice begins.",
       "head_bound_by": "ox-alpha-dxf0",
       "head_bind_reason": "correct binding shape: target_branch=main (verification ref); result_branch stays agent/issue-085-backend-feedback-loop; REBIND f16666e->ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a authorized by coordinator"
@@ -412,21 +412,21 @@
       "owner": "ox-alpha-dxf0",
       "expected_head": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
       "acquired_at": "2026-08-22T10:42:32Z",
-      "lease_expires_at": "2026-08-23T01:04:46Z"
+      "lease_expires_at": "2026-08-23T03:27:02Z"
     },
     "workflow:ci": {
       "task_id": "DX-F0",
       "owner": "ox-alpha-dxf0",
       "expected_head": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
       "acquired_at": "2026-08-22T10:42:32Z",
-      "lease_expires_at": "2026-08-23T01:04:46Z"
+      "lease_expires_at": "2026-08-23T03:27:02Z"
     },
     "devx:backend-feedback": {
       "task_id": "DX-F0",
       "owner": "ox-alpha-dxf0",
       "expected_head": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
       "acquired_at": "2026-08-22T10:42:32Z",
-      "lease_expires_at": "2026-08-23T01:04:46Z"
+      "lease_expires_at": "2026-08-23T03:27:02Z"
     }
   }
 }
