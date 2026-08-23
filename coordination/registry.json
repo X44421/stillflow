@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 11,
+  "revision": 12,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "f16666e59896e2d8bae3b79e188b8f567bb8c534",
-  "updated_at": "2026-08-23T02:30:49Z",
+  "source_main_sha": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
+  "updated_at": "2026-08-23T05:57:20Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -23,15 +23,13 @@
     {
       "id": "T74-R2",
       "title": "E4-S1-R2",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "external:e4-s1-r2",
       "target_pr": 74,
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": "bc430aa4ee4a1d5a79c738d0580ef7ad5deea2b3",
-      "locks": [
-        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "e4s1:r2"
       ],
@@ -41,23 +39,25 @@
         "T74-P1B",
         "T74-MIGRATE"
       ],
-      "lease_expires_at": "2026-08-22T08:05:20Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-22T06:05:20Z",
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Current exclusive writer for PR #74. Transfer the placeholder owner to the actual WSL agent before its first heartbeat."
+      "notes": "Historical exclusive-writer slot for PR #74 (E4-S1 R2 deferred-P1 closure). Reconciled to done by REGISTRY-R12 at 2026-08-23T05:57:20Z; owner kept as the historical runner placeholder.",
+      "result_head": "d8fdf65e38d3bdc841ee56158ab79a24dc90331b",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32555654543",
+      "reconciled_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "completion_note": "Recorded done by REGISTRY-R12 (rev 12) from the authoritative R2 收敛记录 (workspace .acceptance-tmp/ACCEPTANCE-STATE.md, dated 2026-08-22): single successor bc430aa4 -> result head d8fdf65e38d3bdc841ee56158ab79a24dc90331b, CI run 32555654543 three jobs green (re-verified live: conclusion=success). taskctl adopt/complete could not execute in the originating environment (no stillflow-taskctl binary) and target branch agent/issue-073-e4-artifact-verification-bundle-storage was deleted after PR #74 merged at f16666e59896e2d8bae3b79e188b8f567bb8c534, so the expired ghost branch lock was cleared here instead."
     },
     {
       "id": "T74-P1A",
       "title": "Dedup open/recovery two-stage barrier",
-      "status": "queued",
+      "status": "cancelled_duplicate",
       "mode": "write",
       "owner": null,
       "target_pr": 74,
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-storage/src/dedup.rs"
       ],
@@ -75,7 +75,11 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Was reported running, but is queued to remove the same-branch writer conflict. After R2, deduplicate by acceptance key before re-dispatch."
+      "notes": "Cancelled per the R2 收敛记录 (2026-08-22): two-stage barrier evidence landed inside T74-R2 result head d8fdf65.",
+      "covered_by": "T74-R2",
+      "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "completed_at": "2026-08-23T05:57:20Z",
+      "completion_note": "d8fdf65 已覆盖双阶段 barrier"
     },
     {
       "id": "T78-REVIEW",
@@ -106,16 +110,14 @@
     {
       "id": "T78-MERGE",
       "title": "Merge the approved R6 P0 contract completion",
-      "status": "queued",
+      "status": "cancelled_duplicate",
       "mode": "maintenance",
       "owner": null,
       "target_pr": 78,
       "target_branch": "agent/issue-054-contract-r6-completion",
       "result_branch": "main",
       "expected_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
-      "locks": [
-        "main:merge"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "pr78:merge"
       ],
@@ -126,20 +128,21 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:18:43Z",
-      "notes": "Exact-head review completed. Available for a separate maintainer claim; no merge has been executed."
+      "notes": "Exact-head review completed. Available for a separate maintainer claim; no merge has been executed.",
+      "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "completed_at": "2026-08-23T05:57:20Z",
+      "archive_reason": "Obsolete topology: PR #78 (R6 P0 contract completion) is already merged, merge commit 9891dcf55875bb5e236e3573d17e50fae9caa091 (verified live), so this queued maintenance merge has nothing left to execute. T78-REVIEW's done record at expected head 135b434b89166b8d4edf17e23b01291f2437a9d4 remains the historical acceptance anchor."
     },
     {
       "id": "T74-P1B",
       "title": "Bundle-wide ceiling boundary evidence",
-      "status": "queued",
+      "status": "cancelled_duplicate",
       "mode": "write",
       "owner": null,
       "target_pr": 74,
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-storage/src/bundle.rs"
       ],
@@ -160,20 +163,22 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Cancel as duplicate if R2 already covers every acceptance key."
+      "notes": "Cancelled per the R2 收敛记录 (2026-08-22): row/byte/partition ceiling evidence landed inside T74-R2 result head d8fdf65.",
+      "covered_by": "T74-R2",
+      "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "completed_at": "2026-08-23T05:57:20Z",
+      "completion_note": "d8fdf65 已覆盖 row/byte/partition 三形状证据"
     },
     {
       "id": "T74-MIGRATE",
       "title": "Rebase PR #74 onto the post-PR #78 accepted main",
-      "status": "blocked",
+      "status": "cancelled_duplicate",
       "mode": "write",
       "owner": null,
       "target_pr": 74,
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-073-e4-artifact-verification-bundle-storage"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "pr74:post-r6c-base-migration"
       ],
@@ -191,12 +196,15 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Requires backup refs, range-diff, force-with-lease and a fresh CI run."
+      "notes": "Requires backup refs, range-diff, force-with-lease and a fresh CI run.",
+      "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "completed_at": "2026-08-23T05:57:20Z",
+      "archive_reason": "Obsolete topology: PR #74 is fully merged (merge commit f16666e59896e2d8bae3b79e188b8f567bb8c534, issue #73 closed as delivered) and its remote branch agent/issue-073-e4-artifact-verification-bundle-storage is deleted (404 verified live); there is no branch left to rebase onto a post-#78 base."
     },
     {
       "id": "T74-ACCEPT",
       "title": "Final independent E4-S1 acceptance",
-      "status": "blocked",
+      "status": "cancelled_duplicate",
       "mode": "review",
       "owner": null,
       "target_pr": 74,
@@ -213,21 +221,22 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Any new PR #74 commit invalidates this review."
+      "notes": "Any new PR #74 commit invalidates this review.",
+      "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "completed_at": "2026-08-23T05:57:20Z",
+      "archive_reason": "Obsolete topology: final independent acceptance of PR #74 is moot because #74 is merged (merge commit f16666e59896e2d8bae3b79e188b8f567bb8c534) with CI green; any further review belongs to post-merge scopes, not this pre-merge slot."
     },
     {
       "id": "T74-MERGE",
       "title": "Merge the approved E4-S1 runtime",
-      "status": "blocked",
+      "status": "cancelled_duplicate",
       "mode": "maintenance",
       "owner": null,
       "target_pr": 74,
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "result_branch": "main",
       "expected_head": null,
-      "locks": [
-        "main:merge"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "pr74:merge"
       ],
@@ -238,7 +247,10 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Must bind the approved exact head and record the resulting main merge SHA."
+      "notes": "Must bind the approved exact head and record the resulting main merge SHA.",
+      "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "completed_at": "2026-08-23T05:57:20Z",
+      "archive_reason": "Nothing to merge: PR #74 already merged at f16666e59896e2d8bae3b79e188b8f567bb8c534; the main:merge slot is released."
     },
     {
       "id": "T76-CLOSE",
@@ -258,8 +270,9 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Correct PR-body metadata only; no code commit."
+      "updated_at": "2026-08-23T05:57:20Z",
+      "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer.",
+      "verified_by": "ox-alpha-coordinator (REGISTRY-R12)"
     },
     {
       "id": "T53-T71",
@@ -309,8 +322,9 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Bind to the final E3 merge SHA; reuse PR #76 facts instead of repeating inventory."
+      "updated_at": "2026-08-23T05:57:20Z",
+      "notes": "Bind to the final E3 merge SHA; reuse PR #76 facts instead of repeating inventory. | REGISTRY-R12 rev 12 verification: dependencies T53-T71 (queued) and T76-CLOSE (wait_maintainer) remain non-terminal; blocked state correct.",
+      "verified_by": "ox-alpha-coordinator (REGISTRY-R12)"
     },
     {
       "id": "E23-OPT",
@@ -335,32 +349,33 @@
       ],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Create one Issue and one PR per benchmarked hotspot; never bundle multiple optimizations."
+      "updated_at": "2026-08-23T05:57:20Z",
+      "notes": "Create one Issue and one PR per benchmarked hotspot; never bundle multiple optimizations. | REGISTRY-R12 rev 12 verification: depends_on E23-REVIEW still blocked; conflict with queued T53-T71 intact; blocked state correct.",
+      "verified_by": "ox-alpha-coordinator (REGISTRY-R12)"
     },
     {
       "id": "E4-S2",
-      "title": "Exact deduplication index",
-      "status": "blocked",
+      "title": "Deterministic VerificationBundle materialization",
+      "status": "hold",
       "mode": "write",
       "owner": null,
-      "target_pr": null,
-      "target_branch": null,
-      "expected_head": null,
-      "locks": [
-        "storage:dedup-index"
-      ],
+      "target_pr": 91,
+      "target_branch": "agent/issue-080-e4-verification-materialization",
+      "expected_head": "d0ea2a3bce548a6cdc311dea4387e29e35e440ab",
+      "locks": [],
       "acceptance_keys": [
         "e4s2:exact-dedup-index"
       ],
-      "depends_on": [
-        "T74-MERGE"
-      ],
+      "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Do not start before PR #74 is accepted and merged."
+      "notes": "REDEFINED by REGISTRY-R12 (rev 12). Old meaning 'standalone/exact dedup index' retired: dedup delivery landed inside E4-S1/PR #74. Canonical task: issue #80; delivery: PR #91 (Draft). Current state: independent acceptance RESERVED / REVIEW IN PROCESS handled by ANOTHER session; CLAIM record pending. DO NOT DUPLICATE: no other session may claim, accept, or touch #80/#91; E4-S2-R0-ACCEPT is out of scope everywhere else. Status 'hold' is deliberately unclaimable until that review session records its CLAIM/DONE.",
+      "hold_reason": "independent acceptance RESERVED / REVIEW IN PROCESS handled by another session; CLAIM record pending",
+      "canonical_issue": 80,
+      "head_bound_by": "ox-alpha-coordinator",
+      "head_bind_reason": "REGISTRY-R12 rev 12 redefinition: bound to delivery PR #91 head d0ea2a3bce548a6cdc311dea4387e29e35e440ab, verified live (branch tip and PR head agree; Draft, base ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a)."
     },
     {
       "id": "DX-F0",
@@ -402,13 +417,5 @@
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32569171934"
     }
   ],
-  "locks": {
-    "branch:agent/issue-073-e4-artifact-verification-bundle-storage": {
-      "task_id": "T74-R2",
-      "owner": "external:e4-s1-r2",
-      "expected_head": "bc430aa4ee4a1d5a79c738d0580ef7ad5deea2b3",
-      "acquired_at": "2026-08-22T06:05:20Z",
-      "lease_expires_at": "2026-08-22T08:05:20Z"
-    }
-  }
+  "locks": {}
 }
