@@ -324,7 +324,7 @@ fn walk_directory(
         let mut components = relative_parent.to_vec();
         components.push(name.clone());
         let relative = components.join("/");
-        let (file, metadata) = open_relative_file(directory, &[name.clone()])?;
+        let (file, metadata) = open_relative_file(directory, std::slice::from_ref(&name))?;
         drop(file);
         let identity = file_identity(&metadata, &root.identity_key, &relative);
         unique.entry(identity.clone()).or_insert(Candidate {

@@ -57,7 +57,7 @@ pub(crate) struct PrepareOptions<'a> {
 enum ReaderKind {
     Empty,
     CountedRows(usize),
-    Csv(CsvState),
+    Csv(Box<CsvState>),
     Json(JsonObjectStream<BufReader<std::fs::File>>),
     Parquet(ParquetState),
 }
@@ -186,12 +186,12 @@ pub(crate) fn prepare_reader(
                 .into_reader_with_file_handle(file)
                 .batched(None)
                 .map_err(polars_open_error)?;
-            ReaderKind::Csv(CsvState {
+            ReaderKind::Csv(Box::new(CsvState {
                 decoder,
                 validator,
                 schema: full_schema.clone(),
                 row: 0,
-            })
+            }))
         }
         TabularFormat::Json | TabularFormat::Ndjson => ReaderKind::Json(JsonObjectStream::new(
             BufReader::new(opened.file),

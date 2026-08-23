@@ -33,8 +33,8 @@ must be frozen before high-risk implementation begins.
    base merges. Rebase/rebuild it from `main` afterward.
 7. E3-C0 (Issue #50) was explicitly independent of PR #49. It is approved
    at SHA `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`, merged in PR #51 as
-   `main@da3d03b`, and its contract branch was deleted. E3 runtime remains
-   paused until PR #49 is merged and passes final merge-readiness review.
+   `main@da3d03b`, and its contract branch was deleted. PR #49 merged as
+   `main@85502cb`; the E3 runtime gate is now open under Issue #52.
 
 This policy makes authorship, accepted state, and rollback boundaries observable.
 
@@ -184,13 +184,11 @@ The accepted sequence is:
 6. **Engine E1 — execution contract**: Issue #46 docs-only freeze, approved at
    `32f1c53` and merged in PR #47. Live engine memory is connector envelope +
    complete Polars working set + canonical remainder + 5 MiB state (peak 197 MiB).
-7. **Engine E2 — streaming executor**: Issue #48, from latest `main` after #47.
-   Connector envelope → execution chunker → Polars → canonical rebatcher →
-   atomic Snapshot. No Dependabot mix-in. No Join/Union/DuckDB/SQLx/API. Do not
-   continue the E1 contract branch. `15536eca` is Request changes; E2-R1
-   proposed deltas are `docs/issues/issue-048-e2-r1-contract-addendum.md`
-   on draft PR #49. Do not expand remaining operators until that addendum
-   is approved.
+7. **Engine E2 — streaming executor**: Issue #48. Implemented and merged in
+   PR #49; approved head `55f663fc46d23186a0ad1d7c711fced1f984a990`, merged
+   as `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`. Connector envelope →
+   execution chunker → Polars → canonical rebatcher → atomic Snapshot.
+   E2 branch and PR are closed; do not reopen or expand E2 operators.
 8. **Engine E3–E5**: node-level Preview, Validate/Rejected Rows/Deduplicate, then
    job runtime and Axum. DuckDB (#10) and SQL Connector (#9, Post-MVP) stay
    outside this sequence until their own contracts.
@@ -204,8 +202,8 @@ The accepted sequence is:
      rules, the allocated-capacity response memory law, and the P01–P15
      acceptance matrix. **Approved SHA
      `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`; merged in PR #51 as
-     `main@da3d03b`.** E3 runtime stays paused until E2 is merged and
-     finally reviewed.
+     `main@da3d03b`.** E3 runtime is now authorized by Issue #52 from
+     `main@85502cb`; implement only `stillflow-engine` Preview runtime.
 
 Do not pull work forward merely because a downstream type is convenient. A
 temporary placeholder must remain private and must not become a public contract.

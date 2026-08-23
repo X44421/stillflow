@@ -223,7 +223,7 @@ fn handle_connection(mut stream: TcpStream, state: &FixtureState) -> Result<(), 
     let (path, query) = request
         .target
         .split_once('?')
-        .map_or((request.target.as_str(), ""), |parts| parts);
+        .unwrap_or((request.target.as_str(), ""));
     if request.method == "GET"
         && path.trim_end_matches('/') == "/fixture-bucket"
         && query_has(query, "list-type")

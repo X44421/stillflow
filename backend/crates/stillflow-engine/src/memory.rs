@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use crate::error::{live_payload_guard, peak_guard, EngineError};
+use crate::error::{live_payload_guard, EngineError};
 use crate::MAX_OPERATOR_STATE_BYTES;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +21,29 @@ pub struct MemoryReport {
     pub chunk_count: usize,
     pub min_chunk_rows: usize,
     pub saw_split_envelope_with_remainder: bool,
+    #[cfg(test)]
+    pub(crate) max_input_chunk_rows: usize,
+    #[cfg(test)]
+    pub(crate) max_lowered_rows: usize,
+    #[cfg(test)]
+    pub(crate) max_response_prefix_rows: usize,
+    #[cfg(test)]
+    pub(crate) finalized_response_envelopes: usize,
+    #[cfg(test)]
+    pub(crate) response_capacity_peak: usize,
+    #[cfg(test)]
+    pub(crate) saw_n_gt_m_gt_p: bool,
+    #[cfg(test)]
+    pub(crate) saw_full_lowered_chunk_with_compacted_prefix: bool,
+    #[cfg(test)]
+    pub(crate) allocator_reallocation_count: usize,
+    #[cfg(test)]
+    pub(crate) allocator_peak_bytes: usize,
+    /// Maximum predicted old+new builder realloc transient fed to
+    /// `pre_check_realloc_peak` (E3 §10.2). Tracked separately from
+    /// `response_capacity_peak`, which never carries a transient.
+    #[cfg(test)]
+    pub(crate) predicted_realloc_peak: usize,
 }
 
 static GLOBAL_PHASE: AtomicU8 = AtomicU8::new(0);
@@ -30,6 +53,8 @@ static REMAINDER_LIVE: AtomicUsize = AtomicUsize::new(0);
 static REMAINDER_PEAK: AtomicUsize = AtomicUsize::new(0);
 static STORAGE_LIVE: AtomicUsize = AtomicUsize::new(0);
 static STORAGE_PEAK: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static ALLOCATOR_REALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn set_alloc_phase(phase: AllocatorPhase) {
     GLOBAL_PHASE.store(phase as u8, Ordering::SeqCst);
@@ -68,6 +93,8 @@ pub(crate) fn reset_alloc_peaks() {
     REMAINDER_PEAK.store(0, Ordering::SeqCst);
     STORAGE_LIVE.store(0, Ordering::SeqCst);
     STORAGE_PEAK.store(0, Ordering::SeqCst);
+    #[cfg(test)]
+    ALLOCATOR_REALLOCATIONS.store(0, Ordering::SeqCst);
 }
 
 pub(crate) fn alloc_peaks() -> (usize, usize, usize) {
@@ -76,6 +103,11 @@ pub(crate) fn alloc_peaks() -> (usize, usize, usize) {
         REMAINDER_PEAK.load(Ordering::SeqCst),
         STORAGE_PEAK.load(Ordering::SeqCst),
     )
+}
+
+#[cfg(test)]
+pub(crate) fn allocator_reallocation_count() -> usize {
+    ALLOCATOR_REALLOCATIONS.load(Ordering::SeqCst)
 }
 
 #[cfg(test)]
@@ -111,6 +143,7 @@ pub(crate) fn record_realloc_phase(phase: u8, old_size: usize, new_size: usize) 
         3 => (&STORAGE_LIVE, &STORAGE_PEAK),
         _ => return,
     };
+    ALLOCATOR_REALLOCATIONS.fetch_add(1, Ordering::SeqCst);
     let current = live.load(Ordering::SeqCst);
     let transient = current.saturating_add(new_size);
     peak.fetch_max(transient, Ordering::SeqCst);
@@ -129,6 +162,7 @@ pub(crate) struct MemoryTracker {
     working_bytes: usize,
     remainder_bytes: usize,
     operator_state_bytes: usize,
+    peak_limit: usize,
     envelope_live: bool,
     polars_live: bool,
     incoming_live: bool,
@@ -138,12 +172,21 @@ pub(crate) struct MemoryTracker {
 
 impl MemoryTracker {
     pub(crate) fn new() -> Self {
+        Self::with_peak_limit(crate::MAX_ENGINE_PEAK_BYTES)
+    }
+
+    pub(crate) fn new_preview() -> Self {
+        Self::with_peak_limit(crate::PREVIEW_PEAK_ENGINE_BYTES)
+    }
+
+    fn with_peak_limit(peak_limit: usize) -> Self {
         reset_alloc_peaks();
         Self {
             envelope_bytes: 0,
             working_bytes: 0,
             remainder_bytes: 0,
             operator_state_bytes: MAX_OPERATOR_STATE_BYTES,
+            peak_limit,
             envelope_live: false,
             polars_live: false,
             incoming_live: false,
@@ -158,7 +201,32 @@ impl MemoryTracker {
         report.polars_phase_peak = report.polars_phase_peak.max(polars);
         report.remainder_phase_peak = report.remainder_phase_peak.max(remainder);
         report.storage_append_phase_peak = report.storage_append_phase_peak.max(storage);
+        #[cfg(test)]
+        {
+            report.allocator_reallocation_count = allocator_reallocation_count();
+            report.allocator_peak_bytes = polars.max(remainder).max(storage);
+        }
+        // Issue #46 T23/T44: the storage-append Parquet encode phase is
+        // recorded but excluded from the engine ceiling.
+        let allocator_overlay = polars.saturating_add(remainder);
+        report.peak_engine_bytes = report
+            .peak_engine_bytes
+            .max(self.operator_state_bytes.saturating_add(allocator_overlay));
         report
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_response_budget_peak(&mut self, peak: usize) {
+        self.report.response_capacity_peak = self.report.response_capacity_peak.max(peak);
+    }
+
+    /// Records the predicted builder realloc transient (E3 §10.2 peak law).
+    /// This is a memory-safety quantity only: it is tracked separately from
+    /// `response_capacity_peak`, which by section 10.1 rule 5 never contains
+    /// a realloc transient.
+    #[cfg(test)]
+    pub(crate) fn record_predicted_realloc_peak(&mut self, peak: usize) {
+        self.report.predicted_realloc_peak = self.report.predicted_realloc_peak.max(peak);
     }
 
     pub(crate) fn record_chunk(&mut self, rows: usize, remainder_live: bool) {
@@ -166,9 +234,29 @@ impl MemoryTracker {
         if self.report.min_chunk_rows == 0 || rows < self.report.min_chunk_rows {
             self.report.min_chunk_rows = rows;
         }
+        #[cfg(test)]
+        {
+            self.report.max_input_chunk_rows = self.report.max_input_chunk_rows.max(rows);
+        }
         if remainder_live && self.envelope_live && self.polars_live {
             self.report.saw_split_envelope_with_remainder = true;
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_chunk_output(&mut self, n: usize, m: usize, p: usize) {
+        self.report.max_input_chunk_rows = self.report.max_input_chunk_rows.max(n);
+        self.report.max_lowered_rows = self.report.max_lowered_rows.max(m);
+        self.report.max_response_prefix_rows = self.report.max_response_prefix_rows.max(p);
+        self.report.saw_n_gt_m_gt_p |= n > m && m > p;
+        self.report.saw_full_lowered_chunk_with_compacted_prefix |= p > 0 && p < m;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_finalized_response_envelope(&mut self, bytes: usize) {
+        self.report.finalized_response_envelopes =
+            self.report.finalized_response_envelopes.saturating_add(1);
+        self.report.response_capacity_peak = self.report.response_capacity_peak.max(bytes);
     }
 
     pub(crate) fn hold_envelope(&mut self, bytes: usize) -> Result<(), EngineError> {
@@ -230,7 +318,40 @@ impl MemoryTracker {
         }
         self.remainder_live = bytes > 0;
         self.remainder_bytes = bytes;
+        #[cfg(test)]
+        {
+            self.report.response_capacity_peak = self.report.response_capacity_peak.max(bytes);
+        }
         self.refresh()
+    }
+
+    /// Independent peak pre-check for builder realloc transients (E3
+    /// §10.1 rule 5 / §10.2 / §10.3). The predicted old-buffer/new-buffer
+    /// transient is a memory-safety quantity: it never gates admission,
+    /// public caps, or batch boundaries. It is instead verified against the
+    /// peak law at the only place it can be enforced — immediately before
+    /// the physical growth — using the exact-need reserve as the
+    /// minimum-transient strategy (old and new buffers necessarily coexist
+    /// while copying). A breach means the structural peak proof of section
+    /// 10.3 no longer holds for this transition and fails loudly, exactly
+    /// like the other defensive internal-bound assertions.
+    pub(crate) fn pre_check_realloc_peak(
+        &self,
+        transient_peak: usize,
+        superseded_builder_bytes: usize,
+    ) -> Result<(), EngineError> {
+        // The accounted engine total already contains the builder's current
+        // buffers (`superseded_builder_bytes`); the transient peak replaces
+        // them with the peak builder footprint, so only the difference is
+        // projected on top of the engine total.
+        let projected = self
+            .engine_bytes()
+            .saturating_sub(superseded_builder_bytes)
+            .saturating_add(transient_peak);
+        if projected > self.peak_limit {
+            return Err(EngineError::peak_exceeded());
+        }
+        Ok(())
     }
 
     fn live_payloads(&self) -> u8 {
@@ -253,13 +374,22 @@ impl MemoryTracker {
         let live = self.live_payloads();
         live_payload_guard(live)?;
         let bytes = self.engine_bytes();
-        peak_guard(bytes)?;
+        if bytes > self.peak_limit {
+            return Err(EngineError::peak_exceeded());
+        }
         self.report.peak_live_payloads = self.report.peak_live_payloads.max(live);
         self.report.peak_engine_bytes = self.report.peak_engine_bytes.max(bytes);
         let (polars, remainder, storage) = alloc_peaks();
         self.report.polars_phase_peak = self.report.polars_phase_peak.max(polars);
         self.report.remainder_phase_peak = self.report.remainder_phase_peak.max(remainder);
         self.report.storage_append_phase_peak = self.report.storage_append_phase_peak.max(storage);
+        // Issue #46 T23/T44: the storage-append Parquet encode phase is
+        // recorded but excluded from the engine ceiling.
+        let allocator_overlay = polars.saturating_add(remainder);
+        self.report.peak_engine_bytes = self
+            .report
+            .peak_engine_bytes
+            .max(self.operator_state_bytes.saturating_add(allocator_overlay));
         Ok(())
     }
 }
