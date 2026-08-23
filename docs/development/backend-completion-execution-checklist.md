@@ -202,6 +202,24 @@ Historical notes (superseded states, kept for traceability):
 - The former checklist tracked itself through Issue #63, now closed. Epic #81
   is the single canonical ledger from here on.
 
+### 4.1 Current-state re-read at T89-REBIND-R2 (2026-08-23)
+
+Facts below were re-read from GitHub at the rebind execution window
+(2026-08-23 08:32-08:47 UTC). They supersede matching rows of the B0-R0
+snapshot above; that snapshot is kept verbatim for traceability.
+
+| Area | Item | Head / merge SHA | State at this re-read | Next gate |
+| --- | --- | --- | --- | --- |
+| Main | `main` | `c0e828031f0141fa89e6b525b4314ebabd5f4f4e` | Advanced from `f16666e…` via interim `ea54a526…`, then PR #88 (DX-F0) merged 2026-08-23T07:16Z as `9c368ce…` and PR #53 merged 2026-08-23T08:00Z | All new branches start here |
+| E3 runtime | PR #53 / Issue #52 | rebind head `a7a517c29a0509716d68a53c0baf0c32b0e483d8`; merge commit `c0e828031f0141fa89e6b525b4314ebabd5f4f4e` | Merged into main 2026-08-23T08:00:28Z after exact-head rebind and independent APPROVE acceptance (PR #53 comment 5384935921); Issue #52 closed | Delivered |
+| E3 memory law | PR #71 / Issue #70 | merge commit `90fb878e2ace78a6e1c2698014bca5461f19db59` into the #53 branch | Merged 2026-08-23T06:46:49Z under engine-writer serialization; delivered to main through #53; Issue #70 closed | Delivered |
+| Governance | Epic #81 / Issue #82 | this delivery rebased onto `c0e82803…` (rebased head `34800bc…`) | B0-R0 delivered; B0-R1 review PASS (Issue #90 closed); F-XR0/#93 registration carried by this PR | Independent rebind acceptance, then maintainer Ready/merge decision |
+| E4-S2 engine | Issue #80 / PR #91 | Draft head `d0ea2a3bce548a6cdc311dea4387e29e35e440ab`, base main | Hold maintained; R0 acceptance REQUEST CHANGES (F1-F4); rebind onto `c0e82803…` blocked by a `stillflow-engine/src/tests.rs` conflict, folded into the conditional R1 scope (REGISTRY-R22/R23) | Reserved-session CLAIM/DONE, then maintainer R1 dispatch |
+| Performance facts | Issue #75 / PR #76 | head `ceeaa1e113ce335a804c016dd9404c4937a01105` (unchanged) | Body-only status refresh posted 2026-08-23; CI success on the exact head; still Draft | Independent exact-head acceptance |
+| XR track | Issues #93 / #94 | - | #93 registered in this delivery (F-XR0 below); XR-D0 execution-backend coupling inventory dispatched as Issue #94 against `main@c0e82803…` | Inventory fact review, then XR-C0 inputs |
+
+All other rows of the B0-R0 snapshot remain accurate at this re-read.
+
 ## 5. Execution status vocabulary
 
 Each task uses exactly one status:
