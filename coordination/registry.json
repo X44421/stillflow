@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 26,
+  "revision": 27,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T09:04:44Z",
+  "updated_at": "2026-08-23T09:13:18Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -552,10 +552,12 @@
       "mode": "write",
       "owner": "ox-alpha-coordinator",
       "canonical_issue": 94,
-      "target_pr": null,
+      "target_pr": 95,
       "target_branch": "main",
       "result_branch": "agent/issue-094-execution-backend-coupling-inventory",
       "expected_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "result_head": "3604536ed6ef18fc889617be088043906a3521e8",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32630256436",
       "locks": [
         "branch:agent/issue-094-execution-backend-coupling-inventory"
       ],
@@ -570,21 +572,13 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-23T10:07:40Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-23T08:37:40Z",
-      "updated_at": "2026-08-23T08:37:40Z",
+      "updated_at": "2026-08-23T09:13:18Z",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "Issue #93 architecture direction requires a source-bound inventory before XR-C0/ADR-002; docs-only work is independent of E4-S2 hold.",
-      "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91."
+      "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91. | REGISTRY-R27 done at 2026-08-23T09:13:18Z: single-file delivery docs/issues/execution-backend-coupling-inventory.md (326 lines) committed at result head 3604536ed6ef18fc889617be088043906a3521e8 on branch agent/issue-094-execution-backend-coupling-inventory from exact base c0e82803…; Draft PR #95 opened; CI run 32630256436 = success 7/7 on the result head; git diff --check and zero-placeholder checks green. Classification discipline: 61 [source fact] with path:symbol citations, 8 [accepted contract fact], 3 [static inference], 7 [requires experiment], 4 [XR-C0 decision input]. Branch lock released; stopped for independent fact review per scope."
     }
   ],
-  "locks": {
-    "branch:agent/issue-094-execution-backend-coupling-inventory": {
-      "task_id": "XR-D0",
-      "owner": "ox-alpha-coordinator",
-      "expected_head": null,
-      "acquired_at": "2026-08-23T08:37:40Z",
-      "lease_expires_at": "2026-08-23T10:07:40Z"
-    }
-  }
+  "locks": {}
 }
