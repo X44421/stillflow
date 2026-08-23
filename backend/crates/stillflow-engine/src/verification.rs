@@ -294,7 +294,10 @@ pub(crate) fn encode_component<'a>(
                 "list and struct keys are paused in E4-C0",
             ));
         }
-        LogicalType::Timestamp { unit: TimeUnit::Second, .. } => {
+        LogicalType::Timestamp {
+            unit: TimeUnit::Second,
+            ..
+        } => {
             return Err(EngineError::TypeError(
                 "Timestamp Second keys are paused in E4-C0",
             ));
@@ -1082,6 +1085,7 @@ pub(crate) struct VerificationMemory {
     validation_report_bytes: usize,
     dedup_report_bytes: usize,
     routing_bytes: usize,
+    slots: [bool; 6],
     #[allow(dead_code)] // recorded for the 12.2 operator-state audit trail
     compiled_plan_bytes: usize,
     live_payloads: u8,
@@ -1091,30 +1095,29 @@ const DEDUP_CACHE_CONFIGURED_BYTES: usize = 512 * 1024;
 const FFI_SCRATCH_BUDGET_BYTES: usize = 1024 * 1024;
 
 impl VerificationMemory {
-    fn check_peak(&self) -> Result<(), EngineError> {
-        let peak = self.envelope_bytes
-            + self.polars_bytes
-            + self.accepted_remainder_bytes
-            + self.rejected_remainder_bytes
-            + self.validation_report_bytes
-            + self.dedup_report_bytes;
-        if peak > VERIFICATION_MAX_ENGINE_PEAK_BYTES {
-            return Err(EngineError::BoundExceeded(
-                "verification engine peak exceeds 265 MiB",
-            ));
-        }
-        Ok(())
-    }
+    const SLOT_ENVELOPE: usize = 0;
+    const SLOT_POLARS: usize = 1;
+    const SLOT_ACCEPTED: usize = 2;
+    const SLOT_REJECTED: usize = 3;
+    const SLOT_VALIDATION: usize = 4;
+    const SLOT_DEDUP: usize = 5;
 
-    fn begin_hold(
-        &mut self,
+    /// Six-slot admission law (contract 12.1): a slot becomes live on its
+    /// first buffered byte and dies when emptied; the six-slot ceiling is
+    /// exact, and the aggregate columnar peak never exceeds 265 MiB.
+    fn admit(
+        slots: &mut [bool; 6],
+        live: &mut u8,
+        slot: usize,
         current: usize,
         incoming: usize,
+        other_peak: usize,
         cap: usize,
-    ) -> Result<(), EngineError> {
-        if current == 0 && incoming > 0 {
-            self.live_payloads += 1;
-            if self.live_payloads > VERIFICATION_MAX_LIVE_COLUMNAR_PAYLOADS {
+    ) -> Result<usize, EngineError> {
+        if !slots[slot] {
+            slots[slot] = true;
+            *live += 1;
+            if *live > VERIFICATION_MAX_LIVE_COLUMNAR_PAYLOADS {
                 return Err(EngineError::Internal(
                     "verification path exceeded six live payloads",
                 ));
@@ -1126,110 +1129,196 @@ impl VerificationMemory {
                 "verification payload exceeds its bounded slot",
             ));
         }
-        Ok(())
+        if other_peak + total > VERIFICATION_MAX_ENGINE_PEAK_BYTES {
+            return Err(EngineError::BoundExceeded(
+                "verification engine peak exceeds 265 MiB",
+            ));
+        }
+        Ok(total)
     }
 
-    fn end_hold(&mut self, remaining: usize) {
-        if remaining == 0 {
-            self.live_payloads = self.live_payloads.saturating_sub(1);
+    fn release(slots: &mut [bool; 6], live: &mut u8, slot: usize, remaining: &mut usize) {
+        // Callers zero the counter before releasing the slot.
+        if *remaining == 0 && slots[slot] {
+            slots[slot] = false;
+            *live = live.saturating_sub(1);
         }
     }
 
+    fn five_slot_peak_excluding(&self, excluded: usize) -> usize {
+        let mut peak = 0usize;
+        for (index, value) in [
+            self.envelope_bytes,
+            self.polars_bytes,
+            self.accepted_remainder_bytes,
+            self.rejected_remainder_bytes,
+            self.validation_report_bytes,
+            self.dedup_report_bytes,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index != excluded {
+                peak += value;
+            }
+        }
+        peak
+    }
+
     pub(crate) fn hold_envelope(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.begin_hold(0, self.envelope_bytes, bytes, stillflow_core::MAX_BATCH_BYTES)?;
-        self.envelope_bytes += bytes;
-        self.check_peak()
+        let other = self.five_slot_peak_excluding(Self::SLOT_ENVELOPE);
+        self.envelope_bytes = Self::admit(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_ENVELOPE,
+            self.envelope_bytes,
+            bytes,
+            other,
+            stillflow_core::MAX_BATCH_BYTES,
+        )?;
+        Ok(())
     }
 
     pub(crate) fn drop_envelope(&mut self) -> Result<(), EngineError> {
         let bytes = std::mem::take(&mut self.envelope_bytes);
-        self.end_hold(bytes);
+        Self::release(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_ENVELOPE,
+            &mut { bytes },
+        );
         Ok(())
     }
 
     pub(crate) fn hold_polars(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.begin_hold(1, self.polars_bytes, bytes, stillflow_core::MAX_BATCH_BYTES)?;
-        self.polars_bytes += bytes;
-        self.check_peak()
+        let other = self.five_slot_peak_excluding(Self::SLOT_POLARS);
+        self.polars_bytes = Self::admit(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_POLARS,
+            self.polars_bytes,
+            bytes,
+            other,
+            stillflow_core::MAX_BATCH_BYTES,
+        )?;
+        Ok(())
     }
 
     pub(crate) fn drop_polars(&mut self) -> Result<(), EngineError> {
         let bytes = std::mem::take(&mut self.polars_bytes);
-        self.end_hold(bytes);
+        Self::release(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_POLARS,
+            &mut { bytes },
+        );
         Ok(())
     }
 
     pub(crate) fn swap_envelope(&mut self, incoming: usize) -> Result<(), EngineError> {
         let previous = std::mem::take(&mut self.envelope_bytes);
-        self.end_hold(0, previous);
+        Self::release(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_ENVELOPE,
+            &mut { previous },
+        );
         self.hold_envelope(incoming)
     }
 
-    #[allow(dead_code)] // symmetric slot API; verification uses buffered accepted packer
     pub(crate) fn hold_accepted_remainder(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.begin_hold(
+        let other = self.five_slot_peak_excluding(Self::SLOT_ACCEPTED);
+        self.accepted_remainder_bytes = Self::admit(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_ACCEPTED,
             self.accepted_remainder_bytes,
             bytes,
+            other,
             stillflow_core::MAX_BATCH_BYTES,
         )?;
-        self.accepted_remainder_bytes += bytes;
-        self.check_peak()
+        Ok(())
     }
 
     pub(crate) fn release_accepted_remainder(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.accepted_remainder_bytes = self.accepted_remainder_bytes.saturating_sub(bytes);
-        self.end_hold(2, self.accepted_remainder_bytes);
+        if self.accepted_remainder_bytes == 0 && self.slots[Self::SLOT_ACCEPTED] {
+            self.slots[Self::SLOT_ACCEPTED] = false;
+            self.live_payloads -= 1;
+        }
         Ok(())
     }
 
     pub(crate) fn hold_rejected_remainder(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.begin_hold(
+        let other = self.five_slot_peak_excluding(Self::SLOT_REJECTED);
+        self.rejected_remainder_bytes = Self::admit(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_REJECTED,
             self.rejected_remainder_bytes,
             bytes,
+            other,
             stillflow_core::MAX_BATCH_BYTES,
         )?;
-        self.rejected_remainder_bytes += bytes;
-        self.check_peak()
+        Ok(())
     }
 
     pub(crate) fn release_rejected_remainder(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.rejected_remainder_bytes = self.rejected_remainder_bytes.saturating_sub(bytes);
-        self.end_hold(3, self.rejected_remainder_bytes);
+        if self.rejected_remainder_bytes == 0 && self.slots[Self::SLOT_REJECTED] {
+            self.slots[Self::SLOT_REJECTED] = false;
+            self.live_payloads -= 1;
+        }
         Ok(())
     }
 
     pub(crate) fn hold_validation_report(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.begin_hold(
+        let other = self.five_slot_peak_excluding(Self::SLOT_VALIDATION);
+        self.validation_report_bytes = Self::admit(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_VALIDATION,
             self.validation_report_bytes,
             bytes,
+            other,
             stillflow_storage::artifact::REPORT_PACK_BYTES,
         )?;
-        self.validation_report_bytes += bytes;
-        self.check_peak()
+        Ok(())
     }
 
     pub(crate) fn release_validation_report(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.validation_report_bytes = self.validation_report_bytes.saturating_sub(bytes);
-        self.end_hold(4, self.validation_report_bytes);
+        if self.validation_report_bytes == 0 && self.slots[Self::SLOT_VALIDATION] {
+            self.slots[Self::SLOT_VALIDATION] = false;
+            self.live_payloads -= 1;
+        }
         Ok(())
     }
 
     pub(crate) fn hold_dedup_report(&mut self, bytes: usize) -> Result<(), EngineError> {
-        self.dedup_report_bytes = self.admit_like(self.dedup_report_bytes, bytes);
-        self.check_peak()
+        let other = self.five_slot_peak_excluding(Self::SLOT_DEDUP);
+        self.dedup_report_bytes = Self::admit(
+            &mut self.slots,
+            &mut self.live_payloads,
+            Self::SLOT_DEDUP,
+            self.dedup_report_bytes,
+            bytes,
+            other,
+            stillflow_storage::artifact::REPORT_PACK_BYTES,
+        )?;
+        Ok(())
     }
 
     pub(crate) fn release_dedup_report(&mut self, bytes: usize) -> Result<(), EngineError> {
         self.dedup_report_bytes = self.dedup_report_bytes.saturating_sub(bytes);
-        self.end_hold(5, self.dedup_report_bytes);
+        if self.dedup_report_bytes == 0 && self.slots[Self::SLOT_DEDUP] {
+            self.slots[Self::SLOT_DEDUP] = false;
+            self.live_payloads -= 1;
+        }
         Ok(())
     }
 
-    fn admit_like(&mut self, current: usize, bytes: usize) -> usize {
-        current + bytes
-    }
-
-    #[allow(dead_code)] // routing stays within budget via per-chunk buffers; hook kept for V14 instrumentation
+    #[allow(dead_code)] // routing-budget hook kept for V14 instrumentation
     pub(crate) fn hold_routing(&mut self, bytes: usize) -> Result<(), EngineError> {
         let projected = self.routing_bytes.saturating_add(bytes);
         if projected > VERIFICATION_MAX_ROUTING_STATE_BYTES {
@@ -1241,8 +1330,8 @@ impl VerificationMemory {
         Ok(())
     }
 
-    /// Operator-state law: measured compiled plan + FFI budget + routing
-    /// state + configured dedup cache <= 5 MiB (contract 12.2).
+    /// Operator-state law: compiled plan + FFI budget + routing state +
+    /// configured dedup cache <= 5 MiB (contract 12.2).
     pub(crate) fn check_operator_state(
         &self,
         compiled_plan_bytes: usize,
@@ -1694,6 +1783,7 @@ fn severity_literal(severity: ValidationSeverity) -> &'static str {
 
 /// Builds one report batch from per-column closures over the frozen
 /// section schema. Column order is the schema's declaration order.
+#[allow(clippy::type_complexity)]
 fn build_report_batch(
     _logical: &stillflow_core::LogicalSchema,
     arrow: &arrow_schema::SchemaRef,
@@ -1740,7 +1830,7 @@ fn fill_text(
     let out = builder
         .as_any_mut()
         .downcast_mut::<StringBuilder>()
-        .ok_or_else(|| EngineError::Internal("report column type drift"))?;
+        .ok_or(EngineError::Internal("report column type drift"))?;
     for _ in 0..rows {
         out.append_value(value);
     }
@@ -1751,7 +1841,7 @@ fn fill_uuids(builder: &mut Box<dyn ArrayBuilder>, values: &[Uuid]) -> Result<()
     let out = builder
         .as_any_mut()
         .downcast_mut::<StringBuilder>()
-        .ok_or_else(|| EngineError::Internal("report column type drift"))?;
+        .ok_or(EngineError::Internal("report column type drift"))?;
     for value in values {
         out.append_value(value.to_string());
     }
@@ -1762,7 +1852,7 @@ fn fill_u32(builder: &mut Box<dyn ArrayBuilder>, values: &[u32]) -> Result<(), E
     let out = builder
         .as_any_mut()
         .downcast_mut::<UInt32Builder>()
-        .ok_or_else(|| EngineError::Internal("report column type drift"))?;
+        .ok_or(EngineError::Internal("report column type drift"))?;
     for value in values {
         out.append_value(*value);
     }
@@ -1773,7 +1863,7 @@ fn fill_u64(builder: &mut Box<dyn ArrayBuilder>, values: &[u64]) -> Result<(), E
     let out = builder
         .as_any_mut()
         .downcast_mut::<UInt64Builder>()
-        .ok_or_else(|| EngineError::Internal("report column type drift"))?;
+        .ok_or(EngineError::Internal("report column type drift"))?;
     for value in values {
         out.append_value(*value);
     }
@@ -2013,7 +2103,7 @@ fn flush_rejected_rows(
                         let out = builder
                             .as_any_mut()
                             .downcast_mut::<StringBuilder>()
-                            .ok_or_else(|| EngineError::Internal("rejected column type drift"))?;
+                            .ok_or(EngineError::Internal("rejected column type drift"))?;
                         for value in &kinds {
                             out.append_value(value);
                         }
@@ -2217,7 +2307,7 @@ fn flush_accepted_packs(
             let front = run
                 .accepted_batches
                 .first()
-                .ok_or_else(|| EngineError::Internal("accepted packer underflow"))?;
+                .ok_or(EngineError::Internal("accepted packer underflow"))?;
             if front.num_rows() <= needed {
                 let ready = run.accepted_batches.remove(0);
                 needed -= ready.num_rows();
@@ -2448,7 +2538,7 @@ fn process_envelope(
                             .val_summary_index
                             .get(&summary_key)
                             .copied()
-                            .ok_or_else(|| EngineError::Internal("validation summary missing"))?;
+                            .ok_or(EngineError::Internal("validation summary missing"))?;
                         let severity_literal = severity_literal(*severity);
                         let outcome_literal = |outcome: Option<bool>| {
                             if outcome.unwrap_or(false) {
@@ -2550,7 +2640,7 @@ fn process_envelope(
                             .dedup_summary_index
                             .get(&key)
                             .copied()
-                            .ok_or_else(|| EngineError::Internal("dedup summary missing"))?;
+                            .ok_or(EngineError::Internal("dedup summary missing"))?;
                         run.dedup_summaries[summary_index].evaluated += working.height() as u64;
                         let mut columns: Vec<polars::prelude::Series> =
                             Vec::with_capacity(keys.len());

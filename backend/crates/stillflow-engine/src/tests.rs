@@ -2962,12 +2962,6 @@ fn t57_all_valid_flush_then_nullable_flush_resets_validity() {
 #[cfg(test)]
 mod verification {
     use super::*;
-    use stillflow_core::verification::ArtifactKind;
-    use stillflow_storage::{
-        artifact::{dedup_rule_summary_section_schema, validation_finding_section_schema,
-        validation_rule_summary_section_schema},
-        VerificationBundleDraft,
-    };
     use std::collections::BTreeMap;
 
     struct VerIds {
@@ -3021,19 +3015,54 @@ mod verification {
         let materialize = PlanNodeId::from_uuid(Uuid::from_u128(5));
         let mut node_rules: Vec<Rule> = Vec::new();
         if let Some((predicate, severity, message)) = validate {
-            node_rules.push(Rule::Validate { predicate, severity, message: message.to_owned() });
+            node_rules.push(Rule::Validate {
+                predicate,
+                severity,
+                message: message.to_owned(),
+            });
         }
         if !keys.is_empty() {
-            node_rules.push(Rule::Deduplicate { keys: keys.to_vec() });
+            node_rules.push(Rule::Deduplicate {
+                keys: keys.to_vec(),
+            });
         }
         if let Some(predicate) = filter_rows {
             node_rules.push(Rule::FilterRows { predicate });
         }
         let mut nodes = BTreeMap::new();
-        nodes.insert(scan, PlanNode::new(PlanNodeKind::Scan { source_asset_id, projection, predicate: None }, Vec::new()));
-        nodes.insert(filter, PlanNode::new(PlanNodeKind::Filter { predicate: Expr::Literal(ScalarValue::Boolean(true)) }, vec![scan]));
-        nodes.insert(rules, PlanNode::new(PlanNodeKind::ApplyRules { rules: node_rules }, vec![filter]));
-        nodes.insert(materialize, PlanNode::new(PlanNodeKind::Materialize { output_label: "out".to_owned() }, vec![rules]));
+        nodes.insert(
+            scan,
+            PlanNode::new(
+                PlanNodeKind::Scan {
+                    source_asset_id,
+                    projection,
+                    predicate: None,
+                },
+                Vec::new(),
+            ),
+        );
+        nodes.insert(
+            filter,
+            PlanNode::new(
+                PlanNodeKind::Filter {
+                    predicate: Expr::Literal(ScalarValue::Boolean(true)),
+                },
+                vec![scan],
+            ),
+        );
+        nodes.insert(
+            rules,
+            PlanNode::new(PlanNodeKind::ApplyRules { rules: node_rules }, vec![filter]),
+        );
+        nodes.insert(
+            materialize,
+            PlanNode::new(
+                PlanNodeKind::Materialize {
+                    output_label: "out".to_owned(),
+                },
+                vec![rules],
+            ),
+        );
         LogicalPlan::new(materialize, nodes).expect("plan")
     }
 
@@ -3067,7 +3096,9 @@ mod verification {
                 deduplication_report_artifact_id: ids.deduplication_report_artifact_id,
                 session_id: ids.session_id,
                 logical_input: stillflow_core::verification::LogicalInputRef {
-                    input: stillflow_core::verification::InputRef::Asset { asset_id: source.id },
+                    input: stillflow_core::verification::InputRef::Asset {
+                        asset_id: source.id,
+                    },
                     version_digest: [7u8; 32],
                 },
                 canonical_plan_digest: [0u8; 32], // patched by caller
@@ -3113,12 +3144,25 @@ mod verification {
         let ids = ver_ids(0xA0);
         let bundle_id = ids.bundle_id;
         let rejected_id = ids.rejected_rows_artifact_id.expect("authorized");
-        let mut request = verify_request((&engine, &store), &connection, &source, schema.clone(), plan, ids, None);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan,
+            ids,
+            None,
+        );
         request.identities.canonical_plan_digest = digest;
-        let bundle = engine.materialize_verification(request).await.expect("bundle");
-        let rejected = bundle.rejected_rows().expect("terminal rejections publish payload");
+        let bundle = engine
+            .materialize_verification(request)
+            .await
+            .expect("bundle");
+        let rejected = bundle
+            .rejected_rows()
+            .expect("terminal rejections publish payload");
         assert_eq!(rejected.manifest().artifact_id(), rejected_id);
-        let mut reader = store
+        let reader = store
             .open_artifact_section(
                 bundle_id,
                 rejected_id,
@@ -3126,26 +3170,35 @@ mod verification {
             )
             .expect("open rejected section");
         let mut payload_rows = 0usize;
-        while let Some(item) = reader.next() {
+        for item in reader {
             payload_rows += item.expect("envelope").row_count();
         }
         assert_eq!(payload_rows, 2);
-        assert_eq!(bundle.accepted().manifest().snapshot().stats().row_count(), 1);
+        assert_eq!(
+            bundle.accepted().manifest().snapshot().stats().row_count(),
+            1
+        );
         drop(_guard);
     }
 
     use crate::EngineError;
 
     fn reject_plan(source_id: Uuid, id: ColumnId) -> LogicalPlan {
-        ver_plan(source_id, vec![id], &[], Some((
-            Expr::Binary {
-                left: Box::new(Expr::Column(id)),
-                operator: stillflow_core::BinaryOperator::GreaterThan,
-                right: Box::new(Expr::Literal(ScalarValue::Int64(0))),
-            },
-            stillflow_plan::ValidationSeverity::Error,
-            "always fails",
-        )), None)
+        ver_plan(
+            source_id,
+            vec![id],
+            &[],
+            Some((
+                Expr::Binary {
+                    left: Box::new(Expr::Column(id)),
+                    operator: stillflow_core::BinaryOperator::GreaterThan,
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(0))),
+                },
+                stillflow_plan::ValidationSeverity::Error,
+                "always fails",
+            )),
+            None,
+        )
     }
 
     // V02: empty source publishes accepted + two zero-row reports; rejected
@@ -3162,11 +3215,22 @@ mod verification {
         let plan = reject_plan(source.id, schema.fields[0].id);
         let digest = canonical_digest(&plan);
         let ids = ver_ids(0xB0);
-        let mut request = verify_request((&engine, &store), &connection, &source, schema.clone(), plan, ids, None);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan,
+            ids,
+            None,
+        );
         request.identities.canonical_plan_digest = digest;
-        let bundle = engine.materialize_verification(request).await.expect("bundle");
+        let bundle = engine
+            .materialize_verification(request)
+            .await
+            .expect("bundle");
         assert!(bundle.rejected_rows().is_none());
-        
+
         assert_eq!(bundle.validation_report().manifest().sections().len(), 2);
         assert_eq!(bundle.deduplication_report().manifest().sections().len(), 2);
         drop(_guard);
@@ -3187,11 +3251,22 @@ mod verification {
         let plan = reject_plan(source.id, schema.fields[0].id);
         let digest = canonical_digest(&plan);
         let ids = ver_ids(0xC0);
-        let mut request = verify_request((&engine, &store), &connection, &source, schema.clone(), plan, ids, None);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan,
+            ids,
+            None,
+        );
         request.identities.canonical_plan_digest = digest;
         request.identities.rejected_rows_artifact_id = None;
         let run_id = request.identities.run_id;
-        let error = engine.materialize_verification(request).await.expect_err("must fail");
+        let error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("must fail");
         assert!(matches!(error, EngineError::InvalidPlan(_)));
         assert!(store.load_verification_bundle_by_run_id(run_id).is_err());
         drop(_guard);
@@ -3201,7 +3276,7 @@ mod verification {
     #[tokio::test(flavor = "current_thread")]
     async fn v23_materialize_still_rejects_validate() {
         let _guard = exclusive_test_lock().lock().await;
-        let (schema, id) = int_schema(); // used by reject_plan below
+        let (schema, _id) = int_schema();
         let connection = connection();
         let source = asset(connection.id());
         let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
@@ -3221,8 +3296,13 @@ mod verification {
             })
             .await
             .expect_err("E2 must refuse");
-        assert!(matches!(error, EngineError::UnsupportedRule { kind: "validate", .. }));
+        assert!(matches!(
+            error,
+            EngineError::UnsupportedRule {
+                kind: "validate",
+                ..
+            }
+        ));
         drop(_guard);
     }
-
 }
