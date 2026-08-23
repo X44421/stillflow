@@ -255,7 +255,7 @@
     {
       "id": "T76-CLOSE",
       "title": "O0-D0 documentation convergence",
-      "status": "dispatched",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-coordinator",
       "target_pr": 76,
@@ -268,10 +268,11 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-23T10:07:40Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-23T08:37:40Z",
-      "updated_at": "2026-08-23T08:37:40Z",
-      "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer. | REGISTRY-R24 dispatch: exact PR #76 head ceeaa1e113ce335a804c016dd9404c4937a01105 re-verified Open/Draft/MERGEABLE; authorized body-only current-status correction and evidence refresh. No commit, Ready, merge, issue closure, or branch deletion; stop after posting completion evidence for an independent exact-head acceptance.",
+      "updated_at": "2026-08-23T08:55:33Z",
+      "completed_at": "2026-08-23T08:55:33Z",
+      "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer. | REGISTRY-R24 dispatch: exact PR #76 head ceeaa1e113ce335a804c016dd9404c4937a01105 re-verified Open/Draft/MERGEABLE; authorized body-only current-status correction and evidence refresh. No commit, Ready, merge, issue closure, or branch deletion; stop after posting completion evidence for an independent exact-head acceptance. | REGISTRY-R26 done at 2026-08-23T08:55:33Z: body-only status refresh applied to PR #76 via REST PATCH (head unchanged ceeaa1e1…, still Draft); completion evidence at PR #76 comment 5385126464 (single-file constraint live-verified; CI run 32551940170 success on the exact head). Task scope ends at this evidence hand-off; independent exact-head acceptance and Ready/merge remain downstream.",
       "verified_by": "ox-alpha-coordinator (REGISTRY-R12)",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "User-authorized maintainer dispatch: converge PR #76 metadata at exact head, then stop for independent docs acceptance."
@@ -514,13 +515,15 @@
     {
       "id": "T89-REBIND-R2",
       "title": "Rebind PR #89 roadmap onto current main and refresh live facts",
-      "status": "dispatched",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-coordinator",
       "target_pr": 89,
       "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
       "expected_head": "f5407b4b71a6cca495548c24d26f06b97f444fbb",
       "expected_main": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "rebind_result_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32629393791",
       "locks": [
         "branch:agent/issue-082-backend-roadmap-reconciliation"
       ],
@@ -535,12 +538,12 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-23T10:07:40Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-23T08:37:40Z",
-      "updated_at": "2026-08-23T08:37:40Z",
+      "updated_at": "2026-08-23T08:55:33Z",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "PR #89 contains the canonical roadmap plus #93 registration but diverges from current main after #53 integration; rebind and fact refresh are required before independent review.",
-      "notes": "At CLAIM, re-fetch PR #89 head and main; stop on either mismatch. Create backup ref before rewrite. Rebase the existing branch onto main c0e828031f0141fa89e6b525b4314ebabd5f4f4e, resolve only the authorized roadmap file, preserve the B0 reconciliation and F-XR0/#93 additions, reproduce range-diff/content mapping, refresh current GitHub facts in the document/body, run git diff --check and placeholder/link/dependency-graph checks, then force-with-lease. Keep PR Draft and stop at the new-head checkpoint for independent acceptance. Do not touch runtime, #80/#91, Ready, merge, close #82, or delete branches."
+      "notes": "At CLAIM, re-fetch PR #89 head and main; stop on either mismatch. Create backup ref before rewrite. Rebase the existing branch onto main c0e828031f0141fa89e6b525b4314ebabd5f4f4e, resolve only the authorized roadmap file, preserve the B0 reconciliation and F-XR0/#93 additions, reproduce range-diff/content mapping, refresh current GitHub facts in the document/body, run git diff --check and placeholder/link/dependency-graph checks, then force-with-lease. Keep PR Draft and stop at the new-head checkpoint for independent acceptance. Do not touch runtime, #80/#91, Ready, merge, close #82, or delete branches. | REGISTRY-R26 done at 2026-08-23T08:55:33Z: rebased onto main c0e82803… cleanly (range-diff 2=2 identical patches), fact-refresh commit e5524be4dd9f3948e048b58f49e5e7f7ec59555b (+18-line ledger subsection 4.1), force-with-lease pushed with lease anchored at f5407b4b…; checks green (git diff --check, one-file vs main, zero placeholders); CI run 32629393791 = success on the new head; checkpoint evidence at issue #82 comment 5385159548. Branch lock released; Draft preserved; B0 and F-XR0/#93 content preserved verbatim; awaiting independent acceptance."
     },
     {
       "id": "XR-D0",
@@ -576,13 +579,6 @@
     }
   ],
   "locks": {
-    "branch:agent/issue-082-backend-roadmap-reconciliation": {
-      "task_id": "T89-REBIND-R2",
-      "owner": "ox-alpha-coordinator",
-      "expected_head": "f5407b4b71a6cca495548c24d26f06b97f444fbb",
-      "acquired_at": "2026-08-23T08:37:40Z",
-      "lease_expires_at": "2026-08-23T10:07:40Z"
-    },
     "branch:agent/issue-094-execution-backend-coupling-inventory": {
       "task_id": "XR-D0",
       "owner": "ox-alpha-coordinator",
