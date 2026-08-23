@@ -548,7 +548,7 @@
     {
       "id": "XR-D0",
       "title": "Inventory current execution-backend coupling",
-      "status": "dispatched",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-coordinator",
       "canonical_issue": 94,
@@ -577,7 +577,8 @@
       "updated_at": "2026-08-23T09:13:18Z",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "Issue #93 architecture direction requires a source-bound inventory before XR-C0/ADR-002; docs-only work is independent of E4-S2 hold.",
-      "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91. | REGISTRY-R27 done at 2026-08-23T09:13:18Z: single-file delivery docs/issues/execution-backend-coupling-inventory.md (326 lines) committed at result head 3604536ed6ef18fc889617be088043906a3521e8 on branch agent/issue-094-execution-backend-coupling-inventory from exact base c0e82803…; Draft PR #95 opened; CI run 32630256436 = success 7/7 on the result head; git diff --check and zero-placeholder checks green. Classification discipline: 61 [source fact] with path:symbol citations, 8 [accepted contract fact], 3 [static inference], 7 [requires experiment], 4 [XR-C0 decision input]. Branch lock released; stopped for independent fact review per scope."
+      "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91. | REGISTRY-R27 done at 2026-08-23T09:13:18Z: single-file delivery docs/issues/execution-backend-coupling-inventory.md (326 lines) committed at result head 3604536ed6ef18fc889617be088043906a3521e8 on branch agent/issue-094-execution-backend-coupling-inventory from exact base c0e82803…; Draft PR #95 opened; CI run 32630256436 = success 7/7 on the result head; git diff --check and zero-placeholder checks green. Classification discipline: 61 [source fact] with path:symbol citations, 8 [accepted contract fact], 3 [static inference], 7 [requires experiment], 4 [XR-C0 decision input]. Branch lock released; stopped for independent fact review per scope.",
+      "completed_at": "2026-08-23T09:13:18Z"
     }
   ],
   "locks": {}
