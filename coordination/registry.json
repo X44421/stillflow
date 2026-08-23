@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 28,
+  "revision": 29,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T09:26:17.066Z",
+  "updated_at": "2026-08-23T09:42:21Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -583,9 +583,9 @@
     {
       "id": "T76-ACCEPT",
       "title": "Independent exact-head acceptance of O0-D0 inventory",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-r24acc",
       "target_pr": 76,
       "target_branch": "agent/issue-075-backend-optimization-inventory",
       "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
@@ -601,9 +601,9 @@
         "T76-CLOSE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-23T09:26:17.066Z",
+      "lease_expires_at": "2026-08-23T11:12:21Z",
+      "started_at": "2026-08-23T09:42:21Z",
+      "updated_at": "2026-08-23T09:42:21Z",
       "queued_by": "maintainer:auto-followup-after-r24",
       "queue_reason": "R24 body convergence is complete at an unchanged exact head with one-file diff and green CI; independent docs acceptance is the next gate.",
       "notes": "Read-only independent review. Re-fetch exact head, base, diff and CI. Do not trust author summary. Validate every material performance/complexity claim against source at the recorded historical base, verify formulas and fact/inference/experiment labels, confirm the PR body now distinguishes historical and current status, and check no implementation authorization is implied. Publish APPROVE FOR DOCS MERGE or REQUEST CHANGES bound to the full head. Do not edit body/branch, Ready, merge, close #75, or delete branch."
