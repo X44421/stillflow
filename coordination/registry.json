@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 17,
+  "revision": 18,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "9c368cee186bffa4f55d5de5c80d7b2be6957135",
-  "updated_at": "2026-08-23T07:24:43Z",
+  "updated_at": "2026-08-23T07:31:35Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -480,6 +480,8 @@
       "target_branch": "agent/issue-052-node-preview-runtime",
       "result_branch": "main",
       "expected_head": "90fb878e2ace78a6e1c2698014bca5461f19db59",
+      "rebind_result_head": "a7a517c29a0509716d68a53c0baf0c32b0e483d8",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32625688994",
       "locks": [
         "branch:agent/issue-052-node-preview-runtime",
         "engine:stillflow-engine"
@@ -498,8 +500,8 @@
       ],
       "lease_expires_at": "2026-08-23T08:54:43Z",
       "started_at": "2026-08-23T07:24:43Z",
-      "updated_at": "2026-08-23T07:24:43Z",
-      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration.",
+      "updated_at": "2026-08-23T07:31:35Z",
+      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration. | REGISTRY-R18 checkpoint reached 2026-08-23T07:31:35Z: 23 commits rebased onto main 9c368cee… with zero conflicts and 23/23 identical patches (range-diff all '='); backup ref refs/backup/t53-rebind-pre-90fb878e pushed; force-with-lease moved the branch to rebind head a7a517c29a0509716d68a53c0baf0c32b0e483d8; fresh CI run 32625688994 = success, 7 green jobs (stable + Rust 1.85.0 x fmt/clippy/serial tests + Frontend). EXECUTION STOPPED at the approved checkpoint - AWAITING INDEPENDENT ACCEPTANCE before any main integration. Base-migration disclosure: the #53 historical base predated the post-#74/#88 mains, so the tree delta vs the pre-rebase head (+13079/-266 across 39 files) comes solely from base movement, not patch drift.",
       "queued_by": "maintainer:frozen-order-2026-08-23",
       "queue_reason": "Maintainer order step 2 trigger satisfied by DX-F0-MERGE completion (main @ 9c368cee186bffa4f55d5de5c80d7b2be6957135)."
     }
@@ -508,7 +510,7 @@
     "branch:agent/issue-052-node-preview-runtime": {
       "task_id": "T53-REBIND-ACCEPT",
       "owner": "ox-alpha-coordinator",
-      "expected_head": "90fb878e2ace78a6e1c2698014bca5461f19db59",
+      "expected_head": "a7a517c29a0509716d68a53c0baf0c32b0e483d8",
       "acquired_at": "2026-08-23T07:24:43Z",
       "lease_expires_at": "2026-08-23T08:54:43Z"
     },
