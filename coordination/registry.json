@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 30,
+  "revision": 31,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T09:42:35Z",
+  "updated_at": "2026-08-23T09:42:49Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -641,9 +641,9 @@
     {
       "id": "XR-D0-ACCEPT",
       "title": "Independent fact acceptance of execution-backend coupling inventory",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-r24acc",
       "canonical_issue": 94,
       "target_pr": 95,
       "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
@@ -662,9 +662,9 @@
         "XR-D0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-23T09:26:17.066Z",
+      "lease_expires_at": "2026-08-23T11:12:49Z",
+      "started_at": "2026-08-23T09:42:49Z",
+      "updated_at": "2026-08-23T09:42:49Z",
       "queued_by": "maintainer:auto-followup-after-r24",
       "queue_reason": "XR-D0 delivery is complete as one docs-only file with green exact-head CI; its factual inventory must be independently reproduced before XR-C0/ADR-002.",
       "notes": "Read-only independent fact review. Do not trust counts or classifications. Sample and reproduce source citations across every crate and verify all public RecordBatch exposure, Polars confinement, DuckDB absence, operator support/rejection, runtime authority, test taxonomy, and nine disclosed gaps. Check facts are separated from inference/decision inputs and that no Backend trait/ADR is smuggled in. Publish APPROVE FOR FACT MERGE or REQUEST CHANGES bound to the full head. Do not edit, Ready, merge, close #94, start XR-C0, or touch #80/#91."
