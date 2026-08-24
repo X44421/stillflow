@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 56,
+  "revision": 57,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T00:53:52Z",
+  "updated_at": "2026-08-24T01:08:27Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -849,7 +849,7 @@
     {
       "id": "XR-C0",
       "title": "Runtime abstraction contract / ADR-002",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-r24acc",
       "target_issue": 97,
@@ -874,12 +874,16 @@
         "XR-D0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-24T02:49:54Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T00:49:54Z",
-      "updated_at": "2026-08-24T00:49:54Z",
+      "updated_at": "2026-08-24T01:08:27Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "XR-D0 factual inventory is accepted and merged at main@636cd7db443bed45e7adcf1596785670cfc3ff1c; Issue #93 explicitly permits documentation planning before E4-S2 completion.",
-      "notes": "Canonical Issue #97. Docs-only exact-base ADR task; one authorized file. CLAIM must bind main@636cd7db443bed45e7adcf1596785670cfc3ff1c, acquire only its branch lock, and stop on BASE MOVED. No runtime/API/Cargo/workflow/frontend/ADR-001/AGENTS change; no #80/#91 action; Draft PR and independent architecture review required before any merge or XR runtime implementation."
+      "notes": "Canonical Issue #97. Docs-only exact-base ADR task; one authorized file. CLAIM must bind main@636cd7db443bed45e7adcf1596785670cfc3ff1c, acquire only its branch lock, and stop on BASE MOVED. No runtime/API/Cargo/workflow/frontend/ADR-001/AGENTS change; no #80/#91 action; Draft PR and independent architecture review required before any merge or XR runtime implementation.",
+      "completed_at": "2026-08-24T01:08:27Z",
+      "result_head": "7bd1966218ec9a0df2130736ee4cc863d09d5b27",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32678595329",
+      "completion_note": "ADR-002 authored as single new file docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md (+546), single commit on agent/issue-097-xr-c0-runtime-abstraction-contract from exact base main@636cd7db443bed45e7adcf1596785670cfc3ff1c. Draft PR #98 (stays Draft); all ten Issue #97 decision areas covered; coordinator countersign: diff exactly one file, zero forbidden markers, supersession quote verbatim-matches ADR-001 L37, CI success 7/7. Claim comment on #97: 5389491956. Next: independent architecture review dispatch before any Ready/merge or XR runtime work."
     },
     {
       "id": "B0-STATE-HYGIENE-R2",
@@ -922,13 +926,5 @@
       "completion_note": "Live board CURRENT-EXECUTION-BOARD block replaced (R52+ live state; historical roadmap preserved); #79 closed completed (PRs #83@d3c0760/#84@7c5f163a/#87@ea54a526 merged evidence exact); #85 closed completed (PR#88@9c368cee merged evidence exact); #92 closed completed (completion commit 43e78ae verified ancestor of coordination tip); main drift-free at 636cd7d throughout."
     }
   ],
-  "locks": {
-    "branch:agent/issue-097-xr-c0-runtime-abstraction-contract": {
-      "task_id": "XR-C0",
-      "owner": "ox-alpha-r24acc",
-      "expected_head": null,
-      "acquired_at": "2026-08-24T00:49:54Z",
-      "lease_expires_at": "2026-08-24T02:49:54Z"
-    }
-  }
+  "locks": {}
 }
