@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 58,
+  "revision": 59,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T01:10:28Z",
+  "updated_at": "2026-08-24T01:20:31Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -928,6 +928,77 @@
       "result_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "ci_url": null,
       "completion_note": "Live board CURRENT-EXECUTION-BOARD block replaced (R52+ live state; historical roadmap preserved); #79 closed completed (PRs #83@d3c0760/#84@7c5f163a/#87@ea54a526 merged evidence exact); #85 closed completed (PR#88@9c368cee merged evidence exact); #92 closed completed (completion commit 43e78ae verified ancestor of coordination tip); main drift-free at 636cd7d throughout."
+    },
+    {
+      "id": "XR-C0-ACCEPT",
+      "title": "Independent architecture acceptance of ADR-002",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 97,
+      "target_pr": 98,
+      "target_branch": "agent/issue-097-xr-c0-runtime-abstraction-contract",
+      "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
+      "expected_head": "7bd1966218ec9a0df2130736ee4cc863d09d5b27",
+      "locks": [],
+      "acceptance_keys": [
+        "xr-c0-accept:exact-one-file-scope",
+        "xr-c0-accept:ten-decision-domains",
+        "xr-c0-accept:adr001-l37-verbatim-supersession",
+        "xr-c0-accept:runtime-authority-preserved",
+        "xr-c0-accept:four-decision-dispositions"
+      ],
+      "depends_on": [
+        "XR-C0"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T01:20:31Z",
+      "queued_by": "maintainer:chatgpt-workmode",
+      "queue_reason": "XR-C0 delivery is done at exact head 7bd1966218ec9a0df2130736ee4cc863d09d5b27 with one-file +546 diff and CI run 32678595329 success; independent architecture disposition is the next required gate.",
+      "notes": "Read-only exact-head review of PR #98. Re-fetch main/head/diff/CI and reproduce load-bearing quotations and source citations. Resolve each explicit [Decision] ambiguity as ACCEPT / REQUEST_CHANGES with precise rationale. No edits, commits, PR-body changes, Ready, merge, issue closure, branch deletion, AGENTS/ADR-001 changes, XR-R0 dispatch, or #80/#91 action. Any head/base movement voids the review."
+    },
+    {
+      "id": "E24-B2BASE",
+      "title": "Local-tabular ingestion measurement baseline",
+      "status": "dispatched",
+      "mode": "measurement",
+      "owner": null,
+      "target_issue": 99,
+      "target_pr": null,
+      "target_branch": "agent/issue-099-e24-b2-ingestion-baseline",
+      "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
+      "expected_head": null,
+      "e4_reference_head": "d0ea2a3bce548a6cdc311dea4387e29e35e440ab",
+      "locks": [
+        "branch:agent/issue-099-e24-b2-ingestion-baseline",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/json_stream.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/inference.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"
+      ],
+      "acceptance_keys": [
+        "e24-b2base:default-feature-equivalence",
+        "e24-b2base:logical-io-counters",
+        "e24-b2base:parser-reader-counters",
+        "e24-b2base:record-only-json-baseline",
+        "e24-b2base:no-optimization"
+      ],
+      "depends_on": [
+        "E23-REVIEW"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T01:20:31Z",
+      "queued_by": "maintainer:chatgpt-workmode",
+      "queue_reason": "E23-REVIEW selected B2 as the sole dispatch-ready hotspot: measurement only, zero overlap with E4-S2/#91, no performance claim and no optimization implementation.",
+      "notes": "Canonical Issue #99. CLAIM must bind exact main@636cd7db443bed45e7adcf1596785670cfc3ff1c, re-diff PR #91 head d0ea2a3bce548a6cdc311dea4387e29e35e440ab for zero overlap, and acquire both declared locks for 120m. Authorized paths are exact. Cargo.toml may add only feature io-metrics; no dependency. Default-feature behavior unchanged. Counters contradicting C1/C2/C3 require stop and inventory-invalidating report. Draft PR only; release locks and stop for independent measurement review."
     }
   ],
   "locks": {}
