@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 59,
+  "revision": 60,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T01:20:31Z",
+  "updated_at": "2026-08-24T01:25:43Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -932,9 +932,9 @@
     {
       "id": "XR-C0-ACCEPT",
       "title": "Independent architecture acceptance of ADR-002",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-r24acc",
       "target_issue": 97,
       "target_pr": 98,
       "target_branch": "agent/issue-097-xr-c0-runtime-abstraction-contract",
@@ -952,9 +952,9 @@
         "XR-C0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-24T01:20:31Z",
+      "lease_expires_at": "2026-08-24T02:55:43Z",
+      "started_at": "2026-08-24T01:25:43Z",
+      "updated_at": "2026-08-24T01:25:43Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "XR-C0 delivery is done at exact head 7bd1966218ec9a0df2130736ee4cc863d09d5b27 with one-file +546 diff and CI run 32678595329 success; independent architecture disposition is the next required gate.",
       "notes": "Read-only exact-head review of PR #98. Re-fetch main/head/diff/CI and reproduce load-bearing quotations and source citations. Resolve each explicit [Decision] ambiguity as ACCEPT / REQUEST_CHANGES with precise rationale. No edits, commits, PR-body changes, Ready, merge, issue closure, branch deletion, AGENTS/ADR-001 changes, XR-R0 dispatch, or #80/#91 action. Any head/base movement voids the review."
