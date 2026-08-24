@@ -387,7 +387,7 @@ fn print_case(
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn e24_b2_ingestion_baseline() {
+async fn read_baseline_e24_b2_ingestion() {
     let head = std::env::var(HEAD_SHA_ENV).unwrap_or_else(|_| DEFAULT_HEAD.to_string());
     let metrics_out =
         std::env::var(METRICS_OUT_ENV).unwrap_or_else(|_| "/tmp/e24_io_metrics.out".to_string());
