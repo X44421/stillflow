@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 37,
+  "revision": 38,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:09:34Z",
+  "updated_at": "2026-08-24T00:11:38Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -681,7 +681,7 @@
     {
       "id": "T76-MERGE",
       "title": "Merge the accepted O0-D0 inventory into main",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-r24acc",
       "target_pr": 76,
@@ -703,10 +703,14 @@
       "conflicts_with": [
         "T89-MERGE"
       ],
-      "lease_expires_at": "2026-08-24T00:54:34Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T00:09:34Z",
-      "updated_at": "2026-08-24T00:09:34Z",
-      "notes": "Pre-merge gate (all three must hold, else STOP): live head == ceeaa1e113ce335a804c016dd9404c4937a01105; APPROVE FOR DOCS MERGE comment 5385454810 bound to that full head; CI run 32551940170 success on that head. Mark Ready only inside this task, merge with exact-head sha guard (PUT /pulls/76/merge sha=expected_head). Docs-only, one new file. Record the resulting main merge SHA."
+      "updated_at": "2026-08-24T00:11:38Z",
+      "notes": "Pre-merge gate (all three must hold, else STOP): live head == ceeaa1e113ce335a804c016dd9404c4937a01105; APPROVE FOR DOCS MERGE comment 5385454810 bound to that full head; CI run 32551940170 success on that head. Mark Ready only inside this task, merge with exact-head sha guard (PUT /pulls/76/merge sha=expected_head). Docs-only, one new file. Record the resulting main merge SHA.",
+      "completed_at": "2026-08-24T00:11:38Z",
+      "result_head": "1b01be2c6c004b6d21d76ae2b1a52d17f6033c43",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32551940170",
+      "completion_note": "Merged with exact-head guard sha=ceeaa1e113ce335a804c016dd9404c4937a01105 after three-gate re-verification (head exact / APPROVE comment 5385454810 bound to full head / CI 32551940170 success). Resulting main merge commit 1b01be2c6c004b6d21d76ae2b1a52d17f6033c43."
     },
     {
       "id": "T89-MERGE",
@@ -798,13 +802,6 @@
       "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
       "acquired_at": "2026-08-24T00:07:32Z",
       "lease_expires_at": "2026-08-24T01:07:32Z"
-    },
-    "main:merge": {
-      "task_id": "T76-MERGE",
-      "owner": "ox-alpha-r24acc",
-      "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
-      "acquired_at": "2026-08-24T00:09:34Z",
-      "lease_expires_at": "2026-08-24T00:54:34Z"
     }
   }
 }
