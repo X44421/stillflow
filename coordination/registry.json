@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 49,
+  "revision": 50,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:30:27Z",
+  "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
+  "updated_at": "2026-08-24T00:38:38Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -310,12 +310,12 @@
     {
       "id": "E23-REVIEW",
       "title": "Post-merge E2/E3 evidence review",
-      "status": "blocked",
+      "status": "dispatched",
       "mode": "review",
       "owner": null,
       "target_pr": null,
       "target_branch": "main",
-      "expected_head": null,
+      "expected_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "locks": [],
       "acceptance_keys": [
         "e23:post-merge-review"
@@ -327,9 +327,13 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-23T05:57:20Z",
-      "notes": "Bind to the final E3 merge SHA; reuse PR #76 facts instead of repeating inventory. | REGISTRY-R12 rev 12 verification: dependencies T53-T71 (queued) and T76-CLOSE (wait_maintainer) remain non-terminal; blocked state correct.",
-      "verified_by": "ox-alpha-coordinator (REGISTRY-R12)"
+      "updated_at": "2026-08-24T00:38:38Z",
+      "notes": "Bind to the final E3 merge SHA; reuse PR #76 facts instead of repeating inventory. | REGISTRY-R12 rev 12 verification: dependencies T53-T71 (queued) and T76-CLOSE (wait_maintainer) remain non-terminal; blocked state correct. | REGISTRY-R50: dependencies re-evaluated terminal; canonical Issue #96 created. Dispatched read-only against runtime anchor c0e828031f0141fa89e6b525b4314ebabd5f4f4e and planning head 636cd7db443bed45e7adcf1596785670cfc3ff1c. No repository/PR writes, no locks, and no #80/#91 action.",
+      "verified_by": "ox-alpha-coordinator (REGISTRY-R12)",
+      "target_issue": 96,
+      "runtime_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
+      "queued_by": "maintainer:chatgpt-workmode",
+      "queue_reason": "Dependencies T53-T71 and T76-CLOSE are terminal; current main differs from the final E3 runtime anchor only by the three merged documentation files verified in the c0e82803...636cd7db compare. Dispatch a read-only evidence gate to select at most one benchmark-first hotspot."
     },
     {
       "id": "E23-OPT",
@@ -841,6 +845,41 @@
       "result_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32675760904",
       "completion_note": "Merged with exact-head guard sha=8273702dabf90732d66fe362b5c56cdebf93fb06 after four-gate re-verification (head exact + draft / APPROVE FOR FACT MERGE comment 5389353991 bound to full head / CI 32675760904 success / main at baseline 967ca1dfcb136fc44eb2c44c4e895b30cd9ef81d with mergeable=clean). Resulting main merge commit 636cd7db443bed45e7adcf1596785670cfc3ff1c."
+    },
+    {
+      "id": "XR-C0",
+      "title": "Runtime abstraction contract / ADR-002",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 97,
+      "target_pr": null,
+      "target_branch": "agent/issue-097-xr-c0-runtime-abstraction-contract",
+      "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-097-xr-c0-runtime-abstraction-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md"
+      ],
+      "acceptance_keys": [
+        "xr-c0:runtime-executor-ownership",
+        "xr-c0:deterministic-selection-provenance",
+        "xr-c0:equivalence-levels",
+        "xr-c0:compatibility-fail-closed",
+        "xr-c0:adr001-supersession-map"
+      ],
+      "depends_on": [
+        "XR-D0"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T00:38:38Z",
+      "queued_by": "maintainer:chatgpt-workmode",
+      "queue_reason": "XR-D0 factual inventory is accepted and merged at main@636cd7db443bed45e7adcf1596785670cfc3ff1c; Issue #93 explicitly permits documentation planning before E4-S2 completion.",
+      "notes": "Canonical Issue #97. Docs-only exact-base ADR task; one authorized file. CLAIM must bind main@636cd7db443bed45e7adcf1596785670cfc3ff1c, acquire only its branch lock, and stop on BASE MOVED. No runtime/API/Cargo/workflow/frontend/ADR-001/AGENTS change; no #80/#91 action; Draft PR and independent architecture review required before any merge or XR runtime implementation."
     }
   ],
   "locks": {}
