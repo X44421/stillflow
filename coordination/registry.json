@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 44,
+  "revision": 45,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:16:39Z",
+  "updated_at": "2026-08-24T00:24:13Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -783,7 +783,7 @@
     {
       "id": "XR-D0-ACCEPT-R2",
       "title": "Independent exact-head fact re-acceptance after R1 fixes",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-r24acc",
       "target_pr": 95,
@@ -797,14 +797,18 @@
         "XR-D0-FIX-R1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-24T01:46:39Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T00:16:39Z",
-      "updated_at": "2026-08-24T00:16:39Z",
+      "updated_at": "2026-08-24T00:24:13Z",
       "notes": "Bind expected_head to the XR-D0-FIX-R1 result head at claim time. Fresh independent read-only review: reproduce guards on the NEW head (base still c0e828031f01..., diff stays exactly the inventory file), verify each of the four blockers is fixed against source, audit that the delta vs 3604536ed6ef18fc889617be088043906a3521e8 touches nothing beyond the intended lines, and spot-check previously verified assertion themes remain intact. CI on the new head must be success before APPROVE. Publish APPROVE FOR FACT MERGE or REQUEST CHANGES bound to the full new head.",
       "head_bound_by": "ox-alpha-r24acc",
       "head_bind_reason": "Bind to XR-D0-FIX-R1 result head 8273702dabf90732d66fe362b5c56cdebf93fb06 (four-line fact fix, fast-forward from 3604536ed6ef18fc889617be088043906a3521e8); CI rerun of failed toolchain-download job in progress.",
       "queued_by": "ox-alpha-r24acc",
-      "queue_reason": "Dependency XR-D0-FIX-R1 completed (result head 8273702dabf90732d66fe362b5c56cdebf93fb06, CI green after infra-failure rerun); head already bound via bind-head dd6414f."
+      "queue_reason": "Dependency XR-D0-FIX-R1 completed (result head 8273702dabf90732d66fe362b5c56cdebf93fb06, CI green after infra-failure rerun); head already bound via bind-head dd6414f.",
+      "completed_at": "2026-08-24T00:24:13Z",
+      "result_head": "8273702dabf90732d66fe362b5c56cdebf93fb06",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32675760904",
+      "completion_note": "APPROVE FOR FACT MERGE; all four R1 blockers verified fixed against source (18 variants recounted, 53 tests recounted with t26-t29 unassigned, production-import label corrected, DuckDB no-dependency/no-identifier wording exactly true incl. Cargo.lock sweep); delta audit surgical (4 hunks L45/L66/L98/L224 only); cited source blobs byte-identical across heads (coordinator countersign); CI green attempt 2 after infra-only toolchain failure. PR stays Draft; merge is a separate maintainer decision. Evidence: https://github.com/X44421/stillflow/pull/95#issuecomment-<this>"
     }
   ],
   "locks": {}
