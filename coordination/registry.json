@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 54,
+  "revision": 55,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T00:49:44Z",
+  "updated_at": "2026-08-24T00:49:54Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -849,9 +849,9 @@
     {
       "id": "XR-C0",
       "title": "Runtime abstraction contract / ADR-002",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-r24acc",
       "target_issue": 97,
       "target_pr": null,
       "target_branch": "agent/issue-097-xr-c0-runtime-abstraction-contract",
@@ -874,9 +874,9 @@
         "XR-D0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-24T00:38:38Z",
+      "lease_expires_at": "2026-08-24T02:49:54Z",
+      "started_at": "2026-08-24T00:49:54Z",
+      "updated_at": "2026-08-24T00:49:54Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "XR-D0 factual inventory is accepted and merged at main@636cd7db443bed45e7adcf1596785670cfc3ff1c; Issue #93 explicitly permits documentation planning before E4-S2 completion.",
       "notes": "Canonical Issue #97. Docs-only exact-base ADR task; one authorized file. CLAIM must bind main@636cd7db443bed45e7adcf1596785670cfc3ff1c, acquire only its branch lock, and stop on BASE MOVED. No runtime/API/Cargo/workflow/frontend/ADR-001/AGENTS change; no #80/#91 action; Draft PR and independent architecture review required before any merge or XR runtime implementation."
@@ -925,6 +925,13 @@
       "expected_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "acquired_at": "2026-08-24T00:49:32Z",
       "lease_expires_at": "2026-08-24T02:19:32Z"
+    },
+    "branch:agent/issue-097-xr-c0-runtime-abstraction-contract": {
+      "task_id": "XR-C0",
+      "owner": "ox-alpha-r24acc",
+      "expected_head": null,
+      "acquired_at": "2026-08-24T00:49:54Z",
+      "lease_expires_at": "2026-08-24T02:49:54Z"
     }
   }
 }
