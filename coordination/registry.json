@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 61,
+  "revision": 62,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T01:25:57Z",
+  "updated_at": "2026-08-24T01:54:22Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -932,7 +932,7 @@
     {
       "id": "XR-C0-ACCEPT",
       "title": "Independent architecture acceptance of ADR-002",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-r24acc",
       "target_issue": 97,
@@ -952,12 +952,16 @@
         "XR-C0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-24T02:55:43Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T01:25:43Z",
-      "updated_at": "2026-08-24T01:25:43Z",
+      "updated_at": "2026-08-24T01:54:22Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "XR-C0 delivery is done at exact head 7bd1966218ec9a0df2130736ee4cc863d09d5b27 with one-file +546 diff and CI run 32678595329 success; independent architecture disposition is the next required gate.",
-      "notes": "Read-only exact-head review of PR #98. Re-fetch main/head/diff/CI and reproduce load-bearing quotations and source citations. Resolve each explicit [Decision] ambiguity as ACCEPT / REQUEST_CHANGES with precise rationale. No edits, commits, PR-body changes, Ready, merge, issue closure, branch deletion, AGENTS/ADR-001 changes, XR-R0 dispatch, or #80/#91 action. Any head/base movement voids the review."
+      "notes": "Read-only exact-head review of PR #98. Re-fetch main/head/diff/CI and reproduce load-bearing quotations and source citations. Resolve each explicit [Decision] ambiguity as ACCEPT / REQUEST_CHANGES with precise rationale. No edits, commits, PR-body changes, Ready, merge, issue closure, branch deletion, AGENTS/ADR-001 changes, XR-R0 dispatch, or #80/#91 action. Any head/base movement voids the review.",
+      "completed_at": "2026-08-24T01:54:22Z",
+      "result_head": "7bd1966218ec9a0df2130736ee4cc863d09d5b27",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32678595329",
+      "completion_note": "APPROVE FOR ARCHITECTURE REVIEW @ 7bd1966218ec9a0df2130736ee4cc863d09d5b27. Guards reproduced (1-file +546/-0, CI 32678595329 success, Draft unmerged, zero forbidden markers). Ten decision domains verified against ADR-001/AGENTS.md/XR-D0/E1-E4/current symbols; supersession quote byte-exact and conditional (effective at XR-R0 merge); 37/37 Decision markers evaluated, no contradictions, no unbounded paths, no premature XR-R0 authorization. Zero blockers. Evidence: PR #98 comment 5389817060; #97 receipt 5389818323. Review executed directly by coordinator after two subagent attempts failed with zero residue."
     },
     {
       "id": "E24-B2BASE",
