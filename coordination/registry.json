@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 41,
+  "revision": 42,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:13:44Z",
+  "updated_at": "2026-08-24T00:16:01Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -749,7 +749,7 @@
     {
       "id": "XR-D0-FIX-R1",
       "title": "Fix the four fact-review blockers in the execution-backend coupling inventory",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-r24acc",
       "target_pr": 95,
@@ -771,10 +771,14 @@
         "XR-D0-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-24T01:07:32Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T00:07:32Z",
-      "updated_at": "2026-08-24T00:07:32Z",
-      "notes": "Fix ONLY the four source-backed blockers from verdict comment 5385455025: A) L66 EngineError 17 -> 18 variants; B) L224 '54 numbered tests total' -> 53 (t26-t29 unassigned may be disclosed); C) L98 remove false 'Test-only' label for types.rs:28 (it is the production polars_data_type import); D) L45 reword DuckDB sentence to no-dependency/no-identifier occurrence with one doc-comment mention in plan/lib.rs:3. No structural edits, no new sections; append one commit on top of expected_head and push to the PR branch (fast-forward). New head requires XR-D0-ACCEPT-R2 before any Ready/merge. PR #95 stays Draft throughout this task."
+      "updated_at": "2026-08-24T00:16:01Z",
+      "notes": "Fix ONLY the four source-backed blockers from verdict comment 5385455025: A) L66 EngineError 17 -> 18 variants; B) L224 '54 numbered tests total' -> 53 (t26-t29 unassigned may be disclosed); C) L98 remove false 'Test-only' label for types.rs:28 (it is the production polars_data_type import); D) L45 reword DuckDB sentence to no-dependency/no-identifier occurrence with one doc-comment mention in plan/lib.rs:3. No structural edits, no new sections; append one commit on top of expected_head and push to the PR branch (fast-forward). New head requires XR-D0-ACCEPT-R2 before any Ready/merge. PR #95 stays Draft throughout this task.",
+      "completed_at": "2026-08-24T00:16:01Z",
+      "result_head": "8273702dabf90732d66fe362b5c56cdebf93fb06",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32675760904",
+      "completion_note": "Four-line fact fix pushed as fast-forward commit 8273702dabf90732d66fe362b5c56cdebf93fb06 (A L66 17->18 variants; B L224 54->53 + t26-t29 unassigned disclosure; C L98 production-import label corrected; D L45 DuckDB no-dependency/no-identifier wording with plan/lib.rs:3 doc-comment disclosed). Diff audited: single file, exactly 4 lines changed. CI green after rerun of a transient toolchain-download infra failure (attempt 2 success)."
     },
     {
       "id": "XR-D0-ACCEPT-R2",
@@ -801,13 +805,5 @@
       "head_bind_reason": "Bind to XR-D0-FIX-R1 result head 8273702dabf90732d66fe362b5c56cdebf93fb06 (four-line fact fix, fast-forward from 3604536ed6ef18fc889617be088043906a3521e8); CI rerun of failed toolchain-download job in progress."
     }
   ],
-  "locks": {
-    "branch:agent/issue-094-execution-backend-coupling-inventory": {
-      "task_id": "XR-D0-FIX-R1",
-      "owner": "ox-alpha-r24acc",
-      "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
-      "acquired_at": "2026-08-24T00:07:32Z",
-      "lease_expires_at": "2026-08-24T01:07:32Z"
-    }
-  }
+  "locks": {}
 }
