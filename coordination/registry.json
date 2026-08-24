@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 38,
+  "revision": 39,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:11:38Z",
+  "updated_at": "2026-08-24T00:11:49Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -715,9 +715,9 @@
     {
       "id": "T89-MERGE",
       "title": "Merge the accepted backend roadmap reconciliation into main",
-      "status": "queued",
+      "status": "running",
       "mode": "maintenance",
-      "owner": null,
+      "owner": "ox-alpha-r24acc",
       "target_pr": 89,
       "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
       "result_branch": "main",
@@ -737,9 +737,9 @@
       "conflicts_with": [
         "T76-MERGE"
       ],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-24T00:06:54.6926Z",
+      "lease_expires_at": "2026-08-24T00:56:49Z",
+      "started_at": "2026-08-24T00:11:49Z",
+      "updated_at": "2026-08-24T00:11:49Z",
       "notes": "Pre-merge gate (all three must hold, else STOP): live head == e5524be4dd9f3948e048b58f49e5e7f7ec59555b; APPROVE FOR DOCS MERGE comment 5385454915 bound to that full head; CI run 32629393791 success on that head. Mark Ready only inside this task, merge with exact-head sha guard (PUT /pulls/89/merge sha=expected_head). Docs-only, single checklist file. Record the resulting main merge SHA."
     },
     {
@@ -802,6 +802,13 @@
       "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
       "acquired_at": "2026-08-24T00:07:32Z",
       "lease_expires_at": "2026-08-24T01:07:32Z"
+    },
+    "main:merge": {
+      "task_id": "T89-MERGE",
+      "owner": "ox-alpha-r24acc",
+      "expected_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
+      "acquired_at": "2026-08-24T00:11:49Z",
+      "lease_expires_at": "2026-08-24T00:56:49Z"
     }
   }
 }
