@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 53,
+  "revision": 54,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T00:49:32Z",
+  "updated_at": "2026-08-24T00:49:44Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -310,9 +310,9 @@
     {
       "id": "E23-REVIEW",
       "title": "Post-merge E2/E3 evidence review",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-r24acc",
       "target_pr": null,
       "target_branch": "main",
       "expected_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
@@ -325,9 +325,9 @@
         "T76-CLOSE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-24T00:38:38Z",
+      "lease_expires_at": "2026-08-24T02:19:44Z",
+      "started_at": "2026-08-24T00:49:44Z",
+      "updated_at": "2026-08-24T00:49:44Z",
       "notes": "Bind to the final E3 merge SHA; reuse PR #76 facts instead of repeating inventory. | REGISTRY-R12 rev 12 verification: dependencies T53-T71 (queued) and T76-CLOSE (wait_maintainer) remain non-terminal; blocked state correct. | REGISTRY-R50: dependencies re-evaluated terminal; canonical Issue #96 created. Dispatched read-only against runtime anchor c0e828031f0141fa89e6b525b4314ebabd5f4f4e and planning head 636cd7db443bed45e7adcf1596785670cfc3ff1c. No repository/PR writes, no locks, and no #80/#91 action.",
       "verified_by": "ox-alpha-coordinator (REGISTRY-R12)",
       "target_issue": 96,
