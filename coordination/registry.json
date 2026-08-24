@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 34,
+  "revision": 35,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-23T10:10:51Z",
+  "updated_at": "2026-08-24T00:06:54.6926Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -46,7 +46,7 @@
       "result_head": "d8fdf65e38d3bdc841ee56158ab79a24dc90331b",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32555654543",
       "reconciled_by": "ox-alpha-coordinator (REGISTRY-R12)",
-      "completion_note": "Recorded done by REGISTRY-R12 (rev 12) from the authoritative R2 收敛记录 (workspace .acceptance-tmp/ACCEPTANCE-STATE.md, dated 2026-08-22): single successor bc430aa4 -> result head d8fdf65e38d3bdc841ee56158ab79a24dc90331b, CI run 32555654543 three jobs green (re-verified live: conclusion=success). taskctl adopt/complete could not execute in the originating environment (no stillflow-taskctl binary) and target branch agent/issue-073-e4-artifact-verification-bundle-storage was deleted after PR #74 merged at f16666e59896e2d8bae3b79e188b8f567bb8c534, so the expired ghost branch lock was cleared here instead."
+      "completion_note": "Recorded done by REGISTRY-R12 (rev 12) from the authoritative R2 \u6536\u655b\u8bb0\u5f55 (workspace .acceptance-tmp/ACCEPTANCE-STATE.md, dated 2026-08-22): single successor bc430aa4 -> result head d8fdf65e38d3bdc841ee56158ab79a24dc90331b, CI run 32555654543 three jobs green (re-verified live: conclusion=success). taskctl adopt/complete could not execute in the originating environment (no stillflow-taskctl binary) and target branch agent/issue-073-e4-artifact-verification-bundle-storage was deleted after PR #74 merged at f16666e59896e2d8bae3b79e188b8f567bb8c534, so the expired ghost branch lock was cleared here instead."
     },
     {
       "id": "T74-P1A",
@@ -75,11 +75,11 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Cancelled per the R2 收敛记录 (2026-08-22): two-stage barrier evidence landed inside T74-R2 result head d8fdf65.",
+      "notes": "Cancelled per the R2 \u6536\u655b\u8bb0\u5f55 (2026-08-22): two-stage barrier evidence landed inside T74-R2 result head d8fdf65.",
       "covered_by": "T74-R2",
       "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
       "completed_at": "2026-08-23T05:57:20Z",
-      "completion_note": "d8fdf65 已覆盖双阶段 barrier"
+      "completion_note": "d8fdf65 \u5df2\u8986\u76d6\u53cc\u9636\u6bb5 barrier"
     },
     {
       "id": "T78-REVIEW",
@@ -163,11 +163,11 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
-      "notes": "Cancelled per the R2 收敛记录 (2026-08-22): row/byte/partition ceiling evidence landed inside T74-R2 result head d8fdf65.",
+      "notes": "Cancelled per the R2 \u6536\u655b\u8bb0\u5f55 (2026-08-22): row/byte/partition ceiling evidence landed inside T74-R2 result head d8fdf65.",
       "covered_by": "T74-R2",
       "cancelled_by": "ox-alpha-coordinator (REGISTRY-R12)",
       "completed_at": "2026-08-23T05:57:20Z",
-      "completion_note": "d8fdf65 已覆盖 row/byte/partition 三形状证据"
+      "completion_note": "d8fdf65 \u5df2\u8986\u76d6 row/byte/partition \u4e09\u5f62\u72b6\u8bc1\u636e"
     },
     {
       "id": "T74-MIGRATE",
@@ -272,7 +272,7 @@
       "started_at": "2026-08-23T08:37:40Z",
       "updated_at": "2026-08-23T08:55:33Z",
       "completed_at": "2026-08-23T08:55:33Z",
-      "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer. | REGISTRY-R24 dispatch: exact PR #76 head ceeaa1e113ce335a804c016dd9404c4937a01105 re-verified Open/Draft/MERGEABLE; authorized body-only current-status correction and evidence refresh. No commit, Ready, merge, issue closure, or branch deletion; stop after posting completion evidence for an independent exact-head acceptance. | REGISTRY-R26 done at 2026-08-23T08:55:33Z: body-only status refresh applied to PR #76 via REST PATCH (head unchanged ceeaa1e1…, still Draft); completion evidence at PR #76 comment 5385126464 (single-file constraint live-verified; CI run 32551940170 success on the exact head). Task scope ends at this evidence hand-off; independent exact-head acceptance and Ready/merge remain downstream.",
+      "notes": "Correct PR-body metadata only; no code commit. | REGISTRY-R12 rev 12 verification: issues #75/#76 OPEN; PR #76 Draft at ceeaa1e113ce335a804c016dd9404c4937a01105 (= expected_head); still awaiting maintainer. | REGISTRY-R24 dispatch: exact PR #76 head ceeaa1e113ce335a804c016dd9404c4937a01105 re-verified Open/Draft/MERGEABLE; authorized body-only current-status correction and evidence refresh. No commit, Ready, merge, issue closure, or branch deletion; stop after posting completion evidence for an independent exact-head acceptance. | REGISTRY-R26 done at 2026-08-23T08:55:33Z: body-only status refresh applied to PR #76 via REST PATCH (head unchanged ceeaa1e1\u2026, still Draft); completion evidence at PR #76 comment 5385126464 (single-file constraint live-verified; CI run 32551940170 success on the exact head). Task scope ends at this evidence hand-off; independent exact-head acceptance and Ready/merge remain downstream.",
       "verified_by": "ox-alpha-coordinator (REGISTRY-R12)",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "User-authorized maintainer dispatch: converge PR #76 metadata at exact head, then stop for independent docs acceptance."
@@ -302,7 +302,7 @@
       "completed_at": "2026-08-23T06:53:31Z",
       "result_head": "90fb878e2ace78a6e1c2698014bca5461f19db59",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32623819785",
-      "completion_note": "PR #71 merged at 2026-08-23T06:46:49Z under exact source-head guard; merge commit 90fb878e2ace78a6e1c2698014bca5461f19db59 has verified parents c50e3c937b34… + 2b9fdcb716a6…. Dual-toolchain CI run 32623819785 on the new #53-head: three jobs green (Backend stable, Backend Rust 1.85.0, Frontend), conclusion=success. Engine writer and branch lock released; execution stopped before any main integration per scope.",
+      "completion_note": "PR #71 merged at 2026-08-23T06:46:49Z under exact source-head guard; merge commit 90fb878e2ace78a6e1c2698014bca5461f19db59 has verified parents c50e3c937b34\u2026 + 2b9fdcb716a6\u2026. Dual-toolchain CI run 32623819785 on the new #53-head: three jobs green (Backend stable, Backend Rust 1.85.0, Frontend), conclusion=success. Engine writer and branch lock released; execution stopped before any main integration per scope.",
       "notes": "Source PR #71 exact head 2b9fdcb716a66a0ff92cedd82825f533c16b6250 is approved for merge only into target branch agent/issue-052-node-preview-runtime at expected head c50e3c937b3494f56ed6cda19c47a83aff36de93. Claim must re-fetch both heads and stop on mismatch. Mark #71 Ready, merge with an exact source-head guard, wait for the new #53-head dual-toolchain CI, then complete with that full result head and CI URL. Do not merge or rebase #53 into main; hand off to a separately dispatched T53-REBIND/acceptance sequence. | REGISTRY-R13 engine-writer freeze: T53-T71 is the sole granted holder of engine:stillflow-engine while queued or running; E4-S2/E4-S2-R1 is serialized strictly behind it via mutual conflicts_with. On completion (new #53-head dual-toolchain CI recorded) release engine:stillflow-engine and stop before any main integration, per existing scope. | REGISTRY-R14 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T06:43:19Z (lease to 2026-08-23T08:13:19Z) under the REGISTRY-R13 engine-writer freeze; both heads re-verified exact at claim time. | REGISTRY-R15 completion: done at 2026-08-23T06:53:31Z with result head 90fb878e2ace78a6e1c2698014bca5461f19db59 and green dual-toolchain CI (run 32623819785); locks released; no main integration performed.",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "User-authorized E3 convergence dispatch after exact-head independent approval of PR #71; merge PR #71 only into PR #53 branch, then stop before any main integration."
@@ -381,7 +381,7 @@
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-23T06:28:27Z",
-      "notes": "REDEFINED by REGISTRY-R12 (rev 12). Old meaning 'standalone/exact dedup index' retired: dedup delivery landed inside E4-S1/PR #74. Canonical task: issue #80; delivery: PR #91 (Draft). Current state: independent acceptance RESERVED / REVIEW IN PROCESS handled by ANOTHER session; CLAIM record pending. DO NOT DUPLICATE: no other session may claim, accept, or touch #80/#91; E4-S2-R0-ACCEPT is out of scope everywhere else. Status 'hold' is deliberately unclaimable until that review session records its CLAIM/DONE. | REGISTRY-R13 maintainer freeze (engine-writer serialization): frozen execution order is T53-T71 first, then E4-S2-R1; the two must never hold engine:stillflow-engine concurrently. Forward lock declarations added here (branch lock on agent/issue-080-e4-verification-materialization plus engine:stillflow-engine, conflicts_with T53-T71); status stays hold/unclaimable and no claim is made by this revision. E4-S2-R1 may acquire the engine writer only after ALL of: (1) T53-T71 reaches a terminal state and releases engine:stillflow-engine; (2) this hold is lifted by the reserved acceptance session recording its CLAIM/DONE; (3) the maintainer explicitly authorizes the R1 fix round (PR #91 F1-F4). No other task, PR, or code branch was touched by REGISTRY-R13. | REGISTRY-R16 maintainer frozen order (comment 5384765766): E4-S2-R1 additionally waits for order step 4 - REBIND #91 only after the T53-REBIND-ACCEPT sequence lands #53 into main; the R13 gates above are unchanged and now also serialized against T53-REBIND-ACCEPT (mutual conflicts_with). | REGISTRY-R20: #53 main integration COMPLETE (merge c0e82803… into main, main CI run 32627094649 = 7/7 green); frozen-order step 4 gate is OPEN - REBIND #91 onto new main c0e82803… may proceed. The R13 gates remain: E4-S2 hold lift (reserved acceptance session CLAIM/DONE) and explicit maintainer authorization of the F1-F4 fix round are still required before E4-S2-R1 acquires the engine writer. | REGISTRY-R22 rebind attempt (maintainer-authorized step-4 slice, rebind-only): anchors verified (#91 head d0ea2a3…, main c0e82803…); backup ref refs/backup/e4s2-rebind-pre-d0ea2a3 pushed; rebase onto c0e82803… BLOCKED by merge conflict in backend/crates/stillflow-engine/src/tests.rs at commit 98fcaa1 (E3 stack in main overlaps the evidence suite); rebase aborted cleanly, branch UNTOUCHED at d0ea2a3bce548a6cdc311dea4387e29e35e440ab; no locks were acquired. Conclusion: fold the conflict resolution into the authorized E4-S2-R1 fix round authored against main c0e82803… - not mechanically resolvable without engineering decisions on test content. | REGISTRY-R23 maintainer decision after the R22 blocked rebind: accept the factual conclusion that tests.rs requires engineering reconciliation with the merged E3 stack and that a second mechanical rebase pass would duplicate work. E4-S2 hold is NOT lifted because the reserved E4-S2-R0-ACCEPT session still has no registry CLAIM/DONE or exact-head disposition. Conditional scope authorization is recorded but INACTIVE: once that independent review records CLAIM/DONE and the hold is explicitly lifted, one E4-S2-R1 round may target main c0e828031f0141fa89e6b525b4314ebabd5f4f4e and combine (a) the tests.rs conflict resolution, (b) reviewer findings F1-F4, and (c) the outstanding V01-V31 dedicated evidence debt declared by PR #91. It must preserve the frozen E4 contract, public/storage formats and Runtime authority; use the existing backup ref, keep PR #91/branch identity, acquire branch:agent/issue-080-e4-verification-materialization plus engine:stillflow-engine before writes, and finish with exact-head dual-toolchain CI plus independent re-review. No CLAIM, branch write, force-push, Ready, or merge is authorized while status remains hold.",
+      "notes": "REDEFINED by REGISTRY-R12 (rev 12). Old meaning 'standalone/exact dedup index' retired: dedup delivery landed inside E4-S1/PR #74. Canonical task: issue #80; delivery: PR #91 (Draft). Current state: independent acceptance RESERVED / REVIEW IN PROCESS handled by ANOTHER session; CLAIM record pending. DO NOT DUPLICATE: no other session may claim, accept, or touch #80/#91; E4-S2-R0-ACCEPT is out of scope everywhere else. Status 'hold' is deliberately unclaimable until that review session records its CLAIM/DONE. | REGISTRY-R13 maintainer freeze (engine-writer serialization): frozen execution order is T53-T71 first, then E4-S2-R1; the two must never hold engine:stillflow-engine concurrently. Forward lock declarations added here (branch lock on agent/issue-080-e4-verification-materialization plus engine:stillflow-engine, conflicts_with T53-T71); status stays hold/unclaimable and no claim is made by this revision. E4-S2-R1 may acquire the engine writer only after ALL of: (1) T53-T71 reaches a terminal state and releases engine:stillflow-engine; (2) this hold is lifted by the reserved acceptance session recording its CLAIM/DONE; (3) the maintainer explicitly authorizes the R1 fix round (PR #91 F1-F4). No other task, PR, or code branch was touched by REGISTRY-R13. | REGISTRY-R16 maintainer frozen order (comment 5384765766): E4-S2-R1 additionally waits for order step 4 - REBIND #91 only after the T53-REBIND-ACCEPT sequence lands #53 into main; the R13 gates above are unchanged and now also serialized against T53-REBIND-ACCEPT (mutual conflicts_with). | REGISTRY-R20: #53 main integration COMPLETE (merge c0e82803\u2026 into main, main CI run 32627094649 = 7/7 green); frozen-order step 4 gate is OPEN - REBIND #91 onto new main c0e82803\u2026 may proceed. The R13 gates remain: E4-S2 hold lift (reserved acceptance session CLAIM/DONE) and explicit maintainer authorization of the F1-F4 fix round are still required before E4-S2-R1 acquires the engine writer. | REGISTRY-R22 rebind attempt (maintainer-authorized step-4 slice, rebind-only): anchors verified (#91 head d0ea2a3\u2026, main c0e82803\u2026); backup ref refs/backup/e4s2-rebind-pre-d0ea2a3 pushed; rebase onto c0e82803\u2026 BLOCKED by merge conflict in backend/crates/stillflow-engine/src/tests.rs at commit 98fcaa1 (E3 stack in main overlaps the evidence suite); rebase aborted cleanly, branch UNTOUCHED at d0ea2a3bce548a6cdc311dea4387e29e35e440ab; no locks were acquired. Conclusion: fold the conflict resolution into the authorized E4-S2-R1 fix round authored against main c0e82803\u2026 - not mechanically resolvable without engineering decisions on test content. | REGISTRY-R23 maintainer decision after the R22 blocked rebind: accept the factual conclusion that tests.rs requires engineering reconciliation with the merged E3 stack and that a second mechanical rebase pass would duplicate work. E4-S2 hold is NOT lifted because the reserved E4-S2-R0-ACCEPT session still has no registry CLAIM/DONE or exact-head disposition. Conditional scope authorization is recorded but INACTIVE: once that independent review records CLAIM/DONE and the hold is explicitly lifted, one E4-S2-R1 round may target main c0e828031f0141fa89e6b525b4314ebabd5f4f4e and combine (a) the tests.rs conflict resolution, (b) reviewer findings F1-F4, and (c) the outstanding V01-V31 dedicated evidence debt declared by PR #91. It must preserve the frozen E4 contract, public/storage formats and Runtime authority; use the existing backup ref, keep PR #91/branch identity, acquire branch:agent/issue-080-e4-verification-materialization plus engine:stillflow-engine before writes, and finish with exact-head dual-toolchain CI plus independent re-review. No CLAIM, branch write, force-push, Ready, or merge is authorized while status remains hold.",
       "hold_reason": "independent acceptance RESERVED / REVIEW IN PROCESS handled by another session; CLAIM record pending",
       "canonical_issue": 80,
       "head_bound_by": "ox-alpha-coordinator",
@@ -445,7 +445,7 @@
       "started_at": "2026-08-23T06:47:40Z",
       "updated_at": "2026-08-23T06:53:31Z",
       "completed_at": "2026-08-23T06:53:31Z",
-      "completion_note": "Maintainer-authorized body-only correction (dispatch A2): re-read live GitHub state and appended a 'Status refresh' section to PR #89 (#71 merged as 90fb878e… into the #53 branch; #73 and #90 CLOSED; #80 OPEN now carrying Draft #91 with REQUEST CHANGES F1-F4; registry R11->R14). No commits pushed; head unchanged 3a84bb5a778a860929e95716efd7a3c07bbe375a; PR remains Draft/open. Applied via REST PATCH because gh pr edit is blocked by missing read:org token scope - environment limitation, reported, not a pass claim.",
+      "completion_note": "Maintainer-authorized body-only correction (dispatch A2): re-read live GitHub state and appended a 'Status refresh' section to PR #89 (#71 merged as 90fb878e\u2026 into the #53 branch; #73 and #90 CLOSED; #80 OPEN now carrying Draft #91 with REQUEST CHANGES F1-F4; registry R11->R14). No commits pushed; head unchanged 3a84bb5a778a860929e95716efd7a3c07bbe375a; PR remains Draft/open. Applied via REST PATCH because gh pr edit is blocked by missing read:org token scope - environment limitation, reported, not a pass claim.",
       "notes": "Docs-only governance action; zero lock occupancy; executed in parallel with T53-T71 without conflict. Any further #89 work beyond body metadata requires a new dispatch. | Maintainer frozen order step 5 (comment 5384765766): before #89 merges, re-verify committed roadmap facts against live GitHub state once more."
     },
     {
@@ -508,7 +508,7 @@
       "started_at": "2026-08-23T07:24:43Z",
       "updated_at": "2026-08-23T08:07:56Z",
       "completed_at": "2026-08-23T08:00:28Z",
-      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration. | REGISTRY-R18 checkpoint reached 2026-08-23T07:31:35Z: 23 commits rebased onto main 9c368cee… with zero conflicts and 23/23 identical patches (range-diff all '='); backup ref refs/backup/t53-rebind-pre-90fb878e pushed; force-with-lease moved the branch to rebind head a7a517c29a0509716d68a53c0baf0c32b0e483d8; fresh CI run 32625688994 = success, 7 green jobs (stable + Rust 1.85.0 x fmt/clippy/serial tests + Frontend). EXECUTION STOPPED at the approved checkpoint - AWAITING INDEPENDENT ACCEPTANCE before any main integration. Base-migration disclosure: the #53 historical base predated the post-#74/#88 mains, so the tree delta vs the pre-rebase head (+13079/-266 across 39 files) comes solely from base movement, not patch drift. | REGISTRY-R19: independent acceptance returned APPROVE FOR MAIN INTEGRATION (PR #53 comment 5384935921; approved base 9c368cee… head a7a517c…; range-diff independently reproduced 23/23 '='; CI 7/7 green, 327/0 tests per toolchain, engine 93/93). main:merge lock acquired by ox-alpha-coordinator at 2026-08-23T07:58:40Z; anchors re-verified exact; proceeding with the approved main integration. | REGISTRY-R20 completion at 2026-08-23T08:07:56Z: #53 marked Ready and merged at 2026-08-23T08:00:28Z under exact-head guard (head a7a517c…, base main 9c368cee…) as merge commit c0e828031f0141fa89e6b525b4314ebabd5f4f4e with verified parents [9c368cee…, a7a517c…]; main CI run 32627094649 = success 7/7 on the merge commit; issues #52 and #70 closed with delivery evidence; all three locks (branch, engine, main:merge) released. | REGISTRY-R21 correction: status field set to done (missed in R20; all other completion fields were already recorded there).",
+      "notes": "Queued per maintainer frozen order steps 2-3 (Epic #81 comment 5384765766): one-shot migration of #53 onto new main. Claim must re-fetch and stop on mismatch of BOTH anchors: #53 head 90fb878e2ace78a6e1c2698014bca5461f19db59 and main 9c368cee186bffa4f55d5de5c80d7b2be6957135. Requires a backup ref of the pre-rebase branch head, range-diff review, force-with-lease push, fresh dual-toolchain CI on the rebased head, an INDEPENDENT acceptance pass (separate reviewer/session), and only then the main integration with recorded merge SHA. Engine writer held across rebase+CI under REGISTRY-R13 serialization rules. | REGISTRY-R17 dispatch: claimed by ox-alpha-coordinator at 2026-08-23T07:24:43Z (lease to 2026-08-23T08:54:43Z); both anchors re-verified exact at claim time; approved checkpoint = CI green on rebased head, then STOP for independent acceptance before any main integration. | REGISTRY-R18 checkpoint reached 2026-08-23T07:31:35Z: 23 commits rebased onto main 9c368cee\u2026 with zero conflicts and 23/23 identical patches (range-diff all '='); backup ref refs/backup/t53-rebind-pre-90fb878e pushed; force-with-lease moved the branch to rebind head a7a517c29a0509716d68a53c0baf0c32b0e483d8; fresh CI run 32625688994 = success, 7 green jobs (stable + Rust 1.85.0 x fmt/clippy/serial tests + Frontend). EXECUTION STOPPED at the approved checkpoint - AWAITING INDEPENDENT ACCEPTANCE before any main integration. Base-migration disclosure: the #53 historical base predated the post-#74/#88 mains, so the tree delta vs the pre-rebase head (+13079/-266 across 39 files) comes solely from base movement, not patch drift. | REGISTRY-R19: independent acceptance returned APPROVE FOR MAIN INTEGRATION (PR #53 comment 5384935921; approved base 9c368cee\u2026 head a7a517c\u2026; range-diff independently reproduced 23/23 '='; CI 7/7 green, 327/0 tests per toolchain, engine 93/93). main:merge lock acquired by ox-alpha-coordinator at 2026-08-23T07:58:40Z; anchors re-verified exact; proceeding with the approved main integration. | REGISTRY-R20 completion at 2026-08-23T08:07:56Z: #53 marked Ready and merged at 2026-08-23T08:00:28Z under exact-head guard (head a7a517c\u2026, base main 9c368cee\u2026) as merge commit c0e828031f0141fa89e6b525b4314ebabd5f4f4e with verified parents [9c368cee\u2026, a7a517c\u2026]; main CI run 32627094649 = success 7/7 on the merge commit; issues #52 and #70 closed with delivery evidence; all three locks (branch, engine, main:merge) released. | REGISTRY-R21 correction: status field set to done (missed in R20; all other completion fields were already recorded there).",
       "queued_by": "maintainer:frozen-order-2026-08-23",
       "queue_reason": "Maintainer order step 2 trigger satisfied by DX-F0-MERGE completion (main @ 9c368cee186bffa4f55d5de5c80d7b2be6957135)."
     },
@@ -543,7 +543,7 @@
       "updated_at": "2026-08-23T08:55:33Z",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "PR #89 contains the canonical roadmap plus #93 registration but diverges from current main after #53 integration; rebind and fact refresh are required before independent review.",
-      "notes": "At CLAIM, re-fetch PR #89 head and main; stop on either mismatch. Create backup ref before rewrite. Rebase the existing branch onto main c0e828031f0141fa89e6b525b4314ebabd5f4f4e, resolve only the authorized roadmap file, preserve the B0 reconciliation and F-XR0/#93 additions, reproduce range-diff/content mapping, refresh current GitHub facts in the document/body, run git diff --check and placeholder/link/dependency-graph checks, then force-with-lease. Keep PR Draft and stop at the new-head checkpoint for independent acceptance. Do not touch runtime, #80/#91, Ready, merge, close #82, or delete branches. | REGISTRY-R26 done at 2026-08-23T08:55:33Z: rebased onto main c0e82803… cleanly (range-diff 2=2 identical patches), fact-refresh commit e5524be4dd9f3948e048b58f49e5e7f7ec59555b (+18-line ledger subsection 4.1), force-with-lease pushed with lease anchored at f5407b4b…; checks green (git diff --check, one-file vs main, zero placeholders); CI run 32629393791 = success on the new head; checkpoint evidence at issue #82 comment 5385159548. Branch lock released; Draft preserved; B0 and F-XR0/#93 content preserved verbatim; awaiting independent acceptance."
+      "notes": "At CLAIM, re-fetch PR #89 head and main; stop on either mismatch. Create backup ref before rewrite. Rebase the existing branch onto main c0e828031f0141fa89e6b525b4314ebabd5f4f4e, resolve only the authorized roadmap file, preserve the B0 reconciliation and F-XR0/#93 additions, reproduce range-diff/content mapping, refresh current GitHub facts in the document/body, run git diff --check and placeholder/link/dependency-graph checks, then force-with-lease. Keep PR Draft and stop at the new-head checkpoint for independent acceptance. Do not touch runtime, #80/#91, Ready, merge, close #82, or delete branches. | REGISTRY-R26 done at 2026-08-23T08:55:33Z: rebased onto main c0e82803\u2026 cleanly (range-diff 2=2 identical patches), fact-refresh commit e5524be4dd9f3948e048b58f49e5e7f7ec59555b (+18-line ledger subsection 4.1), force-with-lease pushed with lease anchored at f5407b4b\u2026; checks green (git diff --check, one-file vs main, zero placeholders); CI run 32629393791 = success on the new head; checkpoint evidence at issue #82 comment 5385159548. Branch lock released; Draft preserved; B0 and F-XR0/#93 content preserved verbatim; awaiting independent acceptance."
     },
     {
       "id": "XR-D0",
@@ -577,7 +577,7 @@
       "updated_at": "2026-08-23T09:13:18Z",
       "queued_by": "maintainer:status-query-autodispatch",
       "queue_reason": "Issue #93 architecture direction requires a source-bound inventory before XR-C0/ADR-002; docs-only work is independent of E4-S2 hold.",
-      "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91. | REGISTRY-R27 done at 2026-08-23T09:13:18Z: single-file delivery docs/issues/execution-backend-coupling-inventory.md (326 lines) committed at result head 3604536ed6ef18fc889617be088043906a3521e8 on branch agent/issue-094-execution-backend-coupling-inventory from exact base c0e82803…; Draft PR #95 opened; CI run 32630256436 = success 7/7 on the result head; git diff --check and zero-placeholder checks green. Classification discipline: 61 [source fact] with path:symbol citations, 8 [accepted contract fact], 3 [static inference], 7 [requires experiment], 4 [XR-C0 decision input]. Branch lock released; stopped for independent fact review per scope.",
+      "notes": "Canonical scope is Issue #94. At CLAIM, main must still equal c0e828031f0141fa89e6b525b4314ebabd5f4f4e. One file only; no Rust/Cargo/workflow/frontend/ADR/contract change. Create Issue-named branch and Draft PR, classify every claim, cite path:symbol and exact base, run git diff --check, then stop for independent fact review. No XR-C0 implementation and no touch to #80/#91. | REGISTRY-R27 done at 2026-08-23T09:13:18Z: single-file delivery docs/issues/execution-backend-coupling-inventory.md (326 lines) committed at result head 3604536ed6ef18fc889617be088043906a3521e8 on branch agent/issue-094-execution-backend-coupling-inventory from exact base c0e82803\u2026; Draft PR #95 opened; CI run 32630256436 = success 7/7 on the result head; git diff --check and zero-placeholder checks green. Classification discipline: 61 [source fact] with path:symbol citations, 8 [accepted contract fact], 3 [static inference], 7 [requires experiment], 4 [XR-C0 decision input]. Branch lock released; stopped for independent fact review per scope.",
       "completed_at": "2026-08-23T09:13:18Z"
     },
     {
@@ -677,6 +677,118 @@
       "completed_at": "2026-08-23T10:10:51Z",
       "result_head": "3604536ed6ef18fc889617be088043906a3521e8",
       "completion_note": "REQUEST CHANGES; ~246/250 assertions reproduce exactly; 4 source-backed blockers: A=L66 EngineError has 18 not 17 variants; B=L224 53 not 54 numbered tests; C=L98 production polars_data_type import mislabeled test-only; D=L45 DuckDB zero-occurrence overclaim (plan/lib.rs:3 doc-comment). Four small edits; structural findings sound; fresh fact review after fix should approve. Evidence: https://github.com/X44421/stillflow/pull/95#issuecomment-5385455025"
+    },
+    {
+      "id": "T76-MERGE",
+      "title": "Merge the accepted O0-D0 inventory into main",
+      "status": "queued",
+      "mode": "maintenance",
+      "owner": null,
+      "target_pr": 76,
+      "target_branch": "agent/issue-075-backend-optimization-inventory",
+      "result_branch": "main",
+      "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
+      "locks": [
+        "main:merge"
+      ],
+      "paths": [
+        "docs/issues/backend-code-simplification-performance-inventory.md"
+      ],
+      "acceptance_keys": [
+        "pr76:merge"
+      ],
+      "depends_on": [
+        "T76-ACCEPT"
+      ],
+      "conflicts_with": [
+        "T89-MERGE"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T00:06:54.6926Z",
+      "notes": "Pre-merge gate (all three must hold, else STOP): live head == ceeaa1e113ce335a804c016dd9404c4937a01105; APPROVE FOR DOCS MERGE comment 5385454810 bound to that full head; CI run 32551940170 success on that head. Mark Ready only inside this task, merge with exact-head sha guard (PUT /pulls/76/merge sha=expected_head). Docs-only, one new file. Record the resulting main merge SHA."
+    },
+    {
+      "id": "T89-MERGE",
+      "title": "Merge the accepted backend roadmap reconciliation into main",
+      "status": "queued",
+      "mode": "maintenance",
+      "owner": null,
+      "target_pr": 89,
+      "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
+      "result_branch": "main",
+      "expected_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
+      "locks": [
+        "main:merge"
+      ],
+      "paths": [
+        "docs/development/backend-completion-execution-checklist.md"
+      ],
+      "acceptance_keys": [
+        "pr89:merge"
+      ],
+      "depends_on": [
+        "T89-ACCEPT-R3"
+      ],
+      "conflicts_with": [
+        "T76-MERGE"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T00:06:54.6926Z",
+      "notes": "Pre-merge gate (all three must hold, else STOP): live head == e5524be4dd9f3948e048b58f49e5e7f7ec59555b; APPROVE FOR DOCS MERGE comment 5385454915 bound to that full head; CI run 32629393791 success on that head. Mark Ready only inside this task, merge with exact-head sha guard (PUT /pulls/89/merge sha=expected_head). Docs-only, single checklist file. Record the resulting main merge SHA."
+    },
+    {
+      "id": "XR-D0-FIX-R1",
+      "title": "Fix the four fact-review blockers in the execution-backend coupling inventory",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_pr": 95,
+      "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
+      "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
+      "locks": [
+        "branch:agent/issue-094-execution-backend-coupling-inventory"
+      ],
+      "paths": [
+        "docs/issues/execution-backend-coupling-inventory.md"
+      ],
+      "acceptance_keys": [
+        "pr95:blocker-A-variant-count",
+        "pr95:blocker-B-test-count",
+        "pr95:blocker-C-production-import-label",
+        "pr95:blocker-D-duckdb-wording"
+      ],
+      "depends_on": [
+        "XR-D0-ACCEPT"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T00:06:54.6926Z",
+      "notes": "Fix ONLY the four source-backed blockers from verdict comment 5385455025: A) L66 EngineError 17 -> 18 variants; B) L224 '54 numbered tests total' -> 53 (t26-t29 unassigned may be disclosed); C) L98 remove false 'Test-only' label for types.rs:28 (it is the production polars_data_type import); D) L45 reword DuckDB sentence to no-dependency/no-identifier occurrence with one doc-comment mention in plan/lib.rs:3. No structural edits, no new sections; append one commit on top of expected_head and push to the PR branch (fast-forward). New head requires XR-D0-ACCEPT-R2 before any Ready/merge. PR #95 stays Draft throughout this task."
+    },
+    {
+      "id": "XR-D0-ACCEPT-R2",
+      "title": "Independent exact-head fact re-acceptance after R1 fixes",
+      "status": "blocked",
+      "mode": "review",
+      "owner": null,
+      "target_pr": 95,
+      "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
+      "expected_head": null,
+      "locks": [],
+      "acceptance_keys": [
+        "pr95:r2-fact-acceptance"
+      ],
+      "depends_on": [
+        "XR-D0-FIX-R1"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T00:06:54.6926Z",
+      "notes": "Bind expected_head to the XR-D0-FIX-R1 result head at claim time. Fresh independent read-only review: reproduce guards on the NEW head (base still c0e828031f01..., diff stays exactly the inventory file), verify each of the four blockers is fixed against source, audit that the delta vs 3604536ed6ef18fc889617be088043906a3521e8 touches nothing beyond the intended lines, and spot-check previously verified assertion themes remain intact. CI on the new head must be success before APPROVE. Publish APPROVE FOR FACT MERGE or REQUEST CHANGES bound to the full new head."
     }
   ],
   "locks": {}
