@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 39,
+  "revision": 40,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:11:49Z",
+  "updated_at": "2026-08-24T00:12:44Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -715,7 +715,7 @@
     {
       "id": "T89-MERGE",
       "title": "Merge the accepted backend roadmap reconciliation into main",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-r24acc",
       "target_pr": 89,
@@ -737,10 +737,14 @@
       "conflicts_with": [
         "T76-MERGE"
       ],
-      "lease_expires_at": "2026-08-24T00:56:49Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T00:11:49Z",
-      "updated_at": "2026-08-24T00:11:49Z",
-      "notes": "Pre-merge gate (all three must hold, else STOP): live head == e5524be4dd9f3948e048b58f49e5e7f7ec59555b; APPROVE FOR DOCS MERGE comment 5385454915 bound to that full head; CI run 32629393791 success on that head. Mark Ready only inside this task, merge with exact-head sha guard (PUT /pulls/89/merge sha=expected_head). Docs-only, single checklist file. Record the resulting main merge SHA."
+      "updated_at": "2026-08-24T00:12:44Z",
+      "notes": "Pre-merge gate (all three must hold, else STOP): live head == e5524be4dd9f3948e048b58f49e5e7f7ec59555b; APPROVE FOR DOCS MERGE comment 5385454915 bound to that full head; CI run 32629393791 success on that head. Mark Ready only inside this task, merge with exact-head sha guard (PUT /pulls/89/merge sha=expected_head). Docs-only, single checklist file. Record the resulting main merge SHA.",
+      "completed_at": "2026-08-24T00:12:44Z",
+      "result_head": "967ca1dfcb136fc44eb2c44c4e895b30cd9ef81d",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32629393791",
+      "completion_note": "Merged with exact-head guard sha=e5524be4dd9f3948e048b58f49e5e7f7ec59555b after three-gate re-verification (head exact / APPROVE comment 5385454915 bound to full head / CI 32629393791 success) and mergeable=clean re-check post-#76-merge. Resulting main merge commit 967ca1dfcb136fc44eb2c44c4e895b30cd9ef81d."
     },
     {
       "id": "XR-D0-FIX-R1",
@@ -802,13 +806,6 @@
       "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
       "acquired_at": "2026-08-24T00:07:32Z",
       "lease_expires_at": "2026-08-24T01:07:32Z"
-    },
-    "main:merge": {
-      "task_id": "T89-MERGE",
-      "owner": "ox-alpha-r24acc",
-      "expected_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
-      "acquired_at": "2026-08-24T00:11:49Z",
-      "lease_expires_at": "2026-08-24T00:56:49Z"
     }
   }
 }
