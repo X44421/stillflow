@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 48,
+  "revision": 49,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:29:21Z",
+  "updated_at": "2026-08-24T00:30:27Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -813,7 +813,7 @@
     {
       "id": "T95-MERGE",
       "title": "Merge the accepted execution-backend coupling inventory into main",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-r24acc",
       "target_pr": 95,
@@ -833,19 +833,15 @@
         "XR-D0-ACCEPT-R2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-24T01:14:21Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T00:29:21Z",
-      "updated_at": "2026-08-24T00:29:21Z",
-      "notes": "Pre-merge gate (all must hold, else STOP): live head == 8273702dabf90732d66fe362b5c56cdebf93fb06; APPROVE FOR FACT MERGE comment 5389353991 bound to that full head; CI run 32675760904 success on that head; re-read mergeability against current main (baseline 967ca1dfcb136fc44eb2c44c4e895b30cd9ef81d) immediately before merging. Mark Ready only inside this task (GraphQL markPullRequestReadyForReview), merge with exact-head sha guard (PUT /pulls/95/merge sha=expected_head). Docs-only, one new file. Record the resulting main merge SHA. E4-S2/#80/#91 hold unaffected by this task."
+      "updated_at": "2026-08-24T00:30:27Z",
+      "notes": "Pre-merge gate (all must hold, else STOP): live head == 8273702dabf90732d66fe362b5c56cdebf93fb06; APPROVE FOR FACT MERGE comment 5389353991 bound to that full head; CI run 32675760904 success on that head; re-read mergeability against current main (baseline 967ca1dfcb136fc44eb2c44c4e895b30cd9ef81d) immediately before merging. Mark Ready only inside this task (GraphQL markPullRequestReadyForReview), merge with exact-head sha guard (PUT /pulls/95/merge sha=expected_head). Docs-only, one new file. Record the resulting main merge SHA. E4-S2/#80/#91 hold unaffected by this task.",
+      "completed_at": "2026-08-24T00:30:27Z",
+      "result_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32675760904",
+      "completion_note": "Merged with exact-head guard sha=8273702dabf90732d66fe362b5c56cdebf93fb06 after four-gate re-verification (head exact + draft / APPROVE FOR FACT MERGE comment 5389353991 bound to full head / CI 32675760904 success / main at baseline 967ca1dfcb136fc44eb2c44c4e895b30cd9ef81d with mergeable=clean). Resulting main merge commit 636cd7db443bed45e7adcf1596785670cfc3ff1c."
     }
   ],
-  "locks": {
-    "main:merge": {
-      "task_id": "T95-MERGE",
-      "owner": "ox-alpha-r24acc",
-      "expected_head": "8273702dabf90732d66fe362b5c56cdebf93fb06",
-      "acquired_at": "2026-08-24T00:29:21Z",
-      "lease_expires_at": "2026-08-24T01:14:21Z"
-    }
-  }
+  "locks": {}
 }
