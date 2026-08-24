@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 60,
+  "revision": 61,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T01:25:43Z",
+  "updated_at": "2026-08-24T01:25:57Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -962,9 +962,9 @@
     {
       "id": "E24-B2BASE",
       "title": "Local-tabular ingestion measurement baseline",
-      "status": "dispatched",
+      "status": "running",
       "mode": "measurement",
-      "owner": null,
+      "owner": "ox-alpha-r24acc",
       "target_issue": 99,
       "target_pr": null,
       "target_branch": "agent/issue-099-e24-b2-ingestion-baseline",
@@ -993,13 +993,28 @@
         "E23-REVIEW"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-24T01:20:31Z",
+      "lease_expires_at": "2026-08-24T03:25:57Z",
+      "started_at": "2026-08-24T01:25:57Z",
+      "updated_at": "2026-08-24T01:25:57Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "E23-REVIEW selected B2 as the sole dispatch-ready hotspot: measurement only, zero overlap with E4-S2/#91, no performance claim and no optimization implementation.",
       "notes": "Canonical Issue #99. CLAIM must bind exact main@636cd7db443bed45e7adcf1596785670cfc3ff1c, re-diff PR #91 head d0ea2a3bce548a6cdc311dea4387e29e35e440ab for zero overlap, and acquire both declared locks for 120m. Authorized paths are exact. Cargo.toml may add only feature io-metrics; no dependency. Default-feature behavior unchanged. Counters contradicting C1/C2/C3 require stop and inventory-invalidating report. Draft PR only; release locks and stop for independent measurement review."
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/issue-099-e24-b2-ingestion-baseline": {
+      "task_id": "E24-B2BASE",
+      "owner": "ox-alpha-r24acc",
+      "expected_head": null,
+      "acquired_at": "2026-08-24T01:25:57Z",
+      "lease_expires_at": "2026-08-24T03:25:57Z"
+    },
+    "crate:stillflow-connector-local-tabular": {
+      "task_id": "E24-B2BASE",
+      "owner": "ox-alpha-r24acc",
+      "expected_head": null,
+      "acquired_at": "2026-08-24T01:25:57Z",
+      "lease_expires_at": "2026-08-24T03:25:57Z"
+    }
+  }
 }
