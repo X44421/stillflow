@@ -66,10 +66,15 @@ impl<R: BufRead> JsonObjectStream<R> {
         if self.finished {
             return Ok(None);
         }
-        match self.shape {
+        let object = match self.shape {
             JsonShape::Array => self.next_array_object(context),
             JsonShape::Lines => self.next_line_object(context),
+        }?;
+        #[cfg(feature = "io-metrics")]
+        if let Some(raw) = &object {
+            crate::read::io_metrics::add_json_framed_bytes(raw.len() as u64);
         }
+        Ok(object)
     }
 
     pub(crate) const fn row_number(&self) -> usize {

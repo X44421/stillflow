@@ -32,6 +32,174 @@ use crate::schema::{
 
 const INTERNAL_ROWS: usize = 4_096;
 
+/// Measurement-only instrumentation for the E24-B2BASE ingestion baseline
+/// (private feature `io-metrics`). Counters are additive, compared-and-swap
+/// free (relaxed atomics), and never alter parsing, buffering, validation,
+/// allocation, error timing, row order, or envelope boundaries. With the
+/// feature disabled this module does not exist and the crate is bit-identical
+/// in behavior.
+#[cfg(feature = "io-metrics")]
+pub(crate) mod io_metrics {
+    use std::io::{Read, Seek, SeekFrom};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static VALIDATOR_READ_BYTES: AtomicU64 = AtomicU64::new(0);
+    static DECODER_OS_BYTES: AtomicU64 = AtomicU64::new(0);
+    static JSON_HANDLE_BYTES: AtomicU64 = AtomicU64::new(0);
+    static JSON_FRAMED_BYTES: AtomicU64 = AtomicU64::new(0);
+    static JSON_REENCODE_BYTES: AtomicU64 = AtomicU64::new(0);
+    static INFERENCE_PHASE_BYTES: AtomicU64 = AtomicU64::new(0);
+    static CSV_DECODER_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
+    static CSV_ROWS_VALIDATED: AtomicU64 = AtomicU64::new(0);
+    static JSON_FRAMED_ROWS: AtomicU64 = AtomicU64::new(0);
+    static JSON_POLARS_DECODE_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
+    static PARQUET_READER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
+    static PARQUET_BATCH_FINISHES: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn add_validator_read_bytes(n: u64) {
+        VALIDATOR_READ_BYTES.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_decoder_os_bytes(n: u64) {
+        DECODER_OS_BYTES.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_json_handle_bytes(n: u64) {
+        JSON_HANDLE_BYTES.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_json_framed_bytes(n: u64) {
+        JSON_FRAMED_BYTES.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_json_reencode_bytes(n: u64) {
+        JSON_REENCODE_BYTES.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_inference_phase_bytes(n: u64) {
+        INFERENCE_PHASE_BYTES.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_csv_decoder_invocation() {
+        CSV_DECODER_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_csv_rows_validated(n: u64) {
+        CSV_ROWS_VALIDATED.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_json_framed_rows(n: u64) {
+        JSON_FRAMED_ROWS.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_json_polars_decode_invocation() {
+        JSON_POLARS_DECODE_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_parquet_reader_construction() {
+        PARQUET_READER_CONSTRUCTIONS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_parquet_batch_finish() {
+        PARQUET_BATCH_FINISHES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Exact logical bytes pulled from a wrapped file handle through `Read`.
+    /// Labels: validator pass (CSV), framing pass (JSON). Decoder handles
+    /// (CSV polars decode, Parquet) are passed unwrapped because polars may
+    /// mmap them (`MmapBytesReader`); those are recorded as OS-level bytes via
+    /// `record_decoder_os_bytes` and are labeled handle-/OS-level, not exact.
+    pub(crate) struct CountingReader<R> {
+        inner: R,
+        bytes: u64,
+        kind: &'static str,
+    }
+
+    impl<R> CountingReader<R> {
+        pub(crate) fn new(inner: R, kind: &'static str) -> Self {
+            Self {
+                inner,
+                bytes: 0,
+                kind,
+            }
+        }
+    }
+
+    impl<R: Read> Read for CountingReader<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.inner.read(buf)?;
+            self.bytes += n as u64;
+            match self.kind {
+                "validator" => add_validator_read_bytes(n as u64),
+                "json" => add_json_handle_bytes(n as u64),
+                _ => {}
+            }
+            Ok(n)
+        }
+    }
+
+    impl<R: Seek> Seek for CountingReader<R> {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    /// Cumulative counter snapshot. The E24 benchmark test reads this via the
+    /// dump file and computes per-case deltas itself.
+    pub(crate) fn snapshot_labels() -> &'static [&'static str] {
+        &[
+            "validator_read_bytes",
+            "decoder_os_bytes",
+            "json_handle_bytes",
+            "json_framed_bytes",
+            "json_reencode_bytes",
+            "inference_phase_bytes",
+            "csv_decoder_invocations",
+            "csv_rows_validated",
+            "json_framed_rows",
+            "json_polars_decode_invocations",
+            "parquet_reader_constructions",
+            "parquet_batch_finishes",
+        ]
+    }
+
+    pub(crate) fn snapshot_values() -> Vec<u64> {
+        vec![
+            VALIDATOR_READ_BYTES.load(Ordering::Relaxed),
+            DECODER_OS_BYTES.load(Ordering::Relaxed),
+            JSON_HANDLE_BYTES.load(Ordering::Relaxed),
+            JSON_FRAMED_BYTES.load(Ordering::Relaxed),
+            JSON_REENCODE_BYTES.load(Ordering::Relaxed),
+            INFERENCE_PHASE_BYTES.load(Ordering::Relaxed),
+            CSV_DECODER_INVOCATIONS.load(Ordering::Relaxed),
+            CSV_ROWS_VALIDATED.load(Ordering::Relaxed),
+            JSON_FRAMED_ROWS.load(Ordering::Relaxed),
+            JSON_POLARS_DECODE_INVOCATIONS.load(Ordering::Relaxed),
+            PARQUET_READER_CONSTRUCTIONS.load(Ordering::Relaxed),
+            PARQUET_BATCH_FINISHES.load(Ordering::Relaxed),
+        ]
+    }
+
+    /// Best-effort dump of the cumulative snapshot as lines `label=value` to
+    /// the path in `E24_IO_METRICS_OUT` (if set). Errors are ignored: the dump
+    /// is a measurement side channel, not part of connector behavior.
+    pub(crate) fn dump() {
+        let Ok(path) = std::env::var("E24_IO_METRICS_OUT") else {
+            return;
+        };
+        let labels = snapshot_labels();
+        let values = snapshot_values();
+        let mut text = String::new();
+        for (label, value) in labels.iter().zip(values) {
+            text.push_str(label);
+            text.push('=');
+            text.push_str(&value.to_string());
+            text.push('\n');
+        }
+        let _ = std::fs::write(path, text);
+    }
+}
+
 pub(crate) struct PreparedReader {
     context: RequestContext,
     full_schema: LogicalSchema,
@@ -58,13 +226,19 @@ enum ReaderKind {
     Empty,
     CountedRows(usize),
     Csv(Box<CsvState>),
+    #[cfg(not(feature = "io-metrics"))]
     Json(JsonObjectStream<BufReader<std::fs::File>>),
+    #[cfg(feature = "io-metrics")]
+    Json(JsonObjectStream<BufReader<io_metrics::CountingReader<std::fs::File>>>),
     Parquet(ParquetState),
 }
 
 struct CsvState {
     decoder: polars::prelude::OwnedBatchedCsvReader,
+    #[cfg(not(feature = "io-metrics"))]
     validator: csv::Reader<std::fs::File>,
+    #[cfg(feature = "io-metrics")]
+    validator: csv::Reader<io_metrics::CountingReader<std::fs::File>>,
     schema: LogicalSchema,
     row: usize,
 }
@@ -154,12 +328,16 @@ pub(crate) fn prepare_reader(
                         .with_truncate_ragged_lines(false)
                 });
             let validation_file = roots.open_asset(asset)?.file;
+            #[cfg(not(feature = "io-metrics"))]
+            let validation_source = validation_file;
+            #[cfg(feature = "io-metrics")]
+            let validation_source = io_metrics::CountingReader::new(validation_file, "validator");
             let mut validator = csv::ReaderBuilder::new()
                 .delimiter(separator)
                 .quote(quote)
                 .has_headers(has_header)
                 .flexible(false)
-                .from_reader(validation_file);
+                .from_reader(validation_source);
             if has_header {
                 let headers = validator.headers().map_err(|_| {
                     source_error(
@@ -182,6 +360,8 @@ pub(crate) fn prepare_reader(
                 }
             }
             let file: Box<dyn MmapBytesReader> = Box::new(opened.file);
+            #[cfg(feature = "io-metrics")]
+            io_metrics::record_decoder_os_bytes(opened.size_bytes);
             let decoder = options
                 .into_reader_with_file_handle(file)
                 .batched(None)
@@ -193,13 +373,23 @@ pub(crate) fn prepare_reader(
                 row: 0,
             }))
         }
-        TabularFormat::Json | TabularFormat::Ndjson => ReaderKind::Json(JsonObjectStream::new(
-            BufReader::new(opened.file),
-            opened.format,
-        )?),
+        TabularFormat::Json | TabularFormat::Ndjson => {
+            #[cfg(not(feature = "io-metrics"))]
+            let json_reader = JsonObjectStream::new(BufReader::new(opened.file), opened.format)?;
+            #[cfg(feature = "io-metrics")]
+            let json_reader = JsonObjectStream::new(
+                BufReader::new(io_metrics::CountingReader::new(opened.file, "json")),
+                opened.format,
+            )?;
+            ReaderKind::Json(json_reader)
+        }
         TabularFormat::Parquet if full_schema.fields.is_empty() => {
             validate_parquet_magic(&mut opened.file, opened.size_bytes)?;
+            #[cfg(feature = "io-metrics")]
+            io_metrics::record_decoder_os_bytes(opened.size_bytes);
             let mut reader = ParquetReader::new(opened.file);
+            #[cfg(feature = "io-metrics")]
+            io_metrics::add_parquet_reader_construction();
             let schema = reader.schema().map_err(polars_open_error)?;
             if !schema.is_empty() {
                 return Err(source_error(
@@ -213,6 +403,8 @@ pub(crate) fn prepare_reader(
         }
         TabularFormat::Parquet => {
             validate_parquet_magic(&mut opened.file, opened.size_bytes)?;
+            #[cfg(feature = "io-metrics")]
+            io_metrics::record_decoder_os_bytes(opened.size_bytes);
             let mut metadata_reader =
                 ParquetReader::new(opened.file.try_clone().map_err(|_| {
                     source_error(
@@ -221,6 +413,8 @@ pub(crate) fn prepare_reader(
                         "Parquet source handle could not be duplicated",
                     )
                 })?);
+            #[cfg(feature = "io-metrics")]
+            io_metrics::add_parquet_reader_construction();
             let current_schema = metadata_reader.schema().map_err(polars_open_error)?;
             let current_schema =
                 logical_schema_from_polars_arrow(asset.id, current_schema.as_ref())?;
@@ -374,6 +568,8 @@ impl PreparedReader {
                 }
             }
             ReaderKind::Csv(reader) => {
+                #[cfg(feature = "io-metrics")]
+                io_metrics::add_csv_decoder_invocation();
                 if let Some(frames) = reader.decoder.next_batches(1).map_err(polars_data_error)? {
                     for frame in frames {
                         reader.validate_rows(frame.height(), &self.context)?;
@@ -402,6 +598,8 @@ impl PreparedReader {
                     )
                 })?;
                 let mut parquet_reader = ParquetReader::new(file);
+                #[cfg(feature = "io-metrics")]
+                io_metrics::add_parquet_reader_construction();
                 parquet_reader.set_metadata(Arc::clone(&reader.metadata));
                 let frame = parquet_reader
                     .with_projection(Some(reader.projection.clone()))
@@ -410,6 +608,8 @@ impl PreparedReader {
                     .read_parallel(ParallelStrategy::None)
                     .finish()
                     .map_err(polars_data_error)?;
+                #[cfg(feature = "io-metrics")]
+                io_metrics::add_parquet_batch_finish();
                 if frame.height() == 0 {
                     reader.finished = true;
                 } else {
@@ -457,6 +657,12 @@ impl PreparedReader {
                     count += 1;
                 }
                 if count > 0 {
+                    #[cfg(feature = "io-metrics")]
+                    {
+                        io_metrics::add_json_framed_rows(count as u64);
+                        io_metrics::add_json_reencode_bytes(encoded.len() as u64);
+                        io_metrics::add_json_polars_decode_invocation();
+                    }
                     if self.projection.names.is_empty() {
                         self.pending.push_back(empty_frame_with_height(count)?);
                         return Ok(());
@@ -484,6 +690,13 @@ impl PreparedReader {
     }
 }
 
+#[cfg(feature = "io-metrics")]
+impl Drop for PreparedReader {
+    fn drop(&mut self) {
+        io_metrics::dump();
+    }
+}
+
 impl CsvState {
     fn validate_rows(&mut self, count: usize, context: &RequestContext) -> ConnectorResult<()> {
         let mut record = csv::StringRecord::new();
@@ -503,6 +716,8 @@ impl CsvState {
                     "delimited decoder row counts are inconsistent",
                 ));
             }
+            #[cfg(feature = "io-metrics")]
+            io_metrics::add_csv_rows_validated(1);
             self.row = self.row.checked_add(1).ok_or_else(|| {
                 source_error(
                     ErrorCategory::InvalidData,
