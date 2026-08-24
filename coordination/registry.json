@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 51,
+  "revision": 52,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T00:40:24Z",
+  "updated_at": "2026-08-24T00:45:49Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -880,6 +880,42 @@
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "XR-D0 factual inventory is accepted and merged at main@636cd7db443bed45e7adcf1596785670cfc3ff1c; Issue #93 explicitly permits documentation planning before E4-S2 completion.",
       "notes": "Canonical Issue #97. Docs-only exact-base ADR task; one authorized file. CLAIM must bind main@636cd7db443bed45e7adcf1596785670cfc3ff1c, acquire only its branch lock, and stop on BASE MOVED. No runtime/API/Cargo/workflow/frontend/ADR-001/AGENTS change; no #80/#91 action; Draft PR and independent architecture review required before any merge or XR runtime implementation."
+    },
+    {
+      "id": "B0-STATE-HYGIENE-R2",
+      "title": "Refresh the live Epic board and close completed legacy trackers",
+      "status": "dispatched",
+      "mode": "maintenance",
+      "owner": null,
+      "target_issue": 81,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
+      "locks": [
+        "github:issue-ledger-state"
+      ],
+      "issue_targets": [
+        81,
+        79,
+        85,
+        92
+      ],
+      "acceptance_keys": [
+        "b0:epic-live-board-r52",
+        "b0:close-completed-f0-d0",
+        "b0:close-completed-dx-f0",
+        "b0:close-completed-registry-r12"
+      ],
+      "depends_on": [
+        "T95-MERGE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-24T00:45:49Z",
+      "queued_by": "maintainer:chatgpt-workmode",
+      "queue_reason": "B0-R0/B0-R1 and the referenced deliveries are terminal, but the mutable CURRENT-EXECUTION-BOARD block and three canonical issue states remain stale. This governance-only slice restores live issue-state consistency without touching repository refs.",
+      "notes": "CLAIM on #81 must re-fetch main, registry, #79/#85/#92, PR #83/#84/#87/#88, and current #96/#97 claims. Acquire only github:issue-ledger-state for 90m. Authorized writes: replace only the delimited CURRENT-EXECUTION-BOARD block in #81; append completion receipts to #79/#85/#92 and close them as completed only if merged evidence remains exact. Preserve all historical issue bodies/comments. No repository, PR, branch, label, milestone, #80/#91, Ready/merge, or downstream implementation action."
     }
   ],
   "locks": {}
