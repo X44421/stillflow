@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 57,
+  "revision": 58,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-24T01:08:27Z",
+  "updated_at": "2026-08-24T01:10:28Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -310,7 +310,7 @@
     {
       "id": "E23-REVIEW",
       "title": "Post-merge E2/E3 evidence review",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-r24acc",
       "target_pr": null,
@@ -325,15 +325,19 @@
         "T76-CLOSE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-24T02:19:44Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-24T00:49:44Z",
-      "updated_at": "2026-08-24T00:49:44Z",
+      "updated_at": "2026-08-24T01:10:28Z",
       "notes": "Bind to the final E3 merge SHA; reuse PR #76 facts instead of repeating inventory. | REGISTRY-R12 rev 12 verification: dependencies T53-T71 (queued) and T76-CLOSE (wait_maintainer) remain non-terminal; blocked state correct. | REGISTRY-R50: dependencies re-evaluated terminal; canonical Issue #96 created. Dispatched read-only against runtime anchor c0e828031f0141fa89e6b525b4314ebabd5f4f4e and planning head 636cd7db443bed45e7adcf1596785670cfc3ff1c. No repository/PR writes, no locks, and no #80/#91 action.",
       "verified_by": "ox-alpha-coordinator (REGISTRY-R12)",
       "target_issue": 96,
       "runtime_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "queued_by": "maintainer:chatgpt-workmode",
-      "queue_reason": "Dependencies T53-T71 and T76-CLOSE are terminal; current main differs from the final E3 runtime anchor only by the three merged documentation files verified in the c0e82803...636cd7db compare. Dispatch a read-only evidence gate to select at most one benchmark-first hotspot."
+      "queue_reason": "Dependencies T53-T71 and T76-CLOSE are terminal; current main differs from the final E3 runtime anchor only by the three merged documentation files verified in the c0e82803...636cd7db compare. Dispatch a read-only evidence gate to select at most one benchmark-first hotspot.",
+      "completed_at": "2026-08-24T01:10:28Z",
+      "result_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
+      "ci_url": null,
+      "completion_note": "Evidence gate complete against runtime anchor c0e828031f0141fa89e6b525b4314ebabd5f4f4e / planning head 636cd7db443bed45e7adcf1596785670cfc3ff1c (protocol gate: range touches only the three docs files). Verdict: dispatch exactly one measurement-only benchmark, E24-B2BASE (B2 connector ingestion; zero file/lock overlap with E4-S2); B1 conflict-blocked by E4-S2/#91 engine surface+lock (coordinator-verified); B3 viable but ranked behind B2. Systematic line drift vs inventory base recorded for future citation refresh. Deliverable: https://github.com/X44421/stillflow/issues/96#issuecomment-5389575689 (claim 5389499960, done 5389576757). Coordinator countersign: comment set verified, B1 overlap independently reproduced."
     },
     {
       "id": "E23-OPT",
