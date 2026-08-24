@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 42,
+  "revision": 43,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
-  "updated_at": "2026-08-24T00:16:01Z",
+  "updated_at": "2026-08-24T00:16:28Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -783,7 +783,7 @@
     {
       "id": "XR-D0-ACCEPT-R2",
       "title": "Independent exact-head fact re-acceptance after R1 fixes",
-      "status": "blocked",
+      "status": "queued",
       "mode": "review",
       "owner": null,
       "target_pr": 95,
@@ -799,10 +799,12 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
-      "updated_at": "2026-08-24T00:13:44Z",
+      "updated_at": "2026-08-24T00:16:28Z",
       "notes": "Bind expected_head to the XR-D0-FIX-R1 result head at claim time. Fresh independent read-only review: reproduce guards on the NEW head (base still c0e828031f01..., diff stays exactly the inventory file), verify each of the four blockers is fixed against source, audit that the delta vs 3604536ed6ef18fc889617be088043906a3521e8 touches nothing beyond the intended lines, and spot-check previously verified assertion themes remain intact. CI on the new head must be success before APPROVE. Publish APPROVE FOR FACT MERGE or REQUEST CHANGES bound to the full new head.",
       "head_bound_by": "ox-alpha-r24acc",
-      "head_bind_reason": "Bind to XR-D0-FIX-R1 result head 8273702dabf90732d66fe362b5c56cdebf93fb06 (four-line fact fix, fast-forward from 3604536ed6ef18fc889617be088043906a3521e8); CI rerun of failed toolchain-download job in progress."
+      "head_bind_reason": "Bind to XR-D0-FIX-R1 result head 8273702dabf90732d66fe362b5c56cdebf93fb06 (four-line fact fix, fast-forward from 3604536ed6ef18fc889617be088043906a3521e8); CI rerun of failed toolchain-download job in progress.",
+      "queued_by": "ox-alpha-r24acc",
+      "queue_reason": "Dependency XR-D0-FIX-R1 completed (result head 8273702dabf90732d66fe362b5c56cdebf93fb06, CI green after infra-failure rerun); head already bound via bind-head dd6414f."
     }
   ],
   "locks": {}
