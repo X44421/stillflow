@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 85,
+  "revision": 86,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T02:44:25Z",
+  "updated_at": "2026-08-25T02:57:22Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1202,9 +1202,9 @@
         "T100-MERGE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-25T14:44:25Z",
+      "lease_expires_at": "2026-08-25T14:57:22Z",
       "started_at": "2026-08-25T02:13:25Z",
-      "updated_at": "2026-08-25T02:44:25Z",
+      "updated_at": "2026-08-25T02:57:22Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Maintainer explicitly authorized the previously discussed bounded JSON optimization experiment after the accepted E24 baseline was merged. The experiment isolates the connector-local JSON/NDJSON decode tail, retains framing and logical validation, and does not transition E23-OPT.",
       "notes": "Canonical Issue #101. CLAIM must re-fetch registry/main and bind exactly to main@04966586192f8750a02790da988db71a28d82074; acquire both declared locks before creating agent/issue-101-e24-b2json-direct-arrow. Use a 720m lease (renew before expiry) because the paired 8-cell x 30-repetition benchmark can exceed the default lease. Risk-high frozen contract is Issue #101; mirror it at the authorized docs/issues path before implementation and link it from the Draft PR. Add only arrow-json 59 via the workspace plus private non-default feature json-arrow-direct. Preserve JsonObjectStream and the authoritative ProjectedObjectVisitor/ValidateFieldSeed/LogicalValueVisitor validation; json_stream.rs is deliberately outside scope. Direct mode must eliminate JSON re-encode, Polars JSON decode, DataFrame and C-FFI bridge while emitting bounded Arrow RecordBatch values; legacy mode remains available on the same head for A/B. Persist raw wall_samples_ms and publish SHA-256. Both PROMOTE CANDIDATE and CLOSE EXPERIMENT are valid completions. Stop on semantic/error/stream drift, unbounded buffering, public-contract change, second dependency, out-of-scope path, unsafe, or any Engine/Storage/#80/#91 need. Draft PR only; no Ready/merge, no production adoption, no E23-OPT transition. Release locks and stop for a separately dispatched independent exact-head acceptance."
@@ -1216,14 +1216,14 @@
       "owner": "cursor-grok-e24json",
       "expected_head": null,
       "acquired_at": "2026-08-25T02:13:25Z",
-      "lease_expires_at": "2026-08-25T14:44:25Z"
+      "lease_expires_at": "2026-08-25T14:57:22Z"
     },
     "crate:stillflow-connector-local-tabular": {
       "task_id": "E24-B2JSON-A0",
       "owner": "cursor-grok-e24json",
       "expected_head": null,
       "acquired_at": "2026-08-25T02:13:25Z",
-      "lease_expires_at": "2026-08-25T14:44:25Z"
+      "lease_expires_at": "2026-08-25T14:57:22Z"
     }
   }
 }
