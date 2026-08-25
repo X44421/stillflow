@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 79,
+  "revision": 80,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T01:42:25Z",
+  "updated_at": "2026-08-25T01:42:49Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1132,9 +1132,9 @@
     {
       "id": "B0-STATE-HYGIENE-R3",
       "title": "Refresh the live Epic board after the baseline-integration merges",
-      "status": "dispatched",
+      "status": "running",
       "mode": "maintenance",
-      "owner": null,
+      "owner": "ox-alpha-coordinator",
       "target_issue": 81,
       "target_pr": null,
       "target_branch": null,
@@ -1152,13 +1152,20 @@
         "T98-MERGE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-25T01:42:25Z",
+      "lease_expires_at": "2026-08-25T03:12:49Z",
+      "started_at": "2026-08-25T01:42:49Z",
+      "updated_at": "2026-08-25T01:42:49Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "T100-MERGE and T98-MERGE are terminal; main advanced 636cd7db443b… -> c663df6cba6e… -> 04966586192f… while the delimited CURRENT-EXECUTION-BOARD block in #81 still shows the R52-era snapshot. One-shot refresh after both merges per maintainer instruction.",
       "notes": "Governance-only slice. CLAIM must acquire github:issue-ledger-state for 90m and replace ONLY the delimited CURRENT-EXECUTION-BOARD block in #81 with the post-merge state; preserve all historical bodies/comments verbatim; no repository refs, PR states, branches, labels, #80/#91, or downstream implementation actions. Known cosmetic gap (not this task's write scope): T100-MERGE completion_note contains an 'issuecomment-TBD' placeholder; the real receipt is issues/99#issuecomment-5403646945."
     }
   ],
-  "locks": {}
+  "locks": {
+    "github:issue-ledger-state": {
+      "task_id": "B0-STATE-HYGIENE-R3",
+      "owner": "ox-alpha-coordinator",
+      "acquired_at": "2026-08-25T01:42:49Z",
+      "lease_expires_at": "2026-08-25T03:12:49Z"
+    }
+  }
 }
