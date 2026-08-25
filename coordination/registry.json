@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 78,
+  "revision": 79,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T01:29:09Z",
+  "updated_at": "2026-08-25T01:42:25Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1128,6 +1128,36 @@
       "result_head": "04966586192f8750a02790da988db71a28d82074",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32678595329",
       "completion_note": "MERGED PR #98 merge-commit 04966586192f8750a02790da988db71a28d82074 parents c663df6cba6e65640d73e076951016d25805f144 x 7bd1966218ec9a0df2130736ee4cc863d09d5b27; receipt https://github.com/X44421/stillflow/issues/97#issuecomment-5403813876; claim comment 5403806405; Ready performed inside task via GraphQL with exact sha guard PUT /pulls/98/merge; branch not deleted; #97 already closed by maintainer at 2026-08-25T01:27:48Z before receipt landed; no XR-R0 dispatch no runtime implementation authorization no #80/#91 action"
+    },
+    {
+      "id": "B0-STATE-HYGIENE-R3",
+      "title": "Refresh the live Epic board after the baseline-integration merges",
+      "status": "dispatched",
+      "mode": "maintenance",
+      "owner": null,
+      "target_issue": 81,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_head": "04966586192f8750a02790da988db71a28d82074",
+      "locks": [
+        "github:issue-ledger-state"
+      ],
+      "issue_targets": [
+        81
+      ],
+      "acceptance_keys": [
+        "b0:epic-live-board-r78"
+      ],
+      "depends_on": [
+        "T98-MERGE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-25T01:42:25Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "T100-MERGE and T98-MERGE are terminal; main advanced 636cd7db443b… -> c663df6cba6e… -> 04966586192f… while the delimited CURRENT-EXECUTION-BOARD block in #81 still shows the R52-era snapshot. One-shot refresh after both merges per maintainer instruction.",
+      "notes": "Governance-only slice. CLAIM must acquire github:issue-ledger-state for 90m and replace ONLY the delimited CURRENT-EXECUTION-BOARD block in #81 with the post-merge state; preserve all historical bodies/comments verbatim; no repository refs, PR states, branches, labels, #80/#91, or downstream implementation actions. Known cosmetic gap (not this task's write scope): T100-MERGE completion_note contains an 'issuecomment-TBD' placeholder; the real receipt is issues/99#issuecomment-5403646945."
     }
   ],
   "locks": {}
