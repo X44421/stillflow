@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 87,
+  "revision": 88,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T05:40:16Z",
+  "updated_at": "2026-08-25T05:43:01Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1212,9 +1212,9 @@
     {
       "id": "Q-C0",
       "title": "Freeze profiling/finding contract (ADR-003)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-b-qc0",
       "target_issue": 103,
       "target_pr": null,
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
@@ -1238,9 +1238,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-25T05:40:16Z",
+      "lease_expires_at": "2026-08-25T07:13:01Z",
+      "started_at": "2026-08-25T05:43:01Z",
+      "updated_at": "2026-08-25T05:43:01Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Maintainer dispatch authorization (session directive): Q-C0 docs-only contract freeze per #81 Track Q; input inventory Q0-D0 (#65) is factual basis; docs-only C0 may be prepared ahead of E4/E5 implementation.",
       "notes": "Freeze only: exact vs sampled metric semantics; ProfileRequest/ProfilePolicy bounds; row/null/unique/duplicate and column stats; numeric distribution / top values / Utf8-Binary length policy; FindingCategory/FindingEvidence and provenance; QualityScore versioned formula and missing-evidence semantics; Profile/Quality Artifact canonical digest. FORBIDDEN: Rust runtime, profiler/metrics implementation, E4/#91 action, local-tabular crate changes, API/persistence/serialization beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-003-profiling-quality-and-findings.md modeled on ADR-002 structure; Draft PR only."
@@ -1296,6 +1296,12 @@
       "expected_head": null,
       "acquired_at": "2026-08-25T02:13:25Z",
       "lease_expires_at": "2026-08-25T14:57:22Z"
+    },
+    "branch:agent/issue-103-q-c0-profiling-finding-contract": {
+      "task_id": "Q-C0",
+      "owner": "agent-b-qc0",
+      "acquired_at": "2026-08-25T05:43:01Z",
+      "lease_expires_at": "2026-08-25T07:13:01Z"
     }
   }
 }
