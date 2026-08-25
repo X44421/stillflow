@@ -38,3 +38,9 @@ parquet.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+
+# Private measurement-only feature for the E24-B2BASE ingestion baseline.
+# Never enabled by default; adds logical-byte/parser-invocation counters and a
+# test-binary dump side channel only. No dependency and no behavior change.
+[features]
+io-metrics = []

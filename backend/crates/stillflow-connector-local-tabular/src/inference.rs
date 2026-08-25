@@ -76,6 +76,8 @@ fn read_bounded(
                 "source bytes could not be read during schema inference",
             )
         })?;
+        #[cfg(feature = "io-metrics")]
+        crate::read::io_metrics::add_inference_phase_bytes(read as u64);
         if read == 0 {
             break;
         }
