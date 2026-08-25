@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 89,
+  "revision": 90,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T05:44:59Z",
+  "updated_at": "2026-08-25T06:01:43Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1212,17 +1212,15 @@
     {
       "id": "Q-C0",
       "title": "Freeze profiling/finding contract (ADR-003)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-b-qc0",
       "target_issue": 103,
-      "target_pr": null,
+      "target_pr": 105,
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-103-q-c0-profiling-finding-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-003-profiling-quality-and-findings.md"
       ],
@@ -1238,12 +1236,16 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-25T07:13:01Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-25T05:43:01Z",
-      "updated_at": "2026-08-25T05:43:01Z",
+      "updated_at": "2026-08-25T06:01:43Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Maintainer dispatch authorization (session directive): Q-C0 docs-only contract freeze per #81 Track Q; input inventory Q0-D0 (#65) is factual basis; docs-only C0 may be prepared ahead of E4/E5 implementation.",
-      "notes": "Freeze only: exact vs sampled metric semantics; ProfileRequest/ProfilePolicy bounds; row/null/unique/duplicate and column stats; numeric distribution / top values / Utf8-Binary length policy; FindingCategory/FindingEvidence and provenance; QualityScore versioned formula and missing-evidence semantics; Profile/Quality Artifact canonical digest. FORBIDDEN: Rust runtime, profiler/metrics implementation, E4/#91 action, local-tabular crate changes, API/persistence/serialization beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-003-profiling-quality-and-findings.md modeled on ADR-002 structure; Draft PR only."
+      "notes": "Freeze only: exact vs sampled metric semantics; ProfileRequest/ProfilePolicy bounds; row/null/unique/duplicate and column stats; numeric distribution / top values / Utf8-Binary length policy; FindingCategory/FindingEvidence and provenance; QualityScore versioned formula and missing-evidence semantics; Profile/Quality Artifact canonical digest. FORBIDDEN: Rust runtime, profiler/metrics implementation, E4/#91 action, local-tabular crate changes, API/persistence/serialization beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-003-profiling-quality-and-findings.md modeled on ADR-002 structure; Draft PR only.",
+      "completed_at": "2026-08-25T06:01:43Z",
+      "result_head": "a3cc49a8538b85d4641709ac8a36ea9b51ae93f4",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32814994829",
+      "completion_note": "Docs-only contract freeze delivered by agent-b-qc0 at exact base main@04966586192f8750a02790da988db71a28d82074: single new file docs/architecture/adr-003-profiling-quality-and-findings.md (+677 lines), modeled on ADR-002 structure with [Decision]-marked rules. Freezes exact-vs-sampled metric semantics (exact-only v1 over bounded scan scope, counts + exact rationals), ProfileRequest/ProfilePolicy ceilings and fail-closed validation, row/null/unique/duplicate + column stats with overflow-to-absent flags, numeric histogram/top-values/Utf8-Binary length policy with total deterministic formulas, closed FindingCategory/FindingEvidence/provenance with Deterministic|AiProposal origin law, QUALITY_SCORE_VERSION=1 formula (40/30/10 weights) with normative vectors (95/96) and missing-evidence semantics, and Profile/Quality canonical JSON SHA-256 digest. No runtime, no crate changes, no E4/#91 action, no API/persistence changes; ADR-001/ADR-002/AGENTS.md untouched. Evidence: Draft PR #105 (stays Draft), single-file diff vs base, links and issue refs verified live, CI run 32814994829 all 7 checks pass on result head a3cc49a8538b85d4641709ac8a36ea9b51ae93f4. Independent architecture acceptance is a separate dispatch."
     },
     {
       "id": "X-C0",
@@ -1302,12 +1304,6 @@
       "expected_head": null,
       "acquired_at": "2026-08-25T02:13:25Z",
       "lease_expires_at": "2026-08-25T14:57:22Z"
-    },
-    "branch:agent/issue-103-q-c0-profiling-finding-contract": {
-      "task_id": "Q-C0",
-      "owner": "agent-b-qc0",
-      "acquired_at": "2026-08-25T05:43:01Z",
-      "lease_expires_at": "2026-08-25T07:13:01Z"
     }
   }
 }
