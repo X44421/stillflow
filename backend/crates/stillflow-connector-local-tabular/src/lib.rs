@@ -16,6 +16,8 @@ mod config;
 mod format;
 mod inference;
 mod inspect;
+#[cfg(feature = "json-arrow-direct")]
+mod json_arrow;
 mod json_stream;
 mod path;
 mod preview;

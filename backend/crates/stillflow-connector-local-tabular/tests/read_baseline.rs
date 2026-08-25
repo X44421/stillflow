@@ -33,7 +33,7 @@ use tempfile::TempDir;
 
 const HEAD_SHA_ENV: &str = "E24_HEAD_SHA";
 const METRICS_OUT_ENV: &str = "E24_IO_METRICS_OUT";
-const DEFAULT_HEAD: &str = "636cd7db443bed45e7adcf1596785670cfc3ff1c";
+const DEFAULT_HEAD: &str = "04966586192f8750a02790da988db71a28d82074";
 const REPS: usize = 30;
 const BATCH_SIZE: usize = 4_096;
 const PARQUET_CHUNK_ROWS: usize = 8_192;
@@ -48,6 +48,7 @@ const COUNTER_LABELS: &[&str] = &[
     "csv_rows_validated",
     "json_framed_rows",
     "json_polars_decode_invocations",
+    "json_arrow_flushes",
     "parquet_reader_constructions",
     "parquet_batch_finishes",
 ];
@@ -536,5 +537,168 @@ async fn read_baseline() {
             &counter_deltas,
         );
         case_start = cumulative_after_case;
+    }
+}
+
+fn set_json_direct(on: bool) {
+    if on {
+        std::env::set_var("STILLFLOW_JSON_ARROW_DIRECT", "1");
+    } else {
+        std::env::remove_var("STILLFLOW_JSON_ARROW_DIRECT");
+    }
+}
+
+fn print_json_ab_case(
+    strategy: &str,
+    format: &str,
+    cols: usize,
+    rows: usize,
+    fixture_bytes: u64,
+    walls: &[u128],
+    counter_deltas: &BTreeMap<String, u64>,
+) {
+    let head = std::env::var(HEAD_SHA_ENV).unwrap_or_else(|_| DEFAULT_HEAD.to_string());
+    let p50 = percentile(walls.to_vec(), 0.5);
+    let p95 = percentile(walls.to_vec(), 0.95);
+    let mut metrics = serde_json::Map::new();
+    for (label, delta) in counter_deltas {
+        metrics.insert(label.clone(), serde_json::json!(delta));
+    }
+    metrics.insert("strategy".to_string(), serde_json::json!(strategy));
+    metrics.insert("wall_p50_ms".to_string(), serde_json::json!(p50));
+    metrics.insert("wall_p95_ms".to_string(), serde_json::json!(p95));
+    metrics.insert("wall_reps".to_string(), serde_json::json!(walls.len()));
+    metrics.insert(
+        "wall_samples_ms".to_string(),
+        serde_json::json!(walls.iter().copied().collect::<Vec<_>>()),
+    );
+    let record = serde_json::json!({
+        "head": head,
+        "feature": "io-metrics,json-arrow-direct",
+        "fixture": {
+            "format": format,
+            "cols": cols,
+            "rows": rows,
+            "bytes": fixture_bytes
+        },
+        "metrics": metrics
+    });
+    println!("{record}");
+}
+
+#[cfg(feature = "json-arrow-direct")]
+#[tokio::test]
+#[ignore]
+async fn read_json_arrow_ab() {
+    let head = std::env::var(HEAD_SHA_ENV).unwrap_or_else(|_| DEFAULT_HEAD.to_string());
+    let temp = TempDir::new().expect("fixture root");
+    let root = temp.path();
+    let metrics_out: PathBuf = root.join("e24_io_metrics.out");
+    std::env::set_var(METRICS_OUT_ENV, &metrics_out);
+    set_json_direct(false);
+    eprintln!("[e24-b2json-a0] head={head} reps/strategy/cell={REPS}");
+
+    let cases: [(&str, usize, usize); 8] = [
+        ("ndjson", 10, 100_000),
+        ("ndjson", 100, 100_000),
+        ("ndjson", 10, 1_000_000),
+        ("ndjson", 100, 1_000_000),
+        ("array", 10, 100_000),
+        ("array", 100, 100_000),
+        ("array", 10, 1_000_000),
+        ("array", 100, 1_000_000),
+    ];
+
+    let mut generated: BTreeMap<(String, usize, usize), (String, u64)> = BTreeMap::new();
+    for (format, cols, rows) in cases {
+        let ext = if format == "ndjson" { "ndjson" } else { "json" };
+        let name = format!("f_{format}_{cols}c_{rows}r.{ext}");
+        let path = root.join(&name);
+        eprintln!("[e24-b2json-a0] generating {name}");
+        let bytes = write_delimited_or_json(&path, format, cols, rows).expect("fixture");
+        generated.insert((format.to_string(), cols, rows), (name, bytes));
+    }
+
+    let connection = connection(root);
+    let registry = registry();
+    let assets = discover_assets(&registry, &connection).await;
+
+    for (format, cols, rows) in cases {
+        let (name, fixture_bytes) = generated
+            .get(&(format.to_string(), cols, rows))
+            .expect("generated fixture");
+        let asset = asset_named(&assets, name);
+        eprintln!("[e24-b2json-a0] measuring {name}");
+
+        set_json_direct(false);
+        ingest_once(&connection, &registry, &asset).await;
+        set_json_direct(true);
+        ingest_once(&connection, &registry, &asset).await;
+        let mut prev_snap = read_counter_snapshot(&metrics_out);
+
+        let mut legacy_walls = Vec::with_capacity(REPS);
+        let mut direct_walls = Vec::with_capacity(REPS);
+        let zeros: BTreeMap<String, u64> = COUNTER_LABELS
+            .iter()
+            .map(|label| ((*label).to_string(), 0_u64))
+            .collect();
+        let mut legacy_deltas = zeros.clone();
+        let mut direct_deltas = zeros.clone();
+
+        for rep in 0..REPS {
+            let direct_first = (rep + cols + rows) % 2 == 0;
+            for strategy in if direct_first {
+                ["direct", "legacy"]
+            } else {
+                ["legacy", "direct"]
+            } {
+                let direct = strategy == "direct";
+                set_json_direct(direct);
+                let start = Instant::now();
+                ingest_once(&connection, &registry, &asset).await;
+                let wall =
+                    u128::from(u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX));
+                let snap = read_counter_snapshot(&metrics_out);
+                let mut ingest_delta = BTreeMap::new();
+                for label in COUNTER_LABELS {
+                    let current = snap.get(*label).copied().unwrap_or(0);
+                    let previous = prev_snap.get(*label).copied().unwrap_or(0);
+                    ingest_delta.insert((*label).to_string(), current.saturating_sub(previous));
+                }
+                prev_snap = snap;
+                let target = if direct {
+                    direct_walls.push(wall);
+                    &mut direct_deltas
+                } else {
+                    legacy_walls.push(wall);
+                    &mut legacy_deltas
+                };
+                for label in COUNTER_LABELS {
+                    let add = ingest_delta.get(*label).copied().unwrap_or(0);
+                    let slot = target.entry((*label).to_string()).or_insert(0);
+                    *slot = slot.saturating_add(add);
+                }
+            }
+        }
+
+        print_json_ab_case(
+            "legacy",
+            format,
+            cols,
+            rows,
+            *fixture_bytes,
+            &legacy_walls,
+            &legacy_deltas,
+        );
+        print_json_ab_case(
+            "direct",
+            format,
+            cols,
+            rows,
+            *fixture_bytes,
+            &direct_walls,
+            &direct_deltas,
+        );
+        set_json_direct(false);
     }
 }
