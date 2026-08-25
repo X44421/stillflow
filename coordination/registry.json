@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 81,
+  "revision": 82,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T01:43:52Z",
+  "updated_at": "2026-08-25T02:04:34Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1161,6 +1161,53 @@
       "completed_at": "2026-08-25T01:43:52Z",
       "result_head": "04966586192f8750a02790da988db71a28d82074",
       "completion_note": "CURRENT-EXECUTION-BOARD block replaced R52-era -> post-merge state; content outside delimiters preserved byte-exact (diff verified); receipt comment on #81; no repo/PR/branch/label writes; no #80/#91 action"
+    },
+    {
+      "id": "E24-B2JSON-A0",
+      "title": "Direct Arrow JSON batch prototype",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 101,
+      "target_pr": null,
+      "target_branch": "agent/issue-101-e24-b2json-direct-arrow",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-101-e24-b2json-direct-arrow",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "docs/issues/e24-b2json-a0-direct-arrow-json-prototype.md",
+        "backend/Cargo.toml",
+        "backend/Cargo.lock",
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/lib.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/json_arrow.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_direct_arrow.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"
+      ],
+      "acceptance_keys": [
+        "e24-b2json-a0:exact-base-and-private-switch",
+        "e24-b2json-a0:semantic-differential",
+        "e24-b2json-a0:error-and-stream-equivalence",
+        "e24-b2json-a0:bounded-direct-arrow-mechanism",
+        "e24-b2json-a0:raw-paired-wall-samples",
+        "e24-b2json-a0:promotion-or-close-threshold",
+        "e24-b2json-a0:no-public-api-or-default-change"
+      ],
+      "depends_on": [
+        "E24-B2BASE-ACCEPT",
+        "T100-MERGE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-25T02:04:34Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Maintainer explicitly authorized the previously discussed bounded JSON optimization experiment after the accepted E24 baseline was merged. The experiment isolates the connector-local JSON/NDJSON decode tail, retains framing and logical validation, and does not transition E23-OPT.",
+      "notes": "Canonical Issue #101. CLAIM must re-fetch registry/main and bind exactly to main@04966586192f8750a02790da988db71a28d82074; acquire both declared locks before creating agent/issue-101-e24-b2json-direct-arrow. Use a 720m lease (renew before expiry) because the paired 8-cell x 30-repetition benchmark can exceed the default lease. Risk-high frozen contract is Issue #101; mirror it at the authorized docs/issues path before implementation and link it from the Draft PR. Add only arrow-json 59 via the workspace plus private non-default feature json-arrow-direct. Preserve JsonObjectStream and the authoritative ProjectedObjectVisitor/ValidateFieldSeed/LogicalValueVisitor validation; json_stream.rs is deliberately outside scope. Direct mode must eliminate JSON re-encode, Polars JSON decode, DataFrame and C-FFI bridge while emitting bounded Arrow RecordBatch values; legacy mode remains available on the same head for A/B. Persist raw wall_samples_ms and publish SHA-256. Both PROMOTE CANDIDATE and CLOSE EXPERIMENT are valid completions. Stop on semantic/error/stream drift, unbounded buffering, public-contract change, second dependency, out-of-scope path, unsafe, or any Engine/Storage/#80/#91 need. Draft PR only; no Ready/merge, no production adoption, no E23-OPT transition. Release locks and stop for a separately dispatched independent exact-head acceptance."
     }
   ],
   "locks": {}
