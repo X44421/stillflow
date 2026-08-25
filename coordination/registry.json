@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 77,
+  "revision": 78,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "c663df6cba6e65640d73e076951016d25805f144",
-  "updated_at": "2026-08-25T01:26:30Z",
+  "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
+  "updated_at": "2026-08-25T01:29:09Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1095,7 +1095,7 @@
     {
       "id": "T98-MERGE",
       "title": "Merge the accepted ADR-002 runtime/executor architecture into main",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-coordinator",
       "target_issue": 97,
@@ -1118,21 +1118,17 @@
         "T100-MERGE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-25T02:56:30Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-25T01:26:30Z",
-      "updated_at": "2026-08-25T01:26:30Z",
+      "updated_at": "2026-08-25T01:29:09Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "XR-C0-ACCEPT approved exact head 7bd1966218ec9a0df2130736ee4cc863d09d5b27 with CI success; T100-MERGE is terminal and main@c663df6cba6e65640d73e076951016d25805f144 differs from the reviewed base only by the five accepted local-tabular baseline files, with zero path overlap against the single ADR file.",
-      "notes": "Maintenance-only exact-head merge; do not rebase or rewrite the approved source head. CLAIM must acquire main:merge and immediately re-fetch: main == c663df6cba6e65640d73e076951016d25805f144; PR #98 open/Draft with head == 7bd1966218ec9a0df2130736ee4cc863d09d5b27; architecture approval evidence PR comment 5389817060 / Issue #97 receipt 5389818323 remains bound to that full head; CI run 32678595329 is success on that head; live mergeability is true/clean; diff remains exactly the one new ADR-002 file. Any mismatch => STOP and release the lease without Ready/merge. If all gates hold, mark Ready only inside this task and merge with an exact source-SHA guard using a merge commit; do not delete the branch. Verify resulting main SHA/parents, publish the #97 completion receipt, close #97 only after exact merged evidence, then complete the registry task and release main:merge. ADR-002 merge does not itself authorize XR-R0 implementation, optimization work, E23-OPT transition, or any #80/#91 action; downstream implementation requires a separate maintainer dispatch."
+      "notes": "Maintenance-only exact-head merge; do not rebase or rewrite the approved source head. CLAIM must acquire main:merge and immediately re-fetch: main == c663df6cba6e65640d73e076951016d25805f144; PR #98 open/Draft with head == 7bd1966218ec9a0df2130736ee4cc863d09d5b27; architecture approval evidence PR comment 5389817060 / Issue #97 receipt 5389818323 remains bound to that full head; CI run 32678595329 is success on that head; live mergeability is true/clean; diff remains exactly the one new ADR-002 file. Any mismatch => STOP and release the lease without Ready/merge. If all gates hold, mark Ready only inside this task and merge with an exact source-SHA guard using a merge commit; do not delete the branch. Verify resulting main SHA/parents, publish the #97 completion receipt, close #97 only after exact merged evidence, then complete the registry task and release main:merge. ADR-002 merge does not itself authorize XR-R0 implementation, optimization work, E23-OPT transition, or any #80/#91 action; downstream implementation requires a separate maintainer dispatch.",
+      "completed_at": "2026-08-25T01:29:09Z",
+      "result_head": "04966586192f8750a02790da988db71a28d82074",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32678595329",
+      "completion_note": "MERGED PR #98 merge-commit 04966586192f8750a02790da988db71a28d82074 parents c663df6cba6e65640d73e076951016d25805f144 x 7bd1966218ec9a0df2130736ee4cc863d09d5b27; receipt https://github.com/X44421/stillflow/issues/97#issuecomment-5403813876; claim comment 5403806405; Ready performed inside task via GraphQL with exact sha guard PUT /pulls/98/merge; branch not deleted; #97 already closed by maintainer at 2026-08-25T01:27:48Z before receipt landed; no XR-R0 dispatch no runtime implementation authorization no #80/#91 action"
     }
   ],
-  "locks": {
-    "main:merge": {
-      "task_id": "T98-MERGE",
-      "owner": "ox-alpha-coordinator",
-      "expected_head": "7bd1966218ec9a0df2130736ee4cc863d09d5b27",
-      "acquired_at": "2026-08-25T01:26:30Z",
-      "lease_expires_at": "2026-08-25T02:56:30Z"
-    }
-  }
+  "locks": {}
 }
