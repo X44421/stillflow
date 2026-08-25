@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 70,
+  "revision": 71,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-25T00:41:34.047Z",
+  "updated_at": "2026-08-25T00:49:01Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1013,9 +1013,9 @@
     {
       "id": "E24-B2BASE-ACCEPT",
       "title": "Independent acceptance of the local-tabular ingestion measurement baseline",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "cursor-grok-e24accept",
       "target_issue": 99,
       "target_pr": 100,
       "target_branch": "agent/issue-099-e24-b2-ingestion-baseline",
@@ -1041,9 +1041,9 @@
         "E24-B2BASE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-25T00:41:34.047Z",
+      "lease_expires_at": "2026-08-25T02:19:01Z",
+      "started_at": "2026-08-25T00:49:01Z",
+      "updated_at": "2026-08-25T00:49:01Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "E24-B2BASE completed at exact head 3493f22409b7ceae6bd55c71579d783fa931d2e6 with 16/16 cells and 30 repetitions reported; an independent read-only measurement-validity gate is required before any Ready/merge decision.",
       "notes": "Read-only exact-head review of Draft PR #100. Re-fetch base/head/diff/CI and stop on drift. Verify the exact five-file scope, no new dependency/public API/default-feature behavior change, and the io-metrics harness/counter semantics. Independently access records.jsonl (or an integrity-equivalent supplied copy), verify 16 unique matrix cells x 30 repetitions at the bound head/environment, and recompute every published P50/P95 and counter aggregate; if raw records are inaccessible or do not recompute exactly, REQUEST EVIDENCE/CHANGES rather than accepting the PR-body table. Run bounded smoke reproduction across representative formats with and without io-metrics; a full 3.9-hour rerun is not required absent a discrepancy. Check that decoder_os_bytes is treated only as an OS/handle observation, validator_read_bytes as logical validator bytes, and that process-lifetime RSS/CPU-clock assumptions and other measurement limitations are accurately disclosed. Verdict must be ACCEPTED FOR BASELINE MERGE or REQUEST CHANGES bound to the full head. No edits, commits, Ready, merge, optimization claim, optimization task dispatch, E23-OPT transition, or #80/#91 action."
