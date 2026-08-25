@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 86,
+  "revision": 87,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T02:57:22Z",
+  "updated_at": "2026-08-25T05:40:16Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1208,6 +1208,78 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Maintainer explicitly authorized the previously discussed bounded JSON optimization experiment after the accepted E24 baseline was merged. The experiment isolates the connector-local JSON/NDJSON decode tail, retains framing and logical validation, and does not transition E23-OPT.",
       "notes": "Canonical Issue #101. CLAIM must re-fetch registry/main and bind exactly to main@04966586192f8750a02790da988db71a28d82074; acquire both declared locks before creating agent/issue-101-e24-b2json-direct-arrow. Use a 720m lease (renew before expiry) because the paired 8-cell x 30-repetition benchmark can exceed the default lease. Risk-high frozen contract is Issue #101; mirror it at the authorized docs/issues path before implementation and link it from the Draft PR. Add only arrow-json 59 via the workspace plus private non-default feature json-arrow-direct. Preserve JsonObjectStream and the authoritative ProjectedObjectVisitor/ValidateFieldSeed/LogicalValueVisitor validation; json_stream.rs is deliberately outside scope. Direct mode must eliminate JSON re-encode, Polars JSON decode, DataFrame and C-FFI bridge while emitting bounded Arrow RecordBatch values; legacy mode remains available on the same head for A/B. Persist raw wall_samples_ms and publish SHA-256. Both PROMOTE CANDIDATE and CLOSE EXPERIMENT are valid completions. Stop on semantic/error/stream drift, unbounded buffering, public-contract change, second dependency, out-of-scope path, unsafe, or any Engine/Storage/#80/#91 need. Draft PR only; no Ready/merge, no production adoption, no E23-OPT transition. Release locks and stop for a separately dispatched independent exact-head acceptance."
+    },
+    {
+      "id": "Q-C0",
+      "title": "Freeze profiling/finding contract (ADR-003)",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 103,
+      "target_pr": null,
+      "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-103-q-c0-profiling-finding-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md"
+      ],
+      "acceptance_keys": [
+        "q-c0:metric-semantics",
+        "q-c0:profile-request-policy",
+        "q-c0:row-null-unique-duplicate",
+        "q-c0:distribution-top-values-length",
+        "q-c0:finding-category-evidence",
+        "q-c0:quality-score-versioned",
+        "q-c0:artifact-digest",
+        "q-c0:no-runtime"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-25T05:40:16Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Maintainer dispatch authorization (session directive): Q-C0 docs-only contract freeze per #81 Track Q; input inventory Q0-D0 (#65) is factual basis; docs-only C0 may be prepared ahead of E4/E5 implementation.",
+      "notes": "Freeze only: exact vs sampled metric semantics; ProfileRequest/ProfilePolicy bounds; row/null/unique/duplicate and column stats; numeric distribution / top values / Utf8-Binary length policy; FindingCategory/FindingEvidence and provenance; QualityScore versioned formula and missing-evidence semantics; Profile/Quality Artifact canonical digest. FORBIDDEN: Rust runtime, profiler/metrics implementation, E4/#91 action, local-tabular crate changes, API/persistence/serialization beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-003-profiling-quality-and-findings.md modeled on ADR-002 structure; Draft PR only."
+    },
+    {
+      "id": "X-C0",
+      "title": "Freeze export contract (ADR-004)",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 104,
+      "target_pr": null,
+      "target_branch": "agent/issue-104-x-c0-export-contract",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-104-x-c0-export-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-004-export-and-output-artifacts.md"
+      ],
+      "acceptance_keys": [
+        "x-c0:committed-input-rules",
+        "x-c0:encoding-semantics",
+        "x-c0:deterministic-order",
+        "x-c0:bounds",
+        "x-c0:path-filename-overwrite",
+        "x-c0:digest-provenance-atomic",
+        "x-c0:cancel-recovery",
+        "x-c0:no-runtime"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-25T05:40:16Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Maintainer dispatch authorization (session directive): X-C0 docs-only contract freeze per #81 Track X; input inventory X0-D0 (#66) is factual basis; docs-only C0 may be prepared ahead of E4/E5 implementation.",
+      "notes": "Freeze only: committed immutable Snapshot/Artifact input rules; CSV/TSV/JSONL/Parquet schema/null/timezone/escaping semantics; deterministic column/row order; output row/byte/partition/time/temp-storage bounds; path/filename safety, allowed roots, overwrite policy; digest/provenance/retention/atomic publication/recovery; export cancellation/recovery semantics; Instruction/Chat JSONL only after independent typed schema approval (else out of scope). FORBIDDEN: Export runtime, streaming encoders, staging/publish implementation, E4/#91 action, local-tabular crate changes, API/job-system changes beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-004-export-and-output-artifacts.md modeled on ADR-002 structure; Draft PR only."
     }
   ],
   "locks": {
