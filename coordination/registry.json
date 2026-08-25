@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 73,
+  "revision": 74,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-  "updated_at": "2026-08-25T01:03:23.057Z",
+  "updated_at": "2026-08-25T01:07:02Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1055,9 +1055,9 @@
     {
       "id": "T100-MERGE",
       "title": "Merge the accepted local-tabular ingestion baseline into main",
-      "status": "dispatched",
+      "status": "running",
       "mode": "maintenance",
-      "owner": null,
+      "owner": "cursor-grok-t100merge",
       "target_issue": 99,
       "target_pr": 100,
       "target_branch": "agent/issue-099-e24-b2-ingestion-baseline",
@@ -1081,13 +1081,21 @@
         "E24-B2BASE-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-25T01:03:23.057Z",
+      "lease_expires_at": "2026-08-25T02:37:02Z",
+      "started_at": "2026-08-25T01:07:02Z",
+      "updated_at": "2026-08-25T01:07:02Z",
       "queued_by": "maintainer:chatgpt-workmode",
       "queue_reason": "E24-B2BASE-ACCEPT completed with ACCEPTED FOR BASELINE MERGE at exact head 3493f22409b7ceae6bd55c71579d783fa931d2e6; main remains the accepted base and exact-head CI is green.",
       "notes": "Maintenance-only exact-head merge. CLAIM must acquire main:merge and immediately re-fetch: main == 636cd7db443bed45e7adcf1596785670cfc3ff1c; PR #100 open/Draft with head == 3493f22409b7ceae6bd55c71579d783fa931d2e6; acceptance comment 5403529796 is ACCEPTED FOR BASELINE MERGE bound to that full head; CI run 32707944635 is success on that head; live mergeability is true/clean. Any mismatch => STOP and release the lease without Ready/merge. If all gates hold, mark Ready only inside this task and merge with the exact source SHA guard; do not delete the branch. Verify the resulting main merge SHA/parents, publish the #99 completion receipt, close #99 only after merged evidence is exact, then complete the registry task and release main:merge. This integrates measurement-only instrumentation and its ignored harness. It does not authorize speedup language, optimization implementation, E23-OPT transition, optimization-task dispatch, or any #80/#91 action."
     }
   ],
-  "locks": {}
+  "locks": {
+    "main:merge": {
+      "task_id": "T100-MERGE",
+      "owner": "cursor-grok-t100merge",
+      "expected_head": "3493f22409b7ceae6bd55c71579d783fa931d2e6",
+      "acquired_at": "2026-08-25T01:07:02Z",
+      "lease_expires_at": "2026-08-25T02:37:02Z"
+    }
+  }
 }
