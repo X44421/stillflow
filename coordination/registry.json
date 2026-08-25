@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 88,
+  "revision": 89,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T05:43:01Z",
+  "updated_at": "2026-08-25T05:44:59Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1248,9 +1248,9 @@
     {
       "id": "X-C0",
       "title": "Freeze export contract (ADR-004)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-c-xc0",
       "target_issue": 104,
       "target_pr": null,
       "target_branch": "agent/issue-104-x-c0-export-contract",
@@ -1274,15 +1274,21 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-25T05:40:16Z",
+      "lease_expires_at": "2026-08-25T07:14:59Z",
+      "started_at": "2026-08-25T05:44:59Z",
+      "updated_at": "2026-08-25T05:44:59Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Maintainer dispatch authorization (session directive): X-C0 docs-only contract freeze per #81 Track X; input inventory X0-D0 (#66) is factual basis; docs-only C0 may be prepared ahead of E4/E5 implementation.",
       "notes": "Freeze only: committed immutable Snapshot/Artifact input rules; CSV/TSV/JSONL/Parquet schema/null/timezone/escaping semantics; deterministic column/row order; output row/byte/partition/time/temp-storage bounds; path/filename safety, allowed roots, overwrite policy; digest/provenance/retention/atomic publication/recovery; export cancellation/recovery semantics; Instruction/Chat JSONL only after independent typed schema approval (else out of scope). FORBIDDEN: Export runtime, streaming encoders, staging/publish implementation, E4/#91 action, local-tabular crate changes, API/job-system changes beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-004-export-and-output-artifacts.md modeled on ADR-002 structure; Draft PR only."
     }
   ],
   "locks": {
+    "branch:agent/issue-104-x-c0-export-contract": {
+      "task_id": "X-C0",
+      "owner": "agent-c-xc0",
+      "acquired_at": "2026-08-25T05:44:59Z",
+      "lease_expires_at": "2026-08-25T07:14:59Z"
+    },
     "branch:agent/issue-101-e24-b2json-direct-arrow": {
       "task_id": "E24-B2JSON-A0",
       "owner": "cursor-grok-e24json",
