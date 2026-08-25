@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 90,
+  "revision": 91,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-25T06:01:43Z",
+  "updated_at": "2026-08-25T06:02:56Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1250,11 +1250,11 @@
     {
       "id": "X-C0",
       "title": "Freeze export contract (ADR-004)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-c-xc0",
       "target_issue": 104,
-      "target_pr": null,
+      "target_pr": 106,
       "target_branch": "agent/issue-104-x-c0-export-contract",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
@@ -1276,21 +1276,19 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-25T07:14:59Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-25T05:44:59Z",
-      "updated_at": "2026-08-25T05:44:59Z",
+      "updated_at": "2026-08-25T06:02:56Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Maintainer dispatch authorization (session directive): X-C0 docs-only contract freeze per #81 Track X; input inventory X0-D0 (#66) is factual basis; docs-only C0 may be prepared ahead of E4/E5 implementation.",
-      "notes": "Freeze only: committed immutable Snapshot/Artifact input rules; CSV/TSV/JSONL/Parquet schema/null/timezone/escaping semantics; deterministic column/row order; output row/byte/partition/time/temp-storage bounds; path/filename safety, allowed roots, overwrite policy; digest/provenance/retention/atomic publication/recovery; export cancellation/recovery semantics; Instruction/Chat JSONL only after independent typed schema approval (else out of scope). FORBIDDEN: Export runtime, streaming encoders, staging/publish implementation, E4/#91 action, local-tabular crate changes, API/job-system changes beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-004-export-and-output-artifacts.md modeled on ADR-002 structure; Draft PR only."
+      "notes": "Freeze only: committed immutable Snapshot/Artifact input rules; CSV/TSV/JSONL/Parquet schema/null/timezone/escaping semantics; deterministic column/row order; output row/byte/partition/time/temp-storage bounds; path/filename safety, allowed roots, overwrite policy; digest/provenance/retention/atomic publication/recovery; export cancellation/recovery semantics; Instruction/Chat JSONL only after independent typed schema approval (else out of scope). FORBIDDEN: Export runtime, streaming encoders, staging/publish implementation, E4/#91 action, local-tabular crate changes, API/job-system changes beyond contract text, Ready/merge without independent architecture acceptance. CLAIM binds exact main@04966586192f8750a02790da988db71a28d82074, acquires only its branch lock, stops on BASE MOVED. One new file docs/architecture/adr-004-export-and-output-artifacts.md modeled on ADR-002 structure; Draft PR only.",
+      "completed_at": "2026-08-25T06:02:56Z",
+      "result_head": "9ce1b7b7ea3207b63b8972a90d18c484e020134e",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/32815091597",
+      "completion_note": "Docs-only contract freeze delivered by agent-c-xc0 at exact base main@04966586192f8750a02790da988db71a28d82074: single new file docs/architecture/adr-004-export-and-output-artifacts.md (+489 lines), modeled on ADR-002 structure with 40 [Decision]-marked rules. Freezes committed-Snapshot-only input rules with read_batches integrity gate (§2); CSV/TSV/JSONL/Parquet encoding law incl. RFC4180/RFC8259 escaping, UTC-RFC3339 time, null vs empty-string table, NaN/binary fail-closed (§3); LogicalSchema column order + partition-sequence row order (§4); seven hard bounds rows 10M / bytes 8GiB / file 2GiB / partitions 1024 / deadline 600s / staging 16GiB / publishers 4 (§5); absolute no-follow Allowed Roots, strict filename grammar, create-new overwrite policy (§6); SHA-256 per-file+set digest, versioned Export Manifest provenance, atomic stage→rename→manifest-commit publication, tombstone-first retention, recovery-sweeps-never-publishes (§7); cooperative checkpoints, nothing-visible-on-cancel, deterministic retry (§8); Instruction/Chat JSONL explicitly out of scope until independent typed-schema approval (§9). All eight acceptance keys map to sections in the document's Verification section. Evidence: PR #106 Draft (https://github.com/X44421/stillflow/pull/106), head 9ce1b7b7ea3207b63b8972a90d18c484e020134e, CI run 32815091597 all 7 checks green. No runtime implementation, no crate/API change, no E4/#91 action; PR remains Draft; independent architecture acceptance is a separate dispatch."
     }
   ],
   "locks": {
-    "branch:agent/issue-104-x-c0-export-contract": {
-      "task_id": "X-C0",
-      "owner": "agent-c-xc0",
-      "acquired_at": "2026-08-25T05:44:59Z",
-      "lease_expires_at": "2026-08-25T07:14:59Z"
-    },
     "branch:agent/issue-101-e24-b2json-direct-arrow": {
       "task_id": "E24-B2JSON-A0",
       "owner": "cursor-grok-e24json",
