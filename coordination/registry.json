@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 148,
+  "revision": 149,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T11:49:35Z",
+  "updated_at": "2026-08-26T11:49:46Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1862,9 +1862,9 @@
     {
       "id": "O0-B2-A2-ACCEPT",
       "title": "Independent re-review of the A2 incremental schema propagation experiment (issue #145 / PR #144)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a2acc-r1",
       "target_issue": 145,
       "target_pr": 144,
       "target_branch": "agent/o0-b2-a2-incremental-schema",
@@ -1886,9 +1886,9 @@
         "O0-B2-A2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-26T07:52:16Z",
+      "lease_expires_at": "2026-08-26T15:49:46Z",
+      "started_at": "2026-08-26T11:49:46Z",
+      "updated_at": "2026-08-26T11:49:46Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #145 after O0-B2-A2 completed @ PR #144 head cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b with PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Independent design/semantic review required before any promotion step.",
       "notes": "Read-only review; no locks required. INDEPENDENCE BOUNDARY: the O0-B2-A2 author session (cursor-grok-o0-b2-a2) must not CLAIM this task. CLAIM only after re-fetching the registry and verifying PR #144 is Open/Draft with headRefOid still equals cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b (stop on drift). Re-verify FROM ZERO: (a) feature isolation - OFF path retains legacy behavior byte-for-byte and the feature is private/non-default; (b) local checks faithful to legacy error variants/messages/order across every schema-mutating rule surface incl. unknown ColumnId, duplicate id/name, invalid casts, nullability transitions, drop guards, rename collisions, paused types; (c) boundary safety-oracle semantics - single full validation at ApplyRules boundary, never the normal source of an earlier legacy error; (d) differential suite sufficiency against the issue #141 required matrix; (e) benchmark methodology - balanced interleaving, 10 reps/mode/cell, raw hashes f1203f17.../d4823d02... recomputable from artifacts outside repo; gate arithmetic (primary improvement 89.7%, control no-regression) reproduces PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE; (f) forbidden-surface audit - no A1 index/cache, no lowering cache, no fusion, no stillflow-core changes, no collect/cancellation/memory changes, #91 untouched. Evidence entries: PR #144 body (repaired) and issue #141 evidence-restoration comment. Output exactly one terminal verdict at the bound head: APPROVE or REQUEST_CHANGES with blocking findings and references. APPROVE covers only promotion to a later design/review step - it does not authorize merge, default-feature flip, A1, or O0-B1 dispatches. No edits, Ready, merge, or issue closure."
