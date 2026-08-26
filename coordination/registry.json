@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 145,
+  "revision": 146,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T08:59:32Z",
+  "updated_at": "2026-08-26T09:41:21Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1972,6 +1972,45 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #147 Option A attribution experiment after #108 BENCHMARK SUPPORTS FOLLOW-UP. QUEUED behind sibling writer: shares engine:stillflow-engine with O0-B2-A1 (#146) and must not be claimed until #146 is done and the Engine lock is free.",
       "notes": "Private non-default feature engine-lowering-cache. Per-run NON-GLOBAL cache of lowered/type-checked Engine-private representations keyed by exact compiled step/rule position + exact schema state; lazy first-use preferred if it preserves observable failure timing; schema-mutating rules invalidate downstream entries derived from stale state. Hard physical boundary: every existing collect() stays where OFF performs it - no fusion, no rule batching, no collect elimination/reordering, no chunk/envelope size changes, no concurrency/admission/backpressure changes. Preserve rule/plan-step order, logical output/schema, deferred literals, Cast failure behavior, error category and earliest observable ordering, cancellation/deadline checkpoints, memory limits, deterministic inputs, public LogicalSchema/plan contracts/Engine API. Do not convert runtime errors into preflight errors to enable caching; if exact failure timing cannot be preserved => LOWERING_CACHE_SEMANTIC_REJECT and stop. Authorized paths only lower.rs, the chunk-loop file owning repeated lowering calls, preflight.rs (private step metadata only), typing.rs (only if needed for private reusable typed result), Cargo.toml (feature decl); broader paths require maintainer rebind. Oracle: OFF/ON mechanical equality on nine required plan families incl. rename-before-reference, derive-then-reference, drop-then-fail, cast type-state changes, multi-chunk mixed chains, cancellation/deadline and failing paths; full stillflow-engine suite both modes. Benchmark reuses #108 real Engine shapes (narrow scalar control low/high B; wide scalar primary B=100 K={1,16}; large B=200 K={1,16} if memory permits; wide derive-heavy attribution cell), >=10 reps/mode short cells and >=6 long cells with disclosed reductions; internal construction counter proving lowering/type-check constructions fall from per-chunk/per-rule to once per cached step+schema state (evidence-only). Gate per issue body. Lease 120 minutes. Draft PR evidence handoff then stop."
+    },
+    {
+      "id": "E24-JSON-A2",
+      "title": "Isolated direct projected JSON writer experiment (issue #148)",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 148,
+      "target_pr": null,
+      "target_branch": "agent/e24-json-a2-direct-projected-writer",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/e24-json-a2-direct-projected-writer",
+        "connector:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "e24-json-a2:error-order-and-category-parity",
+        "e24-json-a2:duplicate-detected-before-value-acceptance",
+        "e24-json-a2:non-selected-typed-seed-path-unchanged",
+        "e24-json-a2:schema-order-assembly-deterministic",
+        "e24-json-a2:row-scratch-bounded-memory-proof",
+        "e24-json-a2:real-path-interleaved-ab-artifacts",
+        "e24-json-a2:single-gate-verdict"
+      ],
+      "depends_on": [
+        "E24-JSON-A1"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T09:41:21Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #148 implements exactly one bounded experiment for the architecture selected by #143 (ARCHITECTURE_DIRECT_PROJECTED_WRITER): remove selected-field generic Value tree + Map reconstruction, replace full-row to_writer re-encode with deterministic projection-order assembly, deliberately retain downstream Polars JSON parse.",
+      "notes": "Private non-default feature json-direct-projected-writer; Feature OFF retains exact current production path. serde_json RawValue permitted; local-tabular Cargo.toml may add serde_json/raw_value capability alongside preserve_order (capability-only); no new crate/dependency; Cargo.lock should remain unchanged - if it moves, stop and explain. Selected values captured as raw slices/bytes and validated through existing typed validation machinery at the same observable point (blocking: validation before advancing past keys wherever current path would fail there); duplicate detection at the same point before value acceptance; non-selected fields keep existing typed seed path; assembly in deterministic projection.schema order (semantic oracle is final tabular/schema/error behavior, NOT byte equality of the private intermediate). Document ON-path row scratch representation and prove bounded memory. Authorized paths only local-tabular src/read.rs + its Cargo.toml; do not modify json_stream.rs, inference, Engine, Storage, core logical schema types, frontend/API, workflow files, or #140; broader paths require maintainer rebind. Benchmark: WSL2 ext4 release build, exact base, OFF and ON built+warmed before timing, balanced interleaving, identical fixture bytes/logical schema both modes, every sample + raw SHA-256 recorded, never benchmark /mnt windows-drive as product evidence. Primary gate per issue body: 100 columns x 100k rows real projected NDJSON path. Positive result authorizes only an independent acceptance/design-hardening step - no production rewrite or default enablement. Lease 120 minutes."
     }
   ],
   "locks": {}
