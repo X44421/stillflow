@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 120,
+  "revision": 121,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T04:49:26Z",
+  "updated_at": "2026-08-26T04:53:45Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1521,7 +1521,7 @@
     {
       "id": "Q-C0-FIX-R1",
       "title": "Resolve ADR-003 architecture review blockers (issue #132 / PR #105)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "cursor-grok-qc0-fix-r1",
       "target_issue": 132,
@@ -1544,12 +1544,16 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T06:17:03Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T04:47:03Z",
-      "updated_at": "2026-08-26T04:47:03Z",
+      "updated_at": "2026-08-26T04:53:45Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #132 after REQUEST_CHANGES on PR #105 @ a3cc49a8538b85d4641709ac8a36ea9b51ae93f4 (3 blocking findings). Docs-only fix of ADR-003; produces a NEW head, after which a fresh independent re-review is required. Old REQUEST_CHANGES does not carry across SHA.",
-      "notes": "CLAIM only after re-fetching this registry and confirming branch:agent/issue-103-q-c0-profiling-finding-contract is free. Start exactly from PR #105 head a3cc49a8538b85d4641709ac8a36ea9b51ae93f4 and push fix commits to agent/issue-103-q-c0-profiling-finding-contract. ONLY file may change: docs/architecture/adr-003-profiling-quality-and-findings.md. Resolve exactly three blockers: (1) determinism law vs caller-supplied run identifier inside canonical bodies/digests (pin inputs or exclude identity fields); (2) canonical form underdetermination (Date/Timestamp min/max encoding, rational two-integer object rules incl. reduction/sign, negative integers, $float prefix/width, JSON escaping, metric_path dialect); (3) float histogram width-overflow NaN branch (pin infinite-width bucket_index semantics). Forbidden: Runtime/Rust source, connectors, Engine, Storage, API, Frontend, #91/E4-S2, manifest/lockfile changes, Ready, merge, issue closure. Production main must remain 04966586192f8750a02790da988db71a28d82074 as merge-base target. Default 90m lease. After push: post DONE with result_head; re-review is a separate dispatch."
+      "notes": "CLAIM only after re-fetching this registry and confirming branch:agent/issue-103-q-c0-profiling-finding-contract is free. Start exactly from PR #105 head a3cc49a8538b85d4641709ac8a36ea9b51ae93f4 and push fix commits to agent/issue-103-q-c0-profiling-finding-contract. ONLY file may change: docs/architecture/adr-003-profiling-quality-and-findings.md. Resolve exactly three blockers: (1) determinism law vs caller-supplied run identifier inside canonical bodies/digests (pin inputs or exclude identity fields); (2) canonical form underdetermination (Date/Timestamp min/max encoding, rational two-integer object rules incl. reduction/sign, negative integers, $float prefix/width, JSON escaping, metric_path dialect); (3) float histogram width-overflow NaN branch (pin infinite-width bucket_index semantics). Forbidden: Runtime/Rust source, connectors, Engine, Storage, API, Frontend, #91/E4-S2, manifest/lockfile changes, Ready, merge, issue closure. Production main must remain 04966586192f8750a02790da988db71a28d82074 as merge-base target. Default 90m lease. After push: post DONE with result_head; re-review is a separate dispatch.",
+      "completed_at": "2026-08-26T04:53:45Z",
+      "result_head": "eb8408fc1525be5d2ba84c5a3712032e56bb0a37",
+      "ci_url": null,
+      "completion_note": "All three blockers resolved in docs/architecture/adr-003-profiling-quality-and-findings.md only. B1: provenance incl. run id reclassified as envelope metadata, excluded from canonical bodies/digests; §2 gains caller-identity exclusion. B2: canonical form fully pinned (rational {numerator,denominator} lowest terms; integer sign/zero rules; $float 16-digit uppercase hex; temporal extrema $date_days/$epoch_ms/$epoch_us; JSON escaping lowercase \\u00xx; metric_path grammar; float enumeration +sum/mean; fixtures pin bytes+digests under one documented run id). B3: infinite-width branch special-cased before general formula (v=max -> N-1, else 0); NaN intermediates impossible. Single-file diff vs a3cc49a. New head eb8408f => fresh independent re-review required."
     },
     {
       "id": "E24-JSON-P4",
@@ -1589,13 +1593,6 @@
     }
   ],
   "locks": {
-    "branch:agent/issue-103-q-c0-profiling-finding-contract": {
-      "task_id": "Q-C0-FIX-R1",
-      "owner": "cursor-grok-qc0-fix-r1",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T04:47:03Z",
-      "lease_expires_at": "2026-08-26T06:17:03Z"
-    },
     "crate:stillflow-connector-local-tabular": {
       "task_id": "E24-JSON-P4",
       "owner": "cursor-grok-e24json-p4",
