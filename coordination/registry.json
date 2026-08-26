@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 134,
+  "revision": 135,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T05:37:46Z",
+  "updated_at": "2026-08-26T05:44:52Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1741,6 +1741,45 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #139 after X-C0-FIX-R1 produced PR #106 new head 6e33a4099463f09ac8a65cd23bff02379913a75f resolving the two REQUEST_CHANGES blockers found at 9ce1b7b7ea3207b63b8972a90d18c484e020134e. Verdicts do not carry across SHA; from-zero re-verification required.",
       "notes": "Read-only review; no locks required. INDEPENDENCE BOUNDARY: the X-C0-FIX-R1 author session (cursor-grok-xc0-fix-r1) must not CLAIM this task. CLAIM only after re-fetching the registry and verifying PR #106 headRefOid still equals 6e33a4099463f09ac8a65cd23bff02379913a75f (stop on drift). Re-verify FROM ZERO: (1) SS3 quoting law fix - empty-string quoted pair vs null unquoted field byte-distinctness, header-cell rule, RFC 4180 subset consistency; (2) SS6/SS7 journaled recovery fix - durable-before-rename journal ordering, three-kind sweep scope covering rename-before-manifest crash windows, no-tombstone residue deletion, destination-level retry-from-zero, create-new policy coherence; plus the full original acceptance surface: issue #104 freeze scope, anchor audit against base 04966586192f8750a02790da988db71a28d82074, deterministic encoding/ordering, filesystem safety, bounds interplay, digest/provenance, atomic publication/recovery invariants, cancellation semantics. Mechanical recomputation where possible (digest examples, recovery state-machine invariants). Output exactly one terminal verdict at the bound head: APPROVE or REQUEST_CHANGES with blocking findings and section references. APPROVE states contract-only approval and does not authorize X-R1 runtime until dependency gates are satisfied. No edits, Ready, merge, or issue closure."
+    },
+    {
+      "id": "O0-B2-A2",
+      "title": "Isolated incremental schema propagation experiment",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 141,
+      "target_pr": null,
+      "target_branch": "agent/o0-b2-a2-incremental-schema",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/o0-b2-a2-incremental-schema",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/preflight.rs",
+        "backend/crates/stillflow-engine/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "o0-b2-a2:exact-main-base",
+        "o0-b2-a2:private-feature-default-off",
+        "o0-b2-a2:local-invariants-plus-boundary-validation",
+        "o0-b2-a2:no-a1-index",
+        "o0-b2-a2:no-lowering-cache-or-fusion",
+        "o0-b2-a2:semantic-differential",
+        "o0-b2-a2:focused-f4096-r256-gate",
+        "o0-b2-a2:no-core-schema-repr-change",
+        "o0-b2-a2:no-tests-rs-or-e4s2"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T05:44:52Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #141 READY FOR REGISTRY DISPATCH. Isolated Engine experiment from O0-B2/#109 A2 evidence (per-rule LogicalSchema::new reconstruction). Do not dispatch O0-B1 or O0-B2-A1 in parallel. Draft PR only.",
+      "notes": "Canonical Issue #141. Evidence dependency is O0-B2/#109 (A2 VERDICT: BENCHMARK SUPPORTS FOLLOW-UP); that measurement task is not a registry row, so depends_on is empty. CLAIM only after re-fetching the registry, confirming main still equals 04966586192f8750a02790da988db71a28d82074, and confirming both locks are free: branch:agent/o0-b2-a2-incremental-schema and engine:stillflow-engine. Default 90m lease. Private feature engine-incremental-schema-propagation, default off. Change only preflight.rs (+ Cargo.toml feature). Per schema-mutating rule: local invariants and field mutation; one full LogicalSchema validation at the ApplyRules boundary. Forbidden: A1 index, O0-B1 lowering cache, lazy-plan fusion, collect reduction, stillflow-core LogicalSchema public representation change, #91/E4-S2, src/tests.rs, Ready/merge/default flip. Semantic mismatch => INCREMENTAL_SCHEMA_SEMANTIC_REJECT. F=4096,R=256 <20% => FOCUSED_INCREMENTAL_SCHEMA_WEAK. >=20% and F=512,R=16 regression >5% => FOCUSED_INCREMENTAL_SCHEMA_WIDE_ONLY. >=20% and control regression <=5% => PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Cells: F=512 R=16; F=4096 R=16; F=4096 R=256. 10 interleaved reps/mode. No JSON follow-up."
     }
   ],
   "locks": {}
