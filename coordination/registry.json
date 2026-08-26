@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 99,
+  "revision": 100,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T02:50:38Z",
+  "updated_at": "2026-08-26T02:59:56Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1339,6 +1339,47 @@
       "result_head": "641cf626ded0bdb03431a2b3d716995595e76fa1",
       "ci_url": null,
       "completion_note": "FOCUSED_LOOKUP_WEAK: 100-col NDJSON median +6.0 percent; 10-col -5.1 percent. Semantic parity passed. Draft PR 125. No merge."
+    },
+    {
+      "id": "E24-JSON-P0",
+      "title": "Real-path JSON phase attribution",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 126,
+      "target_pr": null,
+      "target_branch": "agent/e24-json-p0-phase-attribution",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/e24-json-p0-phase-attribution",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_attribution.rs",
+        "docs/issues/e24-json-p0-phase-attribution.md"
+      ],
+      "acceptance_keys": [
+        "e24-json-p0:exact-base-measurement-only",
+        "e24-json-p0:five-stage-timers",
+        "e24-json-p0:project-validate-black-box",
+        "e24-json-p0:overhead-check-le-5pct",
+        "e24-json-p0:focused-10x100k-and-100x100k-ndjson",
+        "e24-json-p0:raw-3-rep-wall-and-stage-samples",
+        "e24-json-p0:attribution-verdict",
+        "e24-json-p0:no-algorithm-or-default-change"
+      ],
+      "depends_on": [
+        "E24-JSON-L1"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T02:59:56Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #126 after FOCUSED_LOOKUP_WEAK. Attribution only: time frame, project_validate, reencode, polars_decode, and reorder on the real NDJSON path. Do not optimize selected-set, lookup, framing, Visitor, Arrow, or Polars. project_validate stays a black box. Draft PR if instrumentation code is required.",
+      "notes": "Canonical Issue #126. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-p0-phase-attribution. 90m lease. Reuse io-metrics where practical; optional env STILLFLOW_JSON_PHASE_TIMING=1; default instrumentation off. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps timing off and on. Overhead >5% => ATTRIBUTION_INVALID_OVERHEAD. 100-col coverage <80% => ATTRIBUTION_INCOMPLETE. Largest stage >=40% => ATTRIBUTION_DOMINANT_<STAGE>; else ATTRIBUTION_MIXED. No merge, no default-path flip, no Engine/Storage/#80/#91."
     }
   ],
   "locks": {}
