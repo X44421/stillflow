@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 141,
+  "revision": 142,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T06:50:00Z",
+  "updated_at": "2026-08-26T07:52:16Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -30,9 +30,15 @@
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": "bc430aa4ee4a1d5a79c738d0580ef7ad5deea2b3",
       "locks": [],
-      "acceptance_keys": ["e4s1:r2"],
+      "acceptance_keys": [
+        "e4s1:r2"
+      ],
       "depends_on": [],
-      "conflicts_with": ["T74-P1A", "T74-P1B", "T74-MIGRATE"],
+      "conflicts_with": [
+        "T74-P1A",
+        "T74-P1B",
+        "T74-MIGRATE"
+      ],
       "lease_expires_at": null,
       "started_at": "2026-08-22T06:05:20Z",
       "updated_at": "2026-08-22T06:05:20Z",
@@ -52,10 +58,20 @@
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": null,
       "locks": [],
-      "paths": ["backend/crates/stillflow-storage/src/dedup.rs"],
-      "acceptance_keys": ["pr74:dedup-open-two-stage-barrier"],
-      "depends_on": ["T74-R2"],
-      "conflicts_with": ["T74-R2", "T74-P1B", "T74-MIGRATE"],
+      "paths": [
+        "backend/crates/stillflow-storage/src/dedup.rs"
+      ],
+      "acceptance_keys": [
+        "pr74:dedup-open-two-stage-barrier"
+      ],
+      "depends_on": [
+        "T74-R2"
+      ],
+      "conflicts_with": [
+        "T74-R2",
+        "T74-P1B",
+        "T74-MIGRATE"
+      ],
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
@@ -75,7 +91,10 @@
       "target_branch": "agent/issue-054-contract-r6-completion",
       "expected_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
       "locks": [],
-      "acceptance_keys": ["r6:typed-error-section-9.4", "r6:v13-observable-fields"],
+      "acceptance_keys": [
+        "r6:typed-error-section-9.4",
+        "r6:v13-observable-fields"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -99,8 +118,12 @@
       "result_branch": "main",
       "expected_head": "135b434b89166b8d4edf17e23b01291f2437a9d4",
       "locks": [],
-      "acceptance_keys": ["pr78:merge"],
-      "depends_on": ["T78-REVIEW"],
+      "acceptance_keys": [
+        "pr78:merge"
+      ],
+      "depends_on": [
+        "T78-REVIEW"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
@@ -120,10 +143,23 @@
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": null,
       "locks": [],
-      "paths": ["backend/crates/stillflow-storage/src/bundle.rs"],
-      "acceptance_keys": ["pr74:bundle-row-extra-21", "pr74:bundle-byte-dual-full-plus-one", "pr74:bundle-partition-dual-full-plus-one"],
-      "depends_on": ["T74-R2", "T74-P1A"],
-      "conflicts_with": ["T74-R2", "T74-P1A", "T74-MIGRATE"],
+      "paths": [
+        "backend/crates/stillflow-storage/src/bundle.rs"
+      ],
+      "acceptance_keys": [
+        "pr74:bundle-row-extra-21",
+        "pr74:bundle-byte-dual-full-plus-one",
+        "pr74:bundle-partition-dual-full-plus-one"
+      ],
+      "depends_on": [
+        "T74-R2",
+        "T74-P1A"
+      ],
+      "conflicts_with": [
+        "T74-R2",
+        "T74-P1A",
+        "T74-MIGRATE"
+      ],
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
@@ -143,9 +179,20 @@
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": null,
       "locks": [],
-      "acceptance_keys": ["pr74:post-r6c-base-migration"],
-      "depends_on": ["T78-MERGE", "T74-R2", "T74-P1A", "T74-P1B"],
-      "conflicts_with": ["T74-R2", "T74-P1A", "T74-P1B"],
+      "acceptance_keys": [
+        "pr74:post-r6c-base-migration"
+      ],
+      "depends_on": [
+        "T78-MERGE",
+        "T74-R2",
+        "T74-P1A",
+        "T74-P1B"
+      ],
+      "conflicts_with": [
+        "T74-R2",
+        "T74-P1A",
+        "T74-P1B"
+      ],
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-22T06:05:20Z",
@@ -164,8 +211,12 @@
       "target_branch": "agent/issue-073-e4-artifact-verification-bundle-storage",
       "expected_head": null,
       "locks": [],
-      "acceptance_keys": ["pr74:final-independent-acceptance"],
-      "depends_on": ["T74-MIGRATE"],
+      "acceptance_keys": [
+        "pr74:final-independent-acceptance"
+      ],
+      "depends_on": [
+        "T74-MIGRATE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
@@ -186,8 +237,12 @@
       "result_branch": "main",
       "expected_head": null,
       "locks": [],
-      "acceptance_keys": ["pr74:merge"],
-      "depends_on": ["T74-ACCEPT"],
+      "acceptance_keys": [
+        "pr74:merge"
+      ],
+      "depends_on": [
+        "T74-ACCEPT"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
@@ -207,7 +262,10 @@
       "target_branch": "agent/issue-075-backend-optimization-inventory",
       "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
       "locks": [],
-      "acceptance_keys": ["pr76:body-one-file-correction", "pr76:ready-merge"],
+      "acceptance_keys": [
+        "pr76:body-one-file-correction",
+        "pr76:ready-merge"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -229,9 +287,15 @@
       "target_branch": "agent/issue-052-node-preview-runtime",
       "expected_head": "c50e3c937b3494f56ed6cda19c47a83aff36de93",
       "locks": [],
-      "acceptance_keys": ["e3:preview-memory-law", "e3:preview-envelope-invariants"],
+      "acceptance_keys": [
+        "e3:preview-memory-law",
+        "e3:preview-envelope-invariants"
+      ],
       "depends_on": [],
-      "conflicts_with": ["E23-OPT", "E4-S2"],
+      "conflicts_with": [
+        "E23-OPT",
+        "E4-S2"
+      ],
       "lease_expires_at": null,
       "started_at": "2026-08-23T06:43:19Z",
       "updated_at": "2026-08-23T06:53:31Z",
@@ -253,8 +317,13 @@
       "target_branch": "main",
       "expected_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "locks": [],
-      "acceptance_keys": ["e23:post-merge-review"],
-      "depends_on": ["T53-T71", "T76-CLOSE"],
+      "acceptance_keys": [
+        "e23:post-merge-review"
+      ],
+      "depends_on": [
+        "T53-T71",
+        "T76-CLOSE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:49:44Z",
@@ -279,10 +348,18 @@
       "target_pr": null,
       "target_branch": null,
       "expected_head": null,
-      "locks": ["engine:stillflow-engine"],
-      "acceptance_keys": ["e23:single-benchmarked-hotspot"],
-      "depends_on": ["E23-REVIEW"],
-      "conflicts_with": ["T53-T71"],
+      "locks": [
+        "engine:stillflow-engine"
+      ],
+      "acceptance_keys": [
+        "e23:single-benchmarked-hotspot"
+      ],
+      "depends_on": [
+        "E23-REVIEW"
+      ],
+      "conflicts_with": [
+        "T53-T71"
+      ],
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-23T05:57:20Z",
@@ -298,10 +375,17 @@
       "target_pr": 91,
       "target_branch": "agent/issue-080-e4-verification-materialization",
       "expected_head": "d0ea2a3bce548a6cdc311dea4387e29e35e440ab",
-      "locks": ["branch:agent/issue-080-e4-verification-materialization", "engine:stillflow-engine"],
-      "acceptance_keys": ["e4s2:exact-dedup-index"],
+      "locks": [
+        "branch:agent/issue-080-e4-verification-materialization",
+        "engine:stillflow-engine"
+      ],
+      "acceptance_keys": [
+        "e4s2:exact-dedup-index"
+      ],
       "depends_on": [],
-      "conflicts_with": ["T53-T71"],
+      "conflicts_with": [
+        "T53-T71"
+      ],
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-23T06:28:27Z",
@@ -321,9 +405,23 @@
       "target_branch": "main",
       "result_branch": "agent/issue-085-backend-feedback-loop",
       "expected_head": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
-      "locks": ["branch:agent/issue-085-backend-feedback-loop", "workflow:ci", "devx:backend-feedback"],
-      "paths": ["bacon.toml", "docs/development/backend-feedback-loop.md", "backend/README.md", ".github/workflows/ci.yml"],
-      "acceptance_keys": ["dx:local-bacon-jobs", "dx:serial-engine-feedback", "dx:independent-ci-checks", "dx:feedback-guide"],
+      "locks": [
+        "branch:agent/issue-085-backend-feedback-loop",
+        "workflow:ci",
+        "devx:backend-feedback"
+      ],
+      "paths": [
+        "bacon.toml",
+        "docs/development/backend-feedback-loop.md",
+        "backend/README.md",
+        ".github/workflows/ci.yml"
+      ],
+      "acceptance_keys": [
+        "dx:local-bacon-jobs",
+        "dx:serial-engine-feedback",
+        "dx:independent-ci-checks",
+        "dx:feedback-guide"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -346,7 +444,9 @@
       "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
       "expected_head": "3a84bb5a778a860929e95716efd7a3c07bbe375a",
       "locks": [],
-      "acceptance_keys": ["b0r0r1:pr89-status-refresh"],
+      "acceptance_keys": [
+        "b0r0r1:pr89-status-refresh"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -367,7 +467,9 @@
       "result_branch": "main",
       "expected_head": "9d218d3125b0ae4162e07967168a0475ad79a336",
       "locks": [],
-      "acceptance_keys": ["dxf0:merge"],
+      "acceptance_keys": [
+        "dxf0:merge"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -394,10 +496,22 @@
       "result_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "main_ci_url": "https://github.com/X44421/stillflow/actions/runs/32627094649",
       "acceptance_evidence_url": "https://github.com/X44421/stillflow/pull/53#issuecomment-5384935921",
-      "locks": ["branch:agent/issue-052-node-preview-runtime", "engine:stillflow-engine"],
-      "acceptance_keys": ["t53rebind:rebase-onto-9c368cee", "t53rebind:fresh-dual-toolchain-ci", "t53rebind:independent-acceptance", "t53rebind:main-integration-sha"],
-      "depends_on": ["DX-F0-MERGE"],
-      "conflicts_with": ["E4-S2"],
+      "locks": [
+        "branch:agent/issue-052-node-preview-runtime",
+        "engine:stillflow-engine"
+      ],
+      "acceptance_keys": [
+        "t53rebind:rebase-onto-9c368cee",
+        "t53rebind:fresh-dual-toolchain-ci",
+        "t53rebind:independent-acceptance",
+        "t53rebind:main-integration-sha"
+      ],
+      "depends_on": [
+        "DX-F0-MERGE"
+      ],
+      "conflicts_with": [
+        "E4-S2"
+      ],
       "lease_expires_at": null,
       "started_at": "2026-08-23T07:24:43Z",
       "updated_at": "2026-08-23T08:07:56Z",
@@ -418,9 +532,18 @@
       "expected_main": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "rebind_result_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32629393791",
-      "locks": ["branch:agent/issue-082-backend-roadmap-reconciliation"],
-      "paths": ["docs/development/backend-completion-execution-checklist.md"],
-      "acceptance_keys": ["pr89:rebind-to-c0e82803", "pr89:preserve-b0-and-xr-roadmap", "pr89:live-fact-refresh", "pr89:one-file-diff"],
+      "locks": [
+        "branch:agent/issue-082-backend-roadmap-reconciliation"
+      ],
+      "paths": [
+        "docs/development/backend-completion-execution-checklist.md"
+      ],
+      "acceptance_keys": [
+        "pr89:rebind-to-c0e82803",
+        "pr89:preserve-b0-and-xr-roadmap",
+        "pr89:live-fact-refresh",
+        "pr89:one-file-diff"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -443,9 +566,18 @@
       "expected_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "result_head": "3604536ed6ef18fc889617be088043906a3521e8",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32630256436",
-      "locks": ["branch:agent/issue-094-execution-backend-coupling-inventory"],
-      "paths": ["docs/issues/execution-backend-coupling-inventory.md"],
-      "acceptance_keys": ["xr:d0-public-surface-map", "xr:d0-physical-coupling-map", "xr:d0-operator-authority-matrices", "xr:d0-contract-vs-implementation-evidence"],
+      "locks": [
+        "branch:agent/issue-094-execution-backend-coupling-inventory"
+      ],
+      "paths": [
+        "docs/issues/execution-backend-coupling-inventory.md"
+      ],
+      "acceptance_keys": [
+        "xr:d0-public-surface-map",
+        "xr:d0-physical-coupling-map",
+        "xr:d0-operator-authority-matrices",
+        "xr:d0-contract-vs-implementation-evidence"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -467,8 +599,15 @@
       "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32551940170",
       "locks": [],
-      "acceptance_keys": ["pr76:exact-head-and-one-file", "pr76:source-fact-accuracy", "pr76:measurement-vs-claim-discipline", "pr76:body-current-status"],
-      "depends_on": ["T76-CLOSE"],
+      "acceptance_keys": [
+        "pr76:exact-head-and-one-file",
+        "pr76:source-fact-accuracy",
+        "pr76:measurement-vs-claim-discipline",
+        "pr76:body-current-status"
+      ],
+      "depends_on": [
+        "T76-CLOSE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-23T09:42:21Z",
@@ -492,8 +631,16 @@
       "expected_base": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32629393791",
       "locks": [],
-      "acceptance_keys": ["pr89:exact-head-base-ci", "pr89:rebase-equivalence", "pr89:live-roadmap-facts", "pr89:acyclic-topology", "pr89:xr93-authority-boundary"],
-      "depends_on": ["T89-REBIND-R2"],
+      "acceptance_keys": [
+        "pr89:exact-head-base-ci",
+        "pr89:rebase-equivalence",
+        "pr89:live-roadmap-facts",
+        "pr89:acyclic-topology",
+        "pr89:xr93-authority-boundary"
+      ],
+      "depends_on": [
+        "T89-REBIND-R2"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-23T09:42:35Z",
@@ -518,8 +665,16 @@
       "expected_base": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32630256436",
       "locks": [],
-      "acceptance_keys": ["xr:d0-exact-head-one-file", "xr:d0-source-citation-reproduction", "xr:d0-public-physical-boundary", "xr:d0-operator-runtime-authority", "xr:d0-decision-input-discipline"],
-      "depends_on": ["XR-D0"],
+      "acceptance_keys": [
+        "xr:d0-exact-head-one-file",
+        "xr:d0-source-citation-reproduction",
+        "xr:d0-public-physical-boundary",
+        "xr:d0-operator-runtime-authority",
+        "xr:d0-decision-input-discipline"
+      ],
+      "depends_on": [
+        "XR-D0"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-23T09:42:49Z",
@@ -541,11 +696,21 @@
       "target_branch": "agent/issue-075-backend-optimization-inventory",
       "result_branch": "main",
       "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
-      "locks": ["main:merge"],
-      "paths": ["docs/issues/backend-code-simplification-performance-inventory.md"],
-      "acceptance_keys": ["pr76:merge"],
-      "depends_on": ["T76-ACCEPT"],
-      "conflicts_with": ["T89-MERGE"],
+      "locks": [
+        "main:merge"
+      ],
+      "paths": [
+        "docs/issues/backend-code-simplification-performance-inventory.md"
+      ],
+      "acceptance_keys": [
+        "pr76:merge"
+      ],
+      "depends_on": [
+        "T76-ACCEPT"
+      ],
+      "conflicts_with": [
+        "T89-MERGE"
+      ],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:09:34Z",
       "updated_at": "2026-08-24T00:40:24Z",
@@ -565,11 +730,21 @@
       "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
       "result_branch": "main",
       "expected_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
-      "locks": ["main:merge"],
-      "paths": ["docs/development/backend-completion-execution-checklist.md"],
-      "acceptance_keys": ["pr89:merge"],
-      "depends_on": ["T89-ACCEPT-R3"],
-      "conflicts_with": ["T76-MERGE"],
+      "locks": [
+        "main:merge"
+      ],
+      "paths": [
+        "docs/development/backend-completion-execution-checklist.md"
+      ],
+      "acceptance_keys": [
+        "pr89:merge"
+      ],
+      "depends_on": [
+        "T89-ACCEPT-R3"
+      ],
+      "conflicts_with": [
+        "T76-MERGE"
+      ],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:11:49Z",
       "updated_at": "2026-08-24T00:12:44Z",
@@ -588,10 +763,21 @@
       "target_pr": 95,
       "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
       "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
-      "locks": ["branch:agent/issue-094-execution-backend-coupling-inventory"],
-      "paths": ["docs/issues/execution-backend-coupling-inventory.md"],
-      "acceptance_keys": ["pr95:blocker-A-variant-count", "pr95:blocker-B-test-count", "pr95:blocker-C-production-import-label", "pr95:blocker-D-duckdb-wording"],
-      "depends_on": ["XR-D0-ACCEPT"],
+      "locks": [
+        "branch:agent/issue-094-execution-backend-coupling-inventory"
+      ],
+      "paths": [
+        "docs/issues/execution-backend-coupling-inventory.md"
+      ],
+      "acceptance_keys": [
+        "pr95:blocker-A-variant-count",
+        "pr95:blocker-B-test-count",
+        "pr95:blocker-C-production-import-label",
+        "pr95:blocker-D-duckdb-wording"
+      ],
+      "depends_on": [
+        "XR-D0-ACCEPT"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:07:32Z",
@@ -612,8 +798,12 @@
       "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
       "expected_head": "8273702dabf90732d66fe362b5c56cdebf93fb06",
       "locks": [],
-      "acceptance_keys": ["pr95:r2-fact-acceptance"],
-      "depends_on": ["XR-D0-FIX-R1"],
+      "acceptance_keys": [
+        "pr95:r2-fact-acceptance"
+      ],
+      "depends_on": [
+        "XR-D0-FIX-R1"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:16:39Z",
@@ -639,10 +829,18 @@
       "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
       "result_branch": "main",
       "expected_head": "8273702dabf90732d66fe362b5c56cdebf93fb06",
-      "locks": ["main:merge"],
-      "paths": ["docs/issues/execution-backend-coupling-inventory.md"],
-      "acceptance_keys": ["pr95:merge"],
-      "depends_on": ["XR-D0-ACCEPT-R2"],
+      "locks": [
+        "main:merge"
+      ],
+      "paths": [
+        "docs/issues/execution-backend-coupling-inventory.md"
+      ],
+      "acceptance_keys": [
+        "pr95:merge"
+      ],
+      "depends_on": [
+        "XR-D0-ACCEPT-R2"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:29:21Z",
@@ -664,10 +862,22 @@
       "target_branch": "agent/issue-097-xr-c0-runtime-abstraction-contract",
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": null,
-      "locks": ["branch:agent/issue-097-xr-c0-runtime-abstraction-contract"],
-      "paths": ["docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md"],
-      "acceptance_keys": ["xr-c0:runtime-executor-ownership", "xr-c0:deterministic-selection-provenance", "xr-c0:equivalence-levels", "xr-c0:compatibility-fail-closed", "xr-c0:adr001-supersession-map"],
-      "depends_on": ["XR-D0"],
+      "locks": [
+        "branch:agent/issue-097-xr-c0-runtime-abstraction-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md"
+      ],
+      "acceptance_keys": [
+        "xr-c0:runtime-executor-ownership",
+        "xr-c0:deterministic-selection-provenance",
+        "xr-c0:equivalence-levels",
+        "xr-c0:compatibility-fail-closed",
+        "xr-c0:adr001-supersession-map"
+      ],
+      "depends_on": [
+        "XR-D0"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:49:54Z",
@@ -690,10 +900,24 @@
       "target_pr": null,
       "target_branch": null,
       "expected_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-      "locks": ["github:issue-ledger-state"],
-      "issue_targets": [81, 79, 85, 92],
-      "acceptance_keys": ["b0:epic-live-board-r52", "b0:close-completed-f0-d0", "b0:close-completed-dx-f0", "b0:close-completed-registry-r12"],
-      "depends_on": ["T95-MERGE"],
+      "locks": [
+        "github:issue-ledger-state"
+      ],
+      "issue_targets": [
+        81,
+        79,
+        85,
+        92
+      ],
+      "acceptance_keys": [
+        "b0:epic-live-board-r52",
+        "b0:close-completed-f0-d0",
+        "b0:close-completed-dx-f0",
+        "b0:close-completed-registry-r12"
+      ],
+      "depends_on": [
+        "T95-MERGE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T00:49:32Z",
@@ -718,8 +942,16 @@
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": "7bd1966218ec9a0df2130736ee4cc863d09d5b27",
       "locks": [],
-      "acceptance_keys": ["xr-c0-accept:exact-one-file-scope", "xr-c0-accept:ten-decision-domains", "xr-c0-accept:adr001-l37-verbatim-supersession", "xr-c0-accept:runtime-authority-preserved", "xr-c0-accept:four-decision-dispositions"],
-      "depends_on": ["XR-C0"],
+      "acceptance_keys": [
+        "xr-c0-accept:exact-one-file-scope",
+        "xr-c0-accept:ten-decision-domains",
+        "xr-c0-accept:adr001-l37-verbatim-supersession",
+        "xr-c0-accept:runtime-authority-preserved",
+        "xr-c0-accept:four-decision-dispositions"
+      ],
+      "depends_on": [
+        "XR-C0"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T01:25:43Z",
@@ -744,10 +976,27 @@
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": null,
       "e4_reference_head": "d0ea2a3bce548a6cdc311dea4387e29e35e440ab",
-      "locks": ["branch:agent/issue-099-e24-b2-ingestion-baseline", "crate:stillflow-connector-local-tabular"],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/Cargo.toml", "backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/src/json_stream.rs", "backend/crates/stillflow-connector-local-tabular/src/inference.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"],
-      "acceptance_keys": ["e24-b2base:default-feature-equivalence", "e24-b2base:logical-io-counters", "e24-b2base:parser-reader-counters", "e24-b2base:record-only-json-baseline", "e24-b2base:no-optimization"],
-      "depends_on": ["E23-REVIEW"],
+      "locks": [
+        "branch:agent/issue-099-e24-b2-ingestion-baseline",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/json_stream.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/inference.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"
+      ],
+      "acceptance_keys": [
+        "e24-b2base:default-feature-equivalence",
+        "e24-b2base:logical-io-counters",
+        "e24-b2base:parser-reader-counters",
+        "e24-b2base:record-only-json-baseline",
+        "e24-b2base:no-optimization"
+      ],
+      "depends_on": [
+        "E23-REVIEW"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-24T01:25:57Z",
@@ -774,9 +1023,24 @@
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": "3493f22409b7ceae6bd55c71579d783fa931d2e6",
       "locks": [],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/Cargo.toml", "backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/src/json_stream.rs", "backend/crates/stillflow-connector-local-tabular/src/inference.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"],
-      "acceptance_keys": ["e24-b2base-accept:exact-head-five-file-scope", "e24-b2base-accept:default-feature-equivalence", "e24-b2base-accept:raw-record-recomputation", "e24-b2base-accept:counter-semantics-and-limitations", "e24-b2base-accept:matrix-and-smoke-reproduction", "e24-b2base-accept:no-optimization-conclusion"],
-      "depends_on": ["E24-B2BASE"],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/json_stream.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/inference.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"
+      ],
+      "acceptance_keys": [
+        "e24-b2base-accept:exact-head-five-file-scope",
+        "e24-b2base-accept:default-feature-equivalence",
+        "e24-b2base-accept:raw-record-recomputation",
+        "e24-b2base-accept:counter-semantics-and-limitations",
+        "e24-b2base-accept:matrix-and-smoke-reproduction",
+        "e24-b2base-accept:no-optimization-conclusion"
+      ],
+      "depends_on": [
+        "E24-B2BASE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-25T00:49:01Z",
@@ -801,10 +1065,22 @@
       "result_branch": "main",
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": "3493f22409b7ceae6bd55c71579d783fa931d2e6",
-      "locks": ["main:merge"],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/Cargo.toml", "backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/src/json_stream.rs", "backend/crates/stillflow-connector-local-tabular/src/inference.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"],
-      "acceptance_keys": ["pr100:exact-head-baseline-merge"],
-      "depends_on": ["E24-B2BASE-ACCEPT"],
+      "locks": [
+        "main:merge"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/json_stream.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/inference.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"
+      ],
+      "acceptance_keys": [
+        "pr100:exact-head-baseline-merge"
+      ],
+      "depends_on": [
+        "E24-B2BASE-ACCEPT"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-25T01:07:02Z",
@@ -829,10 +1105,19 @@
       "result_branch": "main",
       "expected_base": "c663df6cba6e65640d73e076951016d25805f144",
       "expected_head": "7bd1966218ec9a0df2130736ee4cc863d09d5b27",
-      "locks": ["main:merge"],
-      "paths": ["docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md"],
-      "acceptance_keys": ["pr98:exact-head-architecture-merge"],
-      "depends_on": ["XR-C0-ACCEPT", "T100-MERGE"],
+      "locks": [
+        "main:merge"
+      ],
+      "paths": [
+        "docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md"
+      ],
+      "acceptance_keys": [
+        "pr98:exact-head-architecture-merge"
+      ],
+      "depends_on": [
+        "XR-C0-ACCEPT",
+        "T100-MERGE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-25T01:26:30Z",
@@ -855,10 +1140,18 @@
       "target_pr": null,
       "target_branch": null,
       "expected_head": "04966586192f8750a02790da988db71a28d82074",
-      "locks": ["github:issue-ledger-state"],
-      "issue_targets": [81],
-      "acceptance_keys": ["b0:epic-live-board-r78"],
-      "depends_on": ["T98-MERGE"],
+      "locks": [
+        "github:issue-ledger-state"
+      ],
+      "issue_targets": [
+        81
+      ],
+      "acceptance_keys": [
+        "b0:epic-live-board-r78"
+      ],
+      "depends_on": [
+        "T98-MERGE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-25T01:42:49Z",
@@ -881,10 +1174,34 @@
       "target_branch": "agent/issue-101-e24-b2json-direct-arrow",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["branch:agent/issue-101-e24-b2json-direct-arrow", "crate:stillflow-connector-local-tabular"],
-      "paths": ["docs/issues/e24-b2json-a0-direct-arrow-json-prototype.md", "backend/Cargo.toml", "backend/Cargo.lock", "backend/crates/stillflow-connector-local-tabular/Cargo.toml", "backend/crates/stillflow-connector-local-tabular/src/lib.rs", "backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/src/json_arrow.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_json_direct_arrow.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"],
-      "acceptance_keys": ["e24-b2json-a0:exact-base-and-private-switch", "e24-b2json-a0:semantic-differential", "e24-b2json-a0:error-and-stream-equivalence", "e24-b2json-a0:bounded-direct-arrow-mechanism", "e24-b2json-a0:raw-paired-wall-samples", "e24-b2json-a0:promotion-or-close-threshold", "e24-b2json-a0:no-public-api-or-default-change"],
-      "depends_on": ["E24-B2BASE-ACCEPT", "T100-MERGE"],
+      "locks": [
+        "branch:agent/issue-101-e24-b2json-direct-arrow",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "docs/issues/e24-b2json-a0-direct-arrow-json-prototype.md",
+        "backend/Cargo.toml",
+        "backend/Cargo.lock",
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/lib.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/json_arrow.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_direct_arrow.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs"
+      ],
+      "acceptance_keys": [
+        "e24-b2json-a0:exact-base-and-private-switch",
+        "e24-b2json-a0:semantic-differential",
+        "e24-b2json-a0:error-and-stream-equivalence",
+        "e24-b2json-a0:bounded-direct-arrow-mechanism",
+        "e24-b2json-a0:raw-paired-wall-samples",
+        "e24-b2json-a0:promotion-or-close-threshold",
+        "e24-b2json-a0:no-public-api-or-default-change"
+      ],
+      "depends_on": [
+        "E24-B2BASE-ACCEPT",
+        "T100-MERGE"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-25T02:13:25Z",
@@ -911,8 +1228,19 @@
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
       "locks": [],
-      "paths": ["docs/architecture/adr-003-profiling-quality-and-findings.md"],
-      "acceptance_keys": ["q-c0:metric-semantics", "q-c0:profile-request-policy", "q-c0:row-null-unique-duplicate", "q-c0:distribution-top-values-length", "q-c0:finding-category-evidence", "q-c0:quality-score-versioned", "q-c0:artifact-digest", "q-c0:no-runtime"],
+      "paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md"
+      ],
+      "acceptance_keys": [
+        "q-c0:metric-semantics",
+        "q-c0:profile-request-policy",
+        "q-c0:row-null-unique-duplicate",
+        "q-c0:distribution-top-values-length",
+        "q-c0:finding-category-evidence",
+        "q-c0:quality-score-versioned",
+        "q-c0:artifact-digest",
+        "q-c0:no-runtime"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -937,9 +1265,22 @@
       "target_branch": "agent/issue-104-x-c0-export-contract",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["branch:agent/issue-104-x-c0-export-contract"],
-      "paths": ["docs/architecture/adr-004-export-and-output-artifacts.md"],
-      "acceptance_keys": ["x-c0:committed-input-rules", "x-c0:encoding-semantics", "x-c0:deterministic-order", "x-c0:bounds", "x-c0:path-filename-overwrite", "x-c0:digest-provenance-atomic", "x-c0:cancel-recovery", "x-c0:no-runtime"],
+      "locks": [
+        "branch:agent/issue-104-x-c0-export-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-004-export-and-output-artifacts.md"
+      ],
+      "acceptance_keys": [
+        "x-c0:committed-input-rules",
+        "x-c0:encoding-semantics",
+        "x-c0:deterministic-order",
+        "x-c0:bounds",
+        "x-c0:path-filename-overwrite",
+        "x-c0:digest-provenance-atomic",
+        "x-c0:cancel-recovery",
+        "x-c0:no-runtime"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -964,10 +1305,30 @@
       "target_branch": "agent/e24-json-l1-indexed-lookup",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["branch:agent/e24-json-l1-indexed-lookup", "crate:stillflow-connector-local-tabular"],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/Cargo.toml", "backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_json_indexed_lookup.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs", "docs/issues/e24-json-l1-indexed-lookup.md"],
-      "acceptance_keys": ["e24-json-l1:exact-base-and-private-switch", "e24-json-l1:semantic-parity-top-level-fields", "e24-json-l1:reader-level-index-not-per-row", "e24-json-l1:no-selected-set-or-framing-or-arrow", "e24-json-l1:focused-10x100k-and-100x100k-ndjson", "e24-json-l1:raw-3-rep-samples", "e24-json-l1:lookup-kill-gate", "e24-json-l1:no-public-api-or-default-change"],
-      "depends_on": ["E24-B2JSON-A0"],
+      "locks": [
+        "branch:agent/e24-json-l1-indexed-lookup",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_indexed_lookup.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs",
+        "docs/issues/e24-json-l1-indexed-lookup.md"
+      ],
+      "acceptance_keys": [
+        "e24-json-l1:exact-base-and-private-switch",
+        "e24-json-l1:semantic-parity-top-level-fields",
+        "e24-json-l1:reader-level-index-not-per-row",
+        "e24-json-l1:no-selected-set-or-framing-or-arrow",
+        "e24-json-l1:focused-10x100k-and-100x100k-ndjson",
+        "e24-json-l1:raw-3-rep-samples",
+        "e24-json-l1:lookup-kill-gate",
+        "e24-json-l1:no-public-api-or-default-change"
+      ],
+      "depends_on": [
+        "E24-B2JSON-A0"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T02:31:02Z",
@@ -991,10 +1352,28 @@
       "target_branch": "agent/e24-json-p0-phase-attribution",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["branch:agent/e24-json-p0-phase-attribution", "crate:stillflow-connector-local-tabular"],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_attribution.rs", "docs/issues/e24-json-p0-phase-attribution.md"],
-      "acceptance_keys": ["e24-json-p0:exact-base-measurement-only", "e24-json-p0:five-stage-timers", "e24-json-p0:project-validate-black-box", "e24-json-p0:overhead-check-le-5pct", "e24-json-p0:focused-10x100k-and-100x100k-ndjson", "e24-json-p0:raw-3-rep-wall-and-stage-samples", "e24-json-p0:attribution-verdict", "e24-json-p0:no-algorithm-or-default-change"],
-      "depends_on": ["E24-JSON-L1"],
+      "locks": [
+        "branch:agent/e24-json-p0-phase-attribution",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_attribution.rs",
+        "docs/issues/e24-json-p0-phase-attribution.md"
+      ],
+      "acceptance_keys": [
+        "e24-json-p0:exact-base-measurement-only",
+        "e24-json-p0:five-stage-timers",
+        "e24-json-p0:project-validate-black-box",
+        "e24-json-p0:overhead-check-le-5pct",
+        "e24-json-p0:focused-10x100k-and-100x100k-ndjson",
+        "e24-json-p0:raw-3-rep-wall-and-stage-samples",
+        "e24-json-p0:attribution-verdict",
+        "e24-json-p0:no-algorithm-or-default-change"
+      ],
+      "depends_on": [
+        "E24-JSON-L1"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T03:05:22Z",
@@ -1018,10 +1397,31 @@
       "target_branch": "agent/e24-json-p1-sampled-attribution",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["branch:agent/e24-json-p1-sampled-attribution", "crate:stillflow-connector-local-tabular"],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_sampled_attribution.rs", "docs/issues/e24-json-p1-sampled-attribution.md"],
-      "acceptance_keys": ["e24-json-p1:exact-base-measurement-only", "e24-json-p1:sample-stride-64", "e24-json-p1:per-row-stages-sampled-only", "e24-json-p1:batch-exact-decode-reorder", "e24-json-p1:batch-local-counters", "e24-json-p1:project-validate-black-box", "e24-json-p1:overhead-check-le-3pct", "e24-json-p1:sampled-rows-ge-1000", "e24-json-p1:focused-10x100k-and-100x100k-ndjson", "e24-json-p1:sampled-attribution-verdict", "e24-json-p1:no-algorithm-or-default-change"],
-      "depends_on": ["E24-JSON-P0"],
+      "locks": [
+        "branch:agent/e24-json-p1-sampled-attribution",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_sampled_attribution.rs",
+        "docs/issues/e24-json-p1-sampled-attribution.md"
+      ],
+      "acceptance_keys": [
+        "e24-json-p1:exact-base-measurement-only",
+        "e24-json-p1:sample-stride-64",
+        "e24-json-p1:per-row-stages-sampled-only",
+        "e24-json-p1:batch-exact-decode-reorder",
+        "e24-json-p1:batch-local-counters",
+        "e24-json-p1:project-validate-black-box",
+        "e24-json-p1:overhead-check-le-3pct",
+        "e24-json-p1:sampled-rows-ge-1000",
+        "e24-json-p1:focused-10x100k-and-100x100k-ndjson",
+        "e24-json-p1:sampled-attribution-verdict",
+        "e24-json-p1:no-algorithm-or-default-change"
+      ],
+      "depends_on": [
+        "E24-JSON-P0"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T03:55:37Z",
@@ -1045,10 +1445,28 @@
       "target_branch": "agent/e24-json-p2-interleaved-attribution",
       "expected_base": "1a6da5944e0e508c44c00fe1f408faf438b333df",
       "expected_head": null,
-      "locks": ["branch:agent/e24-json-p2-interleaved-attribution", "crate:stillflow-connector-local-tabular"],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_sampled_attribution.rs", "docs/issues/e24-json-p2-interleaved-attribution.md"],
-      "acceptance_keys": ["e24-json-p2:start-from-pr-130-head", "e24-json-p2:read-rs-byte-identical", "e24-json-p2:balanced-interleave-off-on", "e24-json-p2:no-all-off-then-all-on", "e24-json-p2:focused-10x100k-and-100x100k-ndjson", "e24-json-p2:chronological-six-run-walls", "e24-json-p2:per-rep-estimates-then-median", "e24-json-p2:interleaved-attribution-verdict", "e24-json-p2:no-algorithm-or-default-change"],
-      "depends_on": ["E24-JSON-P1"],
+      "locks": [
+        "branch:agent/e24-json-p2-interleaved-attribution",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_sampled_attribution.rs",
+        "docs/issues/e24-json-p2-interleaved-attribution.md"
+      ],
+      "acceptance_keys": [
+        "e24-json-p2:start-from-pr-130-head",
+        "e24-json-p2:read-rs-byte-identical",
+        "e24-json-p2:balanced-interleave-off-on",
+        "e24-json-p2:no-all-off-then-all-on",
+        "e24-json-p2:focused-10x100k-and-100x100k-ndjson",
+        "e24-json-p2:chronological-six-run-walls",
+        "e24-json-p2:per-rep-estimates-then-median",
+        "e24-json-p2:interleaved-attribution-verdict",
+        "e24-json-p2:no-algorithm-or-default-change"
+      ],
+      "depends_on": [
+        "E24-JSON-P1"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T04:12:51Z",
@@ -1072,10 +1490,23 @@
       "target_branch": null,
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["crate:stillflow-connector-local-tabular"],
+      "locks": [
+        "crate:stillflow-connector-local-tabular"
+      ],
       "paths": [],
-      "acceptance_keys": ["e24-json-p3:exact-main-default-json-path", "e24-json-p3:repository-read-only", "e24-json-p3:no-in-process-timers", "e24-json-p3:external-perf-cpu-clock", "e24-json-p3:no-install-or-sysctl", "e24-json-p3:primary-100x100k-ndjson", "e24-json-p3:coarse-cpu-sample-buckets", "e24-json-p3:profiler-verdict"],
-      "depends_on": ["E24-JSON-P2"],
+      "acceptance_keys": [
+        "e24-json-p3:exact-main-default-json-path",
+        "e24-json-p3:repository-read-only",
+        "e24-json-p3:no-in-process-timers",
+        "e24-json-p3:external-perf-cpu-clock",
+        "e24-json-p3:no-install-or-sysctl",
+        "e24-json-p3:primary-100x100k-ndjson",
+        "e24-json-p3:coarse-cpu-sample-buckets",
+        "e24-json-p3:profiler-verdict"
+      ],
+      "depends_on": [
+        "E24-JSON-P2"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T04:28:20Z",
@@ -1099,9 +1530,19 @@
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
       "expected_base": "a3cc49a8538b85d4641709ac8a36ea9b51ae93f4",
       "expected_head": null,
-      "locks": ["branch:agent/issue-103-q-c0-profiling-finding-contract"],
-      "paths": ["docs/architecture/adr-003-profiling-quality-and-findings.md"],
-      "acceptance_keys": ["q-c0-fix-r1:blocker-1-determinism-runid-resolved", "q-c0-fix-r1:blocker-2-canonical-form-pinned", "q-c0-fix-r1:blocker-3-float-histogram-nan-branch-pinned", "q-c0-fix-r1:adr-file-only-change", "q-c0-fix-r1:new-head-rebind-review-required"],
+      "locks": [
+        "branch:agent/issue-103-q-c0-profiling-finding-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md"
+      ],
+      "acceptance_keys": [
+        "q-c0-fix-r1:blocker-1-determinism-runid-resolved",
+        "q-c0-fix-r1:blocker-2-canonical-form-pinned",
+        "q-c0-fix-r1:blocker-3-float-histogram-nan-branch-pinned",
+        "q-c0-fix-r1:adr-file-only-change",
+        "q-c0-fix-r1:new-head-rebind-review-required"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -1126,10 +1567,23 @@
       "target_branch": null,
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["crate:stillflow-connector-local-tabular"],
+      "locks": [
+        "crate:stillflow-connector-local-tabular"
+      ],
       "paths": [],
-      "acceptance_keys": ["e24-json-p4:exact-main-default-json-path", "e24-json-p4:repository-read-only", "e24-json-p4:external-perf-cpu-clock-99", "e24-json-p4:dwarf-call-graph", "e24-json-p4:primary-100x100k-ndjson", "e24-json-p4:profile-excludes-build-fixture-warmup", "e24-json-p4:coarse-cpu-sample-buckets", "e24-json-p4:profiler-verdict"],
-      "depends_on": ["E24-JSON-P3"],
+      "acceptance_keys": [
+        "e24-json-p4:exact-main-default-json-path",
+        "e24-json-p4:repository-read-only",
+        "e24-json-p4:external-perf-cpu-clock-99",
+        "e24-json-p4:dwarf-call-graph",
+        "e24-json-p4:primary-100x100k-ndjson",
+        "e24-json-p4:profile-excludes-build-fixture-warmup",
+        "e24-json-p4:coarse-cpu-sample-buckets",
+        "e24-json-p4:profiler-verdict"
+      ],
+      "depends_on": [
+        "E24-JSON-P3"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T04:47:44Z",
@@ -1154,9 +1608,19 @@
       "expected_base": null,
       "expected_head": "eb8408fc1525be5d2ba84c5a3712032e56bb0a37",
       "locks": [],
-      "paths": ["docs/architecture/adr-003-profiling-quality-and-findings.md"],
-      "acceptance_keys": ["q-c0-accept-r2:blocker-1-runid-determinism-fix-verified", "q-c0-accept-r2:blocker-2-canonical-encoding-golden-digest-verified", "q-c0-accept-r2:blocker-3-infinite-width-histogram-verified", "q-c0-accept-r2:full-original-surface-recovered", "q-c0-accept-r2:single-terminal-verdict-at-bound-head"],
-      "depends_on": ["Q-C0-FIX-R1"],
+      "paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md"
+      ],
+      "acceptance_keys": [
+        "q-c0-accept-r2:blocker-1-runid-determinism-fix-verified",
+        "q-c0-accept-r2:blocker-2-canonical-encoding-golden-digest-verified",
+        "q-c0-accept-r2:blocker-3-infinite-width-histogram-verified",
+        "q-c0-accept-r2:full-original-surface-recovered",
+        "q-c0-accept-r2:single-terminal-verdict-at-bound-head"
+      ],
+      "depends_on": [
+        "Q-C0-FIX-R1"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
@@ -1176,10 +1640,29 @@
       "target_branch": "agent/e24-json-p5-selected-utf8-fused",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["branch:agent/e24-json-p5-selected-utf8-fused", "crate:stillflow-connector-local-tabular"],
-      "paths": ["backend/crates/stillflow-connector-local-tabular/Cargo.toml", "backend/crates/stillflow-connector-local-tabular/src/read.rs", "backend/crates/stillflow-connector-local-tabular/tests/read_json_selected_utf8_fused.rs", "docs/issues/e24-json-p5-selected-utf8-fused.md"],
-      "acceptance_keys": ["e24-json-p5:exact-main-base", "e24-json-p5:private-feature-default-off", "e24-json-p5:selected-utf8-only", "e24-json-p5:same-output-value", "e24-json-p5:semantic-differential", "e24-json-p5:interleaved-5-rep-10-and-100-col", "e24-json-p5:fused-utf8-verdict", "e24-json-p5:no-lookup-framing-arrow-polars"],
-      "depends_on": ["E24-JSON-P4"],
+      "locks": [
+        "branch:agent/e24-json-p5-selected-utf8-fused",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_selected_utf8_fused.rs",
+        "docs/issues/e24-json-p5-selected-utf8-fused.md"
+      ],
+      "acceptance_keys": [
+        "e24-json-p5:exact-main-base",
+        "e24-json-p5:private-feature-default-off",
+        "e24-json-p5:selected-utf8-only",
+        "e24-json-p5:same-output-value",
+        "e24-json-p5:semantic-differential",
+        "e24-json-p5:interleaved-5-rep-10-and-100-col",
+        "e24-json-p5:fused-utf8-verdict",
+        "e24-json-p5:no-lookup-framing-arrow-polars"
+      ],
+      "depends_on": [
+        "E24-JSON-P4"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T05:17:44Z",
@@ -1203,9 +1686,18 @@
       "target_branch": "agent/issue-104-x-c0-export-contract",
       "expected_base": "9ce1b7b7ea3207b63b8972a90d18c484e020134e",
       "expected_head": null,
-      "locks": ["branch:agent/issue-104-x-c0-export-contract"],
-      "paths": ["docs/architecture/adr-004-export-and-output-artifacts.md"],
-      "acceptance_keys": ["x-c0-fix-r1:blocker-1-null-emptystring-quoting-resolved", "x-c0-fix-r1:blocker-2-journaled-destination-recovery-defined", "x-c0-fix-r1:adr-file-only-change", "x-c0-fix-r1:new-head-rebind-review-required"],
+      "locks": [
+        "branch:agent/issue-104-x-c0-export-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-004-export-and-output-artifacts.md"
+      ],
+      "acceptance_keys": [
+        "x-c0-fix-r1:blocker-1-null-emptystring-quoting-resolved",
+        "x-c0-fix-r1:blocker-2-journaled-destination-recovery-defined",
+        "x-c0-fix-r1:adr-file-only-change",
+        "x-c0-fix-r1:new-head-rebind-review-required"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -1231,9 +1723,18 @@
       "expected_base": null,
       "expected_head": "6e33a4099463f09ac8a65cd23bff02379913a75f",
       "locks": [],
-      "paths": ["docs/architecture/adr-004-export-and-output-artifacts.md"],
-      "acceptance_keys": ["x-c0-accept-r2:blocker-1-quoting-law-fix-verified", "x-c0-accept-r2:blocker-2-journaled-recovery-fix-verified", "x-c0-accept-r2:full-original-surface-recovered", "x-c0-accept-r2:single-terminal-verdict-at-bound-head"],
-      "depends_on": ["X-C0-FIX-R1"],
+      "paths": [
+        "docs/architecture/adr-004-export-and-output-artifacts.md"
+      ],
+      "acceptance_keys": [
+        "x-c0-accept-r2:blocker-1-quoting-law-fix-verified",
+        "x-c0-accept-r2:blocker-2-journaled-recovery-fix-verified",
+        "x-c0-accept-r2:full-original-surface-recovered",
+        "x-c0-accept-r2:single-terminal-verdict-at-bound-head"
+      ],
+      "depends_on": [
+        "X-C0-FIX-R1"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
@@ -1253,9 +1754,25 @@
       "target_branch": "agent/o0-b2-a2-incremental-schema",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": ["branch:agent/o0-b2-a2-incremental-schema", "engine:stillflow-engine"],
-      "paths": ["backend/crates/stillflow-engine/src/preflight.rs", "backend/crates/stillflow-engine/Cargo.toml"],
-      "acceptance_keys": ["o0-b2-a2:exact-main-base", "o0-b2-a2:private-feature-default-off", "o0-b2-a2:local-invariants-plus-boundary-validation", "o0-b2-a2:no-a1-index", "o0-b2-a2:no-lowering-cache-or-fusion", "o0-b2-a2:semantic-differential", "o0-b2-a2:focused-f4096-r256-gate", "o0-b2-a2:no-core-schema-repr-change", "o0-b2-a2:no-tests-rs-or-e4s2"],
+      "locks": [
+        "branch:agent/o0-b2-a2-incremental-schema",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/preflight.rs",
+        "backend/crates/stillflow-engine/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "o0-b2-a2:exact-main-base",
+        "o0-b2-a2:private-feature-default-off",
+        "o0-b2-a2:local-invariants-plus-boundary-validation",
+        "o0-b2-a2:no-a1-index",
+        "o0-b2-a2:no-lowering-cache-or-fusion",
+        "o0-b2-a2:semantic-differential",
+        "o0-b2-a2:focused-f4096-r256-gate",
+        "o0-b2-a2:no-core-schema-repr-change",
+        "o0-b2-a2:no-tests-rs-or-e4s2"
+      ],
       "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
@@ -1282,8 +1799,17 @@
       "expected_head": null,
       "locks": [],
       "paths": [],
-      "acceptance_keys": ["e24-json-p6:reuse-p4-perf-data-first", "e24-json-p6:inner-buckets-mutually-exclusive", "e24-json-p6:single-verdict-max-share", "e24-json-p6:no-repo-writes", "e24-json-p6:no-fused-visitor-or-value-map-rewrite", "e24-json-p6:no-engine-or-o0-b2-a2-contact"],
-      "depends_on": ["E24-JSON-P5"],
+      "acceptance_keys": [
+        "e24-json-p6:reuse-p4-perf-data-first",
+        "e24-json-p6:inner-buckets-mutually-exclusive",
+        "e24-json-p6:single-verdict-max-share",
+        "e24-json-p6:no-repo-writes",
+        "e24-json-p6:no-fused-visitor-or-value-map-rewrite",
+        "e24-json-p6:no-engine-or-o0-b2-a2-contact"
+      ],
+      "depends_on": [
+        "E24-JSON-P5"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": "2026-08-26T06:00:40Z",
@@ -1309,8 +1835,18 @@
       "expected_head": null,
       "locks": [],
       "paths": [],
-      "acceptance_keys": ["e24-json-a1:exact-main-and-p6-evidence", "e24-json-a1:current-path-data-flow", "e24-json-a1:semantic-invariant-map", "e24-json-a1:candidate-a-b-c-d-comparison", "e24-json-a1:evidence-limitations-p4-p5-p6-m1-m2-m3", "e24-json-a1:single-architecture-verdict", "e24-json-a1:no-repo-writes-or-implementation"],
-      "depends_on": ["E24-JSON-P6"],
+      "acceptance_keys": [
+        "e24-json-a1:exact-main-and-p6-evidence",
+        "e24-json-a1:current-path-data-flow",
+        "e24-json-a1:semantic-invariant-map",
+        "e24-json-a1:candidate-a-b-c-d-comparison",
+        "e24-json-a1:evidence-limitations-p4-p5-p6-m1-m2-m3",
+        "e24-json-a1:single-architecture-verdict",
+        "e24-json-a1:no-repo-writes-or-implementation"
+      ],
+      "depends_on": [
+        "E24-JSON-P6"
+      ],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
@@ -1318,6 +1854,40 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #143 created after E24-JSON-P6 completed with PROFILER_MIXED_WITHIN_PROJECT_VALIDATE. Architecture/design-only gate to choose one credible way to remove or materially reduce the generic Value/Map intermediate without overclaiming P4/P5/P6/M1/M2/M3 evidence. No implementation is authorized.",
       "notes": "Canonical Issue #143. CLAIM only after re-fetching registry/main, confirming main still equals 04966586192f8750a02790da988db71a28d82074, E24-JSON-P6 remains done, and PR #140 remains Draft/unmerged. Mode design / repository read-only; target_branch null; locks=[]; lease 120m. Audit the exact default projected NDJSON path and evaluate four classes: streaming projected JSON writer, streaming typed row/builder, end-to-end typed decode removing reencode+second parse, or retain current path. Preserve projection order, duplicate/unknown/missing/null behavior, selected and non-selected logical validation, nested types, error vocabulary/order, deterministic fingerprints/output, batch/byte/memory ceilings, cancellation/deadline, Arrow public boundary and Polars privacy. Treat P4 as CPU-sample coarse hotspot, P5 as narrow Utf8-negative evidence, P6 as mixed attribution, M1 as checksum-only ceiling, M2 as relevant reencode/reparse tax, and M3 as negative evidence for tail-only Arrow substitution. Do not sum profiler buckets into a speedup claim. Terminal verdict exactly one of ARCHITECTURE_DIRECT_PROJECTED_WRITER / ARCHITECTURE_TYPED_BATCH_BUILDER / ARCHITECTURE_END_TO_END_TYPED_DECODE / ARCHITECTURE_RETAIN_CURRENT_PATH / ARCHITECTURE_INCONCLUSIVE. A positive verdict authorizes only a later separately dispatched private/default-off implementation experiment. No repository writes, branch/PR, benchmarks, fused visitor work, #140 Ready/merge/close, Engine/Storage/#91/E4-S2/O0-B2-A2 contact. O0-B2-A2 is now done and its locks are released; this task remains read-only and locks=[]. Stop after Issue report."
+    },
+    {
+      "id": "O0-B2-A2-ACCEPT",
+      "title": "Independent re-review of the A2 incremental schema propagation experiment (issue #145 / PR #144)",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 145,
+      "target_pr": 144,
+      "target_branch": "agent/o0-b2-a2-incremental-schema",
+      "expected_base": null,
+      "expected_head": "cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b",
+      "locks": [],
+      "paths": [
+        "backend/crates/stillflow-engine/src/preflight.rs",
+        "backend/crates/stillflow-engine/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "o0-b2-a2-accept:feature-isolation-and-off-parity-verified",
+        "o0-b2-a2-accept:local-checks-faithful-to-legacy-errors",
+        "o0-b2-a2-accept:boundary-oracle-semantics-verified",
+        "o0-b2-a2-accept:differential-suite-sufficiency-reviewed",
+        "o0-b2-a2-accept:benchmark-methodology-and-verdict-recomputed"
+      ],
+      "depends_on": [
+        "O0-B2-A2"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T07:52:16Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #145 after O0-B2-A2 completed @ PR #144 head cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b with PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Independent design/semantic review required before any promotion step.",
+      "notes": "Read-only review; no locks required. INDEPENDENCE BOUNDARY: the O0-B2-A2 author session (cursor-grok-o0-b2-a2) must not CLAIM this task. CLAIM only after re-fetching the registry and verifying PR #144 is Open/Draft with headRefOid still equals cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b (stop on drift). Re-verify FROM ZERO: (a) feature isolation - OFF path retains legacy behavior byte-for-byte and the feature is private/non-default; (b) local checks faithful to legacy error variants/messages/order across every schema-mutating rule surface incl. unknown ColumnId, duplicate id/name, invalid casts, nullability transitions, drop guards, rename collisions, paused types; (c) boundary safety-oracle semantics - single full validation at ApplyRules boundary, never the normal source of an earlier legacy error; (d) differential suite sufficiency against the issue #141 required matrix; (e) benchmark methodology - balanced interleaving, 10 reps/mode/cell, raw hashes f1203f17.../d4823d02... recomputable from artifacts outside repo; gate arithmetic (primary improvement 89.7%, control no-regression) reproduces PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE; (f) forbidden-surface audit - no A1 index/cache, no lowering cache, no fusion, no stillflow-core changes, no collect/cancellation/memory changes, #91 untouched. Evidence entries: PR #144 body (repaired) and issue #141 evidence-restoration comment. Output exactly one terminal verdict at the bound head: APPROVE or REQUEST_CHANGES with blocking findings and references. APPROVE covers only promotion to a later design/review step - it does not authorize merge, default-feature flip, A1, or O0-B1 dispatches. No edits, Ready, merge, or issue closure."
     }
   ],
   "locks": {}
