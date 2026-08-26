@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 139,
+  "revision": 140,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T06:07:36Z",
+  "updated_at": "2026-08-26T06:42:11Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1745,7 +1745,7 @@
     {
       "id": "O0-B2-A2",
       "title": "Isolated incremental schema propagation experiment",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "cursor-grok-o0-b2-a2",
       "target_issue": 141,
@@ -1774,12 +1774,16 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T07:24:58Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T05:54:58Z",
-      "updated_at": "2026-08-26T05:54:58Z",
+      "updated_at": "2026-08-26T06:42:11Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #141 READY FOR REGISTRY DISPATCH. Isolated Engine experiment from O0-B2/#109 A2 evidence (per-rule LogicalSchema::new reconstruction). Do not dispatch O0-B1 or O0-B2-A1 in parallel. Draft PR only.",
-      "notes": "Canonical Issue #141. Evidence dependency is O0-B2/#109 (A2 VERDICT: BENCHMARK SUPPORTS FOLLOW-UP); that measurement task is not a registry row, so depends_on is empty. CLAIM only after re-fetching the registry, confirming main still equals 04966586192f8750a02790da988db71a28d82074, and confirming both locks are free: branch:agent/o0-b2-a2-incremental-schema and engine:stillflow-engine. Default 90m lease. Private feature engine-incremental-schema-propagation, default off. Change only preflight.rs (+ Cargo.toml feature). Per schema-mutating rule: local invariants and field mutation; one full LogicalSchema validation at the ApplyRules boundary. Forbidden: A1 index, O0-B1 lowering cache, lazy-plan fusion, collect reduction, stillflow-core LogicalSchema public representation change, #91/E4-S2, src/tests.rs, Ready/merge/default flip. Semantic mismatch => INCREMENTAL_SCHEMA_SEMANTIC_REJECT. F=4096,R=256 <20% => FOCUSED_INCREMENTAL_SCHEMA_WEAK. >=20% and F=512,R=16 regression >5% => FOCUSED_INCREMENTAL_SCHEMA_WIDE_ONLY. >=20% and control regression <=5% => PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Cells: F=512 R=16; F=4096 R=16; F=4096 R=256. 10 interleaved reps/mode. No JSON follow-up."
+      "notes": "Canonical Issue #141. Evidence dependency is O0-B2/#109 (A2 VERDICT: BENCHMARK SUPPORTS FOLLOW-UP); that measurement task is not a registry row, so depends_on is empty. CLAIM only after re-fetching the registry, confirming main still equals 04966586192f8750a02790da988db71a28d82074, and confirming both locks are free: branch:agent/o0-b2-a2-incremental-schema and engine:stillflow-engine. Default 90m lease. Private feature engine-incremental-schema-propagation, default off. Change only preflight.rs (+ Cargo.toml feature). Per schema-mutating rule: local invariants and field mutation; one full LogicalSchema validation at the ApplyRules boundary. Forbidden: A1 index, O0-B1 lowering cache, lazy-plan fusion, collect reduction, stillflow-core LogicalSchema public representation change, #91/E4-S2, src/tests.rs, Ready/merge/default flip. Semantic mismatch => INCREMENTAL_SCHEMA_SEMANTIC_REJECT. F=4096,R=256 <20% => FOCUSED_INCREMENTAL_SCHEMA_WEAK. >=20% and F=512,R=16 regression >5% => FOCUSED_INCREMENTAL_SCHEMA_WIDE_ONLY. >=20% and control regression <=5% => PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Cells: F=512 R=16; F=4096 R=16; F=4096 R=256. 10 interleaved reps/mode. No JSON follow-up.",
+      "completed_at": "2026-08-26T06:42:11Z",
+      "result_head": "cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b",
+      "ci_url": "not run (draft evidence handoff; CI will run on PR #144)",
+      "completion_note": "VERDICT: PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Primary F=4096,R=256 median improvement 89.7 percent (158.02ms -> 16.26ms); F=512,R=16 improved 61.7 percent (no regression); F=4096,R=16 improved 35.9 percent. Semantic differential suite passes identically with feature OFF and ON (98/98 each); boundary oracle never fired. Draft PR #144 @ cfdea8e7 bound to base main@04966586."
     },
     {
       "id": "E24-JSON-P6",
@@ -1818,20 +1822,5 @@
       "completion_note": "PROFILER_MIXED_WITHIN_PROJECT_VALIDATE; reused P4 perf.data; no recapture; map_insert 28.45 percent largest named inner bucket; visit_map leaf 1907 counted as other"
     }
   ],
-  "locks": {
-    "branch:agent/o0-b2-a2-incremental-schema": {
-      "task_id": "O0-B2-A2",
-      "owner": "cursor-grok-o0-b2-a2",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T05:54:58Z",
-      "lease_expires_at": "2026-08-26T07:24:58Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "O0-B2-A2",
-      "owner": "cursor-grok-o0-b2-a2",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T05:54:58Z",
-      "lease_expires_at": "2026-08-26T07:24:58Z"
-    }
-  }
+  "locks": {}
 }
