@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 136,
+  "revision": 137,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T05:54:58Z",
+  "updated_at": "2026-08-26T05:56:12Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1780,6 +1780,38 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #141 READY FOR REGISTRY DISPATCH. Isolated Engine experiment from O0-B2/#109 A2 evidence (per-rule LogicalSchema::new reconstruction). Do not dispatch O0-B1 or O0-B2-A1 in parallel. Draft PR only.",
       "notes": "Canonical Issue #141. Evidence dependency is O0-B2/#109 (A2 VERDICT: BENCHMARK SUPPORTS FOLLOW-UP); that measurement task is not a registry row, so depends_on is empty. CLAIM only after re-fetching the registry, confirming main still equals 04966586192f8750a02790da988db71a28d82074, and confirming both locks are free: branch:agent/o0-b2-a2-incremental-schema and engine:stillflow-engine. Default 90m lease. Private feature engine-incremental-schema-propagation, default off. Change only preflight.rs (+ Cargo.toml feature). Per schema-mutating rule: local invariants and field mutation; one full LogicalSchema validation at the ApplyRules boundary. Forbidden: A1 index, O0-B1 lowering cache, lazy-plan fusion, collect reduction, stillflow-core LogicalSchema public representation change, #91/E4-S2, src/tests.rs, Ready/merge/default flip. Semantic mismatch => INCREMENTAL_SCHEMA_SEMANTIC_REJECT. F=4096,R=256 <20% => FOCUSED_INCREMENTAL_SCHEMA_WEAK. >=20% and F=512,R=16 regression >5% => FOCUSED_INCREMENTAL_SCHEMA_WIDE_ONLY. >=20% and control regression <=5% => PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Cells: F=512 R=16; F=4096 R=16; F=4096 R=256. 10 interleaved reps/mode. No JSON follow-up."
+    },
+    {
+      "id": "E24-JSON-P6",
+      "title": "project_validate sub-attribution from external perf",
+      "status": "dispatched",
+      "mode": "measurement",
+      "owner": null,
+      "target_issue": 142,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [],
+      "paths": [],
+      "acceptance_keys": [
+        "e24-json-p6:reuse-p4-perf-data-first",
+        "e24-json-p6:inner-buckets-mutually-exclusive",
+        "e24-json-p6:single-verdict-max-share",
+        "e24-json-p6:no-repo-writes",
+        "e24-json-p6:no-fused-visitor-or-value-map-rewrite",
+        "e24-json-p6:no-engine-or-o0-b2-a2-contact"
+      ],
+      "depends_on": [
+        "E24-JSON-P5"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T05:56:12Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #142 READY FOR REGISTRY DISPATCH. Measurement-only sub-attribution of P4 project_validate CPU samples. Parallel with O0-B2-A2 is allowed (Engine write vs connector read-only profiler). Default CLAIM takes no crate lock. Draft/report on #142 only.",
+      "notes": "Canonical Issue #142. Depends on E24-JSON-P5 done. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Mode measurement / repository read-only. No target_branch. Default CLAIM locks=[]: do NOT acquire crate:stillflow-connector-local-tabular when reusing /home/owl/e24-p4-work/perf.data. If that capture cannot complete inner attribution and recapture is required, STOP, re-fetch the registry, and acquire crate:stillflow-connector-local-tabular before recapture; do not bypass if the crate lock is held. Recapture must reuse the P4 100x100K NDJSON workload (cpu-clock @ 99 Hz, DWARF, no sysctl). Forbidden: Engine, O0-B2-A2, Storage, #91/E4-S2, fused visitors, PR #140 extension, Value/Map rewrite, in-process timers, repo writes. Inner buckets are mutually exclusive: one sample counted once. Allocator stacks that clearly belong to Value/String construction classify as value_alloc; otherwise conservative project_validate_other. If multiple inner buckets are >=30% of project_validate samples, the terminal verdict is PROFILER_DOMINANT_PROJECT_VALIDATE_<SUB> for the bucket with the largest sample share; also report every other >=30% bucket. Else PROFILER_MIXED_WITHIN_PROJECT_VALIDATE. Default 90m lease. Parallel with O0-B2-A2 is allowed; do not dispatch another connector write experiment in parallel."
     }
   ],
   "locks": {
