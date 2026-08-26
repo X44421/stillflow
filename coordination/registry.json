@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 126,
+  "revision": 127,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T05:17:44Z",
+  "updated_at": "2026-08-26T05:22:49Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1663,9 +1663,9 @@
         "E24-JSON-P4"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T06:47:44Z",
+      "lease_expires_at": "2026-08-26T06:52:49Z",
       "started_at": "2026-08-26T05:17:44Z",
-      "updated_at": "2026-08-26T05:17:44Z",
+      "updated_at": "2026-08-26T05:22:49Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #137 after PROFILER_DOMINANT_PROJECT_VALIDATE on #135. Isolated experiment: fuse selected Utf8 deserialize + validate while still emitting Value::String/Null. Default legacy path stays unchanged. Draft PR only.",
       "notes": "Canonical Issue #137. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-p5-selected-utf8-fused. 90m lease. Private feature json-selected-utf8-fused, default off. Only selected top-level Utf8 fields. Do not change framing, lookup, selected-set, Arrow, or Polars tail. Semantic mismatch => FUSED_UTF8_SEMANTIC_REJECT. 100-col <10% => FOCUSED_FUSED_UTF8_WEAK. 100-col >=10% and 10-col regression >5% => FOCUSED_FUSED_UTF8_WIDE_ONLY. 100-col >=10% and 10-col regression <=5% => PROMOTE_FUSED_UTF8_CANDIDATE. Warmup both modes; 5 interleaved reps; 10x100K and 100x100K only. No merge, no default-path flip, no Engine/Storage/#80/#91. Do not interpret P0/P1/P2 stage estimates."
@@ -1677,14 +1677,14 @@
       "owner": "cursor-grok-e24json-p5",
       "expected_head": null,
       "acquired_at": "2026-08-26T05:17:44Z",
-      "lease_expires_at": "2026-08-26T06:47:44Z"
+      "lease_expires_at": "2026-08-26T06:52:49Z"
     },
     "crate:stillflow-connector-local-tabular": {
       "task_id": "E24-JSON-P5",
       "owner": "cursor-grok-e24json-p5",
       "expected_head": null,
       "acquired_at": "2026-08-26T05:17:44Z",
-      "lease_expires_at": "2026-08-26T06:47:44Z"
+      "lease_expires_at": "2026-08-26T06:52:49Z"
     }
   }
 }
