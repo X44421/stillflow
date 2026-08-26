@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 103,
+  "revision": 104,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T03:25:39Z",
+  "updated_at": "2026-08-26T03:33:35Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1343,7 +1343,7 @@
     {
       "id": "E24-JSON-P0",
       "title": "Real-path JSON phase attribution",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "cursor-grok-e24json-p0",
       "target_issue": 126,
@@ -1374,28 +1374,17 @@
         "E24-JSON-L1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T04:55:39Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T03:05:22Z",
-      "updated_at": "2026-08-26T03:25:39Z",
+      "updated_at": "2026-08-26T03:33:35Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #126 after FOCUSED_LOOKUP_WEAK. Attribution only: time frame, project_validate, reencode, polars_decode, and reorder on the real NDJSON path. Do not optimize selected-set, lookup, framing, Visitor, Arrow, or Polars. project_validate stays a black box. Draft PR if instrumentation code is required.",
-      "notes": "Canonical Issue #126. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-p0-phase-attribution. 90m lease. Reuse io-metrics where practical; optional env STILLFLOW_JSON_PHASE_TIMING=1; default instrumentation off. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps timing off and on. Overhead >5% => ATTRIBUTION_INVALID_OVERHEAD. 100-col coverage <80% => ATTRIBUTION_INCOMPLETE. Largest stage >=40% => ATTRIBUTION_DOMINANT_<STAGE>; else ATTRIBUTION_MIXED. No merge, no default-path flip, no Engine/Storage/#80/#91."
+      "notes": "Canonical Issue #126. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-p0-phase-attribution. 90m lease. Reuse io-metrics where practical; optional env STILLFLOW_JSON_PHASE_TIMING=1; default instrumentation off. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps timing off and on. Overhead >5% => ATTRIBUTION_INVALID_OVERHEAD. 100-col coverage <80% => ATTRIBUTION_INCOMPLETE. Largest stage >=40% => ATTRIBUTION_DOMINANT_<STAGE>; else ATTRIBUTION_MIXED. No merge, no default-path flip, no Engine/Storage/#80/#91.",
+      "completed_at": "2026-08-26T03:33:35Z",
+      "result_head": "0a1f992396a95ebb26150c467f23b9f8f2ef26e3",
+      "ci_url": null,
+      "completion_note": "ATTRIBUTION_INVALID_OVERHEAD: 10x100k timing-on median wall +5.14 percent vs off (675 vs 642 ms); 100x100k +0.95 percent. Stage shares not interpreted. Draft PR 127. parse_projected_object stayed black box. No optimization/merge."
     }
   ],
-  "locks": {
-    "branch:agent/e24-json-p0-phase-attribution": {
-      "task_id": "E24-JSON-P0",
-      "owner": "cursor-grok-e24json-p0",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T03:05:22Z",
-      "lease_expires_at": "2026-08-26T04:55:39Z"
-    },
-    "crate:stillflow-connector-local-tabular": {
-      "task_id": "E24-JSON-P0",
-      "owner": "cursor-grok-e24json-p0",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T03:05:22Z",
-      "lease_expires_at": "2026-08-26T04:55:39Z"
-    }
-  }
+  "locks": {}
 }
