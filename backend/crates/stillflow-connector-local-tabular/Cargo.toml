@@ -34,6 +34,7 @@ stillflow-core.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+memchr = "2"
 parquet.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
