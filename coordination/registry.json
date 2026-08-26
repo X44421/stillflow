@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 107,
+  "revision": 108,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T03:58:26Z",
+  "updated_at": "2026-08-26T04:07:04Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1388,7 +1388,7 @@
     {
       "id": "E24-JSON-P1",
       "title": "Low-overhead sampled JSON phase attribution",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "cursor-grok-e24json-p1",
       "target_issue": 129,
@@ -1422,28 +1422,17 @@
         "E24-JSON-P0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T05:28:26Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T03:55:37Z",
-      "updated_at": "2026-08-26T03:58:26Z",
+      "updated_at": "2026-08-26T04:07:04Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #129 after ATTRIBUTION_INVALID_OVERHEAD on #126. Sampled attribution only: time every 64th row for frame, project_validate, and reencode; keep polars_decode and reorder exact per batch. Do not increase reps. Do not optimize any JSON stage. Draft PR if instrumentation code is required.",
-      "notes": "Canonical Issue #129. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-p1-sampled-attribution. 90m lease. Reuse io-metrics; env STILLFLOW_JSON_PHASE_SAMPLE=1; default instrumentation off. Accumulate sampled ns in batch-local counters; publish atomics at most once per batch. Do not reuse PR #127 per-row Instant/atomic path. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps sampling off and on. Overhead >3% => SAMPLED_ATTRIBUTION_INVALID_OVERHEAD. Sampled rows <1000 => SAMPLED_ATTRIBUTION_INSUFFICIENT. 100-col coverage <80% or >115% => SAMPLED_ATTRIBUTION_INCOMPLETE. Largest stage >=40% => SAMPLED_ATTRIBUTION_DOMINANT_<STAGE>; else SAMPLED_ATTRIBUTION_MIXED. Do not interpret P0 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91."
+      "notes": "Canonical Issue #129. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-p1-sampled-attribution. 90m lease. Reuse io-metrics; env STILLFLOW_JSON_PHASE_SAMPLE=1; default instrumentation off. Accumulate sampled ns in batch-local counters; publish atomics at most once per batch. Do not reuse PR #127 per-row Instant/atomic path. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps sampling off and on. Overhead >3% => SAMPLED_ATTRIBUTION_INVALID_OVERHEAD. Sampled rows <1000 => SAMPLED_ATTRIBUTION_INSUFFICIENT. 100-col coverage <80% or >115% => SAMPLED_ATTRIBUTION_INCOMPLETE. Largest stage >=40% => SAMPLED_ATTRIBUTION_DOMINANT_<STAGE>; else SAMPLED_ATTRIBUTION_MIXED. Do not interpret P0 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91.",
+      "completed_at": "2026-08-26T04:07:04Z",
+      "result_head": "1a6da5944e0e508c44c00fe1f408faf438b333df",
+      "ci_url": null,
+      "completion_note": "SAMPLED_ATTRIBUTION_INVALID_OVERHEAD: 10x100k sampling-on median wall -0.18 percent; 100x100k +19.08 percent (9555 vs 8024 ms). Sampled rows 1563. Stage shares not interpreted. Draft PR 130. No optimization/merge."
     }
   ],
-  "locks": {
-    "branch:agent/e24-json-p1-sampled-attribution": {
-      "task_id": "E24-JSON-P1",
-      "owner": "cursor-grok-e24json-p1",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T03:55:37Z",
-      "lease_expires_at": "2026-08-26T05:28:26Z"
-    },
-    "crate:stillflow-connector-local-tabular": {
-      "task_id": "E24-JSON-P1",
-      "owner": "cursor-grok-e24json-p1",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T03:55:37Z",
-      "lease_expires_at": "2026-08-26T05:28:26Z"
-    }
-  }
+  "locks": {}
 }
