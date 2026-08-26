@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 122,
+  "revision": 123,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T05:04:34Z",
+  "updated_at": "2026-08-26T05:06:01Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1590,6 +1590,39 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #135 after profiler environment readiness. External perf cpu-clock sampling on the uninstrumented default JSON path at main@04966586. No repository writes, no branch lock, crate lock only during the profile run.",
       "notes": "Canonical Issue #135. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. No branch lock. Default features only. External driver outside the repo. perf record -e cpu-clock -F 99 --call-graph dwarf. Do not change sysctl or install another profiler. Primary 100x100K NDJSON, batch 4096, warmup outside profile, at least 3 profiled ingests. Usable samples <5000 or unresolved >25% => PROFILER_INCOMPLETE. Single bucket >=40% => PROFILER_DOMINANT_<STAGE>; else PROFILER_MIXED. CPU sample shares, not wall-time. Do not interpret P0/P1/P2/P3 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91."
+    },
+    {
+      "id": "Q-C0-ACCEPT-R2",
+      "title": "Independent re-review of ADR-003 after blocker fixes (issue #136 / PR #105)",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 136,
+      "target_pr": 105,
+      "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
+      "expected_base": null,
+      "expected_head": "eb8408fc1525be5d2ba84c5a3712032e56bb0a37",
+      "locks": [],
+      "paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md"
+      ],
+      "acceptance_keys": [
+        "q-c0-accept-r2:blocker-1-runid-determinism-fix-verified",
+        "q-c0-accept-r2:blocker-2-canonical-encoding-golden-digest-verified",
+        "q-c0-accept-r2:blocker-3-infinite-width-histogram-verified",
+        "q-c0-accept-r2:full-original-surface-recovered",
+        "q-c0-accept-r2:single-terminal-verdict-at-bound-head"
+      ],
+      "depends_on": [
+        "Q-C0-FIX-R1"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T05:06:01Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #136 after Q-C0-FIX-R1 produced PR #105 new head eb8408fc1525be5d2ba84c5a3712032e56bb0a37 resolving the three REQUEST_CHANGES blockers found at a3cc49a8538b85d4641709ac8a36ea9b51ae93f4. Verdicts do not carry across SHA; from-zero re-verification required.",
+      "notes": "Read-only review; no locks required. CLAIM only after re-fetching the registry and verifying PR #105 headRefOid still equals eb8408fc1525be5d2ba84c5a3712032e56bb0a37 (stop on drift). Re-verify FROM ZERO: (1) run-id/determinism resolution coherence across SS2/SS7.4/SS9 (provenance-as-envelope-metadata, caller identity excluded from bodies/digests); (2) canonical encoding completeness and golden-digest computability (rational lowest-terms objects, integer rules, $float 16-digit uppercase hex, $date_days/$epoch_ms/$epoch_us temporal extrema, JSON escaping incl. lowercase \\u00xx, metric_path grammar, float enumeration incl. sum/mean); (3) infinite-width histogram totality branch. Plus the full original acceptance surface: anchor audit against base 04966586192f8750a02790da988db71a28d82074, internal consistency SS1-SS11, issue #103 charter coverage, downstream implementability; mechanical recomputation where possible (score vectors V1/V2, histogram rules incl. overflow branch, canonical-form demonstrability). Output exactly one terminal verdict at the bound head: APPROVE or REQUEST_CHANGES with blocking findings and section references. APPROVE states contract-only approval and does not authorize Q-R1 runtime until dependency gates are satisfied. No edits, Ready, merge, or issue closure."
     }
   ],
   "locks": {
