@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 117,
+  "revision": 118,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T04:47:03Z",
+  "updated_at": "2026-08-26T04:47:14Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1550,6 +1550,42 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #132 after REQUEST_CHANGES on PR #105 @ a3cc49a8538b85d4641709ac8a36ea9b51ae93f4 (3 blocking findings). Docs-only fix of ADR-003; produces a NEW head, after which a fresh independent re-review is required. Old REQUEST_CHANGES does not carry across SHA.",
       "notes": "CLAIM only after re-fetching this registry and confirming branch:agent/issue-103-q-c0-profiling-finding-contract is free. Start exactly from PR #105 head a3cc49a8538b85d4641709ac8a36ea9b51ae93f4 and push fix commits to agent/issue-103-q-c0-profiling-finding-contract. ONLY file may change: docs/architecture/adr-003-profiling-quality-and-findings.md. Resolve exactly three blockers: (1) determinism law vs caller-supplied run identifier inside canonical bodies/digests (pin inputs or exclude identity fields); (2) canonical form underdetermination (Date/Timestamp min/max encoding, rational two-integer object rules incl. reduction/sign, negative integers, $float prefix/width, JSON escaping, metric_path dialect); (3) float histogram width-overflow NaN branch (pin infinite-width bucket_index semantics). Forbidden: Runtime/Rust source, connectors, Engine, Storage, API, Frontend, #91/E4-S2, manifest/lockfile changes, Ready, merge, issue closure. Production main must remain 04966586192f8750a02790da988db71a28d82074 as merge-base target. Default 90m lease. After push: post DONE with result_head; re-review is a separate dispatch."
+    },
+    {
+      "id": "E24-JSON-P4",
+      "title": "External perf attribution after profiler environment readiness",
+      "status": "dispatched",
+      "mode": "measurement",
+      "owner": null,
+      "target_issue": 135,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [],
+      "acceptance_keys": [
+        "e24-json-p4:exact-main-default-json-path",
+        "e24-json-p4:repository-read-only",
+        "e24-json-p4:external-perf-cpu-clock-99",
+        "e24-json-p4:dwarf-call-graph",
+        "e24-json-p4:primary-100x100k-ndjson",
+        "e24-json-p4:profile-excludes-build-fixture-warmup",
+        "e24-json-p4:coarse-cpu-sample-buckets",
+        "e24-json-p4:profiler-verdict"
+      ],
+      "depends_on": [
+        "E24-JSON-P3"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T04:47:14Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #135 after profiler environment readiness. External perf cpu-clock sampling on the uninstrumented default JSON path at main@04966586. No repository writes, no branch lock, crate lock only during the profile run.",
+      "notes": "Canonical Issue #135. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. No branch lock. Default features only. External driver outside the repo. perf record -e cpu-clock -F 99 --call-graph dwarf. Do not change sysctl or install another profiler. Primary 100x100K NDJSON, batch 4096, warmup outside profile, at least 3 profiled ingests. Usable samples <5000 or unresolved >25% => PROFILER_INCOMPLETE. Single bucket >=40% => PROFILER_DOMINANT_<STAGE>; else PROFILER_MIXED. CPU sample shares, not wall-time. Do not interpret P0/P1/P2/P3 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91."
     }
   ],
   "locks": {
