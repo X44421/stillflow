@@ -35,6 +35,7 @@ const HEAD_SHA_ENV: &str = "E24_HEAD_SHA";
 const METRICS_OUT_ENV: &str = "E24_IO_METRICS_OUT";
 const DEFAULT_HEAD: &str = "04966586192f8750a02790da988db71a28d82074";
 const REPS: usize = 30;
+const FOCUSED_JSON_REPS: usize = 3;
 const BATCH_SIZE: usize = 4_096;
 const PARQUET_CHUNK_ROWS: usize = 8_192;
 const COUNTER_LABELS: &[&str] = &[
@@ -596,17 +597,13 @@ async fn read_json_arrow_ab() {
     let metrics_out: PathBuf = root.join("e24_io_metrics.out");
     std::env::set_var(METRICS_OUT_ENV, &metrics_out);
     set_json_direct(false);
-    eprintln!("[e24-b2json-a0] head={head} reps/strategy/cell={REPS}");
+    eprintln!(
+        "[e24-b2json-a0] focused M3 head={head} reps/strategy/cell={FOCUSED_JSON_REPS} cells=ndjson 10x100k,100x100k"
+    );
 
-    let cases: [(&str, usize, usize); 8] = [
+    let cases: [(&str, usize, usize); 2] = [
         ("ndjson", 10, 100_000),
         ("ndjson", 100, 100_000),
-        ("ndjson", 10, 1_000_000),
-        ("ndjson", 100, 1_000_000),
-        ("array", 10, 100_000),
-        ("array", 100, 100_000),
-        ("array", 10, 1_000_000),
-        ("array", 100, 1_000_000),
     ];
 
     let mut generated: BTreeMap<(String, usize, usize), (String, u64)> = BTreeMap::new();
@@ -636,8 +633,8 @@ async fn read_json_arrow_ab() {
         ingest_once(&connection, &registry, &asset).await;
         let mut prev_snap = read_counter_snapshot(&metrics_out);
 
-        let mut legacy_walls = Vec::with_capacity(REPS);
-        let mut direct_walls = Vec::with_capacity(REPS);
+        let mut legacy_walls = Vec::with_capacity(FOCUSED_JSON_REPS);
+        let mut direct_walls = Vec::with_capacity(FOCUSED_JSON_REPS);
         let zeros: BTreeMap<String, u64> = COUNTER_LABELS
             .iter()
             .map(|label| ((*label).to_string(), 0_u64))
@@ -645,7 +642,7 @@ async fn read_json_arrow_ab() {
         let mut legacy_deltas = zeros.clone();
         let mut direct_deltas = zeros.clone();
 
-        for rep in 0..REPS {
+        for rep in 0..FOCUSED_JSON_REPS {
             let direct_first = (rep + cols + rows) % 2 == 0;
             for strategy in if direct_first {
                 ["direct", "legacy"]

@@ -5,7 +5,7 @@
 > Issue: [#101](https://github.com/X44421/stillflow/issues/101)
 > Authorized base: `main@04966586192f8750a02790da988db71a28d82074`
 > Branch: `agent/issue-101-e24-b2json-direct-arrow`
-> Last updated: 2026-08-25
+> Last updated: 2026-08-26
 
 This document mirrors the frozen Issue #101 contract. The Issue remains
 authoritative if the two ever diverge.
@@ -17,9 +17,11 @@ replace only the downstream re-encode → Polars JSON decode → DataFrame → C
 bridge with an incremental `arrow-json` 59 decoder that emits bounded Apache
 Arrow `RecordBatch` values.
 
-Valid terminal results: `PROMOTE CANDIDATE` or `CLOSE EXPERIMENT`. Neither
-result authorizes production adoption, Ready/merge, a speedup claim,
-`E23-OPT` transition, or work on #80/#91.
+Valid terminal results after #117 G0: `FOCUSED_M3_PROMOTE` or
+`FOCUSED_M3_WEAK`. The original `PROMOTE CANDIDATE` / `CLOSE EXPERIMENT`
+labels applied to the superseded 8×30 matrix and must not be used for the
+focused integration. Neither result authorizes production adoption,
+Ready/merge, a default-path flip, `E23-OPT` transition, or work on #80/#91.
 
 ## 2. Keep unchanged
 
@@ -81,18 +83,23 @@ With `json-arrow-direct` enabled and the runtime switch on:
 
 ## 7. Benchmark contract
 
-Re-run only the eight accepted JSON/NDJSON cells (2 formats × 4 shapes), legacy
-and direct, on one exact head. 30 measured repetitions per strategy/cell after
-warm-up; persist every per-repetition wall sample as `wall_samples_ms`. Publish
-the raw JSONL SHA-256. Recompute P50/P95 from those samples.
+Superseded by #117 G0 (2026-08-26). Do **not** run `8 cells × 2 strategies ×
+30 reps` or any 1M-row / JSON-array cell.
 
-Promotion-discussion eligibility (does **not** authorize adoption or merge):
+Focused integration only, one exact head, legacy vs `json-arrow-direct`:
 
-- both widest 1M-row cells improve P50 by at least 15%;
-- geometric mean of the eight per-cell P50 ratios improves by at least 20%;
-- no cell regresses by more than 5%.
+- `10 cols × 100K rows` NDJSON
+- `100 cols × 100K rows` NDJSON
+- warmup + 3 measured reps per strategy/cell
+- persist `wall_samples_ms` (all 3 raw samples)
+- report medians, ratios, `json_reencode_bytes` / `json_polars_decode_invocations`
+  / `json_arrow_flushes`
 
-Failing the threshold is a valid `CLOSE EXPERIMENT`.
+`FOCUSED_M3_PROMOTE` if both cells keep a material connector-level median
+gain (≥10% wall) with semantic parity already demonstrated.
+`FOCUSED_M3_WEAK` if the module-level 67–81% M3 advantage collapses on this
+hot path (either cell <10%, or a >5% regression). Neither label authorizes
+merge.
 
 ## 8. Stop conditions
 
