@@ -45,7 +45,10 @@ fn framed_rows(width: usize, rows: usize) -> Vec<Vec<u8>> {
             let mut object = Map::new();
             for col in 0..width {
                 if col % 4 == 0 {
-                    object.insert(format!("col_{col:03}"), Value::from(row as i64 + col as i64));
+                    object.insert(
+                        format!("col_{col:03}"),
+                        Value::from(row as i64 + col as i64),
+                    );
                 } else {
                     object.insert(format!("col_{col:03}"), Value::from(utf8_payload(col, row)));
                 }
