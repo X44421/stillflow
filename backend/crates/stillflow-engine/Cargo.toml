@@ -34,6 +34,11 @@ tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 
+[features]
+# Private, non-default experiment: engine-local incremental schema
+# propagation for ApplyRules chains (O0-B2-A2 / issue #141).
+engine-incremental-schema-propagation = []
+
 [dev-dependencies]
 async-trait.workspace = true
 serde_json.workspace = true
