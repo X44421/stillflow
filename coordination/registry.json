@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 98,
+  "revision": 99,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T02:36:43Z",
+  "updated_at": "2026-08-26T02:50:38Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1296,7 +1296,7 @@
     {
       "id": "E24-JSON-L1",
       "title": "Focused real-path indexed schema lookup integration",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "cursor-grok-e24json-l1",
       "target_issue": 124,
@@ -1329,28 +1329,17 @@
         "E24-B2JSON-A0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T04:06:43Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T02:31:02Z",
-      "updated_at": "2026-08-26T02:36:43Z",
+      "updated_at": "2026-08-26T02:50:38Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #124 after FOCUSED_M3_WEAK. Single-variable experiment: replace per-key linear schema.fields.iter().find with a reader-level prebuilt field index. Do not touch framing, Value/Visitor, selected-set, memchr, Arrow, Polars tail, or JSON array. Kill gate is FOCUSED_LOOKUP_WEAK / WIDE_ONLY / PROMOTE_CANDIDATE. Draft PR only.",
-      "notes": "Canonical Issue #124. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-l1-indexed-lookup. 90m lease. Private non-default switch; legacy remains default. Change only top-level JSON field resolution in ProjectedObjectVisitor. Do not rebuild the index per row. Do not precompute selected BTreeSet. No cherry-pick from #102. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps, WSL2 ext4. Draft only; no Ready/merge; no default-path flip; no Engine/Storage/#80/#91."
+      "notes": "Canonical Issue #124. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-l1-indexed-lookup. 90m lease. Private non-default switch; legacy remains default. Change only top-level JSON field resolution in ProjectedObjectVisitor. Do not rebuild the index per row. Do not precompute selected BTreeSet. No cherry-pick from #102. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps, WSL2 ext4. Draft only; no Ready/merge; no default-path flip; no Engine/Storage/#80/#91.",
+      "completed_at": "2026-08-26T02:50:38Z",
+      "result_head": "641cf626ded0bdb03431a2b3d716995595e76fa1",
+      "ci_url": null,
+      "completion_note": "FOCUSED_LOOKUP_WEAK: 100-col NDJSON median +6.0 percent; 10-col -5.1 percent. Semantic parity passed. Draft PR 125. No merge."
     }
   ],
-  "locks": {
-    "branch:agent/e24-json-l1-indexed-lookup": {
-      "task_id": "E24-JSON-L1",
-      "owner": "cursor-grok-e24json-l1",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T02:31:02Z",
-      "lease_expires_at": "2026-08-26T04:06:43Z"
-    },
-    "crate:stillflow-connector-local-tabular": {
-      "task_id": "E24-JSON-L1",
-      "owner": "cursor-grok-e24json-l1",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T02:31:02Z",
-      "lease_expires_at": "2026-08-26T04:06:43Z"
-    }
-  }
+  "locks": {}
 }
