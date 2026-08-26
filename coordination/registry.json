@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 128,
+  "revision": 129,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T05:23:06Z",
+  "updated_at": "2026-08-26T05:24:36Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1669,6 +1669,38 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #137 after PROFILER_DOMINANT_PROJECT_VALIDATE on #135. Isolated experiment: fuse selected Utf8 deserialize + validate while still emitting Value::String/Null. Default legacy path stays unchanged. Draft PR only.",
       "notes": "Canonical Issue #137. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-p5-selected-utf8-fused. 90m lease. Private feature json-selected-utf8-fused, default off. Only selected top-level Utf8 fields. Do not change framing, lookup, selected-set, Arrow, or Polars tail. Semantic mismatch => FUSED_UTF8_SEMANTIC_REJECT. 100-col <10% => FOCUSED_FUSED_UTF8_WEAK. 100-col >=10% and 10-col regression >5% => FOCUSED_FUSED_UTF8_WIDE_ONLY. 100-col >=10% and 10-col regression <=5% => PROMOTE_FUSED_UTF8_CANDIDATE. Warmup both modes; 5 interleaved reps; 10x100K and 100x100K only. No merge, no default-path flip, no Engine/Storage/#80/#91. Do not interpret P0/P1/P2 stage estimates."
+    },
+    {
+      "id": "X-C0-FIX-R1",
+      "title": "Resolve ADR-004 export contract review blockers (issue #138 / PR #106)",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 138,
+      "target_pr": 106,
+      "target_branch": "agent/issue-104-x-c0-export-contract",
+      "expected_base": "9ce1b7b7ea3207b63b8972a90d18c484e020134e",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-104-x-c0-export-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-004-export-and-output-artifacts.md"
+      ],
+      "acceptance_keys": [
+        "x-c0-fix-r1:blocker-1-null-emptystring-quoting-resolved",
+        "x-c0-fix-r1:blocker-2-journaled-destination-recovery-defined",
+        "x-c0-fix-r1:adr-file-only-change",
+        "x-c0-fix-r1:new-head-rebind-review-required"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T05:24:36Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #138 after REQUEST_CHANGES on PR #106 @ 9ce1b7b7ea3207b63b8972a90d18c484e020134e (2 blocking findings). Docs-only fix of ADR-004; produces a NEW head, after which a fresh independent re-review is required. Verdicts do not carry across SHA.",
+      "notes": "CLAIM only after re-fetching this registry and confirming branch:agent/issue-104-x-c0-export-contract is free (connector/engine locks irrelevant to this task but crate:stillflow-connector-local-tabular belongs to E24-JSON-P5 - do not touch it). Start exactly from PR #106 head 9ce1b7b7ea3207b63b8972a90d18c484e020134e and push fix commits to agent/issue-104-x-c0-export-contract. ONLY file may change: docs/architecture/adr-004-export-and-output-artifacts.md. Resolve exactly two blockers: (1) SS3 CSV/TSV quoting law vs normative table byte collision - amend the iff-law so an EMPTY string is always quoted (empty pair of quotes), null stays an unquoted empty field, header cells follow the same rule; state the two encodings can never collide; (2) SS6/SS7 crash-window recovery dead zone - require the export journal to record staged and rename-installed destination paths per export id with durable-before-rename ordering, and extend the recovery sweep to delete journaled destination residue of exports lacking a committed manifest, so an affected export id is free and retry starts from zero at destination level; tombstone remains applicable only to manifest-committed artifacts. Forbidden: Runtime/Rust source, connectors, Engine, Storage, API, Frontend, #91/E4-S2, manifest/lockfile changes, Ready, merge, issue closure. Production main 04966586192f8750a02790da988db71a28d82074 remains the base target. Default 90m lease. After push: DONE with result_head; independent re-review is a separate dispatch."
     }
   ],
   "locks": {
