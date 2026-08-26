@@ -6,8 +6,8 @@ use arrow_json::ReaderBuilder;
 use arrow_schema::{DataType, Field, Schema};
 use serde_json::{Map, Value};
 use std::io::Cursor;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const REPS: usize = 5;
@@ -50,7 +50,10 @@ fn ndjson_and_schema(width: usize, rows: usize) -> (Vec<u8>, Arc<Schema>) {
         let mut object = Map::new();
         for col in 0..width {
             if col % 4 == 0 {
-                object.insert(format!("col_{col:03}"), Value::from(row as i64 + col as i64));
+                object.insert(
+                    format!("col_{col:03}"),
+                    Value::from(row as i64 + col as i64),
+                );
             } else {
                 object.insert(format!("col_{col:03}"), Value::from(utf8_payload(col, row)));
             }
@@ -73,8 +76,7 @@ fn ndjson_and_schema(width: usize, rows: usize) -> (Vec<u8>, Arc<Schema>) {
 
 fn checksum_value_map(map: &Map<String, Value>) -> u64 {
     let mut checksum = 0_u64;
-    for (name, value) in map {
-        checksum = checksum.wrapping_add(name.len() as u64);
+    for value in map.values() {
         checksum = checksum.wrapping_add(match value {
             Value::Number(number) => number.as_i64().unwrap_or(0) as u64,
             Value::String(text) => text.len() as u64,
@@ -87,7 +89,6 @@ fn checksum_value_map(map: &Map<String, Value>) -> u64 {
 fn checksum_batch(batch: &RecordBatch) -> u64 {
     let mut checksum = 0_u64;
     for (index, field) in batch.schema().fields().iter().enumerate() {
-        checksum = checksum.wrapping_add(field.name().len() as u64);
         let column = batch.column(index);
         match field.data_type() {
             DataType::Int64 => {
