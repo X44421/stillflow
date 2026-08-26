@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 159,
+  "revision": 160,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T13:44:59Z",
+  "updated_at": "2026-08-26T13:53:16Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1908,9 +1908,9 @@
     {
       "id": "O0-B2-A1",
       "title": "Isolated Engine-local schema lookup index experiment (issue #146)",
-      "status": "running",
+      "status": "queued",
       "mode": "write",
-      "owner": "ox-alpha-o0b2a1-w1",
+      "owner": null,
       "target_issue": 146,
       "target_pr": null,
       "target_branch": "agent/o0-b2-a1-schema-lookup-index",
@@ -1937,12 +1937,13 @@
       "conflicts_with": [
         "O0-B1-A1"
       ],
-      "lease_expires_at": "2026-08-26T14:42:40Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T11:49:24Z",
-      "updated_at": "2026-08-26T13:12:40Z",
+      "updated_at": "2026-08-26T13:53:16Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #146 after #109 A1 VERDICT BENCHMARK SUPPORTS FOLLOW-UP (last-field placement ~692x; component attribution 74-80 percent of wide preflight wall). Private default-off ColumnId->ordinal index proof.",
-      "notes": "Private non-default feature engine-schema-lookup-index. Feature OFF retains current path exactly. ON adds an Engine-private ColumnId->ordinal lookup derived from an already-validated LogicalSchema instance; LogicalSchema stays the authoritative public/core representation. No stale-index tolerance: rebuild from exact new validated schema state on mutation. Authorized paths only preflight.rs, typing.rs (if required), Cargo.toml (feature decl). Semantic oracle before performance: OFF/ON equality on PreparedPlan schema outputs (expected_connector/scan_output/materialize_schema/target_schema), projected order, canonical serialized schema/fingerprint, EngineError variant+stable message+earliest failing position across sparse/dense/first/middle/last/mixed projections, unknown ColumnId positions, repeated/mixed expression references, project->filter->rules->project chains, F={64,512,2048,4096}, paused/bound failures; full stillflow-engine suite both modes. Any mismatch => SCHEMA_LOOKUP_INDEX_SEMANTIC_REJECT and stop. Focused benchmark reuses #109 shapes: control F=512,E=64 sparse projection; wide F=4096,E=256 mixed references; F=4096 sparse+near-full K; >=10 reps/mode/cell balanced interleaved with warmup; raw SHA-256 recorded. Gate (primary F=4096/E=256): any semantic differential => SEMANTIC_REJECT; <20 percent => FOCUSED_SCHEMA_LOOKUP_INDEX_WEAK; >=20 with control regression >5 => WIDE_ONLY; >=20 and control regression <=5 => PROMOTE_SCHEMA_LOOKUP_INDEX_CANDIDATE. Positive verdict authorizes only later independent acceptance/design-hardening. Forbidden: public LogicalSchema cache/index field, hash/fingerprint/serde changes, A2 incremental work, O0-B1 lowering cache or fusion, collect/materialization changes, #91 contact, connector/Storage/frontend/API changes, production flip or merge. Draft PR evidence handoff then stop."
+      "notes": "Private non-default feature engine-schema-lookup-index. Feature OFF retains current path exactly. ON adds an Engine-private ColumnId->ordinal lookup derived from an already-validated LogicalSchema instance; LogicalSchema stays the authoritative public/core representation. No stale-index tolerance: rebuild from exact new validated schema state on mutation. Authorized paths only preflight.rs, typing.rs (if required), Cargo.toml (feature decl). Semantic oracle before performance: OFF/ON equality on PreparedPlan schema outputs (expected_connector/scan_output/materialize_schema/target_schema), projected order, canonical serialized schema/fingerprint, EngineError variant+stable message+earliest failing position across sparse/dense/first/middle/last/mixed projections, unknown ColumnId positions, repeated/mixed expression references, project->filter->rules->project chains, F={64,512,2048,4096}, paused/bound failures; full stillflow-engine suite both modes. Any mismatch => SCHEMA_LOOKUP_INDEX_SEMANTIC_REJECT and stop. Focused benchmark reuses #109 shapes: control F=512,E=64 sparse projection; wide F=4096,E=256 mixed references; F=4096 sparse+near-full K; >=10 reps/mode/cell balanced interleaved with warmup; raw SHA-256 recorded. Gate (primary F=4096/E=256): any semantic differential => SEMANTIC_REJECT; <20 percent => FOCUSED_SCHEMA_LOOKUP_INDEX_WEAK; >=20 with control regression >5 => WIDE_ONLY; >=20 and control regression <=5 => PROMOTE_SCHEMA_LOOKUP_INDEX_CANDIDATE. Positive verdict authorizes only later independent acceptance/design-hardening. Forbidden: public LogicalSchema cache/index field, hash/fingerprint/serde changes, A2 incremental work, O0-B1 lowering cache or fusion, collect/materialization changes, #91 contact, connector/Storage/frontend/API changes, production flip or merge. Draft PR evidence handoff then stop.",
+      "pause_reason": "executor context failed twice without closing report after oracle capture + bench build; worktree preserved uncommitted for successor"
     },
     {
       "id": "O0-B1-A1",
@@ -2026,20 +2027,6 @@
     }
   ],
   "locks": {
-    "branch:agent/o0-b2-a1-schema-lookup-index": {
-      "task_id": "O0-B2-A1",
-      "owner": "ox-alpha-o0b2a1-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T11:49:24Z",
-      "lease_expires_at": "2026-08-26T14:42:40Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "O0-B2-A1",
-      "owner": "ox-alpha-o0b2a1-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T11:49:24Z",
-      "lease_expires_at": "2026-08-26T14:42:40Z"
-    },
     "branch:agent/e24-json-a2-direct-projected-writer": {
       "task_id": "E24-JSON-A2",
       "owner": "ox-alpha-e24jsona2-w1",
