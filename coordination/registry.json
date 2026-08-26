@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 144,
+  "revision": 145,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T08:28:20Z",
+  "updated_at": "2026-08-26T08:59:32Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1892,6 +1892,86 @@
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #145 after O0-B2-A2 completed @ PR #144 head cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b with PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE. Independent design/semantic review required before any promotion step.",
       "notes": "Read-only review; no locks required. INDEPENDENCE BOUNDARY: the O0-B2-A2 author session (cursor-grok-o0-b2-a2) must not CLAIM this task. CLAIM only after re-fetching the registry and verifying PR #144 is Open/Draft with headRefOid still equals cfdea8e7e96bc4eb126f912c72dfeeb0fe076f1b (stop on drift). Re-verify FROM ZERO: (a) feature isolation - OFF path retains legacy behavior byte-for-byte and the feature is private/non-default; (b) local checks faithful to legacy error variants/messages/order across every schema-mutating rule surface incl. unknown ColumnId, duplicate id/name, invalid casts, nullability transitions, drop guards, rename collisions, paused types; (c) boundary safety-oracle semantics - single full validation at ApplyRules boundary, never the normal source of an earlier legacy error; (d) differential suite sufficiency against the issue #141 required matrix; (e) benchmark methodology - balanced interleaving, 10 reps/mode/cell, raw hashes f1203f17.../d4823d02... recomputable from artifacts outside repo; gate arithmetic (primary improvement 89.7%, control no-regression) reproduces PROMOTE_INCREMENTAL_SCHEMA_CANDIDATE; (f) forbidden-surface audit - no A1 index/cache, no lowering cache, no fusion, no stillflow-core changes, no collect/cancellation/memory changes, #91 untouched. Evidence entries: PR #144 body (repaired) and issue #141 evidence-restoration comment. Output exactly one terminal verdict at the bound head: APPROVE or REQUEST_CHANGES with blocking findings and references. APPROVE covers only promotion to a later design/review step - it does not authorize merge, default-feature flip, A1, or O0-B1 dispatches. No edits, Ready, merge, or issue closure."
+    },
+    {
+      "id": "O0-B2-A1",
+      "title": "Isolated Engine-local schema lookup index experiment (issue #146)",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 146,
+      "target_pr": null,
+      "target_branch": "agent/o0-b2-a1-schema-lookup-index",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/o0-b2-a1-schema-lookup-index",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/preflight.rs",
+        "backend/crates/stillflow-engine/src/typing.rs",
+        "backend/crates/stillflow-engine/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "o0-b2-a1:off-on-preparedplan-equality",
+        "o0-b2-a1:error-variant-message-position-equality",
+        "o0-b2-a1:fingerprint-and-canonical-schema-equality",
+        "o0-b2-a1:full-engine-suite-off-and-on",
+        "o0-b2-a1:focused-interleaved-benchmark-artifacts",
+        "o0-b2-a1:single-gate-verdict"
+      ],
+      "depends_on": [],
+      "conflicts_with": [
+        "O0-B1-A1"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T08:59:32Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #146 after #109 A1 VERDICT BENCHMARK SUPPORTS FOLLOW-UP (last-field placement ~692x; component attribution 74-80 percent of wide preflight wall). Private default-off ColumnId->ordinal index proof.",
+      "notes": "Private non-default feature engine-schema-lookup-index. Feature OFF retains current path exactly. ON adds an Engine-private ColumnId->ordinal lookup derived from an already-validated LogicalSchema instance; LogicalSchema stays the authoritative public/core representation. No stale-index tolerance: rebuild from exact new validated schema state on mutation. Authorized paths only preflight.rs, typing.rs (if required), Cargo.toml (feature decl). Semantic oracle before performance: OFF/ON equality on PreparedPlan schema outputs (expected_connector/scan_output/materialize_schema/target_schema), projected order, canonical serialized schema/fingerprint, EngineError variant+stable message+earliest failing position across sparse/dense/first/middle/last/mixed projections, unknown ColumnId positions, repeated/mixed expression references, project->filter->rules->project chains, F={64,512,2048,4096}, paused/bound failures; full stillflow-engine suite both modes. Any mismatch => SCHEMA_LOOKUP_INDEX_SEMANTIC_REJECT and stop. Focused benchmark reuses #109 shapes: control F=512,E=64 sparse projection; wide F=4096,E=256 mixed references; F=4096 sparse+near-full K; >=10 reps/mode/cell balanced interleaved with warmup; raw SHA-256 recorded. Gate (primary F=4096/E=256): any semantic differential => SEMANTIC_REJECT; <20 percent => FOCUSED_SCHEMA_LOOKUP_INDEX_WEAK; >=20 with control regression >5 => WIDE_ONLY; >=20 and control regression <=5 => PROMOTE_SCHEMA_LOOKUP_INDEX_CANDIDATE. Positive verdict authorizes only later independent acceptance/design-hardening. Forbidden: public LogicalSchema cache/index field, hash/fingerprint/serde changes, A2 incremental work, O0-B1 lowering cache or fusion, collect/materialization changes, #91 contact, connector/Storage/frontend/API changes, production flip or merge. Draft PR evidence handoff then stop."
+    },
+    {
+      "id": "O0-B1-A1",
+      "title": "Isolated per-run lowering/type-check cache experiment (issue #147)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 147,
+      "target_pr": null,
+      "target_branch": "agent/o0-b1-a1-lowering-cache",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/o0-b1-a1-lowering-cache",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/lower.rs",
+        "backend/crates/stillflow-engine/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "o0-b1-a1:off-on-output-schema-roworder-equality",
+        "o0-b1-a1:error-timing-and-vocabulary-preserved",
+        "o0-b1-a1:cancellation-deadline-parity",
+        "o0-b1-a1:construction-counter-evidence",
+        "o0-b1-a1:full-engine-suite-off-and-on",
+        "o0-b1-a1:real-engine-focused-benchmark-artifacts",
+        "o0-b1-a1:single-gate-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1"
+      ],
+      "conflicts_with": [
+        "O0-B2-A1"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T08:59:32Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #147 Option A attribution experiment after #108 BENCHMARK SUPPORTS FOLLOW-UP. QUEUED behind sibling writer: shares engine:stillflow-engine with O0-B2-A1 (#146) and must not be claimed until #146 is done and the Engine lock is free.",
+      "notes": "Private non-default feature engine-lowering-cache. Per-run NON-GLOBAL cache of lowered/type-checked Engine-private representations keyed by exact compiled step/rule position + exact schema state; lazy first-use preferred if it preserves observable failure timing; schema-mutating rules invalidate downstream entries derived from stale state. Hard physical boundary: every existing collect() stays where OFF performs it - no fusion, no rule batching, no collect elimination/reordering, no chunk/envelope size changes, no concurrency/admission/backpressure changes. Preserve rule/plan-step order, logical output/schema, deferred literals, Cast failure behavior, error category and earliest observable ordering, cancellation/deadline checkpoints, memory limits, deterministic inputs, public LogicalSchema/plan contracts/Engine API. Do not convert runtime errors into preflight errors to enable caching; if exact failure timing cannot be preserved => LOWERING_CACHE_SEMANTIC_REJECT and stop. Authorized paths only lower.rs, the chunk-loop file owning repeated lowering calls, preflight.rs (private step metadata only), typing.rs (only if needed for private reusable typed result), Cargo.toml (feature decl); broader paths require maintainer rebind. Oracle: OFF/ON mechanical equality on nine required plan families incl. rename-before-reference, derive-then-reference, drop-then-fail, cast type-state changes, multi-chunk mixed chains, cancellation/deadline and failing paths; full stillflow-engine suite both modes. Benchmark reuses #108 real Engine shapes (narrow scalar control low/high B; wide scalar primary B=100 K={1,16}; large B=200 K={1,16} if memory permits; wide derive-heavy attribution cell), >=10 reps/mode short cells and >=6 long cells with disclosed reductions; internal construction counter proving lowering/type-check constructions fall from per-chunk/per-rule to once per cached step+schema state (evidence-only). Gate per issue body. Lease 120 minutes. Draft PR evidence handoff then stop."
     }
   ],
   "locks": {}
