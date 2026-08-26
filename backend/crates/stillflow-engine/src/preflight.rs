@@ -525,8 +525,24 @@ fn propagate_schema(
                 crate::typing::require_boolean(predicate, &schema)?;
             }
             CompiledStep::Rules { rules } => {
-                for rule in rules {
-                    schema = apply_rule_schema(schema, rule)?;
+                #[cfg(feature = "engine-incremental-schema-propagation")]
+                {
+                    for rule in rules {
+                        apply_rule_schema_incremental(&mut schema, rule)?;
+                    }
+                    // Safety oracle at the ApplyRules boundary: one full
+                    // canonical validation for the whole chain. With faithful
+                    // local checks this never fires where legacy raised
+                    // earlier; differential tests enforce that.
+                    schema.validate().map_err(|_| {
+                        EngineError::InvalidPlan("apply-rules produced an invalid schema")
+                    })?;
+                }
+                #[cfg(not(feature = "engine-incremental-schema-propagation"))]
+                {
+                    for rule in rules {
+                        schema = apply_rule_schema_legacy(schema, rule)?;
+                    }
                 }
             }
         }
@@ -534,7 +550,15 @@ fn propagate_schema(
     Ok(schema)
 }
 
-fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSchema, EngineError> {
+/// Legacy per-rule propagation: every schema-mutating rule clones the field
+/// vector and re-runs full `LogicalSchema::new` validation. Compiled under
+/// both features; called only on the OFF path (tests call it directly as the
+/// differential oracle baseline).
+#[allow(dead_code)]
+fn apply_rule_schema_legacy(
+    mut schema: LogicalSchema,
+    rule: &Rule,
+) -> Result<LogicalSchema, EngineError> {
     match rule {
         Rule::Rename { column, to } => {
             schema
@@ -676,6 +700,181 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
         Rule::FilterRows { predicate } => {
             crate::typing::require_boolean(predicate, &schema)?;
             Ok(schema)
+        }
+        Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
+            node: uuid::Uuid::nil(),
+            kind: "validate",
+        }),
+        Rule::Deduplicate { .. } => Err(EngineError::UnsupportedRule {
+            node: uuid::Uuid::nil(),
+            kind: "deduplicate",
+        }),
+    }
+}
+
+/// Experimental incremental propagation (`engine-incremental-schema-propagation`).
+///
+/// Performs exactly the same local precondition checks as
+/// [`apply_rule_schema_legacy`] — in the same order, with identical error
+/// variants and messages — then mutates only the affected field(s) of
+/// `schema.fields` in place. No `LogicalSchema::new` reconstruction happens
+/// here; full canonical validation runs once at the ApplyRules boundary as a
+/// safety oracle. Rules that do not mutate schema keep their existing logic.
+#[allow(dead_code)]
+fn apply_rule_schema_incremental(
+    schema: &mut LogicalSchema,
+    rule: &Rule,
+) -> Result<(), EngineError> {
+    match rule {
+        Rule::Rename { column, to } => {
+            let index = schema
+                .fields
+                .iter()
+                .position(|field| field.id == *column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            // Legacy routes every core-level rename rejection to
+            // UnknownColumn(column); the locally reachable rejections are
+            // exactly unknown id, empty/whitespace name, and duplicate name.
+            if to.trim().is_empty()
+                || schema
+                    .fields
+                    .iter()
+                    .any(|field| field.id != *column && &field.name == to)
+            {
+                return Err(EngineError::UnknownColumn(*column));
+            }
+            schema.fields[index].name = to.clone();
+            Ok(())
+        }
+        Rule::DropColumn { column } => {
+            if schema.fields.len() <= 1 {
+                return Err(EngineError::InvalidPlan(
+                    "cannot drop the last remaining column",
+                ));
+            }
+            let before = schema.fields.len();
+            schema.fields.retain(|field| field.id != *column);
+            if schema.fields.len() == before {
+                return Err(EngineError::UnknownColumn(*column));
+            }
+            Ok(())
+        }
+        Rule::Trim { column } => {
+            let field = schema
+                .fields
+                .iter()
+                .find(|field| field.id == *column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            if !matches!(field.data_type, LogicalType::Utf8) {
+                return Err(EngineError::TypeError("trim requires a utf8 column"));
+            }
+            Ok(())
+        }
+        Rule::Cast {
+            column,
+            data_type,
+            on_failure,
+        } => {
+            crate::typing::reject_paused_type(data_type)?;
+            reject_paused_cast(
+                &schema
+                    .fields
+                    .iter()
+                    .find(|field| field.id == *column)
+                    .ok_or(EngineError::UnknownColumn(*column))?
+                    .data_type,
+                data_type,
+            )?;
+            let field = schema
+                .fields
+                .iter_mut()
+                .find(|field| field.id == *column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            field.data_type = data_type.clone();
+            if matches!(on_failure, CastFailurePolicy::SetNull) {
+                field.nullable = true;
+            }
+            Ok(())
+        }
+        Rule::ReplaceLiteral { column, from, to } => {
+            let field = schema
+                .fields
+                .iter()
+                .find(|field| field.id == *column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            validate_literal_for_column(&field.data_type, from)?;
+            validate_literal_for_column(&field.data_type, to)?;
+            if matches!(field.data_type, LogicalType::Binary)
+                && !matches!((from, to), (ScalarValue::Null, ScalarValue::Null))
+            {
+                return Err(EngineError::TypeError(
+                    "binary replace-literal may only use null-to-null",
+                ));
+            }
+            if matches!(to, ScalarValue::Null) {
+                if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *column) {
+                    field.nullable = true;
+                }
+            }
+            Ok(())
+        }
+        Rule::FillNull { column, value } => {
+            if matches!(value, ScalarValue::Null) {
+                return Err(EngineError::TypeError("fill-null value must not be null"));
+            }
+            let field = schema
+                .fields
+                .iter()
+                .find(|field| field.id == *column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            if matches!(field.data_type, LogicalType::Binary) {
+                return Err(EngineError::TypeError(
+                    "fill-null is not authorized on binary",
+                ));
+            }
+            validate_literal_for_column(&field.data_type, value)?;
+            if let Some(field) = schema.fields.iter_mut().find(|field| field.id == *column) {
+                field.nullable = false;
+            }
+            Ok(())
+        }
+        Rule::DeriveColumn {
+            id,
+            name,
+            data_type,
+            nullable,
+            expression,
+        } => {
+            validate_expr(expression, schema)?;
+            let inferred = crate::typing::type_check_expr(expression, schema)?;
+            crate::typing::reject_paused_type(data_type)?;
+            if !matches!(inferred, LogicalType::Null) && inferred != *data_type {
+                return Err(EngineError::TypeError(
+                    "derived column type does not match the typed expression",
+                ));
+            }
+            if schema.field(*id).is_some() || schema.fields.iter().any(|field| field.name == *name)
+            {
+                return Err(EngineError::InvalidPlan(
+                    "derived column id or name is not unique",
+                ));
+            }
+            reject_paused_cast_in_expr(expression, schema)?;
+            let nullable_inferred = infer_nullability(expression, schema)?;
+            if !*nullable && nullable_inferred {
+                return Err(EngineError::TypeError(
+                    "derived column nullability is narrower than the expression",
+                ));
+            }
+            schema.fields.push(
+                LogicalField::new(*id, name.clone(), data_type.clone(), *nullable)
+                    .map_err(|_| EngineError::InvalidPlan("derived field is invalid"))?,
+            );
+            Ok(())
+        }
+        Rule::FilterRows { predicate } => {
+            crate::typing::require_boolean(predicate, schema)?;
+            Ok(())
         }
         Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
             node: uuid::Uuid::nil(),
@@ -915,4 +1114,281 @@ fn infer_nullability(expr: &Expr, schema: &LogicalSchema) -> Result<bool, Engine
             all_nullable
         }
     })
+}
+
+#[cfg(test)]
+mod incremental_schema_differential_tests {
+    //! O0-B2-A2 correctness oracle: the legacy per-rule propagation path and
+    //! the experimental incremental path must agree exactly — same Ok payload
+    //! (serialized form and canonical bytes), or same error variant/message at
+    //! the same rule position — across every supported schema-mutating rule
+    //! surface, valid and invalid.
+
+    use super::*;
+    use stillflow_core::LogicalField;
+
+    fn id(n: u128) -> ColumnId {
+        ColumnId::from_uuid(uuid::Uuid::from_u128(n))
+    }
+
+    fn fields(count: usize) -> Vec<LogicalField> {
+        (0..count)
+            .map(|i| {
+                LogicalField::new(
+                    id(i as u128 + 1),
+                    format!("c{i}"),
+                    if i % 4 == 3 {
+                        LogicalType::Int64
+                    } else {
+                        LogicalType::Utf8
+                    },
+                    i % 2 == 0,
+                )
+                .expect("test field is valid")
+            })
+            .collect()
+    }
+
+    /// Runs one chain through both paths. Panics on any divergence.
+    fn assert_chain_equivalent(base: LogicalSchema, rules: &[Rule]) {
+        let mut legacy = Some(base.clone());
+        let mut incremental = base.clone();
+        for (position, rule) in rules.iter().enumerate() {
+            let legacy_step = match legacy.take() {
+                Some(schema) => apply_rule_schema_legacy(schema, rule).map(Some),
+                None => unreachable!("legacy chain terminated without divergence"),
+            };
+            let incremental_step =
+                apply_rule_schema_incremental(&mut incremental, rule).map(|_| ());
+            match (&legacy_step, &incremental_step) {
+                (Ok(_), Ok(())) => {}
+                (Err(legacy_error), Err(incremental_error)) => {
+                    assert_eq!(
+                        format!("{legacy_error:?}"),
+                        format!("{incremental_error:?}"),
+                        "rule {position} ({rule:?}): error variant/message diverged"
+                    );
+                    // Both failed: chains terminate identically.
+                    return;
+                }
+                _ => panic!(
+                    "rule {position} ({rule:?}): Ok/Err disagreement \
+                     legacy={legacy_step:?} incremental={incremental_step:?}"
+                ),
+            }
+            legacy = legacy_step.expect("checked above");
+        }
+        // Boundary oracle must never fire where local checks passed.
+        let boundary = incremental.validate().map_err(|error| error.to_string());
+        assert!(
+            boundary.is_ok(),
+            "boundary safety oracle fired on a chain legacy accepted: {boundary:?}"
+        );
+        let legacy_schema = legacy.expect("chain survived");
+        assert_eq!(
+            serde_json::to_string(&legacy_schema).expect("serialize"),
+            serde_json::to_string(&incremental).expect("serialize"),
+            "serialized schema diverged"
+        );
+        assert_eq!(
+            legacy_schema.canonical_bytes().expect("canonical bytes"),
+            incremental.canonical_bytes().expect("canonical bytes"),
+            "canonical bytes diverged"
+        );
+    }
+
+    #[test]
+    fn rename_paths_agree() {
+        let rules = vec![
+            Rule::Rename {
+                column: id(1),
+                to: "renamed".into(),
+            },
+            Rule::Rename {
+                column: id(99),
+                to: "ghost".into(),
+            },
+            Rule::Rename {
+                column: id(2),
+                to: "".into(),
+            },
+            Rule::Rename {
+                column: id(2),
+                to: "   ".into(),
+            },
+            Rule::Rename {
+                column: id(2),
+                to: "c0".into(),
+            },
+            Rule::Rename {
+                column: id(1),
+                to: "c1".into(),
+            },
+        ];
+        for take in 1..=rules.len() {
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &rules[..take],
+            );
+        }
+    }
+
+    #[test]
+    fn drop_column_paths_agree() {
+        let rules = vec![
+            Rule::DropColumn { column: id(1) },
+            Rule::DropColumn { column: id(99) },
+            Rule::DropColumn { column: id(1) },
+        ];
+        // Drop down to the last remaining column, then attempt one more.
+        let two = LogicalSchema::new(fields(2)).expect("schema");
+        assert_chain_equivalent(two, &rules);
+        let wide = LogicalSchema::new(fields(64)).expect("schema");
+        assert_chain_equivalent(wide, &rules[..1]);
+    }
+
+    #[test]
+    fn trim_cast_replace_fillnull_paths_agree() {
+        let utf8_col = id(1);
+        let int_col = id(4); // fields(): i % 4 == 3 -> Int64
+        let rules = vec![
+            Rule::Trim { column: utf8_col },
+            Rule::Trim { column: int_col },
+            Rule::Trim { column: id(99) },
+            Rule::Cast {
+                column: utf8_col,
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::SetNull,
+            },
+            Rule::Cast {
+                column: utf8_col,
+                data_type: LogicalType::Binary,
+                on_failure: CastFailurePolicy::Error,
+            },
+            Rule::Cast {
+                column: id(99),
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::Error,
+            },
+            Rule::ReplaceLiteral {
+                column: utf8_col,
+                from: ScalarValue::Utf8("a".into()),
+                to: ScalarValue::Null,
+            },
+            Rule::ReplaceLiteral {
+                column: utf8_col,
+                from: ScalarValue::Int64(1),
+                to: ScalarValue::Null,
+            },
+            Rule::ReplaceLiteral {
+                column: id(99),
+                from: ScalarValue::Null,
+                to: ScalarValue::Null,
+            },
+            Rule::FillNull {
+                column: utf8_col,
+                value: ScalarValue::Utf8("x".into()),
+            },
+            Rule::FillNull {
+                column: utf8_col,
+                value: ScalarValue::Null,
+            },
+            Rule::FillNull {
+                column: id(99),
+                value: ScalarValue::Utf8("x".into()),
+            },
+        ];
+        for take in 1..=rules.len() {
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &rules[..take],
+            );
+        }
+    }
+
+    #[test]
+    fn derive_column_paths_agree() {
+        let mk = |idn: u128, name: &str, dtype: LogicalType, nullable: bool, lit: ScalarValue| {
+            Rule::DeriveColumn {
+                id: id(idn),
+                name: name.to_owned(),
+                data_type: dtype,
+                nullable,
+                expression: Expr::Literal(lit),
+            }
+        };
+        let rules = vec![
+            mk(100, "d0", LogicalType::Int64, false, ScalarValue::Int64(7)),
+            mk(100, "dX", LogicalType::Int64, false, ScalarValue::Int64(7)),
+            mk(101, "c0", LogicalType::Int64, false, ScalarValue::Int64(7)),
+            mk(102, "d2", LogicalType::Utf8, false, ScalarValue::Int64(7)),
+            mk(
+                103,
+                "d3",
+                LogicalType::List(Box::new(LogicalType::Int64)),
+                true,
+                ScalarValue::Int64(7),
+            ),
+            mk(104, "", LogicalType::Int64, true, ScalarValue::Int64(7)),
+        ];
+        for take in 1..=rules.len() {
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &rules[..take],
+            );
+        }
+    }
+
+    #[test]
+    fn filter_rows_and_mixed_chains_agree() {
+        let non_boolean = Rule::FilterRows {
+            predicate: Expr::Literal(ScalarValue::Int64(1)),
+        };
+        assert_chain_equivalent(
+            LogicalSchema::new(fields(8)).expect("schema"),
+            &[non_boolean],
+        );
+
+        let mixed = vec![
+            Rule::Cast {
+                column: id(1),
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::SetNull,
+            },
+            Rule::FillNull {
+                column: id(1),
+                value: ScalarValue::Int64(0),
+            },
+            Rule::DeriveColumn {
+                id: id(200),
+                name: "derived_total".into(),
+                data_type: LogicalType::Int64,
+                nullable: false,
+                expression: Expr::Literal(ScalarValue::Int64(1)),
+            },
+            Rule::Rename {
+                column: id(200),
+                to: "total".into(),
+            },
+            Rule::DropColumn { column: id(2) },
+            Rule::DropColumn { column: id(3) },
+            Rule::Trim { column: id(5) },
+        ];
+        for take in 1..=mixed.len() {
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &mixed[..take],
+            );
+        }
+        // Wide-schema chain: exercise F=64 with a long mixed chain.
+        let wide_rules: Vec<Rule> = (0..32)
+            .step_by(2)
+            .map(|i| Rule::Cast {
+                column: id(i as u128 + 1),
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::SetNull,
+            })
+            .collect();
+        assert_chain_equivalent(LogicalSchema::new(fields(64)).expect("schema"), &wide_rules);
+    }
 }
