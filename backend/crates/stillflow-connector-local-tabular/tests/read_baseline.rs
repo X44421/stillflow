@@ -601,10 +601,7 @@ async fn read_json_arrow_ab() {
         "[e24-b2json-a0] focused M3 head={head} reps/strategy/cell={FOCUSED_JSON_REPS} cells=ndjson 10x100k,100x100k"
     );
 
-    let cases: [(&str, usize, usize); 2] = [
-        ("ndjson", 10, 100_000),
-        ("ndjson", 100, 100_000),
-    ];
+    let cases: [(&str, usize, usize); 2] = [("ndjson", 10, 100_000), ("ndjson", 100, 100_000)];
 
     let mut generated: BTreeMap<(String, usize, usize), (String, u64)> = BTreeMap::new();
     for (format, cols, rows) in cases {
