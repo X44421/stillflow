@@ -1,3 +1,5 @@
+#[cfg(feature = "json-indexed-lookup")]
+use std::collections::HashMap;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{BufReader, Cursor};
 use std::num::NonZeroUsize;
@@ -31,6 +33,21 @@ use crate::schema::{
 };
 
 const INTERNAL_ROWS: usize = 4_096;
+
+#[cfg(feature = "json-indexed-lookup")]
+const JSON_INDEXED_LOOKUP_ENV: &str = "STILLFLOW_JSON_INDEXED_LOOKUP";
+
+#[cfg(feature = "json-indexed-lookup")]
+fn json_indexed_lookup_enabled() -> bool {
+    match std::env::var(JSON_INDEXED_LOOKUP_ENV) {
+        Ok(value) => {
+            value == "1"
+                || value.eq_ignore_ascii_case("true")
+                || value.eq_ignore_ascii_case("indexed")
+        }
+        Err(_) => false,
+    }
+}
 
 /// Measurement-only instrumentation for the E24-B2BASE ingestion baseline
 /// (private feature `io-metrics`). Counters are additive, compared-and-swap
@@ -212,6 +229,8 @@ pub(crate) struct PreparedReader {
     rows_emitted: usize,
     sequence: u64,
     pub(crate) warnings: Vec<String>,
+    #[cfg(feature = "json-indexed-lookup")]
+    json_fields_by_name: HashMap<String, usize>,
 }
 
 pub(crate) struct PrepareOptions<'a> {
@@ -439,6 +458,14 @@ pub(crate) fn prepare_reader(
         }
     };
 
+    #[cfg(feature = "json-indexed-lookup")]
+    let json_fields_by_name: HashMap<String, usize> = full_schema
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| (field.name.clone(), index))
+        .collect();
+
     Ok(PreparedReader {
         context: context.clone(),
         full_schema,
@@ -451,6 +478,8 @@ pub(crate) fn prepare_reader(
         rows_emitted: 0,
         sequence: 0,
         warnings,
+        #[cfg(feature = "json-indexed-lookup")]
+        json_fields_by_name,
     })
 }
 
@@ -645,6 +674,8 @@ impl PreparedReader {
                         &self.full_schema,
                         &self.projection.names,
                         reader.row_number(),
+                        #[cfg(feature = "json-indexed-lookup")]
+                        json_indexed_lookup_enabled().then_some(&self.json_fields_by_name),
                     )?;
                     serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(|_| {
                         source_error(
@@ -805,6 +836,8 @@ fn reorder_frame(frame: DataFrame, names: &[String]) -> ConnectorResult<DataFram
 struct ProjectedObjectSeed<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
+    #[cfg(feature = "json-indexed-lookup")]
+    fields_by_name: Option<&'a HashMap<String, usize>>,
 }
 
 impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
@@ -817,6 +850,8 @@ impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
         deserializer.deserialize_map(ProjectedObjectVisitor {
             schema: self.schema,
             selected: self.selected,
+            #[cfg(feature = "json-indexed-lookup")]
+            fields_by_name: self.fields_by_name,
         })
     }
 }
@@ -824,6 +859,20 @@ impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
 struct ProjectedObjectVisitor<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
+    #[cfg(feature = "json-indexed-lookup")]
+    fields_by_name: Option<&'a HashMap<String, usize>>,
+}
+
+impl ProjectedObjectVisitor<'_> {
+    fn field_for_name(&self, name: &str) -> Option<&LogicalField> {
+        #[cfg(feature = "json-indexed-lookup")]
+        if let Some(index) = self.fields_by_name {
+            return index
+                .get(name)
+                .and_then(|position| self.schema.fields.get(*position));
+        }
+        self.schema.fields.iter().find(|field| field.name == name)
+    }
 }
 
 impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
@@ -840,7 +889,7 @@ impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
         let mut output = Map::new();
         let mut seen = BTreeSet::new();
         while let Some(name) = access.next_key::<String>()? {
-            let Some(field) = self.schema.fields.iter().find(|field| field.name == name) else {
+            let Some(field) = self.field_for_name(&name) else {
                 return Err(A::Error::custom(
                     "JSON row contains a field outside the established schema",
                 ));
@@ -1066,6 +1115,7 @@ fn parse_projected_object(
     schema: &LogicalSchema,
     names: &[String],
     row: usize,
+    #[cfg(feature = "json-indexed-lookup")] fields_by_name: Option<&HashMap<String, usize>>,
 ) -> ConnectorResult<Map<String, Value>> {
     if raw.iter().copied().find(|byte| !byte.is_ascii_whitespace()) != Some(b'{') {
         return Err(source_error_with_row(
@@ -1079,6 +1129,8 @@ fn parse_projected_object(
     let mut parsed = ProjectedObjectSeed {
         schema,
         selected: &selected,
+        #[cfg(feature = "json-indexed-lookup")]
+        fields_by_name,
     }
     .deserialize(&mut deserializer)
     .map_err(|error| {

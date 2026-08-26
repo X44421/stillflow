@@ -42,5 +42,11 @@ tokio-util.workspace = true
 # Private measurement-only feature for the E24-B2BASE ingestion baseline.
 # Never enabled by default; adds logical-byte/parser-invocation counters and a
 # test-binary dump side channel only. No dependency and no behavior change.
+#
+# `json-indexed-lookup` is the E24-JSON-L1 experiment switch. Off by default.
+# Runtime `STILLFLOW_JSON_INDEXED_LOOKUP=1` selects the reader-level field
+# index; otherwise top-level JSON keys still use linear schema scan.
 [features]
 io-metrics = []
+json-indexed-lookup = []
+
