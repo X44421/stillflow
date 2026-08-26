@@ -3,6 +3,7 @@
 
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::fmt;
 use std::hint::black_box;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,7 +35,10 @@ unsafe impl std::alloc::GlobalAlloc for CountingAlloc {
 }
 
 fn snapshot_alloc() -> (u64, u64) {
-    (ALLOC_COUNT.load(Ordering::Relaxed), ALLOC_BYTES.load(Ordering::Relaxed))
+    (
+        ALLOC_COUNT.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    )
 }
 
 fn utf8_payload(col: usize, row: usize) -> String {
@@ -45,7 +49,10 @@ fn object_bytes(width: usize, row: usize) -> Vec<u8> {
     let mut object = Map::new();
     for col in 0..width {
         if col % 4 == 0 {
-            object.insert(format!("col_{col:03}"), Value::from(row as i64 + col as i64));
+            object.insert(
+                format!("col_{col:03}"),
+                Value::from(row as i64 + col as i64),
+            );
         } else {
             object.insert(format!("col_{col:03}"), Value::from(utf8_payload(col, row)));
         }
@@ -90,9 +97,7 @@ fn parse_dom(bytes: &[u8], schema: &[(String, FieldKind)]) -> Result<(u64, usize
     let mut checksum = 0_u64;
     let mut fields = 0_usize;
     for (name, kind) in schema {
-        let value = map
-            .get(name)
-            .ok_or_else(|| format!("missing {name}"))?;
+        let value = map.get(name).ok_or_else(|| format!("missing {name}"))?;
         match kind {
             FieldKind::Int if value.is_i64() => {}
             FieldKind::Utf8 if value.is_string() => {}
@@ -110,7 +115,7 @@ struct Sink {
 }
 
 struct RowSeed<'a> {
-    schema: &'a [(String, FieldKind)],
+    lookup: &'a HashMap<&'a str, FieldKind>,
     sink: &'a mut Sink,
 }
 
@@ -122,14 +127,14 @@ impl<'de> DeserializeSeed<'de> for RowSeed<'_> {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_map(RowVisitor {
-            schema: self.schema,
+            lookup: self.lookup,
             sink: self.sink,
         })
     }
 }
 
 struct RowVisitor<'a> {
-    schema: &'a [(String, FieldKind)],
+    lookup: &'a HashMap<&'a str, FieldKind>,
     sink: &'a mut Sink,
 }
 
@@ -145,11 +150,9 @@ impl<'de> Visitor<'de> for RowVisitor<'_> {
         A: MapAccess<'de>,
     {
         while let Some(key) = access.next_key::<&str>()? {
-            let kind = self
-                .schema
-                .iter()
-                .find(|(name, _)| name == key)
-                .map(|(_, kind)| *kind)
+            let kind = *self
+                .lookup
+                .get(key)
                 .ok_or_else(|| de::Error::custom("unknown field"))?;
             match kind {
                 FieldKind::Int => {
@@ -167,14 +170,14 @@ impl<'de> Visitor<'de> for RowVisitor<'_> {
     }
 }
 
-fn parse_visitor(bytes: &[u8], schema: &[(String, FieldKind)]) -> Result<(u64, usize), String> {
+fn parse_visitor(bytes: &[u8], lookup: &HashMap<&str, FieldKind>) -> Result<(u64, usize), String> {
     let mut sink = Sink {
         checksum: 0,
         fields: 0,
     };
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
     RowSeed {
-        schema,
+        lookup,
         sink: &mut sink,
     }
     .deserialize(&mut deserializer)
@@ -204,23 +207,47 @@ fn improvement(baseline: Duration, candidate: Duration) -> f64 {
 
 fn run_shape(width: usize, rows: usize) {
     let schema = schema(width);
+    let lookup: HashMap<&str, FieldKind> = schema
+        .iter()
+        .map(|(name, kind)| (name.as_str(), *kind))
+        .collect();
     let rows_bytes = fixtures(width, rows);
     let mut expected = (0_u64, 0_usize);
     for row in &rows_bytes {
         let got = parse_dom(row, &schema).expect("dom oracle");
-        let visitor = parse_visitor(row, &schema).expect("visitor oracle");
+        let visitor = parse_visitor(row, &lookup).expect("visitor oracle");
         assert_eq!(got, visitor);
         expected.0 = expected.0.wrapping_add(got.0);
         expected.1 += got.1;
     }
 
-    let time = |parse: fn(&[u8], &[(String, FieldKind)]) -> Result<(u64, usize), String>| {
+    let measure_dom = || {
         let started = Instant::now();
         let before = snapshot_alloc();
         let mut checksum = 0_u64;
         let mut fields = 0_usize;
         for row in &rows_bytes {
-            let (row_checksum, row_fields) = parse(row, &schema).expect("parse");
+            let (row_checksum, row_fields) = parse_dom(row, &schema).expect("parse");
+            checksum = checksum.wrapping_add(row_checksum);
+            fields += row_fields;
+        }
+        let after = snapshot_alloc();
+        let result = (checksum, fields);
+        black_box(result);
+        (
+            started.elapsed(),
+            after.0 - before.0,
+            after.1 - before.1,
+            result,
+        )
+    };
+    let measure_visitor = || {
+        let started = Instant::now();
+        let before = snapshot_alloc();
+        let mut checksum = 0_u64;
+        let mut fields = 0_usize;
+        for row in &rows_bytes {
+            let (row_checksum, row_fields) = parse_visitor(row, &lookup).expect("parse");
             checksum = checksum.wrapping_add(row_checksum);
             fields += row_fields;
         }
@@ -235,26 +262,26 @@ fn run_shape(width: usize, rows: usize) {
         )
     };
 
-    let _ = time(parse_dom);
+    let _ = measure_dom();
     let mut dom_samples = Vec::new();
     let mut dom_allocs = Vec::new();
     let mut dom_bytes = Vec::new();
     let mut dom_result = (0_u64, 0_usize);
     for _ in 0..REPS {
-        let (elapsed, allocs, bytes, result) = time(parse_dom);
+        let (elapsed, allocs, bytes, result) = measure_dom();
         dom_samples.push(elapsed);
         dom_allocs.push(allocs);
         dom_bytes.push(bytes);
         dom_result = result;
     }
 
-    let _ = time(parse_visitor);
+    let _ = measure_visitor();
     let mut visitor_samples = Vec::new();
     let mut visitor_allocs = Vec::new();
     let mut visitor_bytes = Vec::new();
     let mut visitor_result = (0_u64, 0_usize);
     for _ in 0..REPS {
-        let (elapsed, allocs, bytes, result) = time(parse_visitor);
+        let (elapsed, allocs, bytes, result) = measure_visitor();
         visitor_samples.push(elapsed);
         visitor_allocs.push(allocs);
         visitor_bytes.push(bytes);
