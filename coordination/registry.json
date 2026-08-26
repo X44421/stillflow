@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 110,
+  "revision": 111,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T04:12:51Z",
+  "updated_at": "2026-08-26T04:14:39Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1467,9 +1467,9 @@
         "E24-JSON-P1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T05:42:51Z",
+      "lease_expires_at": "2026-08-26T05:44:39Z",
       "started_at": "2026-08-26T04:12:51Z",
-      "updated_at": "2026-08-26T04:12:51Z",
+      "updated_at": "2026-08-26T04:14:39Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #131 after SAMPLED_ATTRIBUTION_INVALID_OVERHEAD on #129. Validity rerun only: keep P1 stride-64 instrumentation byte-identical and change the focused harness to a balanced OFF/ON schedule. Do not optimize any JSON stage. Draft PR if harness code is required.",
       "notes": "Canonical Issue #131. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Start exactly from PR #130 head 1a6da5944e0e508c44c00fe1f408faf438b333df. Do not change production main 04966586192f8750a02790da988db71a28d82074. Do not modify src/read.rs. Branch agent/e24-json-p2-interleaved-attribution. 90m lease. Preferred six-run order per cell: OFF, ON, ON, OFF, OFF, ON after warmup of both modes. Same 10x100K and 100x100K NDJSON cells. Overhead |delta| >3% => INTERLEAVED_ATTRIBUTION_INVALID_OVERHEAD. Sampled rows <1000 => INTERLEAVED_ATTRIBUTION_INSUFFICIENT. 100-col coverage <80% or >115% => INTERLEAVED_ATTRIBUTION_INCOMPLETE. Largest stage >=40% => INTERLEAVED_ATTRIBUTION_DOMINANT_<STAGE>; else INTERLEAVED_ATTRIBUTION_MIXED. Do not interpret P0/P1 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91."
@@ -1481,14 +1481,14 @@
       "owner": "cursor-grok-e24json-p2",
       "expected_head": null,
       "acquired_at": "2026-08-26T04:12:51Z",
-      "lease_expires_at": "2026-08-26T05:42:51Z"
+      "lease_expires_at": "2026-08-26T05:44:39Z"
     },
     "crate:stillflow-connector-local-tabular": {
       "task_id": "E24-JSON-P2",
       "owner": "cursor-grok-e24json-p2",
       "expected_head": null,
       "acquired_at": "2026-08-26T04:12:51Z",
-      "lease_expires_at": "2026-08-26T05:42:51Z"
+      "lease_expires_at": "2026-08-26T05:44:39Z"
     }
   }
 }
