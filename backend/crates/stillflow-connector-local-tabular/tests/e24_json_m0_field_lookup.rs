@@ -127,9 +127,12 @@ fn run_shape(width: usize, rows: usize) {
     assert_eq!(linear_oracle, indexed_oracle);
     assert_eq!(linear_oracle, known_oracle);
 
-    let (linear_samples, linear_checksum) = time_reps(WARMUP, REPS, || checksum_linear(&fields, &names));
-    let (indexed_samples, indexed_checksum) = time_reps(WARMUP, REPS, || checksum_indexed(&map, &names));
-    let (known_samples, known_checksum) = time_reps(WARMUP, REPS, || checksum_known(&known_indices));
+    let (linear_samples, linear_checksum) =
+        time_reps(WARMUP, REPS, || checksum_linear(&fields, &names));
+    let (indexed_samples, indexed_checksum) =
+        time_reps(WARMUP, REPS, || checksum_indexed(&map, &names));
+    let (known_samples, known_checksum) =
+        time_reps(WARMUP, REPS, || checksum_known(&known_indices));
     assert_eq!(linear_checksum, linear_oracle);
     assert_eq!(indexed_checksum, linear_oracle);
     assert_eq!(known_checksum, linear_oracle);
@@ -143,9 +146,27 @@ fn run_shape(width: usize, rows: usize) {
         "M0 width={width} rows={rows} probes={} checksum={linear_oracle}",
         names.len()
     );
-    eprintln!("  linear_ms={:?}", linear_samples.iter().map(|d| d.as_secs_f64() * 1000.0).collect::<Vec<_>>());
-    eprintln!("  indexed_ms={:?}", indexed_samples.iter().map(|d| d.as_secs_f64() * 1000.0).collect::<Vec<_>>());
-    eprintln!("  known_key_ms={:?}", known_samples.iter().map(|d| d.as_secs_f64() * 1000.0).collect::<Vec<_>>());
+    eprintln!(
+        "  linear_ms={:?}",
+        linear_samples
+            .iter()
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .collect::<Vec<_>>()
+    );
+    eprintln!(
+        "  indexed_ms={:?}",
+        indexed_samples
+            .iter()
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .collect::<Vec<_>>()
+    );
+    eprintln!(
+        "  known_key_ms={:?}",
+        known_samples
+            .iter()
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .collect::<Vec<_>>()
+    );
     eprintln!(
         "  median_ms linear={:.3} indexed={:.3} known_key={:.3} indexed_gain={:.1}% verdict={}",
         linear_median.as_secs_f64() * 1000.0,
