@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 138,
+  "revision": 139,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T06:00:40Z",
+  "updated_at": "2026-08-26T06:07:36Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1784,7 +1784,7 @@
     {
       "id": "E24-JSON-P6",
       "title": "project_validate sub-attribution from external perf",
-      "status": "running",
+      "status": "done",
       "mode": "measurement",
       "owner": "cursor-grok-e24json-p6",
       "target_issue": 142,
@@ -1806,12 +1806,16 @@
         "E24-JSON-P5"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T07:30:40Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T06:00:40Z",
-      "updated_at": "2026-08-26T06:00:40Z",
+      "updated_at": "2026-08-26T06:07:36Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #142 READY FOR REGISTRY DISPATCH. Measurement-only sub-attribution of P4 project_validate CPU samples. Parallel with O0-B2-A2 is allowed (Engine write vs connector read-only profiler). Default CLAIM takes no crate lock. Draft/report on #142 only.",
-      "notes": "Canonical Issue #142. Depends on E24-JSON-P5 done. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Mode measurement / repository read-only. No target_branch. Default CLAIM locks=[]: do NOT acquire crate:stillflow-connector-local-tabular when reusing /home/owl/e24-p4-work/perf.data. If that capture cannot complete inner attribution and recapture is required, STOP, re-fetch the registry, and acquire crate:stillflow-connector-local-tabular before recapture; do not bypass if the crate lock is held. Recapture must reuse the P4 100x100K NDJSON workload (cpu-clock @ 99 Hz, DWARF, no sysctl). Forbidden: Engine, O0-B2-A2, Storage, #91/E4-S2, fused visitors, PR #140 extension, Value/Map rewrite, in-process timers, repo writes. Inner buckets are mutually exclusive: one sample counted once. Allocator stacks that clearly belong to Value/String construction classify as value_alloc; otherwise conservative project_validate_other. If multiple inner buckets are >=30% of project_validate samples, the terminal verdict is PROFILER_DOMINANT_PROJECT_VALIDATE_<SUB> for the bucket with the largest sample share; also report every other >=30% bucket. Else PROFILER_MIXED_WITHIN_PROJECT_VALIDATE. Default 90m lease. Parallel with O0-B2-A2 is allowed; do not dispatch another connector write experiment in parallel."
+      "notes": "Canonical Issue #142. Depends on E24-JSON-P5 done. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Mode measurement / repository read-only. No target_branch. Default CLAIM locks=[]: do NOT acquire crate:stillflow-connector-local-tabular when reusing /home/owl/e24-p4-work/perf.data. If that capture cannot complete inner attribution and recapture is required, STOP, re-fetch the registry, and acquire crate:stillflow-connector-local-tabular before recapture; do not bypass if the crate lock is held. Recapture must reuse the P4 100x100K NDJSON workload (cpu-clock @ 99 Hz, DWARF, no sysctl). Forbidden: Engine, O0-B2-A2, Storage, #91/E4-S2, fused visitors, PR #140 extension, Value/Map rewrite, in-process timers, repo writes. Inner buckets are mutually exclusive: one sample counted once. Allocator stacks that clearly belong to Value/String construction classify as value_alloc; otherwise conservative project_validate_other. If multiple inner buckets are >=30% of project_validate samples, the terminal verdict is PROFILER_DOMINANT_PROJECT_VALIDATE_<SUB> for the bucket with the largest sample share; also report every other >=30% bucket. Else PROFILER_MIXED_WITHIN_PROJECT_VALIDATE. Default 90m lease. Parallel with O0-B2-A2 is allowed; do not dispatch another connector write experiment in parallel.",
+      "completed_at": "2026-08-26T06:07:36Z",
+      "result_head": null,
+      "ci_url": null,
+      "completion_note": "PROFILER_MIXED_WITHIN_PROJECT_VALIDATE; reused P4 perf.data; no recapture; map_insert 28.45 percent largest named inner bucket; visit_map leaf 1907 counted as other"
     }
   ],
   "locks": {
