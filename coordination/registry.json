@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 114,
+  "revision": 115,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T04:28:20Z",
+  "updated_at": "2026-08-26T04:29:04Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1481,7 +1481,7 @@
     {
       "id": "E24-JSON-P3",
       "title": "External sampling profiler attribution on default JSON path",
-      "status": "running",
+      "status": "done",
       "mode": "measurement",
       "owner": "cursor-grok-e24json-p3",
       "target_issue": 134,
@@ -1507,21 +1507,17 @@
         "E24-JSON-P2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T05:58:20Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T04:28:20Z",
-      "updated_at": "2026-08-26T04:28:20Z",
+      "updated_at": "2026-08-26T04:29:04Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #134 after INTERLEAVED_ATTRIBUTION_INVALID_OVERHEAD on #131. External Linux perf sampling on the uninstrumented default JSON path at main@04966586. No repository writes, no branch lock, crate lock only during the profile run. If perf is unavailable, return PROFILER_UNAVAILABLE.",
-      "notes": "Canonical Issue #134. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. No branch lock. Default features only; no json-arrow-direct, json-indexed-lookup, io-metrics, or P0/P1 env switches. External driver outside the repo. Prefer `perf record -e cpu-clock -F 99 --call-graph dwarf`. Do not install tools or change sysctl. Probe first; if it fails return PROFILER_UNAVAILABLE. Usable samples <5000 or unresolved >25% => PROFILER_INCOMPLETE. Single bucket >=40% => PROFILER_DOMINANT_<STAGE>; else PROFILER_MIXED. CPU sample shares, not wall-time shares. Do not interpret P0/P1/P2 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91."
+      "notes": "Canonical Issue #134. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. No branch lock. Default features only; no json-arrow-direct, json-indexed-lookup, io-metrics, or P0/P1 env switches. External driver outside the repo. Prefer `perf record -e cpu-clock -F 99 --call-graph dwarf`. Do not install tools or change sysctl. Probe first; if it fails return PROFILER_UNAVAILABLE. Usable samples <5000 or unresolved >25% => PROFILER_INCOMPLETE. Single bucket >=40% => PROFILER_DOMINANT_<STAGE>; else PROFILER_MIXED. CPU sample shares, not wall-time shares. Do not interpret P0/P1/P2 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91.",
+      "completed_at": "2026-08-26T04:29:04Z",
+      "result_head": null,
+      "ci_url": null,
+      "completion_note": "PROFILER_UNAVAILABLE: WSL2 kernel 6.18.33.2-microsoft-standard-WSL2 rustc 1.85.0; perf binary absent (command not found, exit 127). No install, no sysctl, no substitute profiler, no repo writes, no ingest."
     }
   ],
-  "locks": {
-    "crate:stillflow-connector-local-tabular": {
-      "task_id": "E24-JSON-P3",
-      "owner": "cursor-grok-e24json-p3",
-      "expected_head": null,
-      "acquired_at": "2026-08-26T04:28:20Z",
-      "lease_expires_at": "2026-08-26T05:58:20Z"
-    }
-  }
+  "locks": {}
 }
