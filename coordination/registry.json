@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 95,
+  "revision": 96,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T02:11:50Z",
+  "updated_at": "2026-08-26T02:22:09Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1292,6 +1292,49 @@
       "result_head": "9ce1b7b7ea3207b63b8972a90d18c484e020134e",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32815091597",
       "completion_note": "Docs-only contract freeze delivered by agent-c-xc0 at exact base main@04966586192f8750a02790da988db71a28d82074: single new file docs/architecture/adr-004-export-and-output-artifacts.md (+489 lines), modeled on ADR-002 structure with 40 [Decision]-marked rules. Freezes committed-Snapshot-only input rules with read_batches integrity gate (§2); CSV/TSV/JSONL/Parquet encoding law incl. RFC4180/RFC8259 escaping, UTC-RFC3339 time, null vs empty-string table, NaN/binary fail-closed (§3); LogicalSchema column order + partition-sequence row order (§4); seven hard bounds rows 10M / bytes 8GiB / file 2GiB / partitions 1024 / deadline 600s / staging 16GiB / publishers 4 (§5); absolute no-follow Allowed Roots, strict filename grammar, create-new overwrite policy (§6); SHA-256 per-file+set digest, versioned Export Manifest provenance, atomic stage→rename→manifest-commit publication, tombstone-first retention, recovery-sweeps-never-publishes (§7); cooperative checkpoints, nothing-visible-on-cancel, deterministic retry (§8); Instruction/Chat JSONL explicitly out of scope until independent typed-schema approval (§9). All eight acceptance keys map to sections in the document's Verification section. Evidence: PR #106 Draft (https://github.com/X44421/stillflow/pull/106), head 9ce1b7b7ea3207b63b8972a90d18c484e020134e, CI run 32815091597 all 7 checks green. No runtime implementation, no crate/API change, no E4/#91 action; PR remains Draft; independent architecture acceptance is a separate dispatch."
+    },
+    {
+      "id": "E24-JSON-L1",
+      "title": "Focused real-path indexed schema lookup integration",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 124,
+      "target_pr": null,
+      "target_branch": "agent/e24-json-l1-indexed-lookup",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/e24-json-l1-indexed-lookup",
+        "crate:stillflow-connector-local-tabular"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_json_indexed_lookup.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/read_baseline.rs",
+        "docs/issues/e24-json-l1-indexed-lookup.md"
+      ],
+      "acceptance_keys": [
+        "e24-json-l1:exact-base-and-private-switch",
+        "e24-json-l1:semantic-parity-top-level-fields",
+        "e24-json-l1:reader-level-index-not-per-row",
+        "e24-json-l1:no-selected-set-or-framing-or-arrow",
+        "e24-json-l1:focused-10x100k-and-100x100k-ndjson",
+        "e24-json-l1:raw-3-rep-samples",
+        "e24-json-l1:lookup-kill-gate",
+        "e24-json-l1:no-public-api-or-default-change"
+      ],
+      "depends_on": [
+        "E24-B2JSON-A0"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-26T02:22:09Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Issue #124 after FOCUSED_M3_WEAK. Single-variable experiment: replace per-key linear schema.fields.iter().find with a reader-level prebuilt field index. Do not touch framing, Value/Visitor, selected-set, memchr, Arrow, Polars tail, or JSON array. Kill gate is FOCUSED_LOOKUP_WEAK / WIDE_ONLY / PROMOTE_CANDIDATE. Draft PR only.",
+      "notes": "Canonical Issue #124. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. Branch agent/e24-json-l1-indexed-lookup. 90m lease. Private non-default switch; legacy remains default. Change only top-level JSON field resolution in ProjectedObjectVisitor. Do not rebuild the index per row. Do not precompute selected BTreeSet. No cherry-pick from #102. Focused A/B: 10x100K and 100x100K NDJSON, warmup + 3 reps, WSL2 ext4. Draft only; no Ready/merge; no default-path flip; no Engine/Storage/#80/#91."
     }
   ],
   "locks": {}
