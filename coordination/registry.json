@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 146,
+  "revision": 147,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T09:41:21Z",
+  "updated_at": "2026-08-26T11:49:24Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1896,9 +1896,9 @@
     {
       "id": "O0-B2-A1",
       "title": "Isolated Engine-local schema lookup index experiment (issue #146)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1-w1",
       "target_issue": 146,
       "target_pr": null,
       "target_branch": "agent/o0-b2-a1-schema-lookup-index",
@@ -1925,9 +1925,9 @@
       "conflicts_with": [
         "O0-B1-A1"
       ],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-26T08:59:32Z",
+      "lease_expires_at": "2026-08-26T16:49:24Z",
+      "started_at": "2026-08-26T11:49:24Z",
+      "updated_at": "2026-08-26T11:49:24Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #146 after #109 A1 VERDICT BENCHMARK SUPPORTS FOLLOW-UP (last-field placement ~692x; component attribution 74-80 percent of wide preflight wall). Private default-off ColumnId->ordinal index proof.",
       "notes": "Private non-default feature engine-schema-lookup-index. Feature OFF retains current path exactly. ON adds an Engine-private ColumnId->ordinal lookup derived from an already-validated LogicalSchema instance; LogicalSchema stays the authoritative public/core representation. No stale-index tolerance: rebuild from exact new validated schema state on mutation. Authorized paths only preflight.rs, typing.rs (if required), Cargo.toml (feature decl). Semantic oracle before performance: OFF/ON equality on PreparedPlan schema outputs (expected_connector/scan_output/materialize_schema/target_schema), projected order, canonical serialized schema/fingerprint, EngineError variant+stable message+earliest failing position across sparse/dense/first/middle/last/mixed projections, unknown ColumnId positions, repeated/mixed expression references, project->filter->rules->project chains, F={64,512,2048,4096}, paused/bound failures; full stillflow-engine suite both modes. Any mismatch => SCHEMA_LOOKUP_INDEX_SEMANTIC_REJECT and stop. Focused benchmark reuses #109 shapes: control F=512,E=64 sparse projection; wide F=4096,E=256 mixed references; F=4096 sparse+near-full K; >=10 reps/mode/cell balanced interleaved with warmup; raw SHA-256 recorded. Gate (primary F=4096/E=256): any semantic differential => SEMANTIC_REJECT; <20 percent => FOCUSED_SCHEMA_LOOKUP_INDEX_WEAK; >=20 with control regression >5 => WIDE_ONLY; >=20 and control regression <=5 => PROMOTE_SCHEMA_LOOKUP_INDEX_CANDIDATE. Positive verdict authorizes only later independent acceptance/design-hardening. Forbidden: public LogicalSchema cache/index field, hash/fingerprint/serde changes, A2 incremental work, O0-B1 lowering cache or fusion, collect/materialization changes, #91 contact, connector/Storage/frontend/API changes, production flip or merge. Draft PR evidence handoff then stop."
@@ -2013,5 +2013,20 @@
       "notes": "Private non-default feature json-direct-projected-writer; Feature OFF retains exact current production path. serde_json RawValue permitted; local-tabular Cargo.toml may add serde_json/raw_value capability alongside preserve_order (capability-only); no new crate/dependency; Cargo.lock should remain unchanged - if it moves, stop and explain. Selected values captured as raw slices/bytes and validated through existing typed validation machinery at the same observable point (blocking: validation before advancing past keys wherever current path would fail there); duplicate detection at the same point before value acceptance; non-selected fields keep existing typed seed path; assembly in deterministic projection.schema order (semantic oracle is final tabular/schema/error behavior, NOT byte equality of the private intermediate). Document ON-path row scratch representation and prove bounded memory. Authorized paths only local-tabular src/read.rs + its Cargo.toml; do not modify json_stream.rs, inference, Engine, Storage, core logical schema types, frontend/API, workflow files, or #140; broader paths require maintainer rebind. Benchmark: WSL2 ext4 release build, exact base, OFF and ON built+warmed before timing, balanced interleaving, identical fixture bytes/logical schema both modes, every sample + raw SHA-256 recorded, never benchmark /mnt windows-drive as product evidence. Primary gate per issue body: 100 columns x 100k rows real projected NDJSON path. Positive result authorizes only an independent acceptance/design-hardening step - no production rewrite or default enablement. Lease 120 minutes."
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/o0-b2-a1-schema-lookup-index": {
+      "task_id": "O0-B2-A1",
+      "owner": "ox-alpha-o0b2a1-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-26T11:49:24Z",
+      "lease_expires_at": "2026-08-26T16:49:24Z"
+    },
+    "engine:stillflow-engine": {
+      "task_id": "O0-B2-A1",
+      "owner": "ox-alpha-o0b2a1-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-26T11:49:24Z",
+      "lease_expires_at": "2026-08-26T16:49:24Z"
+    }
+  }
 }
