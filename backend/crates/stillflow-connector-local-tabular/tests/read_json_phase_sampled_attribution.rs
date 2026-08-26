@@ -1,5 +1,6 @@
-//! E24-JSON-P1: sampled real-path NDJSON stage attribution.
-//! Requires `--features io-metrics`. Default crates stay uninstrumented.
+//! E24-JSON-P2: interleaved validity rerun of sampled NDJSON attribution.
+//! Instrumentation in `src/read.rs` must stay identical to PR #130.
+//! Requires `--features io-metrics`.
 
 #![cfg(feature = "io-metrics")]
 
@@ -20,7 +21,7 @@ use tempfile::TempDir;
 
 const SAMPLE_ENV: &str = "STILLFLOW_JSON_PHASE_SAMPLE";
 const METRICS_OUT_ENV: &str = "E24_IO_METRICS_OUT";
-const FOCUSED_REPS: usize = 3;
+const MEASURE_ORDER: [bool; 6] = [false, true, true, false, false, true];
 const OVERHEAD_LIMIT_PCT: f64 = 3.0;
 const COVERAGE_FLOOR: f64 = 0.80;
 const COVERAGE_CEILING: f64 = 1.15;
@@ -194,6 +195,57 @@ fn estimate_stage(sampled_ns: u64, sampled_rows: u64, total_rows: u64) -> u64 {
     }
 }
 
+fn estimate_from_delta(delta: &BTreeMap<String, u64>) -> BTreeMap<String, u64> {
+    let sampled_rows = delta.get("json_phase_sampled_rows").copied().unwrap_or(0);
+    let total_rows = delta.get("json_framed_rows").copied().unwrap_or(0);
+    let mut estimated = BTreeMap::new();
+    estimated.insert(
+        "estimated_frame_ns".to_string(),
+        estimate_stage(
+            delta
+                .get("json_phase_sampled_frame_ns")
+                .copied()
+                .unwrap_or(0),
+            sampled_rows,
+            total_rows,
+        ),
+    );
+    estimated.insert(
+        "estimated_project_validate_ns".to_string(),
+        estimate_stage(
+            delta
+                .get("json_phase_sampled_project_validate_ns")
+                .copied()
+                .unwrap_or(0),
+            sampled_rows,
+            total_rows,
+        ),
+    );
+    estimated.insert(
+        "estimated_reencode_ns".to_string(),
+        estimate_stage(
+            delta
+                .get("json_phase_sampled_reencode_ns")
+                .copied()
+                .unwrap_or(0),
+            sampled_rows,
+            total_rows,
+        ),
+    );
+    estimated.insert(
+        "exact_polars_decode_ns".to_string(),
+        delta
+            .get("json_phase_polars_decode_ns")
+            .copied()
+            .unwrap_or(0),
+    );
+    estimated.insert(
+        "exact_reorder_ns".to_string(),
+        delta.get("json_phase_reorder_ns").copied().unwrap_or(0),
+    );
+    estimated
+}
+
 fn overhead_pct(off: u128, on: u128) -> f64 {
     if off == 0 {
         0.0
@@ -212,13 +264,13 @@ fn classify_verdict(
     largest_share: f64,
 ) -> String {
     if overhead_10.abs() > OVERHEAD_LIMIT_PCT || overhead_100.abs() > OVERHEAD_LIMIT_PCT {
-        return "SAMPLED_ATTRIBUTION_INVALID_OVERHEAD".to_string();
+        return "INTERLEAVED_ATTRIBUTION_INVALID_OVERHEAD".to_string();
     }
     if sampled_10 < MIN_SAMPLED_ROWS || sampled_100 < MIN_SAMPLED_ROWS {
-        return "SAMPLED_ATTRIBUTION_INSUFFICIENT".to_string();
+        return "INTERLEAVED_ATTRIBUTION_INSUFFICIENT".to_string();
     }
     if coverage_100 < COVERAGE_FLOOR || coverage_100 > COVERAGE_CEILING {
-        return "SAMPLED_ATTRIBUTION_INCOMPLETE".to_string();
+        return "INTERLEAVED_ATTRIBUTION_INCOMPLETE".to_string();
     }
     if largest_share >= 0.40 {
         let stage = largest_stage
@@ -226,9 +278,9 @@ fn classify_verdict(
             .or_else(|| largest_stage.strip_prefix("exact_"))
             .unwrap_or(largest_stage)
             .to_ascii_uppercase();
-        return format!("SAMPLED_ATTRIBUTION_DOMINANT_{stage}");
+        return format!("INTERLEAVED_ATTRIBUTION_DOMINANT_{stage}");
     }
-    "SAMPLED_ATTRIBUTION_MIXED".to_string()
+    "INTERLEAVED_ATTRIBUTION_MIXED".to_string()
 }
 
 #[tokio::test]
@@ -241,7 +293,7 @@ async fn json_phase_sampled_attribution_focused() {
     let cases = [(10_usize, 100_000_usize), (100, 100_000)];
     for (cols, rows) in cases {
         let name = format!("p1_ndjson_{cols}c_{rows}r.ndjson");
-        eprintln!("[e24-json-p1] generating {name}");
+        eprintln!("[e24-json-p2] generating {name}");
         write_wide_ndjson(&root.join(&name), cols, rows);
     }
     let connection = connection(root);
@@ -253,9 +305,11 @@ async fn json_phase_sampled_attribution_focused() {
     for (cols, rows) in cases {
         let name = format!("p1_ndjson_{cols}c_{rows}r.ndjson");
         let asset = asset_named(&assets, &name);
-        eprintln!("[e24-json-p1] measuring {name}");
+        eprintln!("[e24-json-p2] measuring {name}");
 
         set_sampling(false);
+        ingest_once(&connection, &registry, &asset).await;
+        set_sampling(true);
         ingest_once(&connection, &registry, &asset).await;
 
         set_sampling(false);
@@ -270,76 +324,31 @@ async fn json_phase_sampled_attribution_focused() {
         let mut on_walls = Vec::new();
         let mut on_raw: Vec<BTreeMap<String, u64>> = Vec::new();
         let mut on_estimated: Vec<BTreeMap<String, u64>> = Vec::new();
+        let mut chronological = Vec::new();
 
-        for _ in 0..FOCUSED_REPS {
-            set_sampling(false);
+        for (index, sampling_on) in MEASURE_ORDER.into_iter().enumerate() {
+            set_sampling(sampling_on);
             let started = Instant::now();
             ingest_once(&connection, &registry, &asset).await;
-            off_walls.push(u128::from(
-                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            ));
-            snapshot = read_counter_snapshot(&metrics_out);
-        }
-
-        for _ in 0..FOCUSED_REPS {
-            set_sampling(true);
-            let started = Instant::now();
-            ingest_once(&connection, &registry, &asset).await;
-            on_walls.push(u128::from(
-                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            ));
+            let wall = u128::from(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
             let after = read_counter_snapshot(&metrics_out);
             let delta = counter_delta(&snapshot, &after);
             snapshot = after;
-            let sampled_rows = delta.get("json_phase_sampled_rows").copied().unwrap_or(0);
-            let total_rows = delta.get("json_framed_rows").copied().unwrap_or(0);
-            let mut estimated = BTreeMap::new();
-            estimated.insert(
-                "estimated_frame_ns".to_string(),
-                estimate_stage(
-                    delta
-                        .get("json_phase_sampled_frame_ns")
-                        .copied()
-                        .unwrap_or(0),
-                    sampled_rows,
-                    total_rows,
-                ),
-            );
-            estimated.insert(
-                "estimated_project_validate_ns".to_string(),
-                estimate_stage(
-                    delta
-                        .get("json_phase_sampled_project_validate_ns")
-                        .copied()
-                        .unwrap_or(0),
-                    sampled_rows,
-                    total_rows,
-                ),
-            );
-            estimated.insert(
-                "estimated_reencode_ns".to_string(),
-                estimate_stage(
-                    delta
-                        .get("json_phase_sampled_reencode_ns")
-                        .copied()
-                        .unwrap_or(0),
-                    sampled_rows,
-                    total_rows,
-                ),
-            );
-            estimated.insert(
-                "exact_polars_decode_ns".to_string(),
-                delta
-                    .get("json_phase_polars_decode_ns")
-                    .copied()
-                    .unwrap_or(0),
-            );
-            estimated.insert(
-                "exact_reorder_ns".to_string(),
-                delta.get("json_phase_reorder_ns").copied().unwrap_or(0),
-            );
-            on_raw.push(delta);
-            on_estimated.push(estimated);
+            let estimated = estimate_from_delta(&delta);
+            chronological.push(serde_json::json!({
+                "index": index,
+                "sampling": if sampling_on { "on" } else { "off" },
+                "wall_ms": wall,
+                "raw_counters": delta,
+                "estimated_ns": estimated,
+            }));
+            if sampling_on {
+                on_walls.push(wall);
+                on_raw.push(delta);
+                on_estimated.push(estimated);
+            } else {
+                off_walls.push(wall);
+            }
         }
         set_sampling(false);
 
@@ -387,6 +396,8 @@ async fn json_phase_sampled_attribution_focused() {
 
         cell_results.push(serde_json::json!({
             "fixture": { "format": "ndjson", "cols": cols, "rows": rows },
+            "schedule": ["off", "on", "on", "off", "off", "on"],
+            "chronological": chronological,
             "fingerprint_rows": off_fp.0,
             "off_wall_ms": off_walls,
             "on_wall_ms": on_walls,
