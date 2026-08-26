@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 129,
+  "revision": 130,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T05:24:36Z",
+  "updated_at": "2026-08-26T05:24:54Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1673,9 +1673,9 @@
     {
       "id": "X-C0-FIX-R1",
       "title": "Resolve ADR-004 export contract review blockers (issue #138 / PR #106)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "cursor-grok-xc0-fix-r1",
       "target_issue": 138,
       "target_pr": 106,
       "target_branch": "agent/issue-104-x-c0-export-contract",
@@ -1695,9 +1695,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-26T05:24:36Z",
+      "lease_expires_at": "2026-08-26T06:54:54Z",
+      "started_at": "2026-08-26T05:24:54Z",
+      "updated_at": "2026-08-26T05:24:54Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #138 after REQUEST_CHANGES on PR #106 @ 9ce1b7b7ea3207b63b8972a90d18c484e020134e (2 blocking findings). Docs-only fix of ADR-004; produces a NEW head, after which a fresh independent re-review is required. Verdicts do not carry across SHA.",
       "notes": "CLAIM only after re-fetching this registry and confirming branch:agent/issue-104-x-c0-export-contract is free (connector/engine locks irrelevant to this task but crate:stillflow-connector-local-tabular belongs to E24-JSON-P5 - do not touch it). Start exactly from PR #106 head 9ce1b7b7ea3207b63b8972a90d18c484e020134e and push fix commits to agent/issue-104-x-c0-export-contract. ONLY file may change: docs/architecture/adr-004-export-and-output-artifacts.md. Resolve exactly two blockers: (1) SS3 CSV/TSV quoting law vs normative table byte collision - amend the iff-law so an EMPTY string is always quoted (empty pair of quotes), null stays an unquoted empty field, header cells follow the same rule; state the two encodings can never collide; (2) SS6/SS7 crash-window recovery dead zone - require the export journal to record staged and rename-installed destination paths per export id with durable-before-rename ordering, and extend the recovery sweep to delete journaled destination residue of exports lacking a committed manifest, so an affected export id is free and retry starts from zero at destination level; tombstone remains applicable only to manifest-committed artifacts. Forbidden: Runtime/Rust source, connectors, Engine, Storage, API, Frontend, #91/E4-S2, manifest/lockfile changes, Ready, merge, issue closure. Production main 04966586192f8750a02790da988db71a28d82074 remains the base target. Default 90m lease. After push: DONE with result_head; independent re-review is a separate dispatch."
@@ -1717,6 +1717,13 @@
       "expected_head": null,
       "acquired_at": "2026-08-26T05:17:44Z",
       "lease_expires_at": "2026-08-26T06:53:06Z"
+    },
+    "branch:agent/issue-104-x-c0-export-contract": {
+      "task_id": "X-C0-FIX-R1",
+      "owner": "cursor-grok-xc0-fix-r1",
+      "expected_head": null,
+      "acquired_at": "2026-08-26T05:24:54Z",
+      "lease_expires_at": "2026-08-26T06:54:54Z"
     }
   }
 }
