@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 149,
+  "revision": 150,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T11:49:46Z",
+  "updated_at": "2026-08-26T11:49:58Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1599,9 +1599,9 @@
     {
       "id": "Q-C0-ACCEPT-R2",
       "title": "Independent re-review of ADR-003 after blocker fixes (issue #136 / PR #105)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-qc0acc-r1",
       "target_issue": 136,
       "target_pr": 105,
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
@@ -1622,9 +1622,9 @@
         "Q-C0-FIX-R1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-26T05:06:01Z",
+      "lease_expires_at": "2026-08-26T15:49:58Z",
+      "started_at": "2026-08-26T11:49:58Z",
+      "updated_at": "2026-08-26T11:49:58Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #136 after Q-C0-FIX-R1 produced PR #105 new head eb8408fc1525be5d2ba84c5a3712032e56bb0a37 resolving the three REQUEST_CHANGES blockers found at a3cc49a8538b85d4641709ac8a36ea9b51ae93f4. Verdicts do not carry across SHA; from-zero re-verification required.",
       "notes": "Read-only review; no locks required. CLAIM only after re-fetching the registry and verifying PR #105 headRefOid still equals eb8408fc1525be5d2ba84c5a3712032e56bb0a37 (stop on drift). Re-verify FROM ZERO: (1) run-id/determinism resolution coherence across SS2/SS7.4/SS9 (provenance-as-envelope-metadata, caller identity excluded from bodies/digests); (2) canonical encoding completeness and golden-digest computability (rational lowest-terms objects, integer rules, $float 16-digit uppercase hex, $date_days/$epoch_ms/$epoch_us temporal extrema, JSON escaping incl. lowercase \\u00xx, metric_path grammar, float enumeration incl. sum/mean); (3) infinite-width histogram totality branch. Plus the full original acceptance surface: anchor audit against base 04966586192f8750a02790da988db71a28d82074, internal consistency SS1-SS11, issue #103 charter coverage, downstream implementability; mechanical recomputation where possible (score vectors V1/V2, histogram rules incl. overflow branch, canonical-form demonstrability). Output exactly one terminal verdict at the bound head: APPROVE or REQUEST_CHANGES with blocking findings and section references. APPROVE states contract-only approval and does not authorize Q-R1 runtime until dependency gates are satisfied. No edits, Ready, merge, or issue closure."
