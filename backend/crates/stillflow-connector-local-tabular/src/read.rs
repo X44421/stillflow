@@ -849,6 +849,14 @@ impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
                 return Err(A::Error::custom("JSON row contains a duplicate field"));
             }
             if self.selected.contains(name.as_str()) {
+                #[cfg(feature = "json-selected-utf8-fused")]
+                if selected_utf8_fused_enabled() && matches!(field.data_type, LogicalType::Utf8) {
+                    let value = access.next_value_seed(SelectedUtf8Seed {
+                        nullable: field.nullable,
+                    })?;
+                    output.insert(name, value);
+                    continue;
+                }
                 let value = access.next_value::<Value>()?;
                 validate_json_value(&value, field).map_err(A::Error::custom)?;
                 output.insert(name, value);
@@ -862,6 +870,151 @@ impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
             }
         }
         Ok(output)
+    }
+}
+
+#[cfg(feature = "json-selected-utf8-fused")]
+const SELECTED_UTF8_FUSED_ENV: &str = "STILLFLOW_JSON_SELECTED_UTF8_FUSED";
+
+#[cfg(feature = "json-selected-utf8-fused")]
+fn selected_utf8_fused_enabled() -> bool {
+    match std::env::var(SELECTED_UTF8_FUSED_ENV) {
+        Ok(value) => {
+            value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("on")
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(feature = "json-selected-utf8-fused")]
+struct SelectedUtf8Seed {
+    nullable: bool,
+}
+
+#[cfg(feature = "json-selected-utf8-fused")]
+impl<'de> DeserializeSeed<'de> for SelectedUtf8Seed {
+    type Value = Value;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(SelectedUtf8Visitor {
+            nullable: self.nullable,
+        })
+    }
+}
+
+#[cfg(feature = "json-selected-utf8-fused")]
+struct SelectedUtf8Visitor {
+    nullable: bool,
+}
+
+#[cfg(feature = "json-selected-utf8-fused")]
+impl SelectedUtf8Visitor {
+    fn reject<E: DeError>() -> Result<Value, E> {
+        Err(E::custom("value has an incompatible logical type"))
+    }
+
+    fn null<E: DeError>(&self) -> Result<Value, E> {
+        if self.nullable {
+            Ok(Value::Null)
+        } else {
+            Err(E::custom("required field is null"))
+        }
+    }
+}
+
+#[cfg(feature = "json-selected-utf8-fused")]
+impl<'de> Visitor<'de> for SelectedUtf8Visitor {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON string matching the established Utf8 field")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(Value::String(value.to_owned()))
+    }
+
+    fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        self.visit_str(value)
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(Value::String(value))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        self.null()
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        self.null()
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(self)
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Self::reject()
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Self::reject()
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Self::reject()
+    }
+
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Self::reject()
+    }
+
+    fn visit_seq<A>(self, _access: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        Self::reject()
+    }
+
+    fn visit_map<A>(self, _access: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        Self::reject()
     }
 }
 

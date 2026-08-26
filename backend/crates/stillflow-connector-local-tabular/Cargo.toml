@@ -42,5 +42,9 @@ tokio-util.workspace = true
 # Private measurement-only feature for the E24-B2BASE ingestion baseline.
 # Never enabled by default; adds logical-byte/parser-invocation counters and a
 # test-binary dump side channel only. No dependency and no behavior change.
+# json-selected-utf8-fused is a private experiment: fused selected Utf8
+# deserialize+validate. Off by default; runtime also requires
+# STILLFLOW_JSON_SELECTED_UTF8_FUSED=1.
 [features]
 io-metrics = []
+json-selected-utf8-fused = []
