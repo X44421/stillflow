@@ -173,10 +173,14 @@ Reader-side evidence cited is X0-D0 §3.
 | NaN / ±inf | typed failure | typed failure | typed failure | typed failure |
 
 **CSV/TSV quoting law** **[Decision]**: a field is quoted if and only if it
-contains the delimiter, a double quote, LF, or CR. Inside quotes, double quotes
-are doubled. No other character triggers quoting. Header cells follow the same
-rule. This predicate is total and mechanical, so two correct encoders agree
-byte-for-byte.
+is empty or contains the delimiter, a double quote, LF, or CR. Inside quotes,
+double quotes are doubled. No other character triggers quoting. Header cells
+follow the same rule, so an empty header cell renders as `""`. This predicate
+is total and mechanical, so two correct encoders agree byte-for-byte. The law
+and the null/empty-string table above form one rule set: an **empty string**
+value is always rendered as the quoted pair `""`, while a **null** is always
+rendered as the unquoted empty field; the two encodings are byte-distinct in
+every CSV/TSV record and can never collide.
 
 **JSONL record law** **[Decision]**: one JSON object per line; fields appear
 exactly once each, in §4 column order; strings use minimal RFC 8259 escaping
@@ -279,8 +283,10 @@ destination file or artifact directory that already exists causes a typed
 failure. No truncation, replacement, suffixing, or move-aside occurs, closing
 the gap X0-D0 §4 records in the upload byte layer ("no create-new guard"). A
 name becomes publishable again only after its previous artifact is tombstoned
-and collected (§7). Staging directories are keyed by the export id; a staging
-collision is a typed failure, not a merge.
+and collected (§7). Residue left by a crashed, never-committed export is not
+an artifact and takes no tombstone: it is deleted by §7 recovery, after which
+the name is immediately publishable again. Staging directories are keyed by
+the export id; a staging collision is a typed failure, not a merge.
 
 **Export identity** **[Decision]**: every export carries a caller-injected UUID
 export id; nil is rejected; duplicate active ids fail typed — the same
@@ -307,16 +313,26 @@ rule 10); credential references stay references.
 **Publication is atomic and is the single visibility point** **[Decision]**:
 bytes are written to the Staging Area, fsynced, installed into position by
 rename, and only then does the Export Manifest commit make the set visible.
-Readers observe every file of a set or none — the ADR-001 invariant 6 discipline
-applied to exports. A failure before manifest commit leaves no visible
-artifact. There is no second publication path.
+The export journal is the crash ledger of this machine: before any destination
+file is installed by rename, a durable journal record naming the export id and
+that destination path must exist; such records are removed only by manifest
+commit or by recovery (below). Readers observe every file of a set or none —
+the ADR-001 invariant 6 discipline applied to exports. A failure before
+manifest commit leaves no visible artifact. There is no second publication
+path.
 
-**Recovery sweeps residue; recovery never publishes** **[Decision]**: stale
-staging directories and journal rows left by crashed exports are removed by a
-maintenance sweep analogous to `store.rs:recover` (X0-D0 §2.7), which acquires
-the maintenance gate excluding readers and publishers (X0-D0 §2.6). Recovery
-deletes; it never completes a half-written publication. After recovery, the
-affected export id is free, and a retry starts from zero.
+**Recovery sweeps residue; recovery never publishes** **[Decision]**: residue
+left by crashed exports is removed by a maintenance sweep analogous to
+`store.rs:recover` (X0-D0 §2.7), which acquires the maintenance gate excluding
+readers and publishers (X0-D0 §2.6). Swept residue comprises all three kinds:
+stale staging directories; journal rows of exports without a committed
+manifest; and every destination path recorded in such journals — including
+finalized files already renamed into position before the crash. Those files
+are pre-publication residue, not artifacts: recovery deletes them directly
+without tombstoning, because tombstones apply only to manifest-committed
+artifacts. Recovery deletes; it never completes a half-written publication.
+After recovery, the affected export id is free, its former destination paths
+are free, and a retry starts from zero at the destination level as well.
 
 **Retention is tombstone-first and explicit** **[Decision]**: deletion goes
 through tombstone (invisible to ordinary reads) followed by garbage collection
