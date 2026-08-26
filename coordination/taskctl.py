@@ -43,7 +43,7 @@ ALLOWED_STATUSES = {
     "running",
     "wait_maintainer",
 }
-ALLOWED_MODES = {"maintenance", "review", "write"}
+ALLOWED_MODES = {"maintenance", "review", "write", "measurement"}
 TERMINAL_STATUSES = {"cancelled_duplicate", "done"}
 CLAIMABLE_STATUSES = {"dispatched", "queued"}
 
