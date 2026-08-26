@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 150,
+  "revision": 151,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T11:49:58Z",
+  "updated_at": "2026-08-26T11:50:11Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1714,9 +1714,9 @@
     {
       "id": "X-C0-ACCEPT-R2",
       "title": "Independent re-review of ADR-004 after blocker fixes (issue #139 / PR #106)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-xc0acc-r1",
       "target_issue": 139,
       "target_pr": 106,
       "target_branch": "agent/issue-104-x-c0-export-contract",
@@ -1736,9 +1736,9 @@
         "X-C0-FIX-R1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-26T05:34:11Z",
+      "lease_expires_at": "2026-08-26T15:50:11Z",
+      "started_at": "2026-08-26T11:50:11Z",
+      "updated_at": "2026-08-26T11:50:11Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #139 after X-C0-FIX-R1 produced PR #106 new head 6e33a4099463f09ac8a65cd23bff02379913a75f resolving the two REQUEST_CHANGES blockers found at 9ce1b7b7ea3207b63b8972a90d18c484e020134e. Verdicts do not carry across SHA; from-zero re-verification required.",
       "notes": "Read-only review; no locks required. INDEPENDENCE BOUNDARY: the X-C0-FIX-R1 author session (cursor-grok-xc0-fix-r1) must not CLAIM this task. CLAIM only after re-fetching the registry and verifying PR #106 headRefOid still equals 6e33a4099463f09ac8a65cd23bff02379913a75f (stop on drift). Re-verify FROM ZERO: (1) SS3 quoting law fix - empty-string quoted pair vs null unquoted field byte-distinctness, header-cell rule, RFC 4180 subset consistency; (2) SS6/SS7 journaled recovery fix - durable-before-rename journal ordering, three-kind sweep scope covering rename-before-manifest crash windows, no-tombstone residue deletion, destination-level retry-from-zero, create-new policy coherence; plus the full original acceptance surface: issue #104 freeze scope, anchor audit against base 04966586192f8750a02790da988db71a28d82074, deterministic encoding/ordering, filesystem safety, bounds interplay, digest/provenance, atomic publication/recovery invariants, cancellation semantics. Mechanical recomputation where possible (digest examples, recovery state-machine invariants). Output exactly one terminal verdict at the bound head: APPROVE or REQUEST_CHANGES with blocking findings and section references. APPROVE states contract-only approval and does not authorize X-R1 runtime until dependency gates are satisfied. No edits, Ready, merge, or issue closure."
