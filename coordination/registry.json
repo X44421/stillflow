@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 143,
+  "revision": 144,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T08:22:09Z",
+  "updated_at": "2026-08-26T08:28:20Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1825,7 +1825,7 @@
     {
       "id": "E24-JSON-A1",
       "title": "Architecture gate for removing the generic Value/Map intermediate",
-      "status": "running",
+      "status": "done",
       "mode": "design",
       "owner": "cursor-grok-e24json-a1",
       "target_issue": 143,
@@ -1848,12 +1848,16 @@
         "E24-JSON-P6"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T09:52:09Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-26T08:22:09Z",
-      "updated_at": "2026-08-26T08:22:09Z",
+      "updated_at": "2026-08-26T08:28:20Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #143 created after E24-JSON-P6 completed with PROFILER_MIXED_WITHIN_PROJECT_VALIDATE. Architecture/design-only gate to choose one credible way to remove or materially reduce the generic Value/Map intermediate without overclaiming P4/P5/P6/M1/M2/M3 evidence. No implementation is authorized.",
-      "notes": "Canonical Issue #143. CLAIM only after re-fetching registry/main, confirming main still equals 04966586192f8750a02790da988db71a28d82074, E24-JSON-P6 remains done, and PR #140 remains Draft/unmerged. Mode design / repository read-only; target_branch null; locks=[]; lease 120m. Audit the exact default projected NDJSON path and evaluate four classes: streaming projected JSON writer, streaming typed row/builder, end-to-end typed decode removing reencode+second parse, or retain current path. Preserve projection order, duplicate/unknown/missing/null behavior, selected and non-selected logical validation, nested types, error vocabulary/order, deterministic fingerprints/output, batch/byte/memory ceilings, cancellation/deadline, Arrow public boundary and Polars privacy. Treat P4 as CPU-sample coarse hotspot, P5 as narrow Utf8-negative evidence, P6 as mixed attribution, M1 as checksum-only ceiling, M2 as relevant reencode/reparse tax, and M3 as negative evidence for tail-only Arrow substitution. Do not sum profiler buckets into a speedup claim. Terminal verdict exactly one of ARCHITECTURE_DIRECT_PROJECTED_WRITER / ARCHITECTURE_TYPED_BATCH_BUILDER / ARCHITECTURE_END_TO_END_TYPED_DECODE / ARCHITECTURE_RETAIN_CURRENT_PATH / ARCHITECTURE_INCONCLUSIVE. A positive verdict authorizes only a later separately dispatched private/default-off implementation experiment. No repository writes, branch/PR, benchmarks, fused visitor work, #140 Ready/merge/close, Engine/Storage/#91/E4-S2/O0-B2-A2 contact. O0-B2-A2 is now done and its locks are released; this task remains read-only and locks=[]. Stop after Issue report."
+      "notes": "Canonical Issue #143. CLAIM only after re-fetching registry/main, confirming main still equals 04966586192f8750a02790da988db71a28d82074, E24-JSON-P6 remains done, and PR #140 remains Draft/unmerged. Mode design / repository read-only; target_branch null; locks=[]; lease 120m. Audit the exact default projected NDJSON path and evaluate four classes: streaming projected JSON writer, streaming typed row/builder, end-to-end typed decode removing reencode+second parse, or retain current path. Preserve projection order, duplicate/unknown/missing/null behavior, selected and non-selected logical validation, nested types, error vocabulary/order, deterministic fingerprints/output, batch/byte/memory ceilings, cancellation/deadline, Arrow public boundary and Polars privacy. Treat P4 as CPU-sample coarse hotspot, P5 as narrow Utf8-negative evidence, P6 as mixed attribution, M1 as checksum-only ceiling, M2 as relevant reencode/reparse tax, and M3 as negative evidence for tail-only Arrow substitution. Do not sum profiler buckets into a speedup claim. Terminal verdict exactly one of ARCHITECTURE_DIRECT_PROJECTED_WRITER / ARCHITECTURE_TYPED_BATCH_BUILDER / ARCHITECTURE_END_TO_END_TYPED_DECODE / ARCHITECTURE_RETAIN_CURRENT_PATH / ARCHITECTURE_INCONCLUSIVE. A positive verdict authorizes only a later separately dispatched private/default-off implementation experiment. No repository writes, branch/PR, benchmarks, fused visitor work, #140 Ready/merge/close, Engine/Storage/#91/E4-S2/O0-B2-A2 contact. O0-B2-A2 is now done and its locks are released; this task remains read-only and locks=[]. Stop after Issue report.",
+      "completed_at": "2026-08-26T08:28:20Z",
+      "result_head": null,
+      "ci_url": null,
+      "completion_note": "VERDICT: ARCHITECTURE_DIRECT_PROJECTED_WRITER. Full report posted on #143: source audit at main@04966586 (preserve_order index-map finding corrected the determinism narrative - frame equality comes from Polars named-matching, not encoded key order); candidates A/B/C/D evaluated against the nine-criterion decision matrix; chosen design removes Map reconstruction + generic Value allocs + full-row re-encode with schema-order assembly and bounded slot buffers, retains Polars parse (M3 negative evidence respected, P5 negative result not extended, P6 buckets not summed). Authorizes exactly one later private/default-off implementation experiment."
     },
     {
       "id": "O0-B2-A2-ACCEPT",
