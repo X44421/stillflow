@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 119,
+  "revision": 120,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T04:47:44Z",
+  "updated_at": "2026-08-26T04:49:26Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1580,9 +1580,9 @@
         "E24-JSON-P3"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-26T06:17:44Z",
+      "lease_expires_at": "2026-08-26T06:19:26Z",
       "started_at": "2026-08-26T04:47:44Z",
-      "updated_at": "2026-08-26T04:47:44Z",
+      "updated_at": "2026-08-26T04:49:26Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #135 after profiler environment readiness. External perf cpu-clock sampling on the uninstrumented default JSON path at main@04966586. No repository writes, no branch lock, crate lock only during the profile run.",
       "notes": "Canonical Issue #135. CLAIM only after re-fetching the registry and confirming crate:stillflow-connector-local-tabular is free. Bind exactly to main@04966586192f8750a02790da988db71a28d82074. No branch lock. Default features only. External driver outside the repo. perf record -e cpu-clock -F 99 --call-graph dwarf. Do not change sysctl or install another profiler. Primary 100x100K NDJSON, batch 4096, warmup outside profile, at least 3 profiled ingests. Usable samples <5000 or unresolved >25% => PROFILER_INCOMPLETE. Single bucket >=40% => PROFILER_DOMINANT_<STAGE>; else PROFILER_MIXED. CPU sample shares, not wall-time. Do not interpret P0/P1/P2/P3 stage shares. No merge, no default-path flip, no Engine/Storage/#80/#91."
@@ -1601,7 +1601,7 @@
       "owner": "cursor-grok-e24json-p4",
       "expected_head": null,
       "acquired_at": "2026-08-26T04:47:44Z",
-      "lease_expires_at": "2026-08-26T06:17:44Z"
+      "lease_expires_at": "2026-08-26T06:19:26Z"
     }
   }
 }
