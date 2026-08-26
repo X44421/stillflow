@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 116,
+  "revision": 117,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T04:32:51Z",
+  "updated_at": "2026-08-26T04:47:03Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1521,9 +1521,9 @@
     {
       "id": "Q-C0-FIX-R1",
       "title": "Resolve ADR-003 architecture review blockers (issue #132 / PR #105)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "cursor-grok-qc0-fix-r1",
       "target_issue": 132,
       "target_pr": 105,
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
@@ -1544,13 +1544,21 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-26T04:32:51Z",
+      "lease_expires_at": "2026-08-26T06:17:03Z",
+      "started_at": "2026-08-26T04:47:03Z",
+      "updated_at": "2026-08-26T04:47:03Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #132 after REQUEST_CHANGES on PR #105 @ a3cc49a8538b85d4641709ac8a36ea9b51ae93f4 (3 blocking findings). Docs-only fix of ADR-003; produces a NEW head, after which a fresh independent re-review is required. Old REQUEST_CHANGES does not carry across SHA.",
       "notes": "CLAIM only after re-fetching this registry and confirming branch:agent/issue-103-q-c0-profiling-finding-contract is free. Start exactly from PR #105 head a3cc49a8538b85d4641709ac8a36ea9b51ae93f4 and push fix commits to agent/issue-103-q-c0-profiling-finding-contract. ONLY file may change: docs/architecture/adr-003-profiling-quality-and-findings.md. Resolve exactly three blockers: (1) determinism law vs caller-supplied run identifier inside canonical bodies/digests (pin inputs or exclude identity fields); (2) canonical form underdetermination (Date/Timestamp min/max encoding, rational two-integer object rules incl. reduction/sign, negative integers, $float prefix/width, JSON escaping, metric_path dialect); (3) float histogram width-overflow NaN branch (pin infinite-width bucket_index semantics). Forbidden: Runtime/Rust source, connectors, Engine, Storage, API, Frontend, #91/E4-S2, manifest/lockfile changes, Ready, merge, issue closure. Production main must remain 04966586192f8750a02790da988db71a28d82074 as merge-base target. Default 90m lease. After push: post DONE with result_head; re-review is a separate dispatch."
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/issue-103-q-c0-profiling-finding-contract": {
+      "task_id": "Q-C0-FIX-R1",
+      "owner": "cursor-grok-qc0-fix-r1",
+      "expected_head": null,
+      "acquired_at": "2026-08-26T04:47:03Z",
+      "lease_expires_at": "2026-08-26T06:17:03Z"
+    }
+  }
 }
