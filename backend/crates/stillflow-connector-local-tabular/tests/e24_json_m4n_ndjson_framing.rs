@@ -108,7 +108,7 @@ fn copy_frame(bytes: &[u8]) -> (u64, usize, usize) {
 fn slice_frame(bytes: &[u8]) -> (u64, usize, usize) {
     let mut checksum = 0_u64;
     let mut rows = 0_usize;
-    let mut copied = 0_usize;
+    let copied = 0_usize;
     let mut start = 0_usize;
     for (index, byte) in bytes.iter().enumerate() {
         if *byte == b'\n' {
@@ -201,7 +201,11 @@ fn verdict(gain: f64) -> &'static str {
     }
 }
 
-fn bench<F>(bytes: &[u8], expected: (u64, usize), mut work: F) -> (Vec<Duration>, Vec<u64>, Vec<u64>)
+fn bench<F>(
+    bytes: &[u8],
+    expected: (u64, usize),
+    mut work: F,
+) -> (Vec<Duration>, Vec<u64>, Vec<u64>)
 where
     F: FnMut(&[u8]) -> (u64, usize, usize),
 {
