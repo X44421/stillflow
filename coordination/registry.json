@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 92,
+  "revision": 93,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-26T01:57:12Z",
+  "updated_at": "2026-08-26T01:57:33Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1165,9 +1165,9 @@
     {
       "id": "E24-B2JSON-A0",
       "title": "Direct Arrow JSON batch prototype",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "cursor-grok-e24json-m3",
       "target_issue": 101,
       "target_pr": null,
       "target_branch": "agent/issue-101-e24-b2json-direct-arrow",
@@ -1202,9 +1202,9 @@
         "T100-MERGE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-08-26T03:27:33Z",
       "started_at": "2026-08-25T02:13:25Z",
-      "updated_at": "2026-08-26T01:57:12Z",
+      "updated_at": "2026-08-26T01:57:33Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Maintainer explicitly authorized the previously discussed bounded JSON optimization experiment after the accepted E24 baseline was merged. The experiment isolates the connector-local JSON/NDJSON decode tail, retains framing and logical validation, and does not transition E23-OPT.",
       "notes": "Canonical Issue #101. CLAIM must re-fetch registry/main and bind exactly to main@04966586192f8750a02790da988db71a28d82074; acquire both declared locks before creating agent/issue-101-e24-b2json-direct-arrow. Use a 720m lease (renew before expiry) because the paired 8-cell x 30-repetition benchmark can exceed the default lease. Risk-high frozen contract is Issue #101; mirror it at the authorized docs/issues path before implementation and link it from the Draft PR. Add only arrow-json 59 via the workspace plus private non-default feature json-arrow-direct. Preserve JsonObjectStream and the authoritative ProjectedObjectVisitor/ValidateFieldSeed/LogicalValueVisitor validation; json_stream.rs is deliberately outside scope. Direct mode must eliminate JSON re-encode, Polars JSON decode, DataFrame and C-FFI bridge while emitting bounded Arrow RecordBatch values; legacy mode remains available on the same head for A/B. Persist raw wall_samples_ms and publish SHA-256. Both PROMOTE CANDIDATE and CLOSE EXPERIMENT are valid completions. Stop on semantic/error/stream drift, unbounded buffering, public-contract change, second dependency, out-of-scope path, unsafe, or any Engine/Storage/#80/#91 need. Draft PR only; no Ready/merge, no production adoption, no E23-OPT transition. Release locks and stop for a separately dispatched independent exact-head acceptance.",
@@ -1290,5 +1290,20 @@
       "completion_note": "Docs-only contract freeze delivered by agent-c-xc0 at exact base main@04966586192f8750a02790da988db71a28d82074: single new file docs/architecture/adr-004-export-and-output-artifacts.md (+489 lines), modeled on ADR-002 structure with 40 [Decision]-marked rules. Freezes committed-Snapshot-only input rules with read_batches integrity gate (§2); CSV/TSV/JSONL/Parquet encoding law incl. RFC4180/RFC8259 escaping, UTC-RFC3339 time, null vs empty-string table, NaN/binary fail-closed (§3); LogicalSchema column order + partition-sequence row order (§4); seven hard bounds rows 10M / bytes 8GiB / file 2GiB / partitions 1024 / deadline 600s / staging 16GiB / publishers 4 (§5); absolute no-follow Allowed Roots, strict filename grammar, create-new overwrite policy (§6); SHA-256 per-file+set digest, versioned Export Manifest provenance, atomic stage→rename→manifest-commit publication, tombstone-first retention, recovery-sweeps-never-publishes (§7); cooperative checkpoints, nothing-visible-on-cancel, deterministic retry (§8); Instruction/Chat JSONL explicitly out of scope until independent typed-schema approval (§9). All eight acceptance keys map to sections in the document's Verification section. Evidence: PR #106 Draft (https://github.com/X44421/stillflow/pull/106), head 9ce1b7b7ea3207b63b8972a90d18c484e020134e, CI run 32815091597 all 7 checks green. No runtime implementation, no crate/API change, no E4/#91 action; PR remains Draft; independent architecture acceptance is a separate dispatch."
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/issue-101-e24-b2json-direct-arrow": {
+      "task_id": "E24-B2JSON-A0",
+      "owner": "cursor-grok-e24json-m3",
+      "expected_head": null,
+      "acquired_at": "2026-08-26T01:57:33Z",
+      "lease_expires_at": "2026-08-26T03:27:33Z"
+    },
+    "crate:stillflow-connector-local-tabular": {
+      "task_id": "E24-B2JSON-A0",
+      "owner": "cursor-grok-e24json-m3",
+      "expected_head": null,
+      "acquired_at": "2026-08-26T01:57:33Z",
+      "lease_expires_at": "2026-08-26T03:27:33Z"
+    }
+  }
 }
