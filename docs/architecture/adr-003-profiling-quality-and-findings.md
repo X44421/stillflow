@@ -129,7 +129,9 @@ byte-identical DatasetProfile content, identical findings, identical scores,
 and identical canonical artifact bodies and digests. No wall-clock, hostname,
 locale, load, thread count, hash-map iteration order, or environmental value
 may influence any frozen output. Where this ADR resolves an ordering question,
-the resolution is total (§5–§6).
+the resolution is total (§5–§6). Caller identity is not an input: the
+caller-supplied run identifier (§7.4) travels as envelope metadata outside
+every canonical body (§9), so it never participates in digested content.
 
 ## 3. ProfileRequest and ProfilePolicy bounds
 
@@ -312,6 +314,16 @@ are exact integers; the frozen edge inputs (`min`, `max`, `width`) are
 recorded in the profile in the §9 bit-exact form, so bucket membership is
 recomputable and checkable from the artifact alone.
 
+Infinite-width branch **[Decision]**: when `max − min` overflows the f64
+range, `width = +∞` and implementations must special-case before evaluating
+the general formula: `bucket_index(v) = N − 1` when `v = max`, and
+`bucket_index(v) = 0` otherwise (every finite `v − min` divided by +∞ yields
++0.0, whose floor is 0). The general formula
+`min(N − 1, floor((v − min) / width))` is invoked only when `width` is
+finite, so a NaN intermediate can never arise and the mapping is total and
+implementation-independent. All comparisons in this subsection operate on
+finite floats only.
+
 Float sums and means **[Decision]**: naive sequential f64 accumulation is
 forbidden because it depends on arrival partitioning and violates the §2
 determinism law across batch boundaries. Float `sum`/`mean` must be computed
@@ -433,7 +445,11 @@ contract version (`PROFILING_CONTRACT_VERSION`); plan fingerprint
 (`plan.rs:PLAN_FINGERPRINT_ALGORITHM`) when the profiled dataset derives from
 a plan; for AiProposal findings, model/effect identity per ADR-002 §8. Wall-
 clock timestamps are envelope metadata, never provenance-block members and
-never inside canonical artifact bodies (§9).
+never inside canonical artifact bodies (§9). The provenance block itself is
+likewise envelope metadata: it is stored beside the artifact but excluded
+from every canonical body and digest input (§9), so two executions identical
+under the §2 law produce identical canonical bodies and digests even when
+their run identifiers differ.
 
 Detector definitions — which conditions fire which findings at which
 severities — are Q-R2 scope. This section freezes the output shape, category
@@ -497,29 +513,58 @@ remains non-authoritative.
 
 ## 9. Profile/Quality artifact canonical digest
 
-Artifact bodies **[Decision]**: a `profile_report.v1` body contains one
-DatasetProfile (§5–§6) plus provenance (§7.4); a `quality_report.v1` body
+Artifact bodies **[Decision]**: a `profile_report.v1` body contains exactly
+one DatasetProfile (§5–§6) and nothing else; a `quality_report.v1` body
 contains the QualityReport — findings (§7), score with
 `QUALITY_SCORE_VERSION`, `completeness`, `missing_components` (§8) — plus the
 referenced `profile_report.v1` canonical digest. Both carry
 `artifact_type`, `artifact_body_version = 1`, and
-`PROFILING_CONTRACT_VERSION`.
+`PROFILING_CONTRACT_VERSION`. Provenance (§7.4) — including the
+caller-supplied run identifier — is envelope metadata persisted beside the
+body and is excluded from every canonical body and digest input, exactly like
+wall-clock timestamps.
 
 Canonical form **[Decision]**: UTF-8 JSON with lexicographically sorted object
-keys (Unicode code point order), no insignificant whitespace, integers as
-plain decimals (no leading zeros, no `+`), rationals as two-integer objects,
-enums as their exact string names, and every float-domain value (min/max/
-width/histogram edge inputs) represented as
-`{"$float": "<uppercase hex of big-endian IEEE-754 bit pattern>"}`. Canonical
-bodies contain no other floats, no map-order-dependent sequences, and no
-wall-clock fields.
+keys (Unicode code point order), no insignificant whitespace. Scalar encodings
+are pinned exactly:
+
+- Integers: plain decimal digits with an optional single leading `-`; no `+`
+  sign, no leading zeros (`0` itself allowed).
+- Rationals: exactly `{"numerator": <integer>, "denominator": <positive
+  integer>}`, always in lowest terms (gcd = 1); the sign belongs to the
+  numerator; zero is `{"numerator": 0, "denominator": 1}`.
+- Enums: their exact string names.
+- Floats — every float-domain value (`min`/`max`/`sum`/`mean`/`width`/
+  histogram edge inputs): `{"$float": "<uppercase hexadecimal>"}` where the
+  string is exactly 16 uppercase hex digits with no `0x` prefix, encoding the
+  big-endian IEEE-754 binary64 bit pattern (so `-0.0` would render as
+  `"8000000000000000"`). Profiling records `min`/`max`/`sum`/`mean` after the
+  §6.1 `-0.0 → +0.0` normalization, so `-0.0` cannot occur in v1 artifacts;
+  the 16-digit rule remains total for any float-domain value.
+- Temporal extrema: Date values encode as `{"$date_days": <plain integer days
+  since 1970-01-01>}`; Timestamp values encode as `{"$epoch_ms": <integer>}`
+  or `{"$epoch_us": <integer>}` matching the column's logical unit. String or
+  locale-dependent formatting is never used.
+- JSON strings: escape only `"`, `\`, and code points U+0000–U+001F; use the
+  short escapes `\b \t \n \f \r` where they apply, otherwise `\u00xx` with
+  lowercase hex digits; every other character is emitted directly as UTF-8,
+  never as surrogate escapes.
+- `metric_path`: a dot-separated sequence of exact canonical-body member
+  names (case-sensitive); v1 defines no indexed, bracketed, or wildcard
+  segments.
+
+Canonical bodies contain no other floats, no map-order-dependent sequences,
+and no wall-clock fields.
 
 Digest **[Decision]**: `canonical_digest = lowercase_hex(SHA-256(canonical
 UTF-8 bytes))`. Envelope metadata — timestamps, storage locations, host or
-environment info — lives outside the canonical body and is excluded from the
-digest. Identical inputs therefore produce byte-identical bodies and identical
-digests (§2 law); golden-fixture equality tests are the Q-R1/Q-R2 acceptance
-mechanism.
+environment info, and the §7.4 provenance block including the run identifier —
+lives outside the canonical body and is excluded from the digest. Identical
+inputs therefore produce byte-identical bodies and identical digests (§2 law);
+golden-fixture equality tests are the Q-R1/Q-R2 acceptance mechanism. Golden
+fixtures pin exact canonical bytes and digests for fixed §2 input triples
+under one documented run identifier; inter-producer convergence follows from
+the pinned rules above, not from fixtures.
 
 Ownership note **[Decision]**: writers, storage tables, retention, and read
 APIs for these artifacts do not exist and are not created here; artifact
