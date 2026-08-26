@@ -1,20 +1,51 @@
 use stillflow_core::{
-    BinaryOperator, Expr, LogicalSchema, LogicalType, ScalarValue, TimeUnit, UnaryOperator,
+    BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue,
+    TimeUnit, UnaryOperator,
 };
 
 use crate::error::EngineError;
 
+/// Abstraction over `ColumnId -> field` resolution used by the preflight
+/// expression/type-resolution helpers.
+///
+/// The default backend is the authoritative [`LogicalSchema`] itself, whose
+/// lookup is the unchanged linear scan over ordered fields. The private
+/// `engine-schema-lookup-index` feature supplies a second backend (an
+/// Engine-private ordinal index derived from an already-validated schema
+/// instance); both backends return the identical field for any valid schema
+/// because validated schemas have unique column ids. This type stays private
+/// to the engine crate and never appears in public signatures.
+pub(crate) trait ColumnLookup {
+    fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField>;
+}
+
+impl ColumnLookup for LogicalSchema {
+    fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField> {
+        self.field(id)
+    }
+}
+
 pub(crate) fn type_check_expr(
     expr: &Expr,
     schema: &LogicalSchema,
+) -> Result<LogicalType, EngineError> {
+    type_check_expr_in(expr, schema)
+}
+
+pub(crate) fn type_check_expr_in<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
 ) -> Result<LogicalType, EngineError> {
     expr.validate_shape()
         .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
     infer_type(expr, schema)
 }
 
-pub(crate) fn require_boolean(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
-    match type_check_expr(expr, schema)? {
+pub(crate) fn require_boolean_in<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
+) -> Result<(), EngineError> {
+    match type_check_expr_in(expr, schema)? {
         LogicalType::Boolean => Ok(()),
         _ => Err(EngineError::TypeError("predicate must be boolean")),
     }
@@ -88,10 +119,15 @@ pub(crate) fn reject_paused_type(data_type: &LogicalType) -> Result<(), EngineEr
     }
 }
 
-fn infer_type(expr: &Expr, schema: &LogicalSchema) -> Result<LogicalType, EngineError> {
+fn infer_type<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
+) -> Result<LogicalType, EngineError> {
     match expr {
         Expr::Column(id) => {
-            let field = schema.field(*id).ok_or(EngineError::UnknownColumn(*id))?;
+            let field = schema
+                .lookup_field(*id)
+                .ok_or(EngineError::UnknownColumn(*id))?;
             reject_paused_type(&field.data_type)?;
             Ok(field.data_type.clone())
         }
@@ -105,7 +141,7 @@ fn infer_type(expr: &Expr, schema: &LogicalSchema) -> Result<LogicalType, Engine
             operator: UnaryOperator::Not,
             expression,
         } => {
-            require_boolean(expression, schema)?;
+            require_boolean_in(expression, schema)?;
             Ok(LogicalType::Boolean)
         }
         Expr::Unary {
@@ -158,11 +194,11 @@ fn infer_type(expr: &Expr, schema: &LogicalSchema) -> Result<LogicalType, Engine
     }
 }
 
-fn infer_binary(
+fn infer_binary<L: ColumnLookup + ?Sized>(
     operator: BinaryOperator,
     left: &Expr,
     right: &Expr,
-    schema: &LogicalSchema,
+    schema: &L,
 ) -> Result<LogicalType, EngineError> {
     let left_type = infer_type(left, schema)?;
     let right_type = infer_type(right, schema)?;
