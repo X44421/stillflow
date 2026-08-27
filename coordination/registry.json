@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 168,
+  "revision": 169,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T01:27:43Z",
+  "updated_at": "2026-08-27T01:27:56Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2071,13 +2071,13 @@
     {
       "id": "E24-JSON-A2-ACCEPT",
       "title": "Independent acceptance of the direct projected JSON writer experiment (PR #150)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-e24a2acc-r1",
       "locks": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-27T01:35:00Z",
+      "lease_expires_at": "2026-08-27T06:27:56Z",
+      "started_at": "2026-08-27T01:27:56Z",
+      "updated_at": "2026-08-27T01:27:56Z",
       "target_pr": 150,
       "target_branch": "agent/e24-json-a2-direct-projected-writer",
       "expected_head": "e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac",
