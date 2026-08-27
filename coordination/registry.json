@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 167,
+  "revision": 168,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T01:35:00Z",
+  "updated_at": "2026-08-27T01:27:43Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2037,13 +2037,13 @@
     {
       "id": "O0-B2-A1-ACCEPT",
       "title": "Independent acceptance of the A1 schema lookup index experiment (PR #149)",
-      "status": "dispatched",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1acc-r1",
       "locks": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-27T01:35:00Z",
+      "lease_expires_at": "2026-08-27T06:27:43Z",
+      "started_at": "2026-08-27T01:27:43Z",
+      "updated_at": "2026-08-27T01:27:43Z",
       "target_pr": 149,
       "target_branch": "agent/o0-b2-a1-schema-lookup-index",
       "expected_head": "2345055342b24874146230c69d049339a7d3a77d",
