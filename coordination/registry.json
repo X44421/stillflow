@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 180,
+  "revision": 181,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2194,6 +2194,42 @@
       "result_head": "04966586192f8750a02790da988db71a28d82074",
       "ci_url": null,
       "completion_note": "TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM @ baseline 0496658 (diagnosis-only; zero repo changes; branch agent/ts-151-diag pushed as empty pointer). Minimal Polars JsonReader with correct explicit Datetime(ms) reproduces the x1000 shift (raw 1709168523000000 for 2024-02-29T01:02:03); mu-scaled raws regardless of declared unit => no StillFlow fix, no /1000 patch (contract). Connector OFF and #150 ON emit identical shifted raws (parity confirmed); Arrow ms->us scaling correct (rung 5). Verdict + reproducer + recommendation: https://github.com/X44421/stillflow/issues/151#issuecomment-5434509128. Locks never acquired; lease released."
+    },
+    {
+      "id": "O0-B2-A1-PROD-ACCEPT",
+      "title": "Independent production acceptance of the A1 schema lookup index (PR #154, issue #155)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 155,
+      "target_pr": 154,
+      "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": "7bf8360193909ff16b20879479d69978806eb397",
+      "locks": [],
+      "paths": [
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "o0b2a1prod-accept:scope-and-fifth-file-audited",
+        "o0b2a1prod-accept:stale-index-release-structural-proof",
+        "o0b2a1prod-accept:policy-estimator-audit",
+        "o0b2a1prod-accept:semantic-oracle-byte-identical-fresh",
+        "o0b2a1prod-accept:gates-rerun-at-head",
+        "o0b2a1prod-accept:fresh-multi-window-performance",
+        "o0b2a1prod-accept:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1-PROD"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T05:46:46Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "Productionization verdict PROMOTE_SCHEMA_LOOKUP_INDEX_PRODUCTION_CANDIDATE @ PR #154 head 7bf8360. Stricter than experiment acceptance: production architecture audit (release-mode stale-index safety, served-lookup estimator, single-path maintainability, scope incl. the .gitignore-worktree fifth file) + fresh semantic oracle + fresh multi-window performance gates.",
+      "notes": "Independent read-only review per issue #155. Exact-head binding 7bf8360193909ff16b20879479d69978806eb397 (re-fetch before claim and before verdict; stop on drift). Scope audit incl. the fifth changed file (.gitignore-worktree) - must be judged explicitly, not ignored; unexpected scope is blocking. Stale-index structural proof for RELEASE mode (debug assertions supplemental only); if stale state merely unlikely => REQUEST_CHANGES. Estimator audit: R must be exact for every reachable preflight shape (authorized projection 2K/3K, filter/FilterRows, derive, column rules, chains, repeated refs, zero-ref steps, error paths); policy must never change semantics/order/determinism/bounds; new-variant bypass must be mechanically guarded (exhaustive matches/tests). Semantic differential: fresh baseline-main vs 7bf8360 external oracle byte-identical + in-crate linear/indexed/production battery + fixed-seed property suite determinism check. Gates at exact head: fmt, workspace clippy -D warnings, engine suite, workspace suite, git diff --check base..HEAD (rerun, do not reuse author claims). Fresh performance: release binaries built for this review (do not reuse author samples), WSL2 ext4, warm, exclusive flock, interleaved A/B, >=3 windows x >=20 reps short cells, per-window P50 + aggregate P50/P95, A/A noise floor for sub-ms controls; gates: primary F=4096 full >=20%, bridge >=20%, no representative control >5% multi-window median, F=4096 sparse consistent with linear-route policy (source proof) with timing noise not blocking. Maintainability: new expr/rule variant must not compile while forgetting counting; new mutation must not compile while bypassing rebuild; no silent linear/production divergence; one ownership model. Verdict exactly one: APPROVE_SCHEMA_LOOKUP_INDEX_PRODUCTION | REQUEST_CHANGES (with file/function/test refs; distinguish code vs evidence blockers). Positive verdict certifies A1 for later A1/A2 interaction study only - no Ready/merge/default enablement. #91 HOLD zero contact; PR #144 untouched. Lease 120 minutes. AGENT-SAFETY-NORMS binding.",
+      "canonical_issue": 155
     }
   ],
   "locks": {}
