@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 173,
+  "revision": 174,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2113,6 +2113,79 @@
       "result_head": "e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac",
       "ci_url": null,
       "completion_note": "APPROVE_DIRECT_PROJECTED_WRITER_CANDIDATE_CONFIRMED at e9a4fa6 — all four cells independently reproduced (+39.2/+43.4/+18.3/+41.2), RSS delta mechanism explained; https://github.com/X44421/stillflow/pull/150#issuecomment-5433314895"
+    },
+    {
+      "id": "O0-B2-A1-PROD",
+      "title": "Productionize Engine-local schema lookup index (issue #153)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 153,
+      "target_pr": null,
+      "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/o0-b2-a1-prod-schema-lookup-index",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/preflight.rs",
+        "backend/crates/stillflow-engine/src/typing.rs",
+        "backend/crates/stillflow-engine/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "o0-b2-a1-prod:stale-index-structurally-impossible",
+        "o0-b2-a1-prod:semantic-differential-oracle-preserved",
+        "o0-b2-a1-prod:mutation-invariant-suite",
+        "o0-b2-a1-prod:static-gates-fmt-clippy-suite",
+        "o0-b2-a1-prod:multi-window-benchmark-raw-hashes",
+        "o0-b2-a1-prod:sparse-regression-noise-or-eliminated",
+        "o0-b2-a1-prod:single-gate-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1-ACCEPT"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T03:06:31Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "Independent acceptance APPROVE_SCHEMA_LOOKUP_INDEX_CANDIDATE_CONFIRMED at PR #149 head 2345055. Productionization/design-hardening task authorized; Draft PR only. Fresh branch from live main at CLAIM time; do NOT continue the experiment branch.",
+      "notes": "Objective per issue #153: turn the accepted Engine-local ColumnId->ordinal lookup-index candidate (PR #149 @2345055) into a production-quality implementation - maintainable invariants, no public/core schema changes, no semantic drift, no representative regression beyond tolerance. Starting rule: fresh branch agent/o0-b2-a1-prod-schema-lookup-index from exact live main at CLAIM; if main moved from 0496658...STOP and request rebind. Requirements: (1) NO stale-index tolerance - schema mutation must make stale lookup state unrepresentable or force deterministic rebuild from the exact new schema state (structural, not just convention); (2) field order/canonical bytes/fingerprints/error variant+message+order/paused-type behavior/bounds/plan semantics identical; (3) no global/static/cross-run cache; (4) no public LogicalSchema field/API/serde/fingerprint change; (5) no O0-B2-A2 logic (PR #144 deferred - do not combine); (6) no lowering cache/lazy fusion/collect changes; (7) #91 zero contact. Sparse-plan risk (experiment -4.2%, independent rerun -3.7% on F=4096 sparse): resolve by multi-window repeated measurement showing noise with representative median regression <=5%, OR deterministic lazy/adaptive construction policy based ONLY on plan/schema shape (never timing); do not hide cost by changing fixtures/scope. Correctness hardening: deterministic differential coverage OFF/reference vs candidate across valid sparse/dense projections, first/middle/last+mixed ColumnId lookup, repeated expression refs, unknown+duplicate IDs, project->filter->rules->project chains, rename/drop/derive/cast transitions, paused/invalid type paths, bound failures, canonical schema/fingerprint identity, earliest EngineError position/message; mutation-focused invariant suite proving lookup state cannot survive a schema mutation incorrectly; generated/property-style cases over bounded schemas/plans with fixed seed where practical. If feature split is removed, retain mechanically runnable reference/differential test path in tests (do not silently lose the oracle). Static gates: fmt --check; clippy -p stillflow-engine --all-targets -D warnings (both modes); full stillflow-engine suite; git diff --check. Performance gates: WSL2 ext4 release, build before timing, warm modes, exclusive flock, balanced interleaving, raw sample SHA-256; cells F=64 small control, F=512/E=64 sparse control, F=2048 bridge, F=4096/E=256 full/near-full primary, F=4096 sparse projection, representative derive/expression-heavy cell; >=20 reps/mode short cells; P50/P95 + multi-window medians. Decision gate exactly one: PROD_SCHEMA_LOOKUP_SEMANTIC_REJECT | PROD_SCHEMA_LOOKUP_GAIN_LOST (<20% primary) | PROD_SCHEMA_LOOKUP_REGRESSION (control median >5%) | PROD_SCHEMA_LOOKUP_DESIGN_REJECT | PROMOTE_SCHEMA_LOOKUP_INDEX_PRODUCTION_CANDIDATE. Positive verdict authorizes ONLY independent production acceptance (next task), never default enablement/merge. Deliverable: Draft PR with exact base/head, changed files, design rationale, stale-index proof, semantic differential evidence, test/static gates, multi-window raw hashes, P50/P95, sparse-control analysis, one terminal verdict. Lease 240 minutes. AGENT-SAFETY-NORMS binding.",
+      "canonical_issue": 153
+    },
+    {
+      "id": "TS-151-DIAG",
+      "title": "ISO timestamp x1000 scale shift root-cause isolation (issue #151)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 151,
+      "target_pr": null,
+      "target_branch": "agent/ts-151-diag",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/**"
+      ],
+      "acceptance_keys": [
+        "ts151:isolation-ladder-all-rungs",
+        "ts151:first-divergence-boundary-pinned",
+        "ts151:epoch-unit-recorded-each-layer",
+        "ts151:wall-clock-regression-tests",
+        "ts151:single-gate-verdict"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T03:06:31Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "Baseline quirk observed during E24-JSON-A2 (#148/#150): ISO-8601 values decoded into TimestampMillisecond land with constant x1000 scale shift in BOTH #150 OFF and ON; #150 deliberately retains Polars JsonReader so parity is NOT correctness. #151 blocks connector default-path productionization closure but does not retroactively invalidate #150.",
+      "notes": "Mode: focused root-cause diagnosis; fix ONLY if cause is local and mechanically proven. Required isolation ladder (same timestamp vectors through progressively larger surfaces): (1) minimal Polars JsonReader with explicit timestamp dtype/time unit, no StillFlow bridge; (2) StillFlow logical-schema -> Polars dtype conversion only; (3) current local-tabular NDJSON reader feature OFF; (4) PR #150 feature ON as parity control only; (5) non-JSON temporal path (Parquet/Arrow construction) to classify JSON-reader-specific vs broader dtype bridge. Test Millisecond/Microsecond/Nanosecond logical units where supported, pre-epoch and post-epoch values, fractional-second case. Causal requirement: DO NOT stop at 'Polars does it' or 'bridge does it'; pin the FIRST boundary where numeric epoch value or declared time unit diverges; record logical unit, Polars dtype/time unit supplied, parsed numeric epoch before display formatting, expected numeric epoch, exact dependency/version of parser. Fix authority (local only): backend/crates/stillflow-connector-local-tabular/** and the exact shared schema-to-Polars bridge file IF proven causal (declare the path before editing). If minimal Polars-only reproducer fails identically with correct dtype/time unit => NO /1000 or x1000 compensating patch; return TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM with minimal reproducer and safe product-boundary recommendation. Required regression tests pinning real wall-clock values: 2024-02-29T01:02:03; 2024-02-29T01:02:03.123; 2023-12-31T23:59:59.999; one pre-1970 value; Date32 control unaffected. Terminal verdict exactly one: TIMESTAMP_ROOT_CAUSE_STILLFLOW_FIX_CANDIDATE | TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM | TIMESTAMP_ROOT_CAUSE_OTHER_DEPENDENCY | TIMESTAMP_DIAG_INCONCLUSIVE. Local fix candidate is Draft-only and still requires independent acceptance. Locks: none for read-only diagnosis; before FIRST repository edit acquire connector:stillflow-connector-local-tabular + task branch lock. May run in parallel with O0-B2-A1-PROD (disjoint write surfaces). #150 stays Draft - do not modify. #91 HOLD. Lease 240 minutes. AGENT-SAFETY-NORMS binding.",
+      "canonical_issue": 151
     }
   ],
   "locks": {}
