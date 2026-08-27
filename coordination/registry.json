@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 169,
+  "revision": 170,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T01:27:56Z",
+  "updated_at": "2026-08-27T01:28:10Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -1952,9 +1952,9 @@
     {
       "id": "O0-B1-A1",
       "title": "Isolated per-run lowering/type-check cache experiment (issue #147)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-o0b1a1-w1",
       "target_issue": 147,
       "target_pr": null,
       "target_branch": "agent/o0-b1-a1-lowering-cache",
@@ -1983,9 +1983,9 @@
       "conflicts_with": [
         "O0-B2-A1"
       ],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-26T08:59:32Z",
+      "lease_expires_at": "2026-08-27T07:28:10Z",
+      "started_at": "2026-08-27T01:28:10Z",
+      "updated_at": "2026-08-27T01:28:10Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Issue #147 Option A attribution experiment after #108 BENCHMARK SUPPORTS FOLLOW-UP. QUEUED behind sibling writer: shares engine:stillflow-engine with O0-B2-A1 (#146) and must not be claimed until #146 is done and the Engine lock is free.",
       "notes": "Private non-default feature engine-lowering-cache. Per-run NON-GLOBAL cache of lowered/type-checked Engine-private representations keyed by exact compiled step/rule position + exact schema state; lazy first-use preferred if it preserves observable failure timing; schema-mutating rules invalidate downstream entries derived from stale state. Hard physical boundary: every existing collect() stays where OFF performs it - no fusion, no rule batching, no collect elimination/reordering, no chunk/envelope size changes, no concurrency/admission/backpressure changes. Preserve rule/plan-step order, logical output/schema, deferred literals, Cast failure behavior, error category and earliest observable ordering, cancellation/deadline checkpoints, memory limits, deterministic inputs, public LogicalSchema/plan contracts/Engine API. Do not convert runtime errors into preflight errors to enable caching; if exact failure timing cannot be preserved => LOWERING_CACHE_SEMANTIC_REJECT and stop. Authorized paths only lower.rs, the chunk-loop file owning repeated lowering calls, preflight.rs (private step metadata only), typing.rs (only if needed for private reusable typed result), Cargo.toml (feature decl); broader paths require maintainer rebind. Oracle: OFF/ON mechanical equality on nine required plan families incl. rename-before-reference, derive-then-reference, drop-then-fail, cast type-state changes, multi-chunk mixed chains, cancellation/deadline and failing paths; full stillflow-engine suite both modes. Benchmark reuses #108 real Engine shapes (narrow scalar control low/high B; wide scalar primary B=100 K={1,16}; large B=200 K={1,16} if memory permits; wide derive-heavy attribution cell), >=10 reps/mode short cells and >=6 long cells with disclosed reductions; internal construction counter proving lowering/type-check constructions fall from per-chunk/per-rule to once per cached step+schema state (evidence-only). Gate per issue body. Lease 120 minutes. Draft PR evidence handoff then stop."
@@ -2103,5 +2103,20 @@
       "queue_reason": "E24-JSON-A2 completed @ e9a4fa6 with PROMOTE_DIRECT_PROJECTED_WRITER_CANDIDATE (+36.1% primary real path); independent acceptance required before connector productionization."
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/o0-b1-a1-lowering-cache": {
+      "task_id": "O0-B1-A1",
+      "owner": "ox-alpha-o0b1a1-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-27T01:28:10Z",
+      "lease_expires_at": "2026-08-27T07:28:10Z"
+    },
+    "engine:stillflow-engine": {
+      "task_id": "O0-B1-A1",
+      "owner": "ox-alpha-o0b1a1-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-27T01:28:10Z",
+      "lease_expires_at": "2026-08-27T07:28:10Z"
+    }
+  }
 }
