@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 184,
+  "revision": 185,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T07:01:25Z",
+  "updated_at": "2026-08-27T07:21:35Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2238,9 +2238,9 @@
     {
       "id": "O0-B2-A1-PROD-FIX-R1",
       "title": "Encapsulate indexed schema state after production review (PR #154, issue #156)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1prod-w1",
       "target_issue": 156,
       "target_pr": 154,
       "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
@@ -2267,14 +2267,29 @@
         "O0-B2-A1-PROD-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-27T07:01:25Z",
+      "lease_expires_at": "2026-08-27T08:21:35Z",
+      "started_at": "2026-08-27T07:21:35Z",
+      "updated_at": "2026-08-27T07:21:35Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
       "queue_reason": "REJECTED head 7bf8360 by independent production acceptance: (B1/G2) WorkingSchema::Indexed struct-variant fields crate-visible - reviewer's bypass compiles; (scope) .gitignore-worktree committed outside authorized paths. Narrow blocker-fix round on the existing PR.",
       "notes": "Minimal fix ONLY: (1) private indexed state - struct IndexedSchema{ schema, entries } fields private to lookup.rs, tuple variant WorkingSchema::Indexed(IndexedSchema), indexed() sole constructor, schema() immutable only, rename/store/swap_with unchanged rebuild-before-return, release correctness not depending on debug_assert; equivalent or stronger language-level guarantee required - no comments/tests-only workaround. Compile-negative evidence mandatory: former scratch bypass compiles at old head / same attempt fails at new head (not test-only cfg). (2) resolve .gitignore-worktree: preferred removal so the diff returns to Engine-only four files; retention only with explicit PR-body disclosure + corrected claims. FORBIDDEN: use_index policy, estimator, A2, lower/collect/fusion, core/schema/API/serde/fingerprint, deps/lockfile, connectors/storage/frontend/workflow, #91, Ready/merge/default; no history rewrite - push new commit(s). Gates to rerun: mutation invariant tests; disjoint swap test; linear==indexed==production differential battery; 240-case seeded property battery; external 34-case oracle byte-identical vs baseline; fmt; workspace clippy -D warnings; engine suite; workspace suite; git diff --check main..HEAD. Performance: no retune; smoke only on F=4096 full primary (>=20% vs exact baseline), F=4096 sparse linear-route control, F=512 control (no robust >5% regression). Verdict exactly one: READY_FOR_PROD_REACCEPTANCE | FIX_BLOCKED; positive authorizes ONLY creation of a new exact-head re-acceptance task (not created here; maintainer binds the new SHA). Lease 60 minutes. AGENT-SAFETY-NORMS binding.",
       "canonical_issue": 156
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/o0-b2-a1-prod-schema-lookup-index": {
+      "task_id": "O0-B2-A1-PROD-FIX-R1",
+      "owner": "ox-alpha-o0b2a1prod-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-27T07:21:35Z",
+      "lease_expires_at": "2026-08-27T08:21:35Z"
+    },
+    "engine:stillflow-engine": {
+      "task_id": "O0-B2-A1-PROD-FIX-R1",
+      "owner": "ox-alpha-o0b2a1prod-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-27T07:21:35Z",
+      "lease_expires_at": "2026-08-27T08:21:35Z"
+    }
+  }
 }
