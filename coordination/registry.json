@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 182,
+  "revision": 183,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T06:12:36Z",
+  "updated_at": "2026-08-27T07:01:25Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2198,7 +2198,7 @@
     {
       "id": "O0-B2-A1-PROD-ACCEPT",
       "title": "Independent production acceptance of the A1 schema lookup index (PR #154, issue #155)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-o0b2a1prodacc-r1",
       "target_issue": 155,
@@ -2223,13 +2223,17 @@
         "O0-B2-A1-PROD"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-27T08:12:36Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-27T06:12:36Z",
-      "updated_at": "2026-08-27T06:12:36Z",
+      "updated_at": "2026-08-27T07:01:25Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
       "queue_reason": "Productionization verdict PROMOTE_SCHEMA_LOOKUP_INDEX_PRODUCTION_CANDIDATE @ PR #154 head 7bf8360. Stricter than experiment acceptance: production architecture audit (release-mode stale-index safety, served-lookup estimator, single-path maintainability, scope incl. the .gitignore-worktree fifth file) + fresh semantic oracle + fresh multi-window performance gates.",
       "notes": "Independent read-only review per issue #155. Exact-head binding 7bf8360193909ff16b20879479d69978806eb397 (re-fetch before claim and before verdict; stop on drift). Scope audit incl. the fifth changed file (.gitignore-worktree) - must be judged explicitly, not ignored; unexpected scope is blocking. Stale-index structural proof for RELEASE mode (debug assertions supplemental only); if stale state merely unlikely => REQUEST_CHANGES. Estimator audit: R must be exact for every reachable preflight shape (authorized projection 2K/3K, filter/FilterRows, derive, column rules, chains, repeated refs, zero-ref steps, error paths); policy must never change semantics/order/determinism/bounds; new-variant bypass must be mechanically guarded (exhaustive matches/tests). Semantic differential: fresh baseline-main vs 7bf8360 external oracle byte-identical + in-crate linear/indexed/production battery + fixed-seed property suite determinism check. Gates at exact head: fmt, workspace clippy -D warnings, engine suite, workspace suite, git diff --check base..HEAD (rerun, do not reuse author claims). Fresh performance: release binaries built for this review (do not reuse author samples), WSL2 ext4, warm, exclusive flock, interleaved A/B, >=3 windows x >=20 reps short cells, per-window P50 + aggregate P50/P95, A/A noise floor for sub-ms controls; gates: primary F=4096 full >=20%, bridge >=20%, no representative control >5% multi-window median, F=4096 sparse consistent with linear-route policy (source proof) with timing noise not blocking. Maintainability: new expr/rule variant must not compile while forgetting counting; new mutation must not compile while bypassing rebuild; no silent linear/production divergence; one ownership model. Verdict exactly one: APPROVE_SCHEMA_LOOKUP_INDEX_PRODUCTION | REQUEST_CHANGES (with file/function/test refs; distinguish code vs evidence blockers). Positive verdict certifies A1 for later A1/A2 interaction study only - no Ready/merge/default enablement. #91 HOLD zero contact; PR #144 untouched. Lease 120 minutes. AGENT-SAFETY-NORMS binding.",
-      "canonical_issue": 155
+      "canonical_issue": 155,
+      "completed_at": "2026-08-27T07:01:25Z",
+      "result_head": "7bf8360193909ff16b20879479d69978806eb397",
+      "ci_url": "https://github.com/X44421/stillflow/pull/154#issuecomment-5435501240",
+      "completion_note": "REQUEST_CHANGES @ bound head 7bf8360 (PR #154). Independent from-zero review (fresh binaries/oracle/bench; reviewer subagents died pre-start - provider infrastructure, disclosed). PASS: scope (5 files, no core/cargo/lower/A2/connector changes, feature split removed); estimator (exhaustive matches, counts verified, over-count directions safe); semantics (in-crate differential 6/6, 240-case seeded battery, engine 104/104, workspace green, fmt/clippy/diff-check clean, fresh oracle byte-identical aa468916...); performance (fresh 6-window: primary +77.2%, bridge +64.1%, nearfull +77.2%, controls within same-session A/A noise floor, F=4096 sparse -2.22% with source-proven linear route; raw b90e22a2...). CODE BLOCKER B1/G2: pub(crate) enum variant fields make WorkingSchema::Indexed{schema,entries} destructurable in-crate - a pattern-match mutation compiles and bypasses refresh (empirically proven); fix: private struct IndexedSchema + tuple variant, indexed() sole constructor; rerun gates at new head. SCOPE ITEM: remove or disclose .gitignore-worktree (out of authorized paths; PR body claim off by one file). No Ready/merge/default; acceptance does not transfer across SHA - re-acceptance at fixed head required before A2 sequencing."
     }
   ],
   "locks": {}
