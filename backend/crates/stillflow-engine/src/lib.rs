@@ -6,8 +6,8 @@ mod engine;
 mod error;
 #[allow(unsafe_code)]
 mod ffi;
-mod lower;
 mod lookup;
+mod lower;
 mod memory;
 mod predict;
 mod preflight;

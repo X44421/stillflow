@@ -63,7 +63,11 @@ impl ColumnLookup for LogicalSchema {
 /// expression-heavy propagations) into the indexed path.
 pub(crate) const fn use_index(field_count: usize, served_lookups: usize) -> bool {
     let quarter_threshold = field_count / 8;
-    let threshold = if quarter_threshold < 4 { 4 } else { quarter_threshold };
+    let threshold = if quarter_threshold < 4 {
+        4
+    } else {
+        quarter_threshold
+    };
     served_lookups >= threshold
 }
 
@@ -289,16 +293,21 @@ impl ColumnLookup for WorkingSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stillflow_core::LogicalType;
     use std::collections::BTreeMap;
+    use stillflow_core::LogicalType;
     use uuid::Uuid;
 
     fn schema(fields: &[(u128, &str, LogicalType)]) -> LogicalSchema {
         let fields: Vec<LogicalField> = fields
             .iter()
             .map(|(id, name, ty)| {
-                LogicalField::new(ColumnId::from_uuid(Uuid::from_u128(*id)), *name, ty.clone(), false)
-                    .expect("field")
+                LogicalField::new(
+                    ColumnId::from_uuid(Uuid::from_u128(*id)),
+                    *name,
+                    ty.clone(),
+                    false,
+                )
+                .expect("field")
             })
             .collect();
         LogicalSchema::new(fields).expect("schema")
@@ -371,11 +380,17 @@ mod tests {
             assert!(index.verify(), "F={f}");
             for i in 0..f {
                 let id = ColumnId::from_uuid(Uuid::from_u128(i as u128 + 1000));
-                assert_eq!(index.field(id).map(|f| f.name.as_str()), schema.field(id).map(|f| f.name.as_str()));
+                assert_eq!(
+                    index.field(id).map(|f| f.name.as_str()),
+                    schema.field(id).map(|f| f.name.as_str())
+                );
             }
             // Unknown ids resolve identically (None).
             let unknown = ColumnId::from_uuid(Uuid::from_u128(999_999));
-            assert_eq!(index.field(unknown).is_none(), schema.field(unknown).is_none());
+            assert_eq!(
+                index.field(unknown).is_none(),
+                schema.field(unknown).is_none()
+            );
         }
     }
 
@@ -457,10 +472,7 @@ mod tests {
             "drop produced an invalid schema"
         ));
         step!(|w: &mut WorkingSchema| w.rename(id(999_999), "nope".to_owned()));
-        step!(|w: &mut WorkingSchema| w.store(
-            Vec::new(),
-            "store produced an invalid schema"
-        ));
+        step!(|w: &mut WorkingSchema| w.store(Vec::new(), "store produced an invalid schema"));
         step!(|w: &mut WorkingSchema| -> Result<(), EngineError> {
             // Swap in a schema with a DISJOINT id range: the index must
             // reflect the swapped-in schema, never the old one.

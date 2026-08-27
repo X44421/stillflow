@@ -732,7 +732,11 @@ fn apply_rule_schema_in(schema: &mut WorkingSchema, rule: &Rule) -> Result<(), E
                 ));
             }
             let duplicate = schema.lookup_field(*id).is_some()
-                || schema.schema().fields.iter().any(|field| field.name == *name);
+                || schema
+                    .schema()
+                    .fields
+                    .iter()
+                    .any(|field| field.name == *name);
             if duplicate {
                 return Err(EngineError::InvalidPlan(
                     "derived column id or name is not unique",
@@ -931,10 +935,7 @@ fn validate_plan_exprs_iterative(plan: &LogicalPlan) -> Result<(), EngineError> 
     Ok(())
 }
 
-fn validate_expr<L: ColumnLookup + ?Sized>(
-    expr: &Expr,
-    schema: &L,
-) -> Result<(), EngineError> {
+fn validate_expr<L: ColumnLookup + ?Sized>(expr: &Expr, schema: &L) -> Result<(), EngineError> {
     expr.validate_shape()
         .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
     let mut nodes = 0_usize;
@@ -1023,8 +1024,13 @@ mod differential_tests {
     fn wide(f: usize) -> LogicalSchema {
         let fields: Vec<LogicalField> = (0..f)
             .map(|i| {
-                LogicalField::new(col(i as u128 + 1000), format!("c{i}"), LogicalType::Int64, false)
-                    .expect("field")
+                LogicalField::new(
+                    col(i as u128 + 1000),
+                    format!("c{i}"),
+                    LogicalType::Int64,
+                    false,
+                )
+                .expect("field")
             })
             .collect();
         LogicalSchema::new(fields).expect("schema")
@@ -1039,8 +1045,16 @@ mod differential_tests {
     }
 
     fn evaluate(scan_output: &LogicalSchema, steps: &[CompiledStep]) -> Result<Vec<u8>, String> {
-        let linear = propagate_schema_with(scan_output, steps, WorkingSchema::linear(scan_output.clone()));
-        let indexed = propagate_schema_with(scan_output, steps, WorkingSchema::indexed(scan_output.clone()));
+        let linear = propagate_schema_with(
+            scan_output,
+            steps,
+            WorkingSchema::linear(scan_output.clone()),
+        );
+        let indexed = propagate_schema_with(
+            scan_output,
+            steps,
+            WorkingSchema::indexed(scan_output.clone()),
+        );
         let produced = propagate_schema(scan_output, steps);
         match (&linear, &indexed, &produced) {
             (Ok(a), Ok(b), Ok(p)) => {
@@ -1055,8 +1069,16 @@ mod differential_tests {
             }
             (Err(a), Err(b), Err(p)) => {
                 let fmt = |e: &EngineError| format!("{e:?}");
-                assert_eq!(fmt(a), fmt(b), "linear vs indexed error differs (variant+message+payload)");
-                assert_eq!(fmt(a), fmt(p), "production path error differs from references");
+                assert_eq!(
+                    fmt(a),
+                    fmt(b),
+                    "linear vs indexed error differs (variant+message+payload)"
+                );
+                assert_eq!(
+                    fmt(a),
+                    fmt(p),
+                    "production path error differs from references"
+                );
                 Err(fmt(a))
             }
             _ => panic!(
@@ -1098,11 +1120,25 @@ mod differential_tests {
         let mut cases = Vec::new();
         for f in [64usize, 512, 2048, 4096] {
             for (id, cols) in [
-                ("sparse", vec![col(1000), col(1000 + (f as u128 - 1)), col(1000 + f as u128 / 2)]),
+                (
+                    "sparse",
+                    vec![
+                        col(1000),
+                        col(1000 + (f as u128 - 1)),
+                        col(1000 + f as u128 / 2),
+                    ],
+                ),
                 ("first", vec![col(1000)]),
                 ("middle", vec![col(1000 + f as u128 / 2)]),
                 ("last", vec![col(1000 + f as u128 - 1)]),
-                ("mixed", vec![col(1000 + f as u128 - 1), col(1000), col(1000 + f as u128 / 3)]),
+                (
+                    "mixed",
+                    vec![
+                        col(1000 + f as u128 - 1),
+                        col(1000),
+                        col(1000 + f as u128 / 3),
+                    ],
+                ),
             ] {
                 cases.push((
                     format!("proj_{id}_f{f}"),
@@ -1120,13 +1156,58 @@ mod differential_tests {
         let schema = wide(64);
         let unknown = col(999_999);
         let cases = vec![
-            ("unknown_first", schema.clone(), vec![CompiledStep::Project { columns: vec![unknown, col(1005)] }]),
-            ("unknown_middle", schema.clone(), vec![CompiledStep::Project { columns: vec![col(1005), unknown, col(1010)] }]),
-            ("unknown_last", schema.clone(), vec![CompiledStep::Project { columns: vec![col(1005), col(1010), unknown] }]),
-            ("duplicate_ids", schema.clone(), vec![CompiledStep::Project { columns: vec![col(1005), col(1010), col(1005)] }]),
-            ("rule_unknown_rename", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::Rename { column: unknown, to: "x".to_owned() }] }]),
-            ("rule_unknown_trim", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::Trim { column: unknown }] }]),
-            ("rule_unknown_drop", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::DropColumn { column: unknown }] }]),
+            (
+                "unknown_first",
+                schema.clone(),
+                vec![CompiledStep::Project {
+                    columns: vec![unknown, col(1005)],
+                }],
+            ),
+            (
+                "unknown_middle",
+                schema.clone(),
+                vec![CompiledStep::Project {
+                    columns: vec![col(1005), unknown, col(1010)],
+                }],
+            ),
+            (
+                "unknown_last",
+                schema.clone(),
+                vec![CompiledStep::Project {
+                    columns: vec![col(1005), col(1010), unknown],
+                }],
+            ),
+            (
+                "duplicate_ids",
+                schema.clone(),
+                vec![CompiledStep::Project {
+                    columns: vec![col(1005), col(1010), col(1005)],
+                }],
+            ),
+            (
+                "rule_unknown_rename",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::Rename {
+                        column: unknown,
+                        to: "x".to_owned(),
+                    }],
+                }],
+            ),
+            (
+                "rule_unknown_trim",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::Trim { column: unknown }],
+                }],
+            ),
+            (
+                "rule_unknown_drop",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::DropColumn { column: unknown }],
+                }],
+            ),
         ];
         battery(&cases);
     }
@@ -1163,53 +1244,171 @@ mod differential_tests {
             }
         };
         let cases = vec![
-            ("rename", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::Rename { column: col(1003), to: "renamed".to_owned() }] }]),
-            ("drop", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::DropColumn { column: col(1003) }] }]),
-            ("trim_type_error", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::Trim { column: col(1003) }] }]),
-            ("cast_set_null", schema.clone(), vec![CompiledStep::Rules { rules: vec![cast_set_null] }]),
-            ("cast_error", schema.clone(), vec![CompiledStep::Rules { rules: vec![cast_error] }]),
-            ("replace_literal", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::ReplaceLiteral { column: col(1005), from: ScalarValue::Int64(1), to: ScalarValue::Int64(2) }] }]),
-            ("replace_literal_null", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::ReplaceLiteral { column: col(1005), from: ScalarValue::Int64(1), to: ScalarValue::Null }] }]),
-            ("fill_null", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::FillNull { column: col(1005), value: ScalarValue::Int64(0) }] }]),
-            ("fill_null_null_value", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::FillNull { column: col(1005), value: ScalarValue::Null }] }]),
-            ("derive", schema.clone(), vec![CompiledStep::Rules { rules: vec![derive.clone()] }]),
-            ("derive_chain", schema.clone(), vec![CompiledStep::Rules { rules: vec![
-                derive.clone(),
-                Rule::DeriveColumn {
-                    id: col(5001),
-                    name: "d1".to_owned(),
-                    data_type: LogicalType::Boolean,
-                    nullable: false,
-                    expression: Expr::Unary {
-                        operator: stillflow_core::UnaryOperator::Not,
-                        expression: Box::new(Expr::Cast {
-                            expression: Box::new(Expr::Column(col(5000))),
+            (
+                "rename",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::Rename {
+                        column: col(1003),
+                        to: "renamed".to_owned(),
+                    }],
+                }],
+            ),
+            (
+                "drop",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::DropColumn { column: col(1003) }],
+                }],
+            ),
+            (
+                "trim_type_error",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::Trim { column: col(1003) }],
+                }],
+            ),
+            (
+                "cast_set_null",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![cast_set_null],
+                }],
+            ),
+            (
+                "cast_error",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![cast_error],
+                }],
+            ),
+            (
+                "replace_literal",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::ReplaceLiteral {
+                        column: col(1005),
+                        from: ScalarValue::Int64(1),
+                        to: ScalarValue::Int64(2),
+                    }],
+                }],
+            ),
+            (
+                "replace_literal_null",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::ReplaceLiteral {
+                        column: col(1005),
+                        from: ScalarValue::Int64(1),
+                        to: ScalarValue::Null,
+                    }],
+                }],
+            ),
+            (
+                "fill_null",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::FillNull {
+                        column: col(1005),
+                        value: ScalarValue::Int64(0),
+                    }],
+                }],
+            ),
+            (
+                "fill_null_null_value",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::FillNull {
+                        column: col(1005),
+                        value: ScalarValue::Null,
+                    }],
+                }],
+            ),
+            (
+                "derive",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![derive.clone()],
+                }],
+            ),
+            (
+                "derive_chain",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![
+                        derive.clone(),
+                        Rule::DeriveColumn {
+                            id: col(5001),
+                            name: "d1".to_owned(),
                             data_type: LogicalType::Boolean,
-                        }),
+                            nullable: false,
+                            expression: Expr::Unary {
+                                operator: stillflow_core::UnaryOperator::Not,
+                                expression: Box::new(Expr::Cast {
+                                    expression: Box::new(Expr::Column(col(5000))),
+                                    data_type: LogicalType::Boolean,
+                                }),
+                            },
+                        },
+                    ],
+                }],
+            ),
+            (
+                "trim_after_cast_to_utf8",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![trim_utf8_ok, Rule::Trim { column: col(1010) }],
+                }],
+            ),
+            (
+                "repeated_filter_refs",
+                wide(16),
+                vec![CompiledStep::Filter {
+                    predicate: Expr::Binary {
+                        left: Box::new(Expr::Column(col(1007))),
+                        operator: stillflow_core::BinaryOperator::GreaterThan,
+                        right: Box::new(Expr::Column(col(1007))),
                     },
-                },
-            ] }]),
-            ("trim_after_cast_to_utf8", schema.clone(), vec![CompiledStep::Rules { rules: vec![
-                trim_utf8_ok,
-                Rule::Trim { column: col(1010) },
-            ] }]),
-            ("repeated_filter_refs", wide(16), vec![CompiledStep::Filter { predicate: Expr::Binary {
-                left: Box::new(Expr::Column(col(1007))),
-                operator: stillflow_core::BinaryOperator::GreaterThan,
-                right: Box::new(Expr::Column(col(1007))),
-            } }]),
-            ("chain_proj_filter_rules_proj", wide(16), vec![
-                CompiledStep::Project { columns: vec![col(1004), col(1014), col(1024), col(1034), col(1044)] },
-                CompiledStep::Filter { predicate: pred(1004, 1044) },
-                CompiledStep::Rules { rules: vec![
-                    Rule::Rename { column: col(1004), to: "renamed_a".to_owned() },
-                    Rule::Cast { column: col(1014), data_type: LogicalType::Float64, on_failure: CastFailurePolicy::SetNull },
-                    Rule::FillNull { column: col(1024), value: ScalarValue::Int64(11) },
-                    Rule::ReplaceLiteral { column: col(1034), from: ScalarValue::Int64(1), to: ScalarValue::Int64(2) },
-                    Rule::Trim { column: col(1044) }, // type error: int column
-                ] },
-                CompiledStep::Project { columns: vec![col(1044), col(1004)] },
-            ]),
+                }],
+            ),
+            (
+                "chain_proj_filter_rules_proj",
+                wide(16),
+                vec![
+                    CompiledStep::Project {
+                        columns: vec![col(1004), col(1014), col(1024), col(1034), col(1044)],
+                    },
+                    CompiledStep::Filter {
+                        predicate: pred(1004, 1044),
+                    },
+                    CompiledStep::Rules {
+                        rules: vec![
+                            Rule::Rename {
+                                column: col(1004),
+                                to: "renamed_a".to_owned(),
+                            },
+                            Rule::Cast {
+                                column: col(1014),
+                                data_type: LogicalType::Float64,
+                                on_failure: CastFailurePolicy::SetNull,
+                            },
+                            Rule::FillNull {
+                                column: col(1024),
+                                value: ScalarValue::Int64(11),
+                            },
+                            Rule::ReplaceLiteral {
+                                column: col(1034),
+                                from: ScalarValue::Int64(1),
+                                to: ScalarValue::Int64(2),
+                            },
+                            Rule::Trim { column: col(1044) }, // type error: int column
+                        ],
+                    },
+                    CompiledStep::Project {
+                        columns: vec![col(1044), col(1004)],
+                    },
+                ],
+            ),
         ];
         battery(&cases);
     }
@@ -1219,7 +1418,10 @@ mod differential_tests {
         let schema = wide(64);
         let paused_cast = Rule::Cast {
             column: col(1009),
-            data_type: LogicalType::Timestamp { unit: stillflow_core::TimeUnit::Second, timezone: None },
+            data_type: LogicalType::Timestamp {
+                unit: stillflow_core::TimeUnit::Second,
+                timezone: None,
+            },
             on_failure: CastFailurePolicy::Error,
         };
         let paused_list_derive = Rule::DeriveColumn {
@@ -1230,35 +1432,95 @@ mod differential_tests {
             expression: Expr::Literal(ScalarValue::Null),
         };
         let drop_last = {
-            let one = LogicalSchema::new(vec![LogicalField::new(col(1000), "only", LogicalType::Int64, false).expect("f")]).expect("s");
+            let one = LogicalSchema::new(vec![LogicalField::new(
+                col(1000),
+                "only",
+                LogicalType::Int64,
+                false,
+            )
+            .expect("f")])
+            .expect("s");
             one
         };
         let cases = vec![
-            ("paused_timestamp_second_cast", schema.clone(), vec![CompiledStep::Rules { rules: vec![paused_cast] }]),
-            ("paused_list_derive", schema.clone(), vec![CompiledStep::Rules { rules: vec![paused_list_derive] }]),
-            ("derive_wrong_type", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::DeriveColumn {
-                id: col(6200),
-                name: "wrong".to_owned(),
-                data_type: LogicalType::Utf8,
-                nullable: false,
-                expression: Expr::Cast { expression: Box::new(Expr::Column(col(1003))), data_type: LogicalType::Int64 },
-            }] }]),
-            ("derive_duplicate_name", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::DeriveColumn {
-                id: col(6100),
-                name: "c3".to_owned(),
-                data_type: LogicalType::Int64,
-                nullable: false,
-                expression: Expr::Cast { expression: Box::new(Expr::Column(col(1003))), data_type: LogicalType::Int64 },
-            }] }]),
-            ("derive_duplicate_id", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::DeriveColumn {
-                id: col(1003),
-                name: "fresh".to_owned(),
-                data_type: LogicalType::Int64,
-                nullable: false,
-                expression: Expr::Cast { expression: Box::new(Expr::Column(col(1003))), data_type: LogicalType::Int64 },
-            }] }]),
-            ("drop_last_column", drop_last, vec![CompiledStep::Rules { rules: vec![Rule::DropColumn { column: col(1000) }] }]),
-            ("filter_rows_non_boolean", schema.clone(), vec![CompiledStep::Rules { rules: vec![Rule::FilterRows { predicate: Expr::Literal(ScalarValue::Int64(1)) }] }]),
+            (
+                "paused_timestamp_second_cast",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![paused_cast],
+                }],
+            ),
+            (
+                "paused_list_derive",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![paused_list_derive],
+                }],
+            ),
+            (
+                "derive_wrong_type",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::DeriveColumn {
+                        id: col(6200),
+                        name: "wrong".to_owned(),
+                        data_type: LogicalType::Utf8,
+                        nullable: false,
+                        expression: Expr::Cast {
+                            expression: Box::new(Expr::Column(col(1003))),
+                            data_type: LogicalType::Int64,
+                        },
+                    }],
+                }],
+            ),
+            (
+                "derive_duplicate_name",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::DeriveColumn {
+                        id: col(6100),
+                        name: "c3".to_owned(),
+                        data_type: LogicalType::Int64,
+                        nullable: false,
+                        expression: Expr::Cast {
+                            expression: Box::new(Expr::Column(col(1003))),
+                            data_type: LogicalType::Int64,
+                        },
+                    }],
+                }],
+            ),
+            (
+                "derive_duplicate_id",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::DeriveColumn {
+                        id: col(1003),
+                        name: "fresh".to_owned(),
+                        data_type: LogicalType::Int64,
+                        nullable: false,
+                        expression: Expr::Cast {
+                            expression: Box::new(Expr::Column(col(1003))),
+                            data_type: LogicalType::Int64,
+                        },
+                    }],
+                }],
+            ),
+            (
+                "drop_last_column",
+                drop_last,
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::DropColumn { column: col(1000) }],
+                }],
+            ),
+            (
+                "filter_rows_non_boolean",
+                schema.clone(),
+                vec![CompiledStep::Rules {
+                    rules: vec![Rule::FilterRows {
+                        predicate: Expr::Literal(ScalarValue::Int64(1)),
+                    }],
+                }],
+            ),
         ];
         battery(&cases);
     }
@@ -1270,11 +1532,22 @@ mod differential_tests {
         for f in [64usize, 512, 2048, 4096] {
             let schema = wide(f);
             for (id, cols) in [
-                ("sparse", vec![col(1000), col(1000 + f as u128 / 2), col(1000 + f as u128 - 1)]),
+                (
+                    "sparse",
+                    vec![
+                        col(1000),
+                        col(1000 + f as u128 / 2),
+                        col(1000 + f as u128 - 1),
+                    ],
+                ),
                 ("dense", (0..f).map(|i| col(i as u128 + 1000)).collect()),
             ] {
                 let linear = project_schema_with(&schema, &cols).expect("linear");
-                let indexed = project_schema_with(&AuthorizedLookup::Indexed(OrdinalIndex::build(&schema)), &cols).expect("indexed");
+                let indexed = project_schema_with(
+                    &AuthorizedLookup::Indexed(OrdinalIndex::build(&schema)),
+                    &cols,
+                )
+                .expect("indexed");
                 let produced = project_schema(&schema, &cols).expect("produced");
                 assert_eq!(
                     linear.canonical_bytes().expect("canonical"),
@@ -1290,7 +1563,11 @@ mod differential_tests {
             // Unknown column error parity at the projection level.
             let unknown = col(999_999);
             let e1 = project_schema_with(&schema, &[unknown]).expect_err("linear unknown");
-            let e2 = project_schema_with(&AuthorizedLookup::Indexed(OrdinalIndex::build(&schema)), &[unknown]).expect_err("indexed unknown");
+            let e2 = project_schema_with(
+                &AuthorizedLookup::Indexed(OrdinalIndex::build(&schema)),
+                &[unknown],
+            )
+            .expect_err("indexed unknown");
             assert_eq!(format!("{e1:?}"), format!("{e2:?}"));
         }
     }
@@ -1333,29 +1610,63 @@ mod differential_tests {
                     1 => {
                         let a: u128 = 1000 + (next() % (f as u64)) as u128;
                         let b: u128 = 1000 + (next() % (f as u64)) as u128;
-                        steps.push(CompiledStep::Filter { predicate: pred(a, b) });
+                        steps.push(CompiledStep::Filter {
+                            predicate: pred(a, b),
+                        });
                     }
                     2 => {
                         let column: u128 = 1000 + (next() % (f as u64)) as u128;
                         match next() % 5 {
-                            0 => steps.push(CompiledStep::Rules { rules: vec![Rule::Rename { column: col(column), to: format!("r{case_index}") }] }),
+                            0 => steps.push(CompiledStep::Rules {
+                                rules: vec![Rule::Rename {
+                                    column: col(column),
+                                    to: format!("r{case_index}"),
+                                }],
+                            }),
                             1 => {
                                 if next() % 3 == 0 {
-                                    steps.push(CompiledStep::Rules { rules: vec![Rule::DropColumn { column: col(999_997 + (next() % 3) as u128) }] });
+                                    steps.push(CompiledStep::Rules {
+                                        rules: vec![Rule::DropColumn {
+                                            column: col(999_997 + (next() % 3) as u128),
+                                        }],
+                                    });
                                 } else {
-                                    steps.push(CompiledStep::Rules { rules: vec![Rule::DropColumn { column: col(column) }] });
+                                    steps.push(CompiledStep::Rules {
+                                        rules: vec![Rule::DropColumn {
+                                            column: col(column),
+                                        }],
+                                    });
                                 }
                             }
-                            2 => steps.push(CompiledStep::Rules { rules: vec![Rule::Trim { column: col(column) }] }),
-                            3 => steps.push(CompiledStep::Rules { rules: vec![Rule::FillNull { column: col(column), value: ScalarValue::Int64(if next() % 3 == 0 { 0 } else { 7 }) }] }),
-                            _ => steps.push(CompiledStep::Rules { rules: vec![Rule::Cast { column: col(column), data_type: LogicalType::Float64, on_failure: CastFailurePolicy::Error }] }),
+                            2 => steps.push(CompiledStep::Rules {
+                                rules: vec![Rule::Trim {
+                                    column: col(column),
+                                }],
+                            }),
+                            3 => steps.push(CompiledStep::Rules {
+                                rules: vec![Rule::FillNull {
+                                    column: col(column),
+                                    value: ScalarValue::Int64(if next() % 3 == 0 { 0 } else { 7 }),
+                                }],
+                            }),
+                            _ => steps.push(CompiledStep::Rules {
+                                rules: vec![Rule::Cast {
+                                    column: col(column),
+                                    data_type: LogicalType::Float64,
+                                    on_failure: CastFailurePolicy::Error,
+                                }],
+                            }),
                         }
                     }
                     _ => {
                         // FilterRows with a random column predicate.
                         let a: u128 = 1000 + (next() % (f as u64)) as u128;
                         let b: u128 = 1000 + (next() % (f as u64)) as u128;
-                        steps.push(CompiledStep::Rules { rules: vec![Rule::FilterRows { predicate: pred(a, b) }] });
+                        steps.push(CompiledStep::Rules {
+                            rules: vec![Rule::FilterRows {
+                                predicate: pred(a, b),
+                            }],
+                        });
                     }
                 }
             }
