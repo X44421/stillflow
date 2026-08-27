@@ -9,6 +9,7 @@ mod ffi;
 mod lower;
 mod memory;
 mod predict;
+mod incremental;
 mod preflight;
 pub(crate) mod preview;
 mod remainder;

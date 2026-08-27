@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use stillflow_connectors::{Capability, ConnectorRegistry};
 use stillflow_core::{
-    ColumnId, ConnectorKind, Expr, InspectRequest, LogicalField, LogicalSchema, LogicalType,
-    RequestContext, ScalarValue, SourceAsset, SourceConnection,
+    ColumnId, ConnectorKind, Expr, InspectRequest, LogicalSchema, LogicalType, RequestContext,
+    ScalarValue, SourceAsset, SourceConnection,
 };
-use stillflow_plan::{CastFailurePolicy, LogicalPlan, PlanNodeId, PlanNodeKind, Rule};
+use stillflow_plan::{LogicalPlan, PlanNodeId, PlanNodeKind, Rule};
 
 use crate::error::{deadline_too_long, map_context_error, EngineError};
 use crate::{
@@ -525,16 +525,36 @@ fn propagate_schema(
                 crate::typing::require_boolean(predicate, &schema)?;
             }
             CompiledStep::Rules { rules } => {
+                // Production path (O0-B2-A2, #159): one Engine-private
+                // incremental mutation layer performs legacy-equivalent
+                // per-rule checks (incl. budget accounting) and mutates in
+                // place; the full `LogicalSchema::new` validation below is a
+                // permanent production safety oracle at the ApplyRules
+                // boundary, not a substitute for per-rule error fidelity.
+                let mut working = crate::incremental::IncrementalSchema::from_schema(schema);
                 for rule in rules {
-                    schema = apply_rule_schema(schema, rule)?;
+                    working.apply_rule(rule)?;
                 }
+                schema = working.into_schema()?;
             }
         }
     }
     Ok(schema)
 }
 
-fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSchema, EngineError> {
+/// Legacy per-rule propagation: every schema-mutating rule clones the field
+/// vector and re-runs full `LogicalSchema::new` validation. Kept under
+/// `cfg(test)` as the mechanically runnable reference path for the
+/// differential/property batteries (legacy full-rebuild vs production
+/// incremental layer); the production single path is
+/// `crate::incremental::IncrementalSchema`.
+#[cfg(test)]
+pub(crate) fn apply_rule_schema_legacy(
+    mut schema: LogicalSchema,
+    rule: &Rule,
+) -> Result<LogicalSchema, EngineError> {
+    use stillflow_core::LogicalField;
+    use stillflow_plan::CastFailurePolicy;
     match rule {
         Rule::Rename { column, to } => {
             schema
@@ -688,7 +708,7 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
     }
 }
 
-fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), EngineError> {
+pub(crate) fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), EngineError> {
     if matches!(from, LogicalType::Date32 | LogicalType::Timestamp { .. })
         && matches!(to, LogicalType::Utf8)
     {
@@ -706,7 +726,7 @@ fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), Engine
     Ok(())
 }
 
-fn reject_paused_cast_in_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
+pub(crate) fn reject_paused_cast_in_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
     match expr {
         Expr::Cast {
             expression,
@@ -733,7 +753,7 @@ fn reject_paused_cast_in_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(),
     }
 }
 
-fn validate_literal_for_column(
+pub(crate) fn validate_literal_for_column(
     column_type: &LogicalType,
     value: &ScalarValue,
 ) -> Result<(), EngineError> {
@@ -852,7 +872,7 @@ fn validate_plan_exprs_iterative(plan: &LogicalPlan) -> Result<(), EngineError> 
     Ok(())
 }
 
-fn validate_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
+pub(crate) fn validate_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
     expr.validate_shape()
         .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
     let mut nodes = 0_usize;
@@ -890,7 +910,7 @@ fn validate_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError>
     Ok(())
 }
 
-fn infer_nullability(expr: &Expr, schema: &LogicalSchema) -> Result<bool, EngineError> {
+pub(crate) fn infer_nullability(expr: &Expr, schema: &LogicalSchema) -> Result<bool, EngineError> {
     Ok(match expr {
         Expr::Column(id) => {
             schema
