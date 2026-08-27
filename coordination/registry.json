@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 186,
+  "revision": 187,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2278,6 +2278,45 @@
       "result_head": "7afdd656eb90412b65ca51773be6fc6eb4a150dc",
       "ci_url": "https://github.com/X44421/stillflow/pull/154#issuecomment-5435920417",
       "completion_note": "READY_FOR_PROD_REACCEPTANCE @ new head 7afdd656... (PR #154; rejected head 7bf8360 preserved as parent, no history rewrite). Fix exactly the two #155 findings: (1) IndexedSchema private-field struct + opaque tuple variant WorkingSchema::Indexed(IndexedSchema) - bypass compiles at 7bf8360 (cargo check exit 0) / fails at 7afdd65 (error[E0026]); policy/estimator/public surfaces untouched. (2) .gitignore-worktree removed - diff back to Engine-only four files. Gates rerun at new head: engine 104/104 incl. mutation invariant, disjoint swap, differential battery, 240-case fixed-seed property battery; workspace clippy/tests green; fmt/diff-check clean; 34-case oracle byte-identical (aa468916...); smoke: primary +77.2% (all windows), sparse linear-route unchanged (source-verified) and F512 control inside same-session A/A noise floor (floor itself -9.85% F512 with +-23% per-window bursts). Verdict authorizes ONLY new exact-head re-acceptance task - not created here; maintainer binds 7afdd656eb90412b65ca51773be6fc6eb4a150dc. No Ready/merge/default; #91/#144 untouched."
+    },
+    {
+      "id": "O0-B2-A1-PROD-REACCEPT-R2",
+      "title": "Independent production re-acceptance of the A1 schema lookup index after FIX-R1 (PR #154, issue #157)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 157,
+      "target_pr": 154,
+      "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": "7afdd656eb90412b65ca51773be6fc6eb4a150dc",
+      "locks": [],
+      "paths": [
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "o0b2a1reacc2:fix-delta-scope-audited",
+        "o0b2a1reacc2:old-head-bypass-compiles",
+        "o0b2a1reacc2:new-head-bypass-fails-visibility",
+        "o0b2a1reacc2:no-alternate-mutation-path",
+        "o0b2a1reacc2:policy-estimator-zero-drift",
+        "o0b2a1reacc2:semantic-oracle-and-batteries-rerun",
+        "o0b2a1reacc2:static-gates-rerun",
+        "o0b2a1reacc2:fresh-reduced-benchmark",
+        "o0b2a1reacc2:gitignore-absent-from-diff",
+        "o0b2a1reacc2:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1-PROD-FIX-R1"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T07:39:30Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "FIX-R1 READY_FOR_PROD_REACCEPTANCE @ 7afdd656...; prior acceptance at 7bf8360 does not transfer. Independent from-zero re-review at the exact fixed head.",
+      "notes": "Read-only review per issue #157. Exact-head binding 7afdd656eb90412b65ca51773be6fc6eb4a150dc. A. Fix-delta 7bf8360..7afdd656 must contain ONLY encapsulation + .gitignore-worktree removal; full PR diff vs main = exactly 4 engine files. B. Old-head bypass compile-positive + new-head compile-negative (real Rust visibility/type barrier). C. Structural proof (IndexedSchema fields private, sole constructor, immutable schema(), centralized mutations, failed-mutation consistency, disjoint swap, release-not-debug); grep ALL sites - no alternate path. D. Policy/estimator ZERO drift vs rejected head; exhaustive-match safety rerun. E. Fresh: mutation invariants, disjoint swap, differential suite, 240-case seeded property, full engine tests, 34-case external oracle byte-identical. F. Static gates: fmt, workspace clippy -D warnings, engine suite, workspace suite, git diff --check. G. Reduced fresh benchmark: 4 cells (primary >=20%, bridge >=20%, sparse linear-route + no robust >5% beyond A/A noise, F512 no robust >5%), >=3 windows x 20 reps, flock, interleaved, raw sha256; upgrade to full matrix if policy diff. H. .gitignore-worktree absent; changed files exactly 4. Verdict: APPROVE_SCHEMA_LOOKUP_INDEX_PRODUCTION_R2 | REQUEST_CHANGES. Positive certifies A1 for later A1/A2 interaction only - no Ready/merge/default/main movement. Lease 90 minutes. AGENT-SAFETY-NORMS binding.",
+      "canonical_issue": 157
     }
   ],
   "locks": {}
