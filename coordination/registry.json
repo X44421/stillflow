@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 175,
+  "revision": 176,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T03:55:04Z",
+  "updated_at": "2026-08-27T03:55:21Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2158,9 +2158,9 @@
     {
       "id": "TS-151-DIAG",
       "title": "ISO timestamp x1000 scale shift root-cause isolation (issue #151)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-ts151diag-w1",
       "target_issue": 151,
       "target_pr": null,
       "target_branch": "agent/ts-151-diag",
@@ -2179,9 +2179,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-27T03:06:31Z",
+      "lease_expires_at": "2026-08-27T07:55:21Z",
+      "started_at": "2026-08-27T03:55:21Z",
+      "updated_at": "2026-08-27T03:55:21Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
       "queue_reason": "Baseline quirk observed during E24-JSON-A2 (#148/#150): ISO-8601 values decoded into TimestampMillisecond land with constant x1000 scale shift in BOTH #150 OFF and ON; #150 deliberately retains Polars JsonReader so parity is NOT correctness. #151 blocks connector default-path productionization closure but does not retroactively invalidate #150.",
       "notes": "Mode: focused root-cause diagnosis; fix ONLY if cause is local and mechanically proven. Required isolation ladder (same timestamp vectors through progressively larger surfaces): (1) minimal Polars JsonReader with explicit timestamp dtype/time unit, no StillFlow bridge; (2) StillFlow logical-schema -> Polars dtype conversion only; (3) current local-tabular NDJSON reader feature OFF; (4) PR #150 feature ON as parity control only; (5) non-JSON temporal path (Parquet/Arrow construction) to classify JSON-reader-specific vs broader dtype bridge. Test Millisecond/Microsecond/Nanosecond logical units where supported, pre-epoch and post-epoch values, fractional-second case. Causal requirement: DO NOT stop at 'Polars does it' or 'bridge does it'; pin the FIRST boundary where numeric epoch value or declared time unit diverges; record logical unit, Polars dtype/time unit supplied, parsed numeric epoch before display formatting, expected numeric epoch, exact dependency/version of parser. Fix authority (local only): backend/crates/stillflow-connector-local-tabular/** and the exact shared schema-to-Polars bridge file IF proven causal (declare the path before editing). If minimal Polars-only reproducer fails identically with correct dtype/time unit => NO /1000 or x1000 compensating patch; return TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM with minimal reproducer and safe product-boundary recommendation. Required regression tests pinning real wall-clock values: 2024-02-29T01:02:03; 2024-02-29T01:02:03.123; 2023-12-31T23:59:59.999; one pre-1970 value; Date32 control unaffected. Terminal verdict exactly one: TIMESTAMP_ROOT_CAUSE_STILLFLOW_FIX_CANDIDATE | TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM | TIMESTAMP_ROOT_CAUSE_OTHER_DEPENDENCY | TIMESTAMP_DIAG_INCONCLUSIVE. Local fix candidate is Draft-only and still requires independent acceptance. Locks: none for read-only diagnosis; before FIRST repository edit acquire connector:stillflow-connector-local-tabular + task branch lock. May run in parallel with O0-B2-A1-PROD (disjoint write surfaces). #150 stays Draft - do not modify. #91 HOLD. Lease 240 minutes. AGENT-SAFETY-NORMS binding.",
