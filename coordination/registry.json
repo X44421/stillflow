@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 187,
+  "revision": 188,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T07:39:30Z",
+  "updated_at": "2026-08-27T08:17:39Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2282,9 +2282,9 @@
     {
       "id": "O0-B2-A1-PROD-REACCEPT-R2",
       "title": "Independent production re-acceptance of the A1 schema lookup index after FIX-R1 (PR #154, issue #157)",
-      "status": "queued",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1prodreacc-r2",
       "target_issue": 157,
       "target_pr": 154,
       "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
@@ -2310,9 +2310,9 @@
         "O0-B2-A1-PROD-FIX-R1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-27T07:39:30Z",
+      "lease_expires_at": "2026-08-27T09:47:39Z",
+      "started_at": "2026-08-27T08:17:39Z",
+      "updated_at": "2026-08-27T08:17:39Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
       "queue_reason": "FIX-R1 READY_FOR_PROD_REACCEPTANCE @ 7afdd656...; prior acceptance at 7bf8360 does not transfer. Independent from-zero re-review at the exact fixed head.",
       "notes": "Read-only review per issue #157. Exact-head binding 7afdd656eb90412b65ca51773be6fc6eb4a150dc. A. Fix-delta 7bf8360..7afdd656 must contain ONLY encapsulation + .gitignore-worktree removal; full PR diff vs main = exactly 4 engine files. B. Old-head bypass compile-positive + new-head compile-negative (real Rust visibility/type barrier). C. Structural proof (IndexedSchema fields private, sole constructor, immutable schema(), centralized mutations, failed-mutation consistency, disjoint swap, release-not-debug); grep ALL sites - no alternate path. D. Policy/estimator ZERO drift vs rejected head; exhaustive-match safety rerun. E. Fresh: mutation invariants, disjoint swap, differential suite, 240-case seeded property, full engine tests, 34-case external oracle byte-identical. F. Static gates: fmt, workspace clippy -D warnings, engine suite, workspace suite, git diff --check. G. Reduced fresh benchmark: 4 cells (primary >=20%, bridge >=20%, sparse linear-route + no robust >5% beyond A/A noise, F512 no robust >5%), >=3 windows x 20 reps, flock, interleaved, raw sha256; upgrade to full matrix if policy diff. H. .gitignore-worktree absent; changed files exactly 4. Verdict: APPROVE_SCHEMA_LOOKUP_INDEX_PRODUCTION_R2 | REQUEST_CHANGES. Positive certifies A1 for later A1/A2 interaction only - no Ready/merge/default/main movement. Lease 90 minutes. AGENT-SAFETY-NORMS binding.",
