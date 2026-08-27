@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 189,
+  "revision": 190,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2321,6 +2321,48 @@
       "result_head": "7afdd656eb90412b65ca51773be6fc6eb4a150dc",
       "ci_url": "https://github.com/X44421/stillflow/pull/154#issuecomment-5436666873",
       "completion_note": "APPROVE_SCHEMA_LOOKUP_INDEX_PRODUCTION_R2 @ 7afdd656 (exact head, PR #154). Independent from-zero re-review (reviewer subagent died pre-start - provider infra, disclosed; executed under reviewer identity). PASS all: A fix-delta = encapsulation + .gitignore-worktree removal; PR files = exactly 4 engine files (API-verified). B old-head bypass compiles (exit 0) / new-head fails E0026 + E0616 (visibility barriers, ordinary code). C structural proof: IndexedSchema fields private, sole constructor, immutable schema(), centralized rebuild-before-return, failed-mutation consistency, disjoint swap, release not debug-dependent; crate-wide grep - no alternate path. D policy/estimator zero-drift (preflight/typing 0-line diff; use_index and all counters identical; exhaustive-match guards re-verified). E engine 104/104 incl. 240-case property battery; fresh 34-case oracle byte-identical (aa468916...). F fmt/clippy(0)/workspace 338-0/diff-check clean. G reduced fresh bench (4 cells x 4 windows x 20): primary +77.3%, bridge +62.1%, sparse +0.4% (linear route source-verified), F512 +5.6% vs same-session A/A floor -41.7%; raw 5caa4c9e... H .gitignore-worktree absent from PR diff. Certifies A1 production candidate for later A1/A2 interaction study only - NO Ready/merge/default/main movement. Next per state machine: #144 A2 productionization, not started here. #91/#144 untouched."
+    },
+    {
+      "id": "O0-B2-A2-PROD",
+      "title": "Productionize Engine incremental schema propagation (PR #144 / issue #159)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 159,
+      "target_pr": 144,
+      "target_branch": "agent/o0-b2-a2-prod-incremental-schema",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/o0-b2-a2-prod-incremental-schema",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/preflight.rs",
+        "backend/crates/stillflow-engine/src/incremental.rs"
+      ],
+      "acceptance_keys": [
+        "o0b2a2prod:budget-fidelity-rename-derive",
+        "o0b2a2prod:centralized-ownership-layer",
+        "o0b2a2prod:exhaustive-rule-mapping",
+        "o0b2a2prod:boundary-oracle-permanent",
+        "o0b2a2prod:fixed-seed-property-battery",
+        "o0b2a2prod:legacy-equivalence-all-surfaces",
+        "o0b2a2prod:static-gates",
+        "o0b2a2prod:multi-window-performance",
+        "o0b2a2prod:single-gate-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A2-ACCEPT"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T08:52:20Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "A2 productionization after APPROVE_INCREMENTAL_SCHEMA_CANDIDATE (PR #144 @ cfdea8e7) and A1 production acceptance closed (#154 @ 7afdd656). Do NOT combine with A1: #154 stays Draft/unmerged; four-cell attribution is a later task.",
+      "notes": "Per issue #159: fresh branch agent/o0-b2-a2-prod-incremental-schema from live main at CLAIM. Preserve LogicalSchema as sole authoritative representation; keep full ApplyRules-boundary LogicalSchema::new/validate as a PERMANENT production safety oracle. Mandatory #145 closure: (1) exact budget-failure fidelity - Rename crossing cumulative text budget AND DeriveColumn crossing field-count/text budget must fail at the same rule position with same EngineError variant + stable message as legacy per-rule rebuild (incl. legacy's mapped messages such as UnknownColumn catch-all for rename), never a later boundary error, no later-rule execution; (2) anti-drift: centralize local invariant set in ONE Engine-private mutation layer, retain full boundary validator, deterministic differential/property battery (fixed seed, prints seed/case/rule), exhaustive Rule/Expr matching (no wildcard); (3) boundary oracle permanent in production path. Correctness oracle: legacy-reference vs production-candidate identical across all mutating rules valid+invalid, mixed chains, project->filter->rules->project, multiple failures, budget-boundary cases, F={1,64,512,2048,4096}, empty/minimal, near-max budgets, repeated chains, paused paths - compare canonical bytes/fingerprint, PreparedPlan outputs, error variant+message+position, boundary outcome. Performance (preflight-scope only, no E2E claims): cells F=64,R=1 control; F=512,R=16; F=2048,R=16 bridge; F=4096,R=16; F=4096,R=256 primary; mixed-chain Rename/Drop/Derive/Cast; near-budget; >=3 windows, >=20 reps short cells, WSL2 ext4, release, warm, flock, interleaved, raw sha256. Gates: primary F=4096,R=256 >=50% vs main; F=4096,R=16 >=20%; no representative control median regression >5%; no semantic differential. Maintainability: reject if correctness depends on remembering duplicated invariant lists; one mutation ownership layer; exhaustive rule mapping; deterministic oracle; permanent boundary validation; explicit tests at every frozen core budget edge (MAX_SCHEMA_FIELDS=4096, MAX_SCHEMA_TEXT_BYTES=1MiB, MAX_SCHEMA_NESTING_DEPTH=64 - confirm in core). Authorized paths: preflight.rs, one focused Engine-private module for incremental mutation, focused tests, Cargo.toml only if feature gating needed; NO A1 files/logic from PR #154; no core public API change; no lower/collect/materialization; no storage/connectors/frontend/API/workflows; no #91. If core change needed for invariant dedup, STOP and request rebind. Verdict exactly one: PROMOTE_INCREMENTAL_SCHEMA_PRODUCTION_CANDIDATE | PROD_INCREMENTAL_SCHEMA_SEMANTIC_REJECT | PROD_INCREMENTAL_SCHEMA_GAIN_LOST | PROD_INCREMENTAL_SCHEMA_REGRESSION | PROD_INCREMENTAL_SCHEMA_DESIGN_REJECT. Positive authorizes ONLY independent A2 production acceptance. Draft PR only; no merge/default-enable. Lease 240 minutes. AGENT-SAFETY-NORMS binding.",
+      "canonical_issue": 159
     }
   ],
   "locks": {}
