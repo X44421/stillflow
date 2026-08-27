@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 177,
+  "revision": 178,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2188,7 +2188,8 @@
       "canonical_issue": 151,
       "completed_at": "2026-08-27T04:49:17Z",
       "result_head": "04966586192f8750a02790da988db71a28d82074",
-      "ci_url": null
+      "ci_url": null,
+      "completion_note": "TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM @ baseline 0496658 (diagnosis-only; zero repo changes; branch agent/ts-151-diag pushed as empty pointer). Minimal Polars JsonReader with correct explicit Datetime(ms) reproduces the x1000 shift (raw 1709168523000000 for 2024-02-29T01:02:03); mu-scaled raws regardless of declared unit => no StillFlow fix, no /1000 patch (contract). Connector OFF and #150 ON emit identical shifted raws (parity confirmed); Arrow ms->us scaling correct (rung 5). Verdict + reproducer + recommendation: https://github.com/X44421/stillflow/issues/151#issuecomment-5434509128. Locks never acquired; lease released."
     }
   ],
   "locks": {
