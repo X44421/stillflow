@@ -1112,7 +1112,14 @@ mod differential_tests {
 
     fn hex_fingerprint(bytes: &[u8]) -> String {
         // First 8 bytes hex: deterministic and tiny.
-        bytes.iter().take(8).map(|b| format!("{b:02x}")).collect()
+        bytes
+            .iter()
+            .take(8)
+            .fold(String::with_capacity(16), |mut out, byte| {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+                out
+            })
     }
 
     #[test]
@@ -1431,17 +1438,14 @@ mod differential_tests {
             nullable: false,
             expression: Expr::Literal(ScalarValue::Null),
         };
-        let drop_last = {
-            let one = LogicalSchema::new(vec![LogicalField::new(
-                col(1000),
-                "only",
-                LogicalType::Int64,
-                false,
-            )
-            .expect("f")])
-            .expect("s");
-            one
-        };
+        let drop_last = LogicalSchema::new(vec![LogicalField::new(
+            col(1000),
+            "only",
+            LogicalType::Int64,
+            false,
+        )
+        .expect("f")])
+        .expect("s");
         let cases = vec![
             (
                 "paused_timestamp_second_cast",

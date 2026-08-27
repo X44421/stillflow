@@ -54,19 +54,21 @@ impl ColumnLookup for LogicalSchema {
 ///
 /// Linear resolution costs ~R·F/2 comparisons for R lookups over F fields;
 /// indexed resolution costs ~F·log₂(F) to build plus R·log₂(F) to serve, so
-/// the index pays when R ≳ 2·log₂(F). Wall-time measurements on the F=4096
-/// sparse-projection cell (experiment #146 and the independent rerun) show
-/// the build's memory-access overhead is not amortized until R ≈ F/8, so
-/// `F/8` (floored at 4 lookups) is the conservative deterministic threshold:
-/// it never routes the measured loss region into the indexed path, and it
-/// routes every measured win region (dense/near-full projections and
-/// expression-heavy propagations) into the indexed path.
+/// the index pays when R ≳ 2·log₂(F). Wall-time measurements (experiment
+/// #146, the independent rerun, and the production multi-window runs) show
+/// the build's memory-access overhead is not amortized until R ≈ F/8, and
+/// that at small F the build cost can exceed the scan savings even at the
+/// F/8 ratio (F=64/R=24 measured ~ −5…−9%): the effective deterministic
+/// threshold is therefore `max(32, F/8)`. It never routes the measured loss
+/// regions (F=4096 sparse projection, F=64 small control) into the indexed
+/// path, and it routes every measured win region (dense/near-full
+/// projections, expression-heavy propagations, F=2048 bridge) into it.
 pub(crate) const fn use_index(field_count: usize, served_lookups: usize) -> bool {
-    let quarter_threshold = field_count / 8;
-    let threshold = if quarter_threshold < 4 {
-        4
+    let eighth_threshold = field_count / 8;
+    let threshold = if eighth_threshold < 32 {
+        32
     } else {
-        quarter_threshold
+        eighth_threshold
     };
     served_lookups >= threshold
 }
@@ -297,6 +299,7 @@ mod tests {
     use stillflow_core::LogicalType;
     use uuid::Uuid;
 
+    #[allow(dead_code)] // kept for literal-tuple cases
     fn schema(fields: &[(u128, &str, LogicalType)]) -> LogicalSchema {
         let fields: Vec<LogicalField> = fields
             .iter()
@@ -364,9 +367,13 @@ mod tests {
         assert!(use_index(4096, 512));
         assert!(use_index(512, 64));
         assert!(use_index(16, 2048));
-        // Tiny schemas: index only when it is clearly amortized; floor 4.
-        assert!(!use_index(64, 3));
-        assert!(use_index(64, 8));
+        // F=64 small control (R=24): measured build overhead exceeds scan
+        // savings at the F/8 ratio -> must stay linear.
+        assert!(!use_index(64, 24));
+        // Only clearly amortized small-schema cases index (floor 32).
+        assert!(use_index(64, 32));
+        assert!(use_index(8, 32));
+        assert!(!use_index(64, 31));
         // Empty/degenerate shapes never index.
         assert!(!use_index(0, 0));
         assert!(!use_index(1, 3));
