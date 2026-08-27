@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 181,
+  "revision": 182,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T05:46:46Z",
+  "updated_at": "2026-08-27T06:12:36Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2198,9 +2198,9 @@
     {
       "id": "O0-B2-A1-PROD-ACCEPT",
       "title": "Independent production acceptance of the A1 schema lookup index (PR #154, issue #155)",
-      "status": "queued",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1prodacc-r1",
       "target_issue": 155,
       "target_pr": 154,
       "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
@@ -2223,9 +2223,9 @@
         "O0-B2-A1-PROD"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-27T05:46:46Z",
+      "lease_expires_at": "2026-08-27T08:12:36Z",
+      "started_at": "2026-08-27T06:12:36Z",
+      "updated_at": "2026-08-27T06:12:36Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
       "queue_reason": "Productionization verdict PROMOTE_SCHEMA_LOOKUP_INDEX_PRODUCTION_CANDIDATE @ PR #154 head 7bf8360. Stricter than experiment acceptance: production architecture audit (release-mode stale-index safety, served-lookup estimator, single-path maintainability, scope incl. the .gitignore-worktree fifth file) + fresh semantic oracle + fresh multi-window performance gates.",
       "notes": "Independent read-only review per issue #155. Exact-head binding 7bf8360193909ff16b20879479d69978806eb397 (re-fetch before claim and before verdict; stop on drift). Scope audit incl. the fifth changed file (.gitignore-worktree) - must be judged explicitly, not ignored; unexpected scope is blocking. Stale-index structural proof for RELEASE mode (debug assertions supplemental only); if stale state merely unlikely => REQUEST_CHANGES. Estimator audit: R must be exact for every reachable preflight shape (authorized projection 2K/3K, filter/FilterRows, derive, column rules, chains, repeated refs, zero-ref steps, error paths); policy must never change semantics/order/determinism/bounds; new-variant bypass must be mechanically guarded (exhaustive matches/tests). Semantic differential: fresh baseline-main vs 7bf8360 external oracle byte-identical + in-crate linear/indexed/production battery + fixed-seed property suite determinism check. Gates at exact head: fmt, workspace clippy -D warnings, engine suite, workspace suite, git diff --check base..HEAD (rerun, do not reuse author claims). Fresh performance: release binaries built for this review (do not reuse author samples), WSL2 ext4, warm, exclusive flock, interleaved A/B, >=3 windows x >=20 reps short cells, per-window P50 + aggregate P50/P95, A/A noise floor for sub-ms controls; gates: primary F=4096 full >=20%, bridge >=20%, no representative control >5% multi-window median, F=4096 sparse consistent with linear-route policy (source proof) with timing noise not blocking. Maintainability: new expr/rule variant must not compile while forgetting counting; new mutation must not compile while bypassing rebuild; no silent linear/production divergence; one ownership model. Verdict exactly one: APPROVE_SCHEMA_LOOKUP_INDEX_PRODUCTION | REQUEST_CHANGES (with file/function/test refs; distinguish code vs evidence blockers). Positive verdict certifies A1 for later A1/A2 interaction study only - no Ready/merge/default enablement. #91 HOLD zero contact; PR #144 untouched. Lease 120 minutes. AGENT-SAFETY-NORMS binding.",
