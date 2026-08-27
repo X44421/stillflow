@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 174,
+  "revision": 175,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T03:06:31Z",
+  "updated_at": "2026-08-27T03:55:04Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2117,9 +2117,9 @@
     {
       "id": "O0-B2-A1-PROD",
       "title": "Productionize Engine-local schema lookup index (issue #153)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1prod-w1",
       "target_issue": 153,
       "target_pr": null,
       "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
@@ -2147,9 +2147,9 @@
         "O0-B2-A1-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-27T03:06:31Z",
+      "lease_expires_at": "2026-08-27T07:55:04Z",
+      "started_at": "2026-08-27T03:55:04Z",
+      "updated_at": "2026-08-27T03:55:04Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
       "queue_reason": "Independent acceptance APPROVE_SCHEMA_LOOKUP_INDEX_CANDIDATE_CONFIRMED at PR #149 head 2345055. Productionization/design-hardening task authorized; Draft PR only. Fresh branch from live main at CLAIM time; do NOT continue the experiment branch.",
       "notes": "Objective per issue #153: turn the accepted Engine-local ColumnId->ordinal lookup-index candidate (PR #149 @2345055) into a production-quality implementation - maintainable invariants, no public/core schema changes, no semantic drift, no representative regression beyond tolerance. Starting rule: fresh branch agent/o0-b2-a1-prod-schema-lookup-index from exact live main at CLAIM; if main moved from 0496658...STOP and request rebind. Requirements: (1) NO stale-index tolerance - schema mutation must make stale lookup state unrepresentable or force deterministic rebuild from the exact new schema state (structural, not just convention); (2) field order/canonical bytes/fingerprints/error variant+message+order/paused-type behavior/bounds/plan semantics identical; (3) no global/static/cross-run cache; (4) no public LogicalSchema field/API/serde/fingerprint change; (5) no O0-B2-A2 logic (PR #144 deferred - do not combine); (6) no lowering cache/lazy fusion/collect changes; (7) #91 zero contact. Sparse-plan risk (experiment -4.2%, independent rerun -3.7% on F=4096 sparse): resolve by multi-window repeated measurement showing noise with representative median regression <=5%, OR deterministic lazy/adaptive construction policy based ONLY on plan/schema shape (never timing); do not hide cost by changing fixtures/scope. Correctness hardening: deterministic differential coverage OFF/reference vs candidate across valid sparse/dense projections, first/middle/last+mixed ColumnId lookup, repeated expression refs, unknown+duplicate IDs, project->filter->rules->project chains, rename/drop/derive/cast transitions, paused/invalid type paths, bound failures, canonical schema/fingerprint identity, earliest EngineError position/message; mutation-focused invariant suite proving lookup state cannot survive a schema mutation incorrectly; generated/property-style cases over bounded schemas/plans with fixed seed where practical. If feature split is removed, retain mechanically runnable reference/differential test path in tests (do not silently lose the oracle). Static gates: fmt --check; clippy -p stillflow-engine --all-targets -D warnings (both modes); full stillflow-engine suite; git diff --check. Performance gates: WSL2 ext4 release, build before timing, warm modes, exclusive flock, balanced interleaving, raw sample SHA-256; cells F=64 small control, F=512/E=64 sparse control, F=2048 bridge, F=4096/E=256 full/near-full primary, F=4096 sparse projection, representative derive/expression-heavy cell; >=20 reps/mode short cells; P50/P95 + multi-window medians. Decision gate exactly one: PROD_SCHEMA_LOOKUP_SEMANTIC_REJECT | PROD_SCHEMA_LOOKUP_GAIN_LOST (<20% primary) | PROD_SCHEMA_LOOKUP_REGRESSION (control median >5%) | PROD_SCHEMA_LOOKUP_DESIGN_REJECT | PROMOTE_SCHEMA_LOOKUP_INDEX_PRODUCTION_CANDIDATE. Positive verdict authorizes ONLY independent production acceptance (next task), never default enablement/merge. Deliverable: Draft PR with exact base/head, changed files, design rationale, stale-index proof, semantic differential evidence, test/static gates, multi-window raw hashes, P50/P95, sparse-control analysis, one terminal verdict. Lease 240 minutes. AGENT-SAFETY-NORMS binding.",
@@ -2188,5 +2188,20 @@
       "canonical_issue": 151
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/o0-b2-a1-prod-schema-lookup-index": {
+      "task_id": "O0-B2-A1-PROD",
+      "owner": "ox-alpha-o0b2a1prod-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-27T03:55:04Z",
+      "lease_expires_at": "2026-08-27T07:55:04Z"
+    },
+    "engine:stillflow-engine": {
+      "task_id": "O0-B2-A1-PROD",
+      "owner": "ox-alpha-o0b2a1prod-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-27T03:55:04Z",
+      "lease_expires_at": "2026-08-27T07:55:04Z"
+    }
+  }
 }
