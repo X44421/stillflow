@@ -44,3 +44,11 @@ tokio-util.workspace = true
 # test-binary dump side channel only. No dependency and no behavior change.
 [features]
 io-metrics = []
+# Private E24-JSON-A2 experiment feature (issue #148). Never enabled by
+# default and never enabled through production configuration. Capability-only:
+# enabling it turns on serde_json's `raw_value` capability so selected JSON
+# values can be captured as borrowed raw slices instead of a generic
+# `serde_json::Value` tree. With the feature off, the crate builds and behaves
+# exactly as before; no dependency or version changes (Cargo.lock is
+# unaffected because features are not recorded in the lockfile).
+json-direct-projected-writer = ["serde_json/raw_value"]

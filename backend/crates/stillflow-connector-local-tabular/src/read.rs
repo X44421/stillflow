@@ -10,6 +10,7 @@ use polars::prelude::{
     ParallelStrategy, ParquetReader, SerReader,
 };
 use serde::de::{DeserializeSeed, Error as DeError, MapAccess, SeqAccess, Visitor};
+#[cfg(not(feature = "json-direct-projected-writer"))]
 use serde_json::{Map, Value};
 use stillflow_connectors::RawBatchStream;
 use stillflow_core::{
@@ -635,24 +636,46 @@ impl PreparedReader {
                 }
                 let mut encoded = Vec::new();
                 let mut count = 0_usize;
+                #[cfg(feature = "json-direct-projected-writer")]
+                let key_prefixes =
+                    direct_projected::projected_key_prefixes(&self.projection.names)?;
                 while count < rows {
                     self.context.ensure_active()?;
                     let Some(raw) = reader.next_raw_object(&self.context)? else {
                         break;
                     };
-                    let object = parse_projected_object(
+                    #[cfg(not(feature = "json-direct-projected-writer"))]
+                    {
+                        let object = parse_projected_object(
+                            &raw,
+                            &self.full_schema,
+                            &self.projection.names,
+                            reader.row_number(),
+                        )?;
+                        serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(
+                            |_| {
+                                source_error(
+                                    ErrorCategory::Internal,
+                                    false,
+                                    "projected JSON row could not be encoded for Polars",
+                                )
+                            },
+                        )?;
+                    }
+                    // E24-JSON-A2 experiment path (private feature): capture
+                    // selected values as raw JSON slices validated in place at
+                    // the same observation point, then assemble the projected
+                    // row directly in `projection.schema` order. The downstream
+                    // Polars JsonReader below is intentionally retained.
+                    #[cfg(feature = "json-direct-projected-writer")]
+                    direct_projected::encode_projected_row_direct(
                         &raw,
                         &self.full_schema,
                         &self.projection.names,
+                        &key_prefixes,
                         reader.row_number(),
+                        &mut encoded,
                     )?;
-                    serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(|_| {
-                        source_error(
-                            ErrorCategory::Internal,
-                            false,
-                            "projected JSON row could not be encoded for Polars",
-                        )
-                    })?;
                     encoded.push(b'\n');
                     count += 1;
                 }
@@ -802,11 +825,16 @@ fn reorder_frame(frame: DataFrame, names: &[String]) -> ConnectorResult<DataFram
         .map_err(polars_data_error)
 }
 
+// Generic projected-object path: the exact current production path, retained
+// verbatim whenever the E24-JSON-A2 experiment feature is off. The experiment
+// replaces only this selected-field Value/Map intermediate.
+#[cfg(not(feature = "json-direct-projected-writer"))]
 struct ProjectedObjectSeed<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
     type Value = Map<String, Value>;
 
@@ -821,11 +849,13 @@ impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
     }
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 struct ProjectedObjectVisitor<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
     type Value = Map<String, Value>;
 
@@ -1061,6 +1091,7 @@ impl<'de> Visitor<'de> for LogicalValueVisitor<'_> {
     }
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 fn parse_projected_object(
     raw: &[u8],
     schema: &LogicalSchema,
@@ -1110,6 +1141,7 @@ fn parse_projected_object(
     Ok(ordered)
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 fn validate_json_value(value: &Value, field: &LogicalField) -> Result<(), &'static str> {
     if value.is_null() {
         return if field.nullable || matches!(field.data_type, LogicalType::Null) {
@@ -1121,6 +1153,7 @@ fn validate_json_value(value: &Value, field: &LogicalField) -> Result<(), &'stat
     validate_json_type(value, &field.data_type)
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 fn validate_json_type(value: &Value, data_type: &LogicalType) -> Result<(), &'static str> {
     let valid = match data_type {
         LogicalType::Null => false,
@@ -1158,6 +1191,7 @@ fn validate_json_type(value: &Value, data_type: &LogicalType) -> Result<(), &'st
     }
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 fn validate_json_struct(
     object: &Map<String, Value>,
     fields: &[LogicalField],
@@ -1176,6 +1210,495 @@ fn validate_json_struct(
         }
     }
     Ok(())
+}
+
+// ===========================================================================
+// E24-JSON-A2 — private experiment feature `json-direct-projected-writer`
+// (issue #148, architecture verdict #143 ARCHITECTURE_DIRECT_PROJECTED_WRITER)
+//
+// Replaces ONLY the selected-field generic `serde_json::Value` tree plus
+// projected `Map<String, Value>` reconstruction of the projected NDJSON path:
+//
+// * selected values are captured as borrowed raw JSON slices
+//   (`serde_json::value::RawValue`) instead of a generic DOM;
+// * every captured slice is validated immediately through the existing typed
+//   logical-type machinery at the SAME observable point as the generic path
+//   (blocking: before advancing past the current object key), so the earliest
+//   failing key/value position and the error category ordering are unchanged;
+// * duplicate detection stays at the same point, BEFORE value acceptance;
+// * non-selected fields keep the untouched `ValidateFieldSeed` typed path;
+// * the projected row is assembled deterministically in `projection.schema`
+//   order by writing key syntax plus already-valid raw value bytes;
+// * the downstream Polars JsonReader second parse is intentionally retained.
+//
+// Row scratch representation (bounded-memory proof):
+// * no generic selected `Value` tree and no selected `Map<String, Value>`
+//   exists anywhere on this path;
+// * per-row scratch is one `Vec<Option<Cow<[u8]>>>` of O(projected-field-count)
+//   borrowed slices pointing INTO the framed row buffer that the generic path
+//   also allocates (`next_raw_object`), plus O(#keys-in-row) borrowed entries
+//   in the duplicate-detection set — no owned string/value copies; the ONE
+//   owned exception is a selected subtree that itself contained duplicate
+//   nested keys, which is re-serialized once (bounded by that subtree's own
+//   bytes) to reproduce generic-path last-value-wins semantics, and no selected
+//   value is copied through any further intermediate buffer before assembly;
+// * the assembled row written into the shared batch `Vec<u8>` is the single
+//   row-sized owned buffer (identical to the generic path's re-encode target);
+//   no selected value is copied through any intermediate owned buffer between
+//   capture and final assembly (zero-copy slices);
+// * nothing spans rows: slots/prefix scratch lives and dies inside one
+//   `fill_pending` call, slots are overwritten per row, and the existing
+//   framing byte ceilings and per-row cancellation checkpoints are unchanged.
+// Known measured trade-off (disclosed, not hidden): the captured raw slice is
+// scanned twice — once syntactically during capture, once by the typed
+// validator — but never copied; the generic path scans once and allocates a
+// full DOM copy instead.
+// ===========================================================================
+#[cfg(feature = "json-direct-projected-writer")]
+mod direct_projected {
+    use std::borrow::Cow;
+    use std::collections::{BTreeSet, HashMap};
+
+    use serde::de::{DeserializeSeed, Error as DeError, MapAccess, SeqAccess, Visitor};
+    use serde_json::value::RawValue;
+    use stillflow_core::{
+        ConnectorResult, ErrorCategory, LogicalField, LogicalSchema, LogicalType,
+    };
+
+    use super::{source_error, source_error_with_row, temporal_text_matches, ValidateFieldSeed};
+
+    /// Precomputes the `"escaped_key":` prefix for every projected field so
+    /// per-row assembly only concatenates bytes. Bounded by O(projected-field
+    /// count × key length) per batch; keys come from the established schema.
+    pub(super) fn projected_key_prefixes(names: &[String]) -> ConnectorResult<Vec<Vec<u8>>> {
+        names
+            .iter()
+            .map(|name| {
+                let mut prefix = serde_json::to_vec(name).map_err(|_| {
+                    source_error(
+                        ErrorCategory::Internal,
+                        false,
+                        "projected JSON key could not be encoded",
+                    )
+                })?;
+                prefix.push(b':');
+                Ok(prefix)
+            })
+            .collect()
+    }
+
+    /// Validates one input row and appends its projected NDJSON encoding in
+    /// `projection.schema` order to `out` (without trailing newline).
+    pub(super) fn encode_projected_row_direct<'de>(
+        raw: &'de [u8],
+        schema: &LogicalSchema,
+        names: &[String],
+        key_prefixes: &[Vec<u8>],
+        row: usize,
+        out: &mut Vec<u8>,
+    ) -> ConnectorResult<()> {
+        if raw.iter().copied().find(|byte| !byte.is_ascii_whitespace()) != Some(b'{') {
+            return Err(source_error_with_row(
+                ErrorCategory::InvalidData,
+                "JSON row is not an object",
+                row,
+            ));
+        }
+        let mut slot_of: HashMap<&str, usize> = HashMap::with_capacity(names.len());
+        for (index, name) in names.iter().enumerate() {
+            slot_of.insert(name.as_str(), index);
+        }
+        let mut slots: Vec<Option<Cow<'de, [u8]>>> = vec![None; names.len()];
+        let mut deserializer = serde_json::Deserializer::from_slice(raw);
+        DirectProjectedObjectSeed {
+            schema,
+            selected: &slot_of,
+            slots: &mut slots,
+        }
+        .deserialize(&mut deserializer)
+        .map_err(|error| {
+            let category = match error.classify() {
+                serde_json::error::Category::Syntax | serde_json::error::Category::Eof => {
+                    ErrorCategory::InvalidData
+                }
+                serde_json::error::Category::Io => ErrorCategory::TransientSource,
+                serde_json::error::Category::Data => ErrorCategory::SchemaDrift,
+            };
+            source_error_with_row(
+                category,
+                "JSON row does not match the established schema",
+                row,
+            )
+        })?;
+        deserializer.end().map_err(|_| {
+            source_error_with_row(ErrorCategory::InvalidData, "JSON row is malformed", row)
+        })?;
+
+        out.push(b'{');
+        for (index, prefix) in key_prefixes.iter().enumerate() {
+            if index > 0 {
+                out.push(b',');
+            }
+            out.extend_from_slice(prefix);
+            match slots.get(index) {
+                Some(Some(value_bytes)) => out.extend_from_slice(value_bytes),
+                _ => out.extend_from_slice(b"null"),
+            }
+        }
+        out.push(b'}');
+        Ok(())
+    }
+
+    struct DirectProjectedObjectSeed<'de, 'a> {
+        schema: &'a LogicalSchema,
+        selected: &'a HashMap<&'a str, usize>,
+        slots: &'a mut [Option<Cow<'de, [u8]>>],
+    }
+
+    impl<'de> DeserializeSeed<'de> for DirectProjectedObjectSeed<'de, '_> {
+        type Value = ();
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_map(DirectProjectedObjectVisitor {
+                schema: self.schema,
+                selected: self.selected,
+                slots: self.slots,
+            })
+        }
+    }
+
+    struct DirectProjectedObjectVisitor<'de, 'a> {
+        schema: &'a LogicalSchema,
+        selected: &'a HashMap<&'a str, usize>,
+        slots: &'a mut [Option<Cow<'de, [u8]>>],
+    }
+
+    impl<'de> Visitor<'de> for DirectProjectedObjectVisitor<'de, '_> {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a JSON object matching the established schema")
+        }
+
+        fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+        where
+            A: MapAccess<'de>,
+        {
+            let mut seen = BTreeSet::new();
+            while let Some(name) = access.next_key::<&'de str>()? {
+                let Some(field) = self.schema.fields.iter().find(|field| field.name == name) else {
+                    return Err(A::Error::custom(
+                        "JSON row contains a field outside the established schema",
+                    ));
+                };
+                if !seen.insert(name) {
+                    return Err(A::Error::custom("JSON row contains a duplicate field"));
+                }
+                if let Some(&slot) = self.selected.get(name) {
+                    // Same observable point as the generic path: consume the
+                    // selected value as raw JSON and validate it through the
+                    // typed machinery BEFORE advancing to the next key.
+                    let captured: &'de RawValue = access.next_value()?;
+                    let mut had_duplicate_keys = false;
+                    validate_selected_raw_value(captured.get(), field, &mut had_duplicate_keys)
+                        .map_err(A::Error::custom)?;
+                    if let Some(dst) = self.slots.get_mut(slot) {
+                        *dst = Some(if had_duplicate_keys {
+                            // A selected nested object contained duplicate keys.
+                            // The generic path parsed such values into a
+                            // `preserve_order` serde_json Value, where re-inserting
+                            // an existing key REPLACES the value at the original
+                            // position — i.e. last write wins. A raw slice would
+                            // hand every occurrence downstream instead, so this
+                            // rare case falls back to one canonical owned copy of
+                            // that single subtree (bounded by its own bytes) and
+                            // is disclosed as a measured trade-off; clean values
+                            // stay borrowed slices.
+                            let dom: serde_json::Value = serde_json::from_str(captured.get())
+                                .map_err(|_| {
+                                    A::Error::custom("value has an incompatible logical type")
+                                })?;
+                            let rewritten = serde_json::to_vec(&dom).map_err(|_| {
+                                A::Error::custom("value has an incompatible logical type")
+                            })?;
+                            Cow::Owned(rewritten)
+                        } else {
+                            Cow::Borrowed(captured.get().as_bytes())
+                        });
+                    }
+                } else {
+                    access.next_value_seed(ValidateFieldSeed { field })?;
+                }
+            }
+            for field in &self.schema.fields {
+                if !seen.contains(field.name.as_str()) && !field.nullable {
+                    return Err(A::Error::custom("JSON row is missing a required field"));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Validates a captured raw slice through the existing typed obligations.
+    /// The slice is already known to be well-formed JSON (capture enforces
+    /// syntax), so every reachable failure here is semantic and maps to the
+    /// same custom/Data error class the generic path produced. The flag also
+    /// records whether any nested object repeated a key, so the caller can
+    /// collapse the value to generic-path `Value` semantics.
+    fn validate_selected_raw_value(
+        text: &str,
+        field: &LogicalField,
+        duplicate_keys: &mut bool,
+    ) -> Result<(), &'static str> {
+        let mut deserializer = serde_json::Deserializer::from_slice(text.as_bytes());
+        SelectedRawValueSeed {
+            field,
+            duplicate_keys,
+        }
+        .deserialize(&mut deserializer)
+        .map_err(|_| "value has an incompatible logical type")
+    }
+
+    struct SelectedRawValueSeed<'a> {
+        field: &'a LogicalField,
+        duplicate_keys: &'a mut bool,
+    }
+
+    impl<'de> DeserializeSeed<'de> for SelectedRawValueSeed<'_> {
+        type Value = ();
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(SelectedLogicalValueVisitor {
+                data_type: &self.field.data_type,
+                nullable: self.field.nullable,
+                duplicate_keys: self.duplicate_keys,
+            })
+        }
+    }
+
+    struct SelectedFieldSeed<'a> {
+        field: &'a LogicalField,
+        duplicate_keys: &'a mut bool,
+    }
+
+    impl<'de> DeserializeSeed<'de> for SelectedFieldSeed<'_> {
+        type Value = ();
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(SelectedLogicalValueVisitor {
+                data_type: &self.field.data_type,
+                nullable: self.field.nullable,
+                duplicate_keys: self.duplicate_keys,
+            })
+        }
+    }
+
+    struct SelectedElementSeed<'a> {
+        data_type: &'a LogicalType,
+        duplicate_keys: &'a mut bool,
+    }
+
+    impl<'de> DeserializeSeed<'de> for SelectedElementSeed<'_> {
+        type Value = ();
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(SelectedLogicalValueVisitor {
+                data_type: self.data_type,
+                nullable: true,
+                duplicate_keys: self.duplicate_keys,
+            })
+        }
+    }
+
+    /// Typed validation for selected raw values. This mirrors the accept/reject
+    /// surface of the generic path's `validate_json_value` for parsed `Value`s
+    /// — including one deliberate difference from the non-selected
+    /// `LogicalValueVisitor`: duplicate keys inside SELECTED nested objects are
+    /// accepted with last-value-wins because the generic path parses selected
+    /// values into `serde_json::Value` whose map silently collapses
+    /// duplicates. Rejecting them here would move a previously accepted input
+    /// to an error, breaking error-category parity.
+    struct SelectedLogicalValueVisitor<'a> {
+        data_type: &'a LogicalType,
+        nullable: bool,
+        duplicate_keys: &'a mut bool,
+    }
+
+    impl SelectedLogicalValueVisitor<'_> {
+        fn ensure(&self, valid: bool) -> Result<(), &'static str> {
+            if valid {
+                Ok(())
+            } else {
+                Err("value has an incompatible logical type")
+            }
+        }
+    }
+
+    impl<'de> Visitor<'de> for SelectedLogicalValueVisitor<'_> {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a value matching the established logical type")
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.ensure(self.nullable || matches!(self.data_type, LogicalType::Null))
+                .map_err(E::custom)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.visit_unit()
+        }
+
+        fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.ensure(matches!(self.data_type, LogicalType::Boolean))
+                .map_err(E::custom)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            let valid = match self.data_type {
+                LogicalType::Int8 => i8::try_from(value).is_ok(),
+                LogicalType::Int16 => i16::try_from(value).is_ok(),
+                LogicalType::Int32 => i32::try_from(value).is_ok(),
+                LogicalType::Int64 | LogicalType::Float32 | LogicalType::Float64 => true,
+                _ => false,
+            };
+            self.ensure(valid).map_err(E::custom)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            let valid = match self.data_type {
+                LogicalType::Int8 => i8::try_from(value).is_ok(),
+                LogicalType::Int16 => i16::try_from(value).is_ok(),
+                LogicalType::Int32 => i32::try_from(value).is_ok(),
+                LogicalType::UInt8 => u8::try_from(value).is_ok(),
+                LogicalType::UInt16 => u16::try_from(value).is_ok(),
+                LogicalType::UInt32 => u32::try_from(value).is_ok(),
+                LogicalType::UInt64 | LogicalType::Float32 | LogicalType::Float64 => true,
+                LogicalType::Int64 => i64::try_from(value).is_ok(),
+                _ => false,
+            };
+            self.ensure(valid).map_err(E::custom)
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            let valid = match self.data_type {
+                LogicalType::Float32 => value.is_finite() && (value as f32).is_finite(),
+                LogicalType::Float64 => value.is_finite(),
+                _ => false,
+            };
+            self.ensure(valid).map_err(E::custom)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            let valid = match self.data_type {
+                LogicalType::Utf8 => true,
+                LogicalType::Date32 | LogicalType::Timestamp { .. } => {
+                    temporal_text_matches(value, self.data_type)
+                }
+                _ => false,
+            };
+            self.ensure(valid).map_err(E::custom)
+        }
+
+        fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.visit_str(value)
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_seq<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let LogicalType::List(element) = self.data_type else {
+                return Err(A::Error::custom("array has an incompatible logical type"));
+            };
+            while access
+                .next_element_seed(SelectedElementSeed {
+                    data_type: element,
+                    duplicate_keys: self.duplicate_keys,
+                })?
+                .is_some()
+            {}
+            Ok(())
+        }
+
+        fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+        where
+            A: MapAccess<'de>,
+        {
+            let LogicalType::Struct(fields) = self.data_type else {
+                return Err(A::Error::custom("object has an incompatible logical type"));
+            };
+            // Membership tracking only: duplicates are accepted (last value
+            // wins) to mirror the generic selected-path `Value` semantics; the
+            // flag tells the assembler to canonicalize this one subtree.
+            let mut seen = BTreeSet::new();
+            while let Some(name) = access.next_key::<&'de str>()? {
+                let Some(field) = fields.iter().find(|field| field.name == name) else {
+                    return Err(A::Error::custom("nested object contains an unknown field"));
+                };
+                if !seen.insert(name) {
+                    *self.duplicate_keys = true;
+                }
+                access.next_value_seed(SelectedFieldSeed {
+                    field,
+                    duplicate_keys: &mut *self.duplicate_keys,
+                })?;
+            }
+            if fields
+                .iter()
+                .any(|field| !field.nullable && !seen.contains(field.name.as_str()))
+            {
+                return Err(A::Error::custom(
+                    "nested object is missing a required field",
+                ));
+            }
+            Ok(())
+        }
+    }
 }
 
 fn polars_open_error(_error: polars::error::PolarsError) -> ConnectorError {
