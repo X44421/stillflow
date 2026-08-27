@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 166,
+  "revision": 167,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T01:07:20Z",
+  "updated_at": "2026-08-27T01:35:00Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2033,6 +2033,74 @@
       "result_head": "e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac",
       "ci_url": null,
       "completion_note": "PROMOTE_DIRECT_PROJECTED_WRITER_CANDIDATE @ e9a4fa6 (PR #150 Draft); primary 100x100k +36.1%, narrow +43.1%/nested +38.3% no regressions; 52/52 tests both modes; https://github.com/X44421/stillflow/issues/148#issuecomment-… (see issue)"
+    },
+    {
+      "id": "O0-B2-A1-ACCEPT",
+      "title": "Independent acceptance of the A1 schema lookup index experiment (PR #149)",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "locks": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T01:35:00Z",
+      "target_pr": 149,
+      "target_branch": "agent/o0-b2-a1-schema-lookup-index",
+      "expected_head": "2345055342b24874146230c69d049339a7d3a77d",
+      "depends_on": [
+        "O0-B2-A1"
+      ],
+      "conflicts_with": [],
+      "notes": "Read-only review; no locks required. INDEPENDENCE BOUNDARY: the experiment executor lineage (ox-alpha-o0b2a1-w1/w2) must not CLAIM. CLAIM only after re-fetching the registry and verifying PR #149 is Open/Draft with headRefOid == 2345055342b24874146230c69d049339a7d3a77f prefix-full form 2345055342b24874146230c69d049339a7d3a77d (stop on drift). Re-verify FROM ZERO: feature isolation / OFF parity on the exact head; error variant+message+position equality probes across schema-mutating surfaces; PreparedPlan schema-output equality; fingerprint/canonical equality; full engine suite OFF and ON; benchmark methodology audit + reduced independent rerun of at least primary F=4096/E=256 and control F=512 under the shared bench-window flock. AGENT-SAFETY-NORMS apply: never load large artifacts into context (hashes/slices only). Single terminal verdict bound to the full head.",
+      "paths": [
+        "backend/crates/stillflow-engine/src/preflight.rs",
+        "backend/crates/stillflow-engine/src/typing.rs",
+        "backend/crates/stillflow-engine/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "o0-b2-a1-accept:feature-isolation-and-off-parity-at-head",
+        "o0-b2-a1-accept:error-order-parity-probes",
+        "o0-b2-a1-accept:schema-fingerprint-equality",
+        "o0-b2-a1-accept:full-suite-off-and-on-rerun",
+        "o0-b2-a1-accept:benchmark-methodology-audited-and-gate-recomputed",
+        "o0-b2-a1-accept:single-terminal-verdict-at-bound-head"
+      ],
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "O0-B2-A1 completed @ 2345055 with PROMOTE_SCHEMA_LOOKUP_INDEX_CANDIDATE; independent acceptance required before any productionization step."
+    },
+    {
+      "id": "E24-JSON-A2-ACCEPT",
+      "title": "Independent acceptance of the direct projected JSON writer experiment (PR #150)",
+      "status": "dispatched",
+      "mode": "review",
+      "owner": null,
+      "locks": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T01:35:00Z",
+      "target_pr": 150,
+      "target_branch": "agent/e24-json-a2-direct-projected-writer",
+      "expected_head": "e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac",
+      "depends_on": [
+        "E24-JSON-A2"
+      ],
+      "conflicts_with": [],
+      "notes": "Read-only review; no locks required. INDEPENDENCE BOUNDARY: the experiment executor lineage (ox-alpha-e24jsona2-w1/w2) must not CLAIM. CLAIM only after re-fetching the registry and verifying PR #150 is Open/Draft with headRefOid == e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac (stop on drift). Re-verify FROM ZERO: authorized-paths diff audit; error-order/category parity incl. duplicate-before-acceptance; non-selected typed seed untouched; projection.schema-order deterministic assembly; bounded-memory proof audited including the disclosed duplicate-subtree re-encode exception and the primary-cell peak-RS Delta (+11MB) explanation requirement; differential suite + full connector suite OFF and ON rerun; raw benchmark artifacts sha-audited with methodology review and a reduced independent rerun of cheap cells under the shared bench-window flock. The pre-existing Polars ISO-timestamp x1000 decode quirk is baseline behavior tracked in its own issue and MUST NOT block this acceptance. AGENT-SAFETY-NORMS apply: fixtures reach 279MB — hashes/counts only, never file dumps. Single terminal verdict bound to the full head.",
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/direct_projected_writer.rs",
+        "backend/crates/stillflow-connector-local-tabular/Cargo.toml"
+      ],
+      "acceptance_keys": [
+        "e24-json-a2-accept:authorized-paths-and-feature-isolation",
+        "e24-json-a2-accept:error-order-and-category-parity",
+        "e24-json-a2-accept:duplicate-and-missing-semantics-at-same-points",
+        "e24-json-a2-accept:bounded-memory-proof-including-rss-delta-explained",
+        "e24-json-a2-accept:suite-and-artifacts-reproduced-off-and-on",
+        "e24-json-a2-accept:single-terminal-verdict-at-bound-head"
+      ],
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "E24-JSON-A2 completed @ e9a4fa6 with PROMOTE_DIRECT_PROJECTED_WRITER_CANDIDATE (+36.1% primary real path); independent acceptance required before connector productionization."
     }
   ],
   "locks": {}
