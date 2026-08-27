@@ -290,6 +290,7 @@ impl ColumnLookup for WorkingSchema {
 mod tests {
     use super::*;
     use stillflow_core::LogicalType;
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     fn schema(fields: &[(u128, &str, LogicalType)]) -> LogicalSchema {
@@ -315,6 +316,22 @@ mod tests {
                 LogicalField::new(
                     ColumnId::from_uuid(Uuid::from_u128(i as u128 + 1000)),
                     format!("c{i}"),
+                    LogicalType::Int64,
+                    false,
+                )
+                .expect("field")
+            })
+            .collect();
+        LogicalSchema::new(fields).expect("schema")
+    }
+
+    /// Wide schema with a disjoint id range (2000 + i), names "n{i}".
+    fn wide_new_range(f: usize) -> LogicalSchema {
+        let fields: Vec<LogicalField> = (0..f)
+            .map(|i| {
+                LogicalField::new(
+                    ColumnId::from_uuid(Uuid::from_u128(i as u128 + 2000)),
+                    format!("n{i}"),
                     LogicalType::Int64,
                     false,
                 )
@@ -364,13 +381,24 @@ mod tests {
 
     #[test]
     fn duplicate_ids_resolve_first_wins_in_both_backends() {
-        // Unvalidated-style duplicate ids: linear scan resolves first
-        // occurrence; the index must too (stable sort + dedup keeps first).
-        let schema = schema(&[
-            (1, "first", LogicalType::Int64),
-            (2, "second", LogicalType::Int64),
-            (1, "dupe", LogicalType::Int64),
-        ]);
+        // `LogicalSchema::new` validates uniqueness, so a duplicate-id schema
+        // can only exist unvalidated. The index must still match the linear
+        // first-match resolution on such input (defense in depth; validated
+        // schemas have unique ids and never hit this branch).
+        let field = |id: u128, name: &str| {
+            LogicalField::new(
+                ColumnId::from_uuid(Uuid::from_u128(id)),
+                name.to_owned(),
+                LogicalType::Int64,
+                false,
+            )
+            .expect("field")
+        };
+        let schema = LogicalSchema {
+            version: 1,
+            fields: vec![field(1, "first"), field(2, "second"), field(1, "dupe")],
+            metadata: BTreeMap::new(),
+        };
         let index = OrdinalIndex::build(&schema);
         let id = ColumnId::from_uuid(Uuid::from_u128(1));
         assert_eq!(index.field(id).unwrap().name, "first");
@@ -434,13 +462,16 @@ mod tests {
             "store produced an invalid schema"
         ));
         step!(|w: &mut WorkingSchema| -> Result<(), EngineError> {
-            w.swap_with(wide(4));
+            // Swap in a schema with a DISJOINT id range: the index must
+            // reflect the swapped-in schema, never the old one.
+            w.swap_with(wide_new_range(4));
             Ok(())
         });
-        // After swap, the index must reflect the swapped-in schema, not the old one.
+        // After swap, the index must resolve the new mapping and forget the
+        // old schema's ids entirely.
         assert_eq!(
-            indexed.lookup_field(id(1003)).map(|f| f.name.as_str()),
-            Some("c3")
+            indexed.lookup_field(id(2003)).map(|f| f.name.as_str()),
+            Some("n3")
         );
         assert_eq!(indexed.lookup_field(id(1000)), None);
     }
