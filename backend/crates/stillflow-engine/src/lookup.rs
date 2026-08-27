@@ -9,15 +9,20 @@
 //!
 //! Two invariants are enforced by construction:
 //!
-//! 1. **No stale index.** The index lives inside [`WorkingSchema`] / [`OrdinalIndex`]
-//!    whose schema is private and only ever exposed immutably. Every mutation
-//!    (`rename` / `store` / `swap_with`) rebuilds the ordinal table from the
-//!    exact new validated schema state *in the same method call*, so a stale
-//!    table is unrepresentable: there is no code path that can change the
-//!    schema without immediately replacing the index. [`WorkingSchema::verify`]
-//!    additionally recomputes the table and compares it under `debug_assertions`
-//!    after every mutation (mechanical guard), and the test suite runs
-//!    property-style consistency checks over every rule family.
+//! 1. **No stale index.** The indexed state lives in [`IndexedSchema`], a struct
+//!    whose fields are private to this module, carried opaquely in the
+//!    [`WorkingSchema::Indexed`] tuple variant — nothing outside `lookup.rs`
+//!    can construct, destructure, or mutate the schema/index pair, so any
+//!    schema change must flow through the mutation methods below. Every
+//!    mutation (`rename` / `store` / `swap_with`) rebuilds the ordinal table
+//!    from the exact new validated schema state *in the same method call*, so
+//!    a stale table is unrepresentable: there is no code path that can change
+//!    the schema without immediately replacing the index.
+//!    [`WorkingSchema::verify`] additionally recomputes the table and compares
+//!    it under `debug_assertions` after every mutation (supplemental
+//!    mechanical guard; release correctness does not depend on it), and the
+//!    test suite runs property-style consistency checks over every rule
+//!    family.
 //!
 //! 2. **Deterministic construction policy.** The index is built only when
 //!    [`use_index`] says the build is amortized. The decision is a pure
@@ -160,6 +165,20 @@ impl ColumnLookup for AuthorizedLookup<'_> {
     }
 }
 
+/// Indexed backend state: the exact validated schema plus its private ordinal
+/// table. Both fields are **private to this module**; the opaque tuple variant
+/// below means no code outside `lookup.rs` can construct, destructure, or
+/// mutate this pair, so any schema change must flow through
+/// [`WorkingSchema`]'s mutation methods, which rebuild the table from the
+/// exact post-mutation state in the same call.
+/// The struct name is crate-visible (it appears in the `pub(crate)` enum
+/// variant's type) but both **fields are private to this module** — that is
+/// what makes the schema/index pair opaque outside `lookup.rs`.
+pub(crate) struct IndexedSchema {
+    schema: LogicalSchema,
+    entries: Vec<(ColumnId, u32)>,
+}
+
 /// Owned working schema threaded through rule-schema propagation.
 ///
 /// The `Linear` variant is the unchanged production-baseline behavior (the
@@ -168,19 +187,17 @@ impl ColumnLookup for AuthorizedLookup<'_> {
 /// `Indexed` variant keeps the exact same schema semantics and replaces only
 /// where `ColumnId` resolution happens.
 ///
-/// Structural stale-index guarantee: the schema is private and exposed only
-/// immutably; the three mutation methods (`rename` / `store` / `swap_with`)
-/// are the only way the schema can change, and each rebuilds the ordinal table
-/// from the exact post-mutation validated schema state before returning, so no
-/// stale window exists. Mutations replace or revalidate the whole field list
-/// through [`LogicalSchema::new`] exactly like the baseline path (no
-/// incremental validation semantics).
+/// Structural stale-index guarantee: the indexed state is opaque (see
+/// [`IndexedSchema`]), the schema is exposed only immutably (`schema()`), and
+/// the three mutation methods (`rename` / `store` / `swap_with`) are the only
+/// way the schema can change; each rebuilds the ordinal table from the exact
+/// post-mutation validated schema state before returning, so no stale window
+/// exists. Mutations replace or revalidate the whole field list through
+/// [`LogicalSchema::new`] exactly like the baseline path (no incremental
+/// validation semantics).
 pub(crate) enum WorkingSchema {
     Linear(LogicalSchema),
-    Indexed {
-        schema: LogicalSchema,
-        entries: Vec<(ColumnId, u32)>,
-    },
+    Indexed(IndexedSchema),
 }
 
 impl WorkingSchema {
@@ -204,13 +221,13 @@ impl WorkingSchema {
     /// Indexed backend: ordinal table rebuilt from the exact schema state.
     pub(crate) fn indexed(schema: LogicalSchema) -> Self {
         let entries = build_ordinals(&schema);
-        Self::Indexed { schema, entries }
+        Self::Indexed(IndexedSchema { schema, entries })
     }
 
     pub(crate) fn schema(&self) -> &LogicalSchema {
         match self {
             Self::Linear(schema) => schema,
-            Self::Indexed { schema, .. } => schema,
+            Self::Indexed(state) => &state.schema,
         }
     }
 
@@ -218,8 +235,8 @@ impl WorkingSchema {
     /// variant only). Called at the end of every mutation, in the same call,
     /// so the index can never outlive the schema state it was derived from.
     fn refresh(&mut self) {
-        if let Self::Indexed { schema, entries } = self {
-            *entries = build_ordinals(schema);
+        if let Self::Indexed(state) = self {
+            state.entries = build_ordinals(&state.schema);
         }
     }
 
@@ -229,7 +246,7 @@ impl WorkingSchema {
     pub(crate) fn verify(&self) -> bool {
         match self {
             Self::Linear(_) => true,
-            Self::Indexed { schema, entries } => build_ordinals(schema) == *entries,
+            Self::Indexed(state) => build_ordinals(&state.schema) == state.entries,
         }
     }
 
@@ -265,14 +282,14 @@ impl WorkingSchema {
     pub(crate) fn into_schema(self) -> LogicalSchema {
         match self {
             Self::Linear(schema) => schema,
-            Self::Indexed { schema, .. } => schema,
+            Self::Indexed(state) => state.schema,
         }
     }
 
     fn schema_mut(&mut self) -> &mut LogicalSchema {
         match self {
             Self::Linear(schema) => schema,
-            Self::Indexed { schema, .. } => schema,
+            Self::Indexed(state) => &mut state.schema,
         }
     }
 }
@@ -281,12 +298,13 @@ impl ColumnLookup for WorkingSchema {
     fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField> {
         match self {
             Self::Linear(schema) => schema.field(id),
-            Self::Indexed { schema, entries } => entries
+            Self::Indexed(state) => state
+                .entries
                 .binary_search_by_key(&id, |(key, _)| *key)
                 .ok()
                 .and_then(|position| {
-                    let ordinal = entries[position].1 as usize;
-                    schema.fields.get(ordinal)
+                    let ordinal = state.entries[position].1 as usize;
+                    state.schema.fields.get(ordinal)
                 }),
         }
     }
@@ -501,7 +519,7 @@ mod tests {
         let ws = WorkingSchema::for_shape(big.clone(), 48);
         assert!(matches!(ws, WorkingSchema::Linear(_)));
         let ws = WorkingSchema::for_shape(big.clone(), 4096 * 3);
-        assert!(matches!(ws, WorkingSchema::Indexed { .. }));
+        assert!(matches!(ws, WorkingSchema::Indexed(_)));
         let auth = AuthorizedLookup::for_shape(&big, 48);
         assert!(matches!(auth, AuthorizedLookup::Linear(_)));
     }
