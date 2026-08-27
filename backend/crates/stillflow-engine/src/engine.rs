@@ -337,6 +337,11 @@ fn consume_envelope(
     tracker: &mut MemoryTracker,
     context: &RequestContext,
 ) -> Result<(), EngineError> {
+    // O0-B1-A1 (#147): one per-run lowering cache owned by the chunk loop.
+    // Feature OFF constructs nothing and passes nothing; the transform path
+    // is the exact current production path.
+    #[cfg(feature = "engine-lowering-cache")]
+    let mut lowering_cache = crate::lower::LoweringCache::new();
     let mut offset = 0_usize;
     let row_count = envelope.payload().num_rows();
     while offset < row_count {
@@ -360,8 +365,16 @@ fn consume_envelope(
                     "polars working set exceeded MAX_BATCH_BYTES",
                 ));
             }
+            #[cfg(not(feature = "engine-lowering-cache"))]
             let (transformed, deferred) =
                 crate::lower::transform(frame, &prepared.scan_output, &prepared.steps)?;
+            #[cfg(feature = "engine-lowering-cache")]
+            let (transformed, deferred) = crate::lower::transform_cached(
+                frame,
+                &prepared.scan_output,
+                &prepared.steps,
+                &mut lowering_cache,
+            )?;
             let transformed_bytes = transformed.estimated_size();
             tracker.hold_polars(transformed_bytes)?;
             dataframe_to_record_batch(

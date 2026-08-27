@@ -9,15 +9,132 @@ use crate::error::EngineError;
 use crate::preflight::CompiledStep;
 use crate::types::polars_data_type;
 
+/// Cached entry point for the engine chunk loop (feature ON): one
+/// LoweringCache instance is owned by the run and passed by &mut on every
+/// chunk. Feature OFF callers use `transform` and never construct a cache.
+#[cfg(feature = "engine-lowering-cache")]
+pub(crate) fn transform_cached(
+    frame: DataFrame,
+    schema: &LogicalSchema,
+    steps: &[CompiledStep],
+    cache: &mut LoweringCache,
+) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
+    transform_steps(frame, schema, steps, Vec::new(), cache)
+}
+
 pub(crate) fn transform(
     frame: DataFrame,
     schema: &LogicalSchema,
     steps: &[CompiledStep],
 ) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
-    let mut frame = frame;
+    #[cfg(feature = "engine-lowering-cache")]
+    {
+        let mut cache = LoweringCache::new();
+        transform_steps(frame, schema, steps, Vec::new(), &mut cache)
+    }
+    #[cfg(not(feature = "engine-lowering-cache"))]
+    transform_steps(frame, schema, steps, Vec::new(), &mut NoCache)
+}
+
+/// Per-run lowering/type-check cache experiment (O0-B1-A1, issue #147).
+///
+/// Non-global: the engine chunk loop owns one instance for the whole run, so
+/// entries can never escape the run or be reused across unrelated plans. Key
+/// identity = exact compiled step/rule position PLUS exact logical-schema
+/// state fingerprint (field id/name/type/nullability/count fed to a 64-bit
+/// hasher — intra-run uniqueness is all that is required, so the dependency-
+/// free std hasher suffices). Lazy first-use preserves observable failure
+/// timing exactly: only SUCCESSFUL lowerings are cached, and a first failure
+/// surfaces at the same step/rule as feature OFF.
+#[cfg(feature = "engine-lowering-cache")]
+pub(crate) struct LoweringCache {
+    lowered: std::collections::HashMap<(usize, usize, u64), PolarsExpr>,
+    counter_hits: u64,
+    counter_misses: u64,
+}
+
+#[cfg(feature = "engine-lowering-cache")]
+impl LoweringCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            lowered: std::collections::HashMap::new(),
+            counter_hits: 0,
+            counter_misses: 0,
+        }
+    }
+
+    /// Evidence-only counters (hits, misses): how many lowering constructions
+    /// were served from cache vs rebuilt. Must never become a production
+    /// public metric (issue #147 contract). Unused outside cfg(test) today;
+    /// the benchmark harness reads it through a test-only accessor.
+    #[allow(dead_code)]
+    pub(crate) fn construction_counters(&self) -> (u64, u64) {
+        (self.counter_hits, self.counter_misses)
+    }
+}
+
+/// OFF-path no-op surface; only constructed when the feature is disabled.
+#[cfg_attr(not(test), allow(dead_code))]
+struct NoCache;
+
+trait CacheSurface {
+    fn lookup_lowered(&mut self, key: (usize, usize, u64)) -> Option<PolarsExpr>;
+    fn store_lowered(&mut self, key: (usize, usize, u64), expr: PolarsExpr);
+    fn record_hit(&mut self);
+    fn record_miss(&mut self);
+}
+
+#[cfg(feature = "engine-lowering-cache")]
+impl CacheSurface for LoweringCache {
+    fn lookup_lowered(&mut self, key: (usize, usize, u64)) -> Option<PolarsExpr> {
+        self.lowered.get(&key).cloned()
+    }
+    fn store_lowered(&mut self, key: (usize, usize, u64), expr: PolarsExpr) {
+        self.lowered.insert(key, expr);
+    }
+    fn record_hit(&mut self) {
+        self.counter_hits += 1;
+    }
+    fn record_miss(&mut self) {
+        self.counter_misses += 1;
+    }
+}
+
+impl CacheSurface for NoCache {
+    fn lookup_lowered(&mut self, _key: (usize, usize, u64)) -> Option<PolarsExpr> {
+        None
+    }
+    fn store_lowered(&mut self, _key: (usize, usize, u64), _expr: PolarsExpr) {}
+    fn record_hit(&mut self) {}
+    fn record_miss(&mut self) {}
+}
+
+/// Exact schema-state fingerprint + position key. Position is (step index,
+/// rule index within its Rules step); the fingerprint hashes every field's
+/// id/name/data_type/nullable plus the field count, so ANY schema mutation
+/// changes the key and stale reuse across schema states is impossible.
+fn cache_key(schema: &LogicalSchema, step_index: usize, rule_index: usize) -> (usize, usize, u64) {
+    use std::hash::Hash;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for field in &schema.fields {
+        field.id.hash(&mut hasher);
+        field.name.hash(&mut hasher);
+        format!("{:?}", field.data_type).hash(&mut hasher);
+        field.nullable.hash(&mut hasher);
+    }
+    schema.fields.len().hash(&mut hasher);
+    (step_index, rule_index, std::hash::Hasher::finish(&hasher))
+}
+
+fn transform_steps<C: CacheSurface>(
+    mut frame: DataFrame,
+    schema: &LogicalSchema,
+    steps: &[CompiledStep],
+    mut deferred: Vec<(String, ScalarValue)>,
+    cache: &mut C,
+) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
     let mut schema = schema.clone();
-    let mut deferred = Vec::new();
-    for step in steps {
+    for (step_index, step) in steps.iter().enumerate() {
         match step {
             CompiledStep::Project { columns } => {
                 let names = names_for(&schema, columns)?;
@@ -28,7 +145,19 @@ pub(crate) fn transform(
                 schema = crate::preflight::project_schema(&schema, columns)?;
             }
             CompiledStep::Filter { predicate } => {
-                let expr = lower_expr(predicate, &schema)?;
+                let key = cache_key(&schema, step_index, 0);
+                let expr = match cache.lookup_lowered(key) {
+                    Some(expr) => {
+                        cache.record_hit();
+                        expr
+                    }
+                    None => {
+                        cache.record_miss();
+                        let expr = lower_expr(predicate, &schema)?;
+                        cache.store_lowered(key, expr.clone());
+                        expr
+                    }
+                };
                 frame = frame
                     .lazy()
                     .filter(expr)
@@ -36,13 +165,78 @@ pub(crate) fn transform(
                     .map_err(|_| EngineError::TypeError("filter evaluation failed"))?;
             }
             CompiledStep::Rules { rules } => {
-                for rule in rules {
-                    frame = apply_rule(frame, &mut schema, &mut deferred, rule)?;
+                for (rule_index, rule) in rules.iter().enumerate() {
+                    frame = apply_rule_cached(
+                        frame,
+                        &mut schema,
+                        &mut deferred,
+                        rule,
+                        cache,
+                        step_index,
+                        rule_index,
+                    )?;
                 }
             }
         }
     }
     Ok((frame, deferred))
+}
+
+/// Cached-rule wrapper (feature ON): only DeriveColumn with a non-literal
+/// expression actually performs lowering/type-check work today; all other
+/// rules resolve names (O(fields), not worth caching) and are delegated
+/// unchanged. Keying includes the rule index so identical rule bodies at
+/// different positions never share an entry.
+fn apply_rule_cached<C: CacheSurface>(
+    frame: DataFrame,
+    schema: &mut LogicalSchema,
+    deferred: &mut Vec<(String, ScalarValue)>,
+    rule: &Rule,
+    cache: &mut C,
+    step_index: usize,
+    rule_index: usize,
+) -> Result<DataFrame, EngineError> {
+    if let Rule::DeriveColumn {
+        id,
+        name,
+        data_type,
+        nullable,
+        expression,
+    } = rule
+    {
+        let key = cache_key(schema, step_index, 128 + rule_index);
+        let expr = match cache.lookup_lowered(key) {
+            Some(expr) => {
+                cache.record_hit();
+                expr
+            }
+            None => {
+                cache.record_miss();
+                // Type-check + lower exactly as the uncached derive path does;
+                // on success both products become one cached entry.
+                let _checked = crate::typing::type_check_expr(expression, schema)?;
+                let expr = lower_expr(expression, schema)?;
+                cache.store_lowered(key, expr.clone());
+                expr
+            }
+        };
+        let dtype = polars_data_type(data_type)?;
+        let mut derived = frame;
+        derived = derived
+            .lazy()
+            .with_column(expr.cast(dtype.clone()).alias(name.as_str()))
+            .collect()
+            .map_err(|_| EngineError::TypeError("derive-column failed"))?;
+        let mut fields = schema.fields.clone();
+        fields.push(
+            LogicalField::new(*id, name.clone(), data_type.clone(), *nullable)
+                .map_err(|_| EngineError::InvalidPlan("derived field is invalid"))?,
+        );
+        *schema = LogicalSchema::new(fields)
+            .map_err(|_| EngineError::InvalidPlan("derive produced an invalid schema"))?;
+        return Ok(derived);
+    }
+    apply_rule(frame, schema, deferred, rule)
 }
 
 fn apply_rule(
