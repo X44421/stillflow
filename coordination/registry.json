@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 183,
+  "revision": 184,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2234,6 +2234,46 @@
       "result_head": "7bf8360193909ff16b20879479d69978806eb397",
       "ci_url": "https://github.com/X44421/stillflow/pull/154#issuecomment-5435501240",
       "completion_note": "REQUEST_CHANGES @ bound head 7bf8360 (PR #154). Independent from-zero review (fresh binaries/oracle/bench; reviewer subagents died pre-start - provider infrastructure, disclosed). PASS: scope (5 files, no core/cargo/lower/A2/connector changes, feature split removed); estimator (exhaustive matches, counts verified, over-count directions safe); semantics (in-crate differential 6/6, 240-case seeded battery, engine 104/104, workspace green, fmt/clippy/diff-check clean, fresh oracle byte-identical aa468916...); performance (fresh 6-window: primary +77.2%, bridge +64.1%, nearfull +77.2%, controls within same-session A/A noise floor, F=4096 sparse -2.22% with source-proven linear route; raw b90e22a2...). CODE BLOCKER B1/G2: pub(crate) enum variant fields make WorkingSchema::Indexed{schema,entries} destructurable in-crate - a pattern-match mutation compiles and bypasses refresh (empirically proven); fix: private struct IndexedSchema + tuple variant, indexed() sole constructor; rerun gates at new head. SCOPE ITEM: remove or disclose .gitignore-worktree (out of authorized paths; PR body claim off by one file). No Ready/merge/default; acceptance does not transfer across SHA - re-acceptance at fixed head required before A2 sequencing."
+    },
+    {
+      "id": "O0-B2-A1-PROD-FIX-R1",
+      "title": "Encapsulate indexed schema state after production review (PR #154, issue #156)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 156,
+      "target_pr": 154,
+      "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/o0-b2-a1-prod-schema-lookup-index",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/lookup.rs"
+      ],
+      "acceptance_keys": [
+        "o0b2a1fix1:encapsulation-language-level",
+        "o0b2a1fix1:bypass-compiles-old-fails-new",
+        "o0b2a1fix1:invariant-battery-rerun",
+        "o0b2a1fix1:oracle-34-byte-identical",
+        "o0b2a1fix1:gates-rerun",
+        "o0b2a1fix1:smoke-primary-sparse-f512",
+        "o0b2a1fix1:gitignore-resolved",
+        "o0b2a1fix1:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1-PROD-ACCEPT"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-27T07:01:25Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "REJECTED head 7bf8360 by independent production acceptance: (B1/G2) WorkingSchema::Indexed struct-variant fields crate-visible - reviewer's bypass compiles; (scope) .gitignore-worktree committed outside authorized paths. Narrow blocker-fix round on the existing PR.",
+      "notes": "Minimal fix ONLY: (1) private indexed state - struct IndexedSchema{ schema, entries } fields private to lookup.rs, tuple variant WorkingSchema::Indexed(IndexedSchema), indexed() sole constructor, schema() immutable only, rename/store/swap_with unchanged rebuild-before-return, release correctness not depending on debug_assert; equivalent or stronger language-level guarantee required - no comments/tests-only workaround. Compile-negative evidence mandatory: former scratch bypass compiles at old head / same attempt fails at new head (not test-only cfg). (2) resolve .gitignore-worktree: preferred removal so the diff returns to Engine-only four files; retention only with explicit PR-body disclosure + corrected claims. FORBIDDEN: use_index policy, estimator, A2, lower/collect/fusion, core/schema/API/serde/fingerprint, deps/lockfile, connectors/storage/frontend/workflow, #91, Ready/merge/default; no history rewrite - push new commit(s). Gates to rerun: mutation invariant tests; disjoint swap test; linear==indexed==production differential battery; 240-case seeded property battery; external 34-case oracle byte-identical vs baseline; fmt; workspace clippy -D warnings; engine suite; workspace suite; git diff --check main..HEAD. Performance: no retune; smoke only on F=4096 full primary (>=20% vs exact baseline), F=4096 sparse linear-route control, F=512 control (no robust >5% regression). Verdict exactly one: READY_FOR_PROD_REACCEPTANCE | FIX_BLOCKED; positive authorizes ONLY creation of a new exact-head re-acceptance task (not created here; maintainer binds the new SHA). Lease 60 minutes. AGENT-SAFETY-NORMS binding.",
+      "canonical_issue": 156
     }
   ],
   "locks": {}
