@@ -295,6 +295,8 @@ impl ExecutionEngine {
             LogicalSchemaFingerprint::try_from_schema(&prepared.expected_connector)
                 .map_err(|_| EngineError::Internal("connector schema fingerprint failed"))?;
 
+        #[cfg(feature = "engine-lowering-cache")]
+        let mut lowering_cache = crate::lower::LoweringCache::new();
         while let Some(item) = stream.next().await {
             context.ensure_active().map_err(map_context_error)?;
             let envelope = item.map_err(EngineError::from_connector)?;
@@ -306,6 +308,7 @@ impl ExecutionEngine {
                 });
             }
             tracker.hold_envelope(envelope.byte_count())?;
+            #[cfg(not(feature = "engine-lowering-cache"))]
             consume_envelope(
                 envelope,
                 prepared,
@@ -315,6 +318,18 @@ impl ExecutionEngine {
                 writer,
                 tracker,
                 context,
+            )?;
+            #[cfg(feature = "engine-lowering-cache")]
+            consume_envelope_cached(
+                envelope,
+                prepared,
+                &predicted,
+                &output_schema,
+                &mut rebatcher,
+                writer,
+                tracker,
+                context,
+                &mut lowering_cache,
             )?;
             tracker.drop_envelope()?;
         }
@@ -326,6 +341,7 @@ impl ExecutionEngine {
     }
 }
 
+#[cfg(not(feature = "engine-lowering-cache"))]
 #[allow(clippy::too_many_arguments)]
 fn consume_envelope(
     envelope: BatchEnvelope,
@@ -340,8 +356,60 @@ fn consume_envelope(
     // O0-B1-A1 (#147): one per-run lowering cache owned by the chunk loop.
     // Feature OFF constructs nothing and passes nothing; the transform path
     // is the exact current production path.
-    #[cfg(feature = "engine-lowering-cache")]
-    let mut lowering_cache = crate::lower::LoweringCache::new();
+    consume_envelope_inner(
+        envelope,
+        prepared,
+        predicted,
+        output_schema,
+        rebatcher,
+        writer,
+        tracker,
+        context,
+        &mut crate::lower::NoCache,
+    )
+}
+
+#[cfg(feature = "engine-lowering-cache")]
+#[allow(clippy::too_many_arguments)]
+fn consume_envelope_cached(
+    envelope: BatchEnvelope,
+    prepared: &PreparedPlan,
+    predicted: &PredictedSchema,
+    output_schema: &arrow_schema::SchemaRef,
+    rebatcher: &mut CanonicalRebatcher,
+    writer: &mut SnapshotWriter,
+    tracker: &mut MemoryTracker,
+    context: &RequestContext,
+    lowering_cache: &mut crate::lower::LoweringCache,
+) -> Result<(), EngineError> {
+    consume_envelope_inner(
+        envelope,
+        prepared,
+        predicted,
+        output_schema,
+        rebatcher,
+        writer,
+        tracker,
+        context,
+        lowering_cache,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn consume_envelope_inner<C: crate::lower::CacheSurface>(
+    envelope: BatchEnvelope,
+    prepared: &PreparedPlan,
+    predicted: &PredictedSchema,
+    output_schema: &arrow_schema::SchemaRef,
+    rebatcher: &mut CanonicalRebatcher,
+    writer: &mut SnapshotWriter,
+    tracker: &mut MemoryTracker,
+    context: &RequestContext,
+    cache: &mut C,
+) -> Result<(), EngineError> {
+    // OFF the NoCache surface is intentionally inert; absorb the unused
+    // binding so both feature modes compile warning-clean from one body.
+    let _ = &mut *cache;
     let mut offset = 0_usize;
     let row_count = envelope.payload().num_rows();
     while offset < row_count {
@@ -373,7 +441,7 @@ fn consume_envelope(
                 frame,
                 &prepared.scan_output,
                 &prepared.steps,
-                &mut lowering_cache,
+                cache,
             )?;
             let transformed_bytes = transformed.estimated_size();
             tracker.hold_polars(transformed_bytes)?;

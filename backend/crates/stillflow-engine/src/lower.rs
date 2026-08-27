@@ -13,11 +13,11 @@ use crate::types::polars_data_type;
 /// LoweringCache instance is owned by the run and passed by &mut on every
 /// chunk. Feature OFF callers use `transform` and never construct a cache.
 #[cfg(feature = "engine-lowering-cache")]
-pub(crate) fn transform_cached(
+pub(crate) fn transform_cached<C: CacheSurface>(
     frame: DataFrame,
     schema: &LogicalSchema,
     steps: &[CompiledStep],
-    cache: &mut LoweringCache,
+    cache: &mut C,
 ) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
     transform_steps(frame, schema, steps, Vec::new(), cache)
 }
@@ -54,6 +54,20 @@ pub(crate) struct LoweringCache {
 }
 
 #[cfg(feature = "engine-lowering-cache")]
+impl Drop for LoweringCache {
+    fn drop(&mut self) {
+        // Evidence-only trace for benchmark runs (issue #147 construction-
+        // counter requirement); enabled by LOWERING_CACHE_TRACE=1.
+        if std::env::var("LOWERING_CACHE_TRACE").as_deref() == Ok("1") {
+            eprintln!(
+                "lowering_cache_counters hits={} misses={}",
+                self.counter_hits, self.counter_misses
+            );
+        }
+    }
+}
+
+#[cfg(feature = "engine-lowering-cache")]
 impl LoweringCache {
     pub(crate) fn new() -> Self {
         Self {
@@ -74,10 +88,10 @@ impl LoweringCache {
 }
 
 /// OFF-path no-op surface; only constructed when the feature is disabled.
-#[cfg_attr(not(test), allow(dead_code))]
-struct NoCache;
+#[cfg(not(feature = "engine-lowering-cache"))]
+pub(crate) struct NoCache;
 
-trait CacheSurface {
+pub(crate) trait CacheSurface {
     fn lookup_lowered(&mut self, key: (usize, usize, u64)) -> Option<PolarsExpr>;
     fn store_lowered(&mut self, key: (usize, usize, u64), expr: PolarsExpr);
     fn record_hit(&mut self);
@@ -100,6 +114,7 @@ impl CacheSurface for LoweringCache {
     }
 }
 
+#[cfg(not(feature = "engine-lowering-cache"))]
 impl CacheSurface for NoCache {
     fn lookup_lowered(&mut self, _key: (usize, usize, u64)) -> Option<PolarsExpr> {
         None
