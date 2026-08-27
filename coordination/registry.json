@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 170,
+  "revision": 171,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T01:28:10Z",
+  "updated_at": "2026-08-27T01:47:22Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2037,13 +2037,13 @@
     {
       "id": "O0-B2-A1-ACCEPT",
       "title": "Independent acceptance of the A1 schema lookup index experiment (PR #149)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-o0b2a1acc-r1",
       "locks": [],
-      "lease_expires_at": "2026-08-27T06:27:43Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-27T01:27:43Z",
-      "updated_at": "2026-08-27T01:27:43Z",
+      "updated_at": "2026-08-27T01:47:22Z",
       "target_pr": 149,
       "target_branch": "agent/o0-b2-a1-schema-lookup-index",
       "expected_head": "2345055342b24874146230c69d049339a7d3a77d",
@@ -2066,7 +2066,11 @@
         "o0-b2-a1-accept:single-terminal-verdict-at-bound-head"
       ],
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
-      "queue_reason": "O0-B2-A1 completed @ 2345055 with PROMOTE_SCHEMA_LOOKUP_INDEX_CANDIDATE; independent acceptance required before any productionization step."
+      "queue_reason": "O0-B2-A1 completed @ 2345055 with PROMOTE_SCHEMA_LOOKUP_INDEX_CANDIDATE; independent acceptance required before any productionization step.",
+      "completed_at": "2026-08-27T01:47:22Z",
+      "result_head": "2345055342b24874146230c69d049339a7d3a77d",
+      "ci_url": null,
+      "completion_note": "APPROVE_SCHEMA_LOOKUP_INDEX_CANDIDATE_CONFIRMED at 2345055 — independent rerun primary +75.5%, control -3.7% within tolerance; https://github.com/X44421/stillflow/pull/149#issuecomment-5433312297"
     },
     {
       "id": "E24-JSON-A2-ACCEPT",
