@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 171,
+  "revision": 172,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T01:47:22Z",
+  "updated_at": "2026-08-27T01:47:36Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2075,13 +2075,13 @@
     {
       "id": "E24-JSON-A2-ACCEPT",
       "title": "Independent acceptance of the direct projected JSON writer experiment (PR #150)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-e24a2acc-r1",
       "locks": [],
-      "lease_expires_at": "2026-08-27T06:27:56Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-27T01:27:56Z",
-      "updated_at": "2026-08-27T01:27:56Z",
+      "updated_at": "2026-08-27T01:47:36Z",
       "target_pr": 150,
       "target_branch": "agent/e24-json-a2-direct-projected-writer",
       "expected_head": "e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac",
@@ -2104,7 +2104,11 @@
         "e24-json-a2-accept:single-terminal-verdict-at-bound-head"
       ],
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
-      "queue_reason": "E24-JSON-A2 completed @ e9a4fa6 with PROMOTE_DIRECT_PROJECTED_WRITER_CANDIDATE (+36.1% primary real path); independent acceptance required before connector productionization."
+      "queue_reason": "E24-JSON-A2 completed @ e9a4fa6 with PROMOTE_DIRECT_PROJECTED_WRITER_CANDIDATE (+36.1% primary real path); independent acceptance required before connector productionization.",
+      "completed_at": "2026-08-27T01:47:36Z",
+      "result_head": "e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac",
+      "ci_url": null,
+      "completion_note": "APPROVE_DIRECT_PROJECTED_WRITER_CANDIDATE_CONFIRMED at e9a4fa6 — all four cells independently reproduced (+39.2/+43.4/+18.3/+41.2), RSS delta mechanism explained; https://github.com/X44421/stillflow/pull/150#issuecomment-5433314895"
     }
   ],
   "locks": {
