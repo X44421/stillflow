@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 216,
+  "revision": 217,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:15:52Z",
+  "updated_at": "2026-08-28T08:21:17Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2635,7 +2635,7 @@
     {
       "id": "O0-B2-A1-A2-FINAL-MERGE",
       "title": "Ready and merge final consolidated A1 + A2 production candidate (PR #167, issue #169)",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-o0b2a1a2finalmerge-w1",
       "target_issue": 169,
@@ -2663,29 +2663,18 @@
         "O0-B2-A1-A2-FINAL-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T09:00:52Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T08:15:52Z",
-      "updated_at": "2026-08-28T08:15:52Z",
+      "updated_at": "2026-08-28T08:21:17Z",
       "queued_by": "maintainer:direct-chat (issue #169 dispatch 2026-08-28)",
       "queue_reason": "Issue #169 O0-B2-A1-A2-FINAL-MERGE: final state transition for accepted consolidated A1+A2 (PR #167 @ 37b5a5ad, APPROVE_FINAL_A1_A2_PRODUCTION, exact-head CI run 33148332668 success). Frozen order: pre-merge exact binding -> #167 Draft->Ready -> merge commit (NO squash/rebase, preserve cb3dde4/b5ae3f2/37b5a5a) -> verify parents (main 0496658 + 37b5a5ad) -> main = merge commit -> close #154/#160 unmerged as superseded -> #164 stays Draft, #91 HOLD.",
       "notes": "Lease 45 minutes. Locks on claim: merge:main, pr:167 (DO NOT take engine lock; no code writing). Pre-mutation binding: #167 Open+Draft @ exact head; base main 0496658; mergeable; 5-file scope; exact-head CI run 33148332668 success (or equivalent newer); live main 0496658; #154/#160/#164 Draft at exact heads; #91 HOLD. Any drift => FINAL_A1_A2_MERGE_BLOCKED, do not partially advance. Merge via GitHub merge commit; first parent = old main, second parent = accepted head. Post-merge: provenance comment on #167; supersede+close #154/#160 unmerged; #164 Draft/open untouched; #91 untouched; registry locks empty. No branch deletion; preserve provenance. Verdict: MERGED_FINAL_A1_A2_PRODUCTION | FINAL_A1_A2_MERGE_BLOCKED | FINAL_A1_A2_POSTMERGE_HYGIENE_BLOCKED.",
-      "canonical_issue": 169
+      "canonical_issue": 169,
+      "completed_at": "2026-08-28T08:21:17Z",
+      "result_head": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "ci_url": "https://github.com/X44421/stillflow/pull/167#issuecomment-5450165358",
+      "completion_note": "MERGED_FINAL_A1_A2_PRODUCTION — final state transition complete. Pre-mutation binding (all passed): #167 Open+Draft @ 37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af, base main 0496658, MERGEABLE/CLEAN, changed files exactly the 5 Engine files, exact-head CI run 33148332668 success, live main 0496658, #154/#160/#164 Draft at exact heads, #91 HOLD. Transition in frozen order: Ready; merged via merge commit (no squash/rebase; cb3dde4/b5ae3f2/37b5a5a preserved) = 81e817adec9f344416b01d7d28a84c5f17e55e57, parents verified first=04966586192f8750a02790da988db71a28d82074 second=37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af; provenance comment on #167 (issuecomment-5450165358); #154 closed unmerged as superseded; #160 closed unmerged as superseded; #164 OPEN+Draft untouched; #91 HOLD untouched. Post-merge: main = 81e817adec (single movement), registry locks released, no branch deletion. Post-merge CI recorded: CI 33154762114 in_progress; Deploy-to-GitHub-Pages failure pre-existing on all main pushes (env issue, not an acceptance gate)."
     }
   ],
-  "locks": {
-    "merge:main": {
-      "task_id": "O0-B2-A1-A2-FINAL-MERGE",
-      "owner": "ox-alpha-o0b2a1a2finalmerge-w1",
-      "expected_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
-      "acquired_at": "2026-08-28T08:15:52Z",
-      "lease_expires_at": "2026-08-28T09:00:52Z"
-    },
-    "pr:167": {
-      "task_id": "O0-B2-A1-A2-FINAL-MERGE",
-      "owner": "ox-alpha-o0b2a1a2finalmerge-w1",
-      "expected_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
-      "acquired_at": "2026-08-28T08:15:52Z",
-      "lease_expires_at": "2026-08-28T09:00:52Z"
-    }
-  }
+  "locks": {}
 }
