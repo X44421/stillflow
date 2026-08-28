@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 192,
+  "revision": 193,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-27T10:41:07Z",
+  "updated_at": "2026-08-28T00:46:13Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2325,7 +2325,7 @@
     {
       "id": "O0-B2-A2-PROD",
       "title": "Productionize Engine incremental schema propagation (PR #144 / issue #159)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-o0b2a2prod-w1",
       "target_issue": 159,
@@ -2356,29 +2356,18 @@
         "O0-B2-A2-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-27T12:11:07Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-27T09:45:31Z",
-      "updated_at": "2026-08-27T10:41:07Z",
+      "updated_at": "2026-08-28T00:46:13Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
       "queue_reason": "A2 productionization after APPROVE_INCREMENTAL_SCHEMA_CANDIDATE (PR #144 @ cfdea8e7) and A1 production acceptance closed (#154 @ 7afdd656). Do NOT combine with A1: #154 stays Draft/unmerged; four-cell attribution is a later task.",
       "notes": "Per issue #159: fresh branch agent/o0-b2-a2-prod-incremental-schema from live main at CLAIM. Preserve LogicalSchema as sole authoritative representation; keep full ApplyRules-boundary LogicalSchema::new/validate as a PERMANENT production safety oracle. Mandatory #145 closure: (1) exact budget-failure fidelity - Rename crossing cumulative text budget AND DeriveColumn crossing field-count/text budget must fail at the same rule position with same EngineError variant + stable message as legacy per-rule rebuild (incl. legacy's mapped messages such as UnknownColumn catch-all for rename), never a later boundary error, no later-rule execution; (2) anti-drift: centralize local invariant set in ONE Engine-private mutation layer, retain full boundary validator, deterministic differential/property battery (fixed seed, prints seed/case/rule), exhaustive Rule/Expr matching (no wildcard); (3) boundary oracle permanent in production path. Correctness oracle: legacy-reference vs production-candidate identical across all mutating rules valid+invalid, mixed chains, project->filter->rules->project, multiple failures, budget-boundary cases, F={1,64,512,2048,4096}, empty/minimal, near-max budgets, repeated chains, paused paths - compare canonical bytes/fingerprint, PreparedPlan outputs, error variant+message+position, boundary outcome. Performance (preflight-scope only, no E2E claims): cells F=64,R=1 control; F=512,R=16; F=2048,R=16 bridge; F=4096,R=16; F=4096,R=256 primary; mixed-chain Rename/Drop/Derive/Cast; near-budget; >=3 windows, >=20 reps short cells, WSL2 ext4, release, warm, flock, interleaved, raw sha256. Gates: primary F=4096,R=256 >=50% vs main; F=4096,R=16 >=20%; no representative control median regression >5%; no semantic differential. Maintainability: reject if correctness depends on remembering duplicated invariant lists; one mutation ownership layer; exhaustive rule mapping; deterministic oracle; permanent boundary validation; explicit tests at every frozen core budget edge (MAX_SCHEMA_FIELDS=4096, MAX_SCHEMA_TEXT_BYTES=1MiB, MAX_SCHEMA_NESTING_DEPTH=64 - confirm in core). Authorized paths: preflight.rs, one focused Engine-private module for incremental mutation, focused tests, Cargo.toml only if feature gating needed; NO A1 files/logic from PR #154; no core public API change; no lower/collect/materialization; no storage/connectors/frontend/API/workflows; no #91. If core change needed for invariant dedup, STOP and request rebind. Verdict exactly one: PROMOTE_INCREMENTAL_SCHEMA_PRODUCTION_CANDIDATE | PROD_INCREMENTAL_SCHEMA_SEMANTIC_REJECT | PROD_INCREMENTAL_SCHEMA_GAIN_LOST | PROD_INCREMENTAL_SCHEMA_REGRESSION | PROD_INCREMENTAL_SCHEMA_DESIGN_REJECT. Positive authorizes ONLY independent A2 production acceptance. Draft PR only; no merge/default-enable. Lease 240 minutes. AGENT-SAFETY-NORMS binding.",
-      "canonical_issue": 159
+      "canonical_issue": 159,
+      "completed_at": "2026-08-28T00:46:13Z",
+      "result_head": "049833ee7178ff38dd331756f06bcd4f7e05099d",
+      "ci_url": "https://github.com/X44421/stillflow/pull/160",
+      "completion_note": "PROMOTE_INCREMENTAL_SCHEMA_PRODUCTION_CANDIDATE @ 049833e (PR #160 Draft, base main@0496658). Fresh branch, no A1 import, #91 untouched. One Engine-private incremental layer (incremental.rs): exhaustive 10-variant Rule mapping (no wildcard), legacy-equivalent check order/messages, in-place mutation, exact cumulative text-budget counter (names+metadata+timezone) + field count; #145 Finding-1 closed (rename/derive/cast/drop budget crossings fail at the same rule with legacy mapped messages - 4 pins + no-false-positive + position pins); permanent LogicalSchema::new boundary oracle in production; 400-case fixed-seed property battery + differential batteries + counter exactness. Gates: engine 105/105, workspace 339/0, clippy 0, fmt/diff-check clean. Fresh bench (4w x 20r, raw 5966f7d5...): primary F=4096,R=256 +89.3% (>=50), F=4096,R=16 +34.8% (>=20), controls f64 +1.3% / f512 +63.4% (improves), mixed +82.8%, near-budget +79.0%; A/A floor all cells within +-1.4%. Verdict authorizes ONLY independent A2 production acceptance, then four-cell attribution. No Ready/merge/default. #144/#154 remain Draft."
     }
   ],
-  "locks": {
-    "branch:agent/o0-b2-a2-prod-incremental-schema": {
-      "task_id": "O0-B2-A2-PROD",
-      "owner": "ox-alpha-o0b2a2prod-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-27T09:45:31Z",
-      "lease_expires_at": "2026-08-27T12:11:07Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "O0-B2-A2-PROD",
-      "owner": "ox-alpha-o0b2a2prod-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-27T09:45:31Z",
-      "lease_expires_at": "2026-08-27T12:11:07Z"
-    }
-  }
+  "locks": {}
 }
