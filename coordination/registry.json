@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 205,
+  "revision": 206,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T05:07:57Z",
+  "updated_at": "2026-08-28T05:40:29Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2502,9 +2502,9 @@
     {
       "id": "O0-B2-A1-A2-FINAL-PLAN",
       "title": "Final integration and merge plan for accepted A1 + A2 (issue #165)",
-      "status": "queued",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1a2finalplan-w1",
       "target_issue": 165,
       "target_pr": null,
       "target_branch": null,
@@ -2528,9 +2528,9 @@
         "O0-B2-A1-A2-FACTORIAL"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-28T05:07:57Z",
+      "lease_expires_at": "2026-08-28T06:55:29Z",
+      "started_at": "2026-08-28T05:40:29Z",
+      "updated_at": "2026-08-28T05:40:29Z",
       "queued_by": "maintainer:direct-chat (issue #165 dispatch 2026-08-28)",
       "queue_reason": "Issue #165 O0-B2-A1-A2-FINAL-PLAN: read-only maintainer planning gate. Convert factorial attribution (#163, PR #164 ac863966) into a precise final production integration plan for A1+A2. Decide: as-is promotion vs narrow interaction hardening (mixed_wide -66.8% vs A2); compare 4 refresh-cadence options (eager / dirty-lazy / ordinal-shift-only / linear fallback); choose integration strategy S1/S2/S3; freeze final combined acceptance gate (mixed_wide no robust >5% regression vs A2 beyond A/A noise, full semantic oracle rerun, main performance matrix); Ready/merge sequencing; rollback/provenance. Read-only: no source edits, no pushes, no Ready/merge/close, main unmoved.",
       "notes": "Lease 75 minutes. Locks: none. Binding before CLAIM and before terminal decision: main=0496658..., #154 Draft@7afdd656..., #160 Draft@6d228e0..., #164 Draft@ac863966..., #91 HOLD. Deliverable: maintainer-facing planning comment on PR #164 or #163 plus registry completion, with exact live bindings, as-is promotion decision, refresh-cadence option comparison, chosen integration strategy, exact next branch/base/path scope, final acceptance gate, Ready/merge state machine, rollback/provenance plan, exactly one verdict: FINAL_PLAN_HARDEN_INTERACTION_THEN_INTEGRATE | FINAL_PLAN_INTEGRATE_AS_IS | FINAL_PLAN_SEQUENCE_SINGLE_CANDIDATE_FIRST | FINAL_PLAN_BLOCKED.",
