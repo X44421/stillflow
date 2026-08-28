@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 199,
+  "revision": 200,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T02:32:55Z",
+  "updated_at": "2026-08-28T02:39:03Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2411,7 +2411,7 @@
     {
       "id": "O0-B2-A2-PROD-ACCEPT-R2",
       "title": "Independent production acceptance of the A2 incremental schema production candidate (PR #160, issue #162)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-o0b2a2prodacc-r2",
       "target_issue": 162,
@@ -2438,13 +2438,17 @@
         "O0-B2-A2-PROD-SCOPE-FIX"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T04:02:55Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T01:23:18Z",
-      "updated_at": "2026-08-28T02:32:55Z",
+      "updated_at": "2026-08-28T02:39:03Z",
       "queued_by": "maintainer:direct-chat (issue #162 dispatch 2026-08-28)",
       "queue_reason": "Issue #162 O0-B2-A2-PROD-ACCEPT-R2: independent read-only production acceptance of PR #160 @ 6d228e0f69f0887a3ab1f7f688c86707230ec588 vs main@04966586192f8750a02790da988db71a28d82074. No evidence transfer from #159/#161; fresh reproduction of all A-H gates required.",
       "notes": "Read-only review per issue #162. Exact-head binding: PR #160 Open+Draft at 6d228e0f6..., live main 0496658..., PR #154 stays Draft/unmerged at 7afdd656..., #144 Draft, #91 HOLD. A. scope exactly 3 engine files incl. #161 delta proof (049833e..6d228e0 = only .gitignore-worktree deletion, engine blobs byte-identical). B. one Engine-private ownership layer, exhaustive Rule match no wildcard, permanent full LogicalSchema::new boundary oracle in production path, no test/debug dependency, no core/public change. C. independent reproduction: Rename text-budget crossing, Derive field-count crossing, Derive text crossing, Cast timezone crossing, Drop accounting, just-below-budget success - exact legacy parity of variant/message/position, no later-rule execution. D. text/field accounting audit incl. every contributor, counter sync, failure-path cleanliness, per-rule differential, fixed-seed battery prints seed/case/rule, compile-time central mapping. E. semantic differential matrix. F. static gates fresh at head. G. fresh 7-cell performance (F4096/R256 >=50%, F4096/R16 >=20%, control no-regression >5%), >=3 windows x >=20 reps, WSL2 ext4, warm, flock, interleaved, raw sha256. H. maintainability. Verdict exactly one of APPROVE_INCREMENTAL_SCHEMA_PRODUCTION_R2 | REQUEST_CHANGES. No merge/ready/enable; four-cell attribution is a later dispatch. Lease 90 minutes.",
-      "canonical_issue": 162
+      "canonical_issue": 162,
+      "completed_at": "2026-08-28T02:39:03Z",
+      "result_head": "6d228e0f69f0887a3ab1f7f688c86707230ec588",
+      "ci_url": "https://github.com/X44421/stillflow/pull/160#issuecomment-5447708661",
+      "completion_note": "APPROVE_INCREMENTAL_SCHEMA_PRODUCTION_R2 — independent review comment posted on PR #160 (issuecomment-5447708661). A. scope: exactly 3 Engine files; #161 delta 049833e..6d228e0 = .gitignore-worktree deletion only, blobs byte-identical; no A1 code. B. single Engine-private layer (IncrementalSchema), exhaustive 10-variant match no wildcard, permanent full LogicalSchema::new boundary oracle in production path on materialize+preview, zero debug_asserts, no core/public change; legacy body byte-identical under cfg(test). C. fresh independent budget-fidelity reproduction (11 scratch tests, tree restored byte-identical): Rename text crossing (UnknownColumn @ rule 0, no later-rule execution), Derive count edges 4095/4096/4097, Derive text crossing, Cast timezone growth/shrink/exact-MAX/+1, Drop exact subtraction incl. metadata+tz, just-below/at/over-budget, 1-field drop guard order, non-mutating/unsupported/paused types, F={1,64,512,2048,4096}, 240-case fixed-seed battery (seed 0xA2ED_2026_0000_162) — zero differential. D. accounting audit: names+metadata+tz+count all covered; every mutation site updates counter exactly; failed rules mutate nothing. E. semantic differential: none. F. gates fresh at head: fmt PASS; clippy workspace all-targets -D warnings 0 warnings; engine 105/105; workspace all green exit 0 (api 1, connectors 59, core 83, engine 105, plan 8, storage 67); git diff --check PASS. G. fresh 3-window x20-rep bench (flock, interleaved, A/A floor <=3.1%): primary F4096/R256 +89.6% (gate >=50%), F4096/R16 +35.5% (>=20%), F64 control within noise, mixed +54.0%, near-budget +46.0%; raw sha256 base=1ecc2c4d... head=2147ddaec.... H. maintainability PASS. Binding re-verified at verdict: #160 Open+Draft@6d228e0..., main 0496658..., #154 Draft@7afdd656..., #144 Draft, #91 HOLD. Verdict authorizes A2 only for later four-cell attribution; no ready/merge/enable."
     }
   ],
   "locks": {}
