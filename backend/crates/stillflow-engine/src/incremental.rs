@@ -27,7 +27,10 @@
 //! print seed/case/rule on divergence; the budget accounting is additionally
 //! pinned by an exactness test against a fresh core-style recount.
 
-use stillflow_core::{LogicalField, LogicalSchema, LogicalType, ScalarValue, TimeUnit, MAX_SCHEMA_FIELDS, MAX_SCHEMA_TEXT_BYTES};
+use stillflow_core::{
+    LogicalField, LogicalSchema, LogicalType, ScalarValue, TimeUnit, MAX_SCHEMA_FIELDS,
+    MAX_SCHEMA_TEXT_BYTES,
+};
 use stillflow_plan::{CastFailurePolicy, Rule};
 
 use crate::error::EngineError;
@@ -53,7 +56,8 @@ fn field_text(field: &LogicalField) -> usize {
 fn type_timezone_text(data_type: &LogicalType) -> usize {
     match data_type {
         LogicalType::Timestamp {
-            unit: TimeUnit::Second | TimeUnit::Millisecond | TimeUnit::Microsecond | TimeUnit::Nanosecond,
+            unit:
+                TimeUnit::Second | TimeUnit::Millisecond | TimeUnit::Microsecond | TimeUnit::Nanosecond,
             timezone: Some(timezone),
         } => timezone.len(),
         _ => 0,
@@ -128,8 +132,11 @@ impl IncrementalSchema {
                     ));
                 }
                 if matches!(to, ScalarValue::Null) {
-                    if let Some(field) =
-                        self.schema.fields.iter_mut().find(|field| field.id == *column)
+                    if let Some(field) = self
+                        .schema
+                        .fields
+                        .iter_mut()
+                        .find(|field| field.id == *column)
                     {
                         field.nullable = true;
                     }
@@ -152,8 +159,11 @@ impl IncrementalSchema {
                     ));
                 }
                 validate_literal_for_column(&field.data_type, value)?;
-                if let Some(field) =
-                    self.schema.fields.iter_mut().find(|field| field.id == *column)
+                if let Some(field) = self
+                    .schema
+                    .fields
+                    .iter_mut()
+                    .find(|field| field.id == *column)
                 {
                     field.nullable = false;
                 }
@@ -181,7 +191,11 @@ impl IncrementalSchema {
         }
     }
 
-    fn apply_rename(&mut self, column: stillflow_core::ColumnId, to: &str) -> Result<(), EngineError> {
+    fn apply_rename(
+        &mut self,
+        column: stillflow_core::ColumnId,
+        to: &str,
+    ) -> Result<(), EngineError> {
         let index = self
             .schema
             .fields
@@ -263,9 +277,7 @@ impl IncrementalSchema {
             .and_then(|base| base.checked_add(type_timezone_text(data_type)))
             .unwrap_or(MAX_SCHEMA_TEXT_BYTES + 1);
         if new_total > MAX_SCHEMA_TEXT_BYTES {
-            return Err(EngineError::InvalidPlan(
-                "cast produced an invalid schema",
-            ));
+            return Err(EngineError::InvalidPlan("cast produced an invalid schema"));
         }
         let field = self
             .schema
@@ -298,11 +310,7 @@ impl IncrementalSchema {
             ));
         }
         if self.schema.field(id).is_some()
-            || self
-                .schema
-                .fields
-                .iter()
-                .any(|field| field.name == name)
+            || self.schema.fields.iter().any(|field| field.name == name)
         {
             return Err(EngineError::InvalidPlan(
                 "derived column id or name is not unique",
@@ -415,13 +423,8 @@ mod tests {
             assert_eq!(name.len(), base + padding);
             let name_len = name.len();
             fields.push(
-                LogicalField::new(
-                    id(i as u128 + 9000),
-                    name,
-                    LogicalType::Int64,
-                    false,
-                )
-                .expect("budget field"),
+                LogicalField::new(id(i as u128 + 9000), name, LogicalType::Int64, false)
+                    .expect("budget field"),
             );
             used += name_len;
         }
@@ -478,7 +481,10 @@ mod tests {
                     "rule {position} ({rule:?}): Ok/Err disagreement                      legacy={legacy_step:?} incremental={incremental_step:?}"
                 ),
             }
-            assert!(layer.text_bytes_exact(), "counter drift after rule {position}");
+            assert!(
+                layer.text_bytes_exact(),
+                "counter drift after rule {position}"
+            );
             legacy = legacy_step.expect("checked above");
         }
         // The permanent boundary oracle must never fire where legacy passed.
@@ -504,15 +510,36 @@ mod tests {
     #[test]
     fn rename_paths_agree() {
         let rules = vec![
-            Rule::Rename { column: id(1), to: "renamed".into() },
-            Rule::Rename { column: id(99), to: "ghost".into() },
-            Rule::Rename { column: id(2), to: "".into() },
-            Rule::Rename { column: id(2), to: "   ".into() },
-            Rule::Rename { column: id(2), to: "c0".into() },
-            Rule::Rename { column: id(1), to: "c1".into() },
+            Rule::Rename {
+                column: id(1),
+                to: "renamed".into(),
+            },
+            Rule::Rename {
+                column: id(99),
+                to: "ghost".into(),
+            },
+            Rule::Rename {
+                column: id(2),
+                to: "".into(),
+            },
+            Rule::Rename {
+                column: id(2),
+                to: "   ".into(),
+            },
+            Rule::Rename {
+                column: id(2),
+                to: "c0".into(),
+            },
+            Rule::Rename {
+                column: id(1),
+                to: "c1".into(),
+            },
         ];
         for take in 1..=rules.len() {
-            assert_chain_equivalent(LogicalSchema::new(fields(8)).expect("schema"), &rules[..take]);
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &rules[..take],
+            );
         }
     }
 
@@ -533,18 +560,54 @@ mod tests {
             Rule::Trim { column: id(1) },
             Rule::Trim { column: id(4) },
             Rule::Trim { column: id(99) },
-            Rule::Cast { column: id(1), data_type: LogicalType::Int64, on_failure: CastFailurePolicy::SetNull },
-            Rule::Cast { column: id(1), data_type: LogicalType::Binary, on_failure: CastFailurePolicy::Error },
-            Rule::Cast { column: id(99), data_type: LogicalType::Int64, on_failure: CastFailurePolicy::Error },
-            Rule::ReplaceLiteral { column: id(1), from: ScalarValue::Utf8("a".into()), to: ScalarValue::Null },
-            Rule::ReplaceLiteral { column: id(1), from: ScalarValue::Int64(1), to: ScalarValue::Null },
-            Rule::ReplaceLiteral { column: id(99), from: ScalarValue::Null, to: ScalarValue::Null },
-            Rule::FillNull { column: id(1), value: ScalarValue::Utf8("x".into()) },
-            Rule::FillNull { column: id(1), value: ScalarValue::Null },
-            Rule::FillNull { column: id(99), value: ScalarValue::Int64(7) },
+            Rule::Cast {
+                column: id(1),
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::SetNull,
+            },
+            Rule::Cast {
+                column: id(1),
+                data_type: LogicalType::Binary,
+                on_failure: CastFailurePolicy::Error,
+            },
+            Rule::Cast {
+                column: id(99),
+                data_type: LogicalType::Int64,
+                on_failure: CastFailurePolicy::Error,
+            },
+            Rule::ReplaceLiteral {
+                column: id(1),
+                from: ScalarValue::Utf8("a".into()),
+                to: ScalarValue::Null,
+            },
+            Rule::ReplaceLiteral {
+                column: id(1),
+                from: ScalarValue::Int64(1),
+                to: ScalarValue::Null,
+            },
+            Rule::ReplaceLiteral {
+                column: id(99),
+                from: ScalarValue::Null,
+                to: ScalarValue::Null,
+            },
+            Rule::FillNull {
+                column: id(1),
+                value: ScalarValue::Utf8("x".into()),
+            },
+            Rule::FillNull {
+                column: id(1),
+                value: ScalarValue::Null,
+            },
+            Rule::FillNull {
+                column: id(99),
+                value: ScalarValue::Int64(7),
+            },
         ];
         for take in 1..=rules.len() {
-            assert_chain_equivalent(LogicalSchema::new(fields(8)).expect("schema"), &rules[..take]);
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &rules[..take],
+            );
         }
     }
 
@@ -559,33 +622,67 @@ mod tests {
             derive(500, "d1", LogicalType::Int64, cast_expr(8)), // duplicate id
             derive(501, "c0", LogicalType::Int64, cast_expr(4)), // duplicate name
             derive(501, "d2", LogicalType::Utf8, cast_expr(4)),  // type mismatch
-            derive(501, "", LogicalType::Int64, cast_expr(4)),  // empty name
+            derive(501, "", LogicalType::Int64, cast_expr(4)),   // empty name
             derive(501, "d3", LogicalType::Int64, cast_expr(99)), // unknown column
-            derive(501, "d4", LogicalType::Boolean, Expr::Literal(ScalarValue::Boolean(true))),
+            derive(
+                501,
+                "d4",
+                LogicalType::Boolean,
+                Expr::Literal(ScalarValue::Boolean(true)),
+            ),
         ];
         for take in 1..=rules.len() {
-            assert_chain_equivalent(LogicalSchema::new(fields(8)).expect("schema"), &rules[..take]);
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &rules[..take],
+            );
         }
     }
 
     #[test]
     fn mixed_chains_agree() {
         let rules = vec![
-            Rule::Rename { column: id(1), to: "renamed_a".into() },
-            Rule::Cast { column: id(4), data_type: LogicalType::Float64, on_failure: CastFailurePolicy::SetNull },
-            Rule::ReplaceLiteral { column: id(1), from: ScalarValue::Utf8("x".into()), to: ScalarValue::Null },
-            Rule::FillNull { column: id(4), value: ScalarValue::Float64(stillflow_core::FiniteF64::new(1.5).expect("finite")) },
-            Rule::FilterRows { predicate: pred(1, 4) },
-            Rule::FilterRows { predicate: Expr::Literal(ScalarValue::Int64(1)) },
+            Rule::Rename {
+                column: id(1),
+                to: "renamed_a".into(),
+            },
+            Rule::Cast {
+                column: id(4),
+                data_type: LogicalType::Float64,
+                on_failure: CastFailurePolicy::SetNull,
+            },
+            Rule::ReplaceLiteral {
+                column: id(1),
+                from: ScalarValue::Utf8("x".into()),
+                to: ScalarValue::Null,
+            },
+            Rule::FillNull {
+                column: id(4),
+                value: ScalarValue::Float64(stillflow_core::FiniteF64::new(1.5).expect("finite")),
+            },
+            Rule::FilterRows {
+                predicate: pred(1, 4),
+            },
+            Rule::FilterRows {
+                predicate: Expr::Literal(ScalarValue::Int64(1)),
+            },
             Rule::DeriveColumn {
-                id: id(600), name: "total".into(), data_type: LogicalType::Int64,
+                id: id(600),
+                name: "total".into(),
+                data_type: LogicalType::Int64,
                 nullable: false,
-                expression: Expr::Cast { expression: Box::new(Expr::Column(id(4))), data_type: LogicalType::Int64 },
+                expression: Expr::Cast {
+                    expression: Box::new(Expr::Column(id(4))),
+                    data_type: LogicalType::Int64,
+                },
             },
             Rule::Trim { column: id(1) }, // int column after cast -> type error
         ];
         for take in 1..=rules.len() {
-            assert_chain_equivalent(LogicalSchema::new(fields(8)).expect("schema"), &rules[..take]);
+            assert_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("schema"),
+                &rules[..take],
+            );
         }
     }
 
@@ -596,7 +693,9 @@ mod tests {
                 column: id(i as u128 % 8 + 1),
                 to: format!("w{i}"),
             })
-            .chain((0..8).map(|i| Rule::DropColumn { column: id(i as u128 % 8 + 1) }))
+            .chain((0..8).map(|i| Rule::DropColumn {
+                column: id(i as u128 % 8 + 1),
+            }))
             .collect();
         assert_chain_equivalent(LogicalSchema::new(fields(64)).expect("schema"), &rules[..4]);
         assert_chain_equivalent(LogicalSchema::new(fields(64)).expect("schema"), &rules);
@@ -615,14 +714,23 @@ mod tests {
         let old_len = schema.field(id(9000)).expect("field").name.len();
         let longer = "y".repeat(old_len + 11);
         let rules = vec![
-            Rule::Rename { column: id(9000), to: longer.clone() }, // crosses
-            Rule::Rename { column: id(9001), to: "must_not_run".into() },
+            Rule::Rename {
+                column: id(9000),
+                to: longer.clone(),
+            }, // crosses
+            Rule::Rename {
+                column: id(9001),
+                to: "must_not_run".into(),
+            },
         ];
         assert_chain_equivalent(schema, &rules);
         // Exact pin: legacy error at rule 0 == UnknownColumn(9000).
         let direct = crate::preflight::apply_rule_schema_legacy(
             budget_schema(300, near_max),
-            &Rule::Rename { column: id(9000), to: longer },
+            &Rule::Rename {
+                column: id(9000),
+                to: longer,
+            },
         );
         let err = direct.expect_err("budget crossing must fail in legacy");
         assert!(format!("{err:?}").contains("UnknownColumn"), "{err:?}");
@@ -631,12 +739,15 @@ mod tests {
     #[test]
     fn derive_field_count_budget_crossing_fails_at_same_rule() {
         let full = LogicalSchema::new(fields(MAX_SCHEMA_FIELDS)).expect("max schema");
-        let rules = vec![
-            derive(999_000, "overflow", LogicalType::Int64, Expr::Cast {
+        let rules = vec![derive(
+            999_000,
+            "overflow",
+            LogicalType::Int64,
+            Expr::Cast {
                 expression: Box::new(Expr::Column(id(1))),
                 data_type: LogicalType::Int64,
-            }),
-        ];
+            },
+        )];
         assert_chain_equivalent(full, &rules);
     }
 
@@ -645,11 +756,19 @@ mod tests {
         let near_max = MAX_SCHEMA_TEXT_BYTES - 10;
         let schema = budget_schema(300, near_max);
         let rules = vec![
-            derive(999_001, "plus_twenty_five_bytes_long_n", LogicalType::Int64, Expr::Cast {
-                expression: Box::new(Expr::Column(id(9000))),
-                data_type: LogicalType::Int64,
-            }),
-            Rule::Rename { column: id(9001), to: "must_not_run".into() },
+            derive(
+                999_001,
+                "plus_twenty_five_bytes_long_n",
+                LogicalType::Int64,
+                Expr::Cast {
+                    expression: Box::new(Expr::Column(id(9000))),
+                    data_type: LogicalType::Int64,
+                },
+            ),
+            Rule::Rename {
+                column: id(9001),
+                to: "must_not_run".into(),
+            },
         ];
         assert_chain_equivalent(schema, &rules);
     }
@@ -668,7 +787,10 @@ mod tests {
                 },
                 on_failure: CastFailurePolicy::Error,
             },
-            Rule::Rename { column: id(9001), to: "must_not_run".into() },
+            Rule::Rename {
+                column: id(9001),
+                to: "must_not_run".into(),
+            },
         ];
         assert_chain_equivalent(schema, &rules);
     }
@@ -680,15 +802,21 @@ mod tests {
         let near_max = MAX_SCHEMA_TEXT_BYTES - 10_000;
         let schema = budget_schema(300, near_max);
         let shrink = vec![
-            Rule::Rename { column: id(9000), to: "xy".into() }, // shrinks text
-            Rule::DropColumn { column: id(9001) },               // shrinks text
+            Rule::Rename {
+                column: id(9000),
+                to: "xy".into(),
+            }, // shrinks text
+            Rule::DropColumn { column: id(9001) }, // shrinks text
         ];
         assert_chain_equivalent(schema, &shrink);
         // Growth by less than the remaining slack must pass (no false fire).
         let schema2 = budget_schema(300, near_max);
         let old_len2 = schema2.field(id(9000)).expect("field").name.len();
         let grow_but_ok = vec![
-            Rule::Rename { column: id(9000), to: "x".repeat(old_len2 + 4).into() }, // +4 < slack
+            Rule::Rename {
+                column: id(9000),
+                to: "x".repeat(old_len2 + 4),
+            }, // +4 < slack
         ];
         assert_chain_equivalent(schema2, &grow_but_ok);
     }
@@ -699,7 +827,7 @@ mod tests {
 
     #[test]
     fn property_battery_legacy_equals_incremental() {
-        let seed = 0xA2_5E_ED_159u64;
+        let seed = 0x000A_25EE_D159_u64; // fixed seed (A2)
         let mut state = seed;
         let mut next = move || {
             state ^= state << 13;
@@ -715,15 +843,42 @@ mod tests {
                 let column = (next() % (f as u64) + 1) as u128;
                 let other = (next() % (f as u64) + 1) as u128;
                 match next() % 9 {
-                    0 => rules.push(Rule::Rename { column: id(column), to: format!("r{case}_{r}") }),
-                    1 => rules.push(Rule::Rename { column: id(900_000 + (next() % 9) as u128), to: "ghost".into() }),
-                    2 => rules.push(Rule::Rename { column: id(column), to: if next() % 2 == 0 { "".into() } else { "   ".into() } }),
-                    3 => rules.push(Rule::Rename { column: id(999), to: "c0".into() }),
+                    0 => rules.push(Rule::Rename {
+                        column: id(column),
+                        to: format!("r{case}_{r}"),
+                    }),
+                    1 => rules.push(Rule::Rename {
+                        column: id(900_000 + (next() % 9) as u128),
+                        to: "ghost".into(),
+                    }),
+                    2 => rules.push(Rule::Rename {
+                        column: id(column),
+                        to: if next() % 2 == 0 {
+                            "".into()
+                        } else {
+                            "   ".into()
+                        },
+                    }),
+                    3 => rules.push(Rule::Rename {
+                        column: id(999),
+                        to: "c0".into(),
+                    }),
                     4 => rules.push(Rule::DropColumn { column: id(column) }),
                     5 => rules.push(Rule::DropColumn { column: id(999) }),
-                    6 => rules.push(Rule::Cast { column: id(column), data_type: LogicalType::Int64, on_failure: CastFailurePolicy::SetNull }),
-                    7 => rules.push(Rule::FillNull { column: id(column), value: ScalarValue::Int64(7) }),
-                    _ => rules.push(Rule::ReplaceLiteral { column: id(column), from: ScalarValue::Null, to: ScalarValue::Null }),
+                    6 => rules.push(Rule::Cast {
+                        column: id(column),
+                        data_type: LogicalType::Int64,
+                        on_failure: CastFailurePolicy::SetNull,
+                    }),
+                    7 => rules.push(Rule::FillNull {
+                        column: id(column),
+                        value: ScalarValue::Int64(7),
+                    }),
+                    _ => rules.push(Rule::ReplaceLiteral {
+                        column: id(column),
+                        from: ScalarValue::Null,
+                        to: ScalarValue::Null,
+                    }),
                 }
                 let _ = other;
             }

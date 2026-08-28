@@ -726,7 +726,10 @@ pub(crate) fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result
     Ok(())
 }
 
-pub(crate) fn reject_paused_cast_in_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
+pub(crate) fn reject_paused_cast_in_expr(
+    expr: &Expr,
+    schema: &LogicalSchema,
+) -> Result<(), EngineError> {
     match expr {
         Expr::Cast {
             expression,

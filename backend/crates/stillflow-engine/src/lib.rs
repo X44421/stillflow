@@ -6,10 +6,10 @@ mod engine;
 mod error;
 #[allow(unsafe_code)]
 mod ffi;
+mod incremental;
 mod lower;
 mod memory;
 mod predict;
-mod incremental;
 mod preflight;
 pub(crate) mod preview;
 mod remainder;
