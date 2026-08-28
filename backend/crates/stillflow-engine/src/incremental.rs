@@ -92,15 +92,20 @@ fn text_bytes_of(schema: &LogicalSchema) -> usize {
 /// goes through the A1 ordinal table (ordinal -> field position) instead of a
 /// linear scan, exactly as the accepted A1 lookup semantics define. The
 /// table is a deterministic image of the current validated field list (ids
-/// sorted, first-wins) and is rederived at the end of every accepted
-/// mutation, in the same call, before any subsequent lookup can observe the
-/// new field state: structurally no stale-index window exists.
+/// sorted, first-wins). It is rederived in the same call only for mutations
+/// that can change the ColumnId -> ordinal mapping (DropColumn, DeriveColumn,
+/// swap_with); Rename/Cast/ReplaceLiteral/FillNull change only name/type/
+/// nullability, which the ordinal table does not depend on, so the held
+/// entries remain the exact deterministic image (mechanically guarded by
+/// verify_entries after every rule). The rebuild happens before the method
+/// returns, so no stale window can exist.
 pub(crate) struct IncrementalSchema {
     schema: LogicalSchema,
     text_bytes: usize,
     /// A1 ordinal table for indexed lookups (`None` = linear reference
     /// semantics). Remains `None`/`Some` across projection swaps and rule
-    /// mutations; rebuilt in the same call as every accepted mutation.
+    /// mutations; rebuilt in the same call as every accepted mutation that
+    /// can change the ColumnId -> ordinal mapping (drop/derive/swap).
     entries: Option<Vec<(stillflow_core::ColumnId, u32)>>,
 }
 
@@ -237,7 +242,7 @@ impl IncrementalSchema {
                         field.nullable = true;
                     }
                 }
-                self.refresh();
+                // Option 3 (#166): replace-literal changes nullability only.
                 Ok(())
             }
             Rule::FillNull { column, value } => {
@@ -261,7 +266,7 @@ impl IncrementalSchema {
                 {
                     field.nullable = false;
                 }
-                self.refresh();
+                // Option 3 (#166): fill-null changes nullability only.
                 Ok(())
             }
             Rule::DeriveColumn {
@@ -318,7 +323,9 @@ impl IncrementalSchema {
         }
         self.schema.fields[index].name = to.to_owned();
         self.text_bytes = new_total;
-        self.refresh();
+        // Option 3 (#166): rename cannot change the ColumnId -> ordinal
+        // mapping, so entries stay exact without a rebuild (verify_entries-
+        // guarded; identical to a fresh rebuild by construction).
         Ok(())
     }
 
@@ -381,7 +388,8 @@ impl IncrementalSchema {
             field.nullable = true;
         }
         self.text_bytes = new_total;
-        self.refresh();
+        // Option 3 (#166): cast changes type/nullability only, never the
+        // ColumnId -> ordinal mapping.
         Ok(())
     }
 
