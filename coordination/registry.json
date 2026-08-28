@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 219,
+  "revision": 220,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2734,9 +2734,7 @@
         "e4s2rebind:provenance-from-91",
         "e4s2rebind:single-terminal-verdict"
       ],
-      "depends_on": [
-        "B0-POST-O0-REBASE"
-      ],
+      "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
@@ -2769,9 +2767,7 @@
         "qc0:stage-c-merge-parents",
         "qc0:single-terminal-verdict"
       ],
-      "depends_on": [
-        "B0-POST-O0-REBASE"
-      ],
+      "depends_on": [],
       "conflicts_with": [
         "X-C0-REBIND-MERGE"
       ],
@@ -2806,9 +2802,7 @@
         "xc0:stage-c-merge-parents",
         "xc0:single-terminal-verdict"
       ],
-      "depends_on": [
-        "B0-POST-O0-REBASE"
-      ],
+      "depends_on": [],
       "conflicts_with": [
         "Q-C0-REBIND-MERGE"
       ],
@@ -2844,9 +2838,7 @@
         "jsona2:locks-free",
         "jsona2:single-terminal-verdict"
       ],
-      "depends_on": [
-        "B0-POST-O0-REBASE"
-      ],
+      "depends_on": [],
       "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
