@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 198,
+  "revision": 199,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T01:23:18Z",
+  "updated_at": "2026-08-28T02:32:55Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2438,9 +2438,9 @@
         "O0-B2-A2-PROD-SCOPE-FIX"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T02:53:18Z",
+      "lease_expires_at": "2026-08-28T04:02:55Z",
       "started_at": "2026-08-28T01:23:18Z",
-      "updated_at": "2026-08-28T01:23:18Z",
+      "updated_at": "2026-08-28T02:32:55Z",
       "queued_by": "maintainer:direct-chat (issue #162 dispatch 2026-08-28)",
       "queue_reason": "Issue #162 O0-B2-A2-PROD-ACCEPT-R2: independent read-only production acceptance of PR #160 @ 6d228e0f69f0887a3ab1f7f688c86707230ec588 vs main@04966586192f8750a02790da988db71a28d82074. No evidence transfer from #159/#161; fresh reproduction of all A-H gates required.",
       "notes": "Read-only review per issue #162. Exact-head binding: PR #160 Open+Draft at 6d228e0f6..., live main 0496658..., PR #154 stays Draft/unmerged at 7afdd656..., #144 Draft, #91 HOLD. A. scope exactly 3 engine files incl. #161 delta proof (049833e..6d228e0 = only .gitignore-worktree deletion, engine blobs byte-identical). B. one Engine-private ownership layer, exhaustive Rule match no wildcard, permanent full LogicalSchema::new boundary oracle in production path, no test/debug dependency, no core/public change. C. independent reproduction: Rename text-budget crossing, Derive field-count crossing, Derive text crossing, Cast timezone crossing, Drop accounting, just-below-budget success - exact legacy parity of variant/message/position, no later-rule execution. D. text/field accounting audit incl. every contributor, counter sync, failure-path cleanliness, per-rule differential, fixed-seed battery prints seed/case/rule, compile-time central mapping. E. semantic differential matrix. F. static gates fresh at head. G. fresh 7-cell performance (F4096/R256 >=50%, F4096/R16 >=20%, control no-regression >5%), >=3 windows x >=20 reps, WSL2 ext4, warm, flock, interleaved, raw sha256. H. maintainability. Verdict exactly one of APPROVE_INCREMENTAL_SCHEMA_PRODUCTION_R2 | REQUEST_CHANGES. No merge/ready/enable; four-cell attribution is a later dispatch. Lease 90 minutes.",
