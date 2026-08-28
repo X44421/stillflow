@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 210,
+  "revision": 211,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T06:27:06Z",
+  "updated_at": "2026-08-28T06:34:10Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2543,7 +2543,7 @@
     {
       "id": "O0-B2-A1-A2-FINAL-INTEGRATION",
       "title": "Build final consolidated A1 + A2 production candidate (issue #166)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-o0b2a1a2finalint-w1",
       "target_issue": 166,
@@ -2577,29 +2577,18 @@
         "O0-B2-A1-A2-FINAL-PLAN"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T08:57:06Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T05:56:41Z",
-      "updated_at": "2026-08-28T06:27:06Z",
+      "updated_at": "2026-08-28T06:34:10Z",
       "queued_by": "maintainer:direct-chat (issue #166 dispatch 2026-08-28)",
       "queue_reason": "Issue #166 O0-B2-A1-A2-FINAL-INTEGRATION: create the single final A1+A2 production candidate from exact main. Fresh branch agent/o0-b2-a1-a2-final-integration (do NOT branch from #154/#160/#164). Commit structure preserving 4 provenance layers: (1) A1 head 7afdd656, (2) A2 head 6d228e0, (3) factorial ac863966, (4) one identifiable Option-3 hardening commit. Scope: exactly 5 Engine files. Option 3 contract: Rename/Cast/ReplaceLiteral/FillNull MUST NOT rebuild ordinal entries; Drop/Derive/swap MUST rebuild same-call; non-mutating rules never rebuild; A1 use_index(F,R) and estimator FORBIDDEN to modify; A2 budget/error-position/boundary FORBIDDEN to modify. Semantic gates: fresh 68-case oracle + Option-3 mechanical tests; static gates; fresh 9-scenario matrix (>=4 windows x >=20 reps, A/A) vs A2-only/A1-only/legacy; production gate: mixed_wide no robust >5% regression vs A2-only beyond same-session A/A. Draft PR only; verdict exactly one: PROMOTE_FINAL_A1_A2_PRODUCTION_CANDIDATE | FINAL_A1_A2_SEMANTIC_REJECT | FINAL_A1_A2_STALE_INDEX_REJECT | FINAL_A1_A2_INTERACTION_REGRESSION | FINAL_A1_A2_SCOPE_REJECT. No Ready/merge/main-move; #91 HOLD.",
       "notes": "Lease 150 minutes. Locks on claim: branch:agent/o0-b2-a1-a2-final-integration, engine:stillflow-engine. Deliverable: Draft consolidated production PR + completion evidence with base/head, provenance/commit structure, exact file scope, Option-3 implementation + classification table, stale-index mechanical proof, fresh semantic oracle hash/results, static/workspace gates, fresh 9-scenario performance table + A/A + raw hashes, remaining risks, exactly one verdict. Do not close/supersede #154/#160/#164 in this task.",
-      "canonical_issue": 166
+      "canonical_issue": 166,
+      "completed_at": "2026-08-28T06:34:10Z",
+      "result_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
+      "ci_url": "https://github.com/X44421/stillflow/pull/167",
+      "completion_note": "PROMOTE_FINAL_A1_A2_PRODUCTION_CANDIDATE — Draft consolidated production PR #167 @ 37b5a5ad on exact main 0496658. 3-commit provenance structure: cb3dde4 integration (5 files blob-identical to factorial ac863966; A1 7afdd656 / A2 6d228e0 verbatim), b5ae3f2 Option-3 hardening ONLY (refresh on Drop/Derive/swap; none on Rename/Cast/ReplaceLiteral/FillNull; never on non-mutating), 37b5a5a classification table + mechanical tests + cfg(test) gating of A1 reference backend (semantics unchanged; clippy clean). Option-3 contract exact: A1 use_index(F,R) and estimator untouched; A2 budget/error-position/boundary untouched; exhaustive classification no wildcard. Semantic oracle (fresh, reconstruction fidelity verified byte-identical vs #163 artifact): 68/68 cases BYTE-IDENTICAL to all four #163 references (L/A1/A2/factorial incl. fingerprints; sha prefix 3d27b080). Static gates at head: fmt PASS; clippy workspace --all-targets -D warnings 0 warnings; engine 118/118; workspace suite PASS (23 ok, 0 failures); git diff --check PASS. Fresh 4-window Latin-square 9-scenario matrix (320 samples/cell; A/A floor worst 5.3%): mixed_wide FINAL 9.31ms vs A2-only 22.49ms = -58.6% (gate: no >5% regression - met with 58-pt improvement margin, 4/4 windows); lookup_dominant -63.2% vs A1 and -70.5% vs A2; mutation_dominant -68.9% vs A2; sparse_wide = A1 (-0.4%); small controls noise; near_budget -58.5%; derive_heavy -70.8%. Raw samples aggregate sha256 203428f09e...; final binary 196707f285fc.... Remaining risks: classification re-review on new Rule variants (compile-enforced). Authorizes ONLY independent final combined acceptance; no Ready/merge/main-move; #154/#160/#164 remain Draft; #91 HOLD."
     }
   ],
-  "locks": {
-    "branch:agent/o0-b2-a1-a2-final-integration": {
-      "task_id": "O0-B2-A1-A2-FINAL-INTEGRATION",
-      "owner": "ox-alpha-o0b2a1a2finalint-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-28T05:56:41Z",
-      "lease_expires_at": "2026-08-28T08:57:06Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "O0-B2-A1-A2-FINAL-INTEGRATION",
-      "owner": "ox-alpha-o0b2a1a2finalint-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-28T05:56:41Z",
-      "lease_expires_at": "2026-08-28T08:57:06Z"
-    }
-  }
+  "locks": {}
 }
