@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 206,
+  "revision": 207,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T05:40:29Z",
+  "updated_at": "2026-08-28T05:49:35Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2502,7 +2502,7 @@
     {
       "id": "O0-B2-A1-A2-FINAL-PLAN",
       "title": "Final integration and merge plan for accepted A1 + A2 (issue #165)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-o0b2a1a2finalplan-w1",
       "target_issue": 165,
@@ -2528,13 +2528,17 @@
         "O0-B2-A1-A2-FACTORIAL"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T06:55:29Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T05:40:29Z",
-      "updated_at": "2026-08-28T05:40:29Z",
+      "updated_at": "2026-08-28T05:49:35Z",
       "queued_by": "maintainer:direct-chat (issue #165 dispatch 2026-08-28)",
       "queue_reason": "Issue #165 O0-B2-A1-A2-FINAL-PLAN: read-only maintainer planning gate. Convert factorial attribution (#163, PR #164 ac863966) into a precise final production integration plan for A1+A2. Decide: as-is promotion vs narrow interaction hardening (mixed_wide -66.8% vs A2); compare 4 refresh-cadence options (eager / dirty-lazy / ordinal-shift-only / linear fallback); choose integration strategy S1/S2/S3; freeze final combined acceptance gate (mixed_wide no robust >5% regression vs A2 beyond A/A noise, full semantic oracle rerun, main performance matrix); Ready/merge sequencing; rollback/provenance. Read-only: no source edits, no pushes, no Ready/merge/close, main unmoved.",
       "notes": "Lease 75 minutes. Locks: none. Binding before CLAIM and before terminal decision: main=0496658..., #154 Draft@7afdd656..., #160 Draft@6d228e0..., #164 Draft@ac863966..., #91 HOLD. Deliverable: maintainer-facing planning comment on PR #164 or #163 plus registry completion, with exact live bindings, as-is promotion decision, refresh-cadence option comparison, chosen integration strategy, exact next branch/base/path scope, final acceptance gate, Ready/merge state machine, rollback/provenance plan, exactly one verdict: FINAL_PLAN_HARDEN_INTERACTION_THEN_INTEGRATE | FINAL_PLAN_INTEGRATE_AS_IS | FINAL_PLAN_SEQUENCE_SINGLE_CANDIDATE_FIRST | FINAL_PLAN_BLOCKED.",
-      "canonical_issue": 165
+      "canonical_issue": 165,
+      "completed_at": "2026-08-28T05:49:35Z",
+      "result_head": "04966586192f8750a02790da988db71a28d82074",
+      "ci_url": "https://github.com/X44421/stillflow/pull/164#issuecomment-5448951205",
+      "completion_note": "FINAL_PLAN_HARDEN_INTERACTION_THEN_INTEGRATE — read-only planning gate; plan comment posted on PR #164 (issuecomment-5448951205). A. as-is promotion: NO (#164 mixed_wide -66.8% vs A2 is avoidable repeated work). B. refresh cadence measured: opted Option 3 (rebuild ONLY on ordinal-shifting mutations: Drop/Derive/swap; Rename/Cast/Replace/Fill preserve entries exactly — deterministic semantic classification, mechanically verify_entries-guarded; 114/114 engine suite). Measured fresh 2-window x 3-cycle interleaved (scratch, tree restored to ac86396): mixed_wide 13.7ms = -59.3% vs A2-only (eager was +66.8%); all 9 cells <= A2 or noise; sparse = A1-only. Option 2 (lazy) analyzed = approx eager in rule chains (every column rule does a pre-mutation lookup) + weaker auditability; Option 4 rejected (second policy violates A1 use_index contract). C. invariants all preserved. D. strategy S1: fresh consolidated production branch from exact main 0496658; S2 (sequence one candidate) rejected (head-bound evidence breaks on rebase); S3 (separate merge units) rejected (intermediate non-production main states). E. topology: branch agent/o0-b2-a1-a2-final-integration, 5 Engine files, A1/A2 blobs verbatim, hardening as its own atomic commit; #154/#160 evidence Draft PRs only; #164 permanent experiment evidence. F. final acceptance gate frozen: fresh 68-case 4-cell oracle byte-identical, Option-3 stale/dirty probes, A2 budget probes, A1 policy probes, fmt/clippy/workspace tests, 9-scenario matrix >=4 windows x >=20 reps with A/A; mixed_wide no robust >5% regression vs A2 (measured headroom -59%), controls <5%, lookup/mutation wins preserved, semantics absolute, no #163/#165 sample reuse. G. merge sequencing: consolidated PR is the only merge vehicle; #154/#160 superseded-closed only after final combined acceptance; #164 stays Draft; main moves once; #91 stays HOLD. H. rollback = single revert of the consolidated PR; provenance preserved incl. isolated hardening commit. Bindings verified at claim and at delivery. No code/push/Ready/merge performed."
     }
   ],
   "locks": {}
