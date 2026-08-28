@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 226,
+  "revision": 227,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:40:26Z",
+  "updated_at": "2026-08-28T08:42:27Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2817,7 +2817,7 @@
     {
       "id": "E24-JSON-A2-PROD-REBIND",
       "title": "Rebind direct projected NDJSON productionization to post-O0 main (issue #174)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-jsona2re-w1",
       "target_issue": 174,
@@ -2840,13 +2840,17 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T09:23:09Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T08:38:09Z",
-      "updated_at": "2026-08-28T08:38:09Z",
+      "updated_at": "2026-08-28T08:42:27Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #174: read-only rebind authorization for #158 to CLAIM on main@81e817ad after verifying no connector/dependency drift; no implementation.",
       "notes": "Lease 45 min. Verify: main exact; PR #150 @ e9a4fa61 Draft/unmerged; O0 merge touched only Engine; #151 TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM; Polars version unchanged old->new; connector lock free; E4 rebind Engine-only. Verdict: REBIND_JSON_A2_PROD_TO_81E817AD | JSON_A2_PROD_REBIND_REQUIRES_REVIEW | JSON_A2_PROD_REBIND_BLOCKED. No source edit/branch/#158 CLAIM/benchmark/PR#150 mutation/Polars upgrade/#151 closure.",
-      "canonical_issue": 174
+      "canonical_issue": 174,
+      "completed_at": "2026-08-28T08:42:27Z",
+      "result_head": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "ci_url": "https://github.com/X44421/stillflow/issues/158",
+      "completion_note": "REBIND_JSON_A2_PROD_TO_81E817AD — read-only rebind analysis complete: main exact 81e817ad; PR #150 @ e9a4fa61 Open+Draft unchanged; O0 merge surface = exactly 5 engine files with zero connector overlap; Polars 0.46 identical old->new; connector-local-tabular blobs untouched; #151 OPEN with TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM lineage (TS-151-DIAG done) and independent; connector locks free; E4 rebind (#171) engine-only. Authorization posted on #158: productionization task may CLAIM fresh from main@81e817ad with the original contract unchanged. No source edits, no #158 CLAIM, no benchmark, no PR #150 mutation, no Polars upgrade, no #151 closure."
     }
   ],
   "locks": {
