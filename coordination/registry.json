@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 196,
+  "revision": 197,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2407,6 +2407,44 @@
       "result_head": "6d228e0f69f0887a3ab1f7f688c86707230ec588",
       "ci_url": "https://github.com/X44421/stillflow/pull/160",
       "completion_note": "READY_FOR_A2_PROD_ACCEPTANCE @ 6d228e0f... (PR #160; old head 049833ee... preserved as parent, no rewrite). Scope-hygiene only: deleted .gitignore-worktree (was +target-a2/ +bench-artifacts/). Proofs: (1) old head verified; (2) new head descendant; (3) git diff old..new --name-status = D .gitignore-worktree ONLY; (4) Engine blobs identical old vs new (incremental.rs 85a68021..., lib.rs a4848bac..., preflight.rs 742f6fe8...); (5) GitHub PR files API = exactly 3 Engine files; (6) PR OPEN+Draft; (7) main unchanged 0496658.... No source/test/benchmark change => #159 evidence (105/105 engine, 339 workspace, clippy 0, primary +89.3% >=50%, F4096R16 +34.8% >=20%, A/A floor +-1.4%) remains applicable. Verdict authorizes ONLY new exact-head A2 production acceptance task - not created here. #91/#154/#144 untouched."
+    },
+    {
+      "id": "O0-B2-A2-PROD-ACCEPT-R2",
+      "title": "Independent production acceptance of the A2 incremental schema production candidate (PR #160, issue #162)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 162,
+      "target_pr": 160,
+      "target_branch": "agent/o0-b2-a2-prod-incremental-schema",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": "6d228e0f69f0887a3ab1f7f688c86707230ec588",
+      "locks": [],
+      "paths": [
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "o0b2a2prodacc:scope-and-cleanup-proof",
+        "o0b2a2prodacc:ownership-model-single-layer",
+        "o0b2a2prodacc:budget-fidelity-fresh-reproduction",
+        "o0b2a2prodacc:anti-drift-accounting-proof",
+        "o0b2a2prodacc:semantic-differential-fresh",
+        "o0b2a2prodacc:static-and-workspace-gates",
+        "o0b2a2prodacc:fresh-7-cell-performance",
+        "o0b2a2prodacc:maintainability-acceptance",
+        "o0b2a2prodacc:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A2-PROD-SCOPE-FIX"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T01:04:47Z",
+      "queued_by": "maintainer:direct-chat (issue #162 dispatch 2026-08-28)",
+      "queue_reason": "Issue #162 O0-B2-A2-PROD-ACCEPT-R2: independent read-only production acceptance of PR #160 @ 6d228e0f69f0887a3ab1f7f688c86707230ec588 vs main@04966586192f8750a02790da988db71a28d82074. No evidence transfer from #159/#161; fresh reproduction of all A-H gates required.",
+      "notes": "Read-only review per issue #162. Exact-head binding: PR #160 Open+Draft at 6d228e0f6..., live main 0496658..., PR #154 stays Draft/unmerged at 7afdd656..., #144 Draft, #91 HOLD. A. scope exactly 3 engine files incl. #161 delta proof (049833e..6d228e0 = only .gitignore-worktree deletion, engine blobs byte-identical). B. one Engine-private ownership layer, exhaustive Rule match no wildcard, permanent full LogicalSchema::new boundary oracle in production path, no test/debug dependency, no core/public change. C. independent reproduction: Rename text-budget crossing, Derive field-count crossing, Derive text crossing, Cast timezone crossing, Drop accounting, just-below-budget success - exact legacy parity of variant/message/position, no later-rule execution. D. text/field accounting audit incl. every contributor, counter sync, failure-path cleanliness, per-rule differential, fixed-seed battery prints seed/case/rule, compile-time central mapping. E. semantic differential matrix. F. static gates fresh at head. G. fresh 7-cell performance (F4096/R256 >=50%, F4096/R16 >=20%, control no-regression >5%), >=3 windows x >=20 reps, WSL2 ext4, warm, flock, interleaved, raw sha256. H. maintainability. Verdict exactly one of APPROVE_INCREMENTAL_SCHEMA_PRODUCTION_R2 | REQUEST_CHANGES. No merge/ready/enable; four-cell attribution is a later dispatch. Lease 90 minutes.",
+      "canonical_issue": 162
     }
   ],
   "locks": {}
