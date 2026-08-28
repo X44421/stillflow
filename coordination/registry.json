@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 193,
+  "revision": 194,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2367,6 +2367,42 @@
       "result_head": "049833ee7178ff38dd331756f06bcd4f7e05099d",
       "ci_url": "https://github.com/X44421/stillflow/pull/160",
       "completion_note": "PROMOTE_INCREMENTAL_SCHEMA_PRODUCTION_CANDIDATE @ 049833e (PR #160 Draft, base main@0496658). Fresh branch, no A1 import, #91 untouched. One Engine-private incremental layer (incremental.rs): exhaustive 10-variant Rule mapping (no wildcard), legacy-equivalent check order/messages, in-place mutation, exact cumulative text-budget counter (names+metadata+timezone) + field count; #145 Finding-1 closed (rename/derive/cast/drop budget crossings fail at the same rule with legacy mapped messages - 4 pins + no-false-positive + position pins); permanent LogicalSchema::new boundary oracle in production; 400-case fixed-seed property battery + differential batteries + counter exactness. Gates: engine 105/105, workspace 339/0, clippy 0, fmt/diff-check clean. Fresh bench (4w x 20r, raw 5966f7d5...): primary F=4096,R=256 +89.3% (>=50), F=4096,R=16 +34.8% (>=20), controls f64 +1.3% / f512 +63.4% (improves), mixed +82.8%, near-budget +79.0%; A/A floor all cells within +-1.4%. Verdict authorizes ONLY independent A2 production acceptance, then four-cell attribution. No Ready/merge/default. #144/#154 remain Draft."
+    },
+    {
+      "id": "O0-B2-A2-PROD-SCOPE-FIX",
+      "title": "Scope-hygiene fix: remove committed .gitignore-worktree from PR #160 (issue #161)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 161,
+      "target_pr": 160,
+      "target_branch": "agent/o0-b2-a2-prod-incremental-schema",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/o0-b2-a2-prod-incremental-schema"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "o0b2a2scopefix:only-gitignore-deletion",
+        "o0b2a2scopefix:engine-blobs-identical",
+        "o0b2a2scopefix:no-history-rewrite",
+        "o0b2a2scopefix:pr-files-exactly-3",
+        "o0b2a2scopefix:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A2-PROD"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T00:46:13Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-27)",
+      "queue_reason": "PR #160 live diff shows 4 changed files (extra .gitignore-worktree with target-a2/ + bench-artifacts/); PR body claims exactly 3 Engine files and contract deviations none - scope disclosure mismatch. Narrow hygiene fix; A2 verdict PROMOTE_INCREMENTAL_SCHEMA_PRODUCTION_CANDIDATE stays.",
+      "notes": "Delete .gitignore-worktree ONLY. Forbidden: edits to incremental.rs/preflight.rs/lib.rs; A1 import; estimator/invariant/budget/test/benchmark changes; Cargo/Cargo.lock/core/lower/connector/storage/frontend/API/workflow; #91; Ready/merge/default; history rewrite. Mechanical proof before completion: (1) old head 049833ee7178ff38dd331756f06bcd4f7e05099d; (2) new head descendant of old (no rewrite); (3) git diff old..new --name-status = deletion of .gitignore-worktree ONLY; (4) blob SHA/content of all three Engine files (incremental.rs, lib.rs, preflight.rs) identical between old and new head; (5) GitHub PR files API = exactly 3 files; (6) PR OPEN + Draft; (7) main unchanged. No code change => no perf/semantic rerun required; #159 evidence remains applicable. Verdict exactly one: READY_FOR_A2_PROD_ACCEPTANCE | SCOPE_FIX_BLOCKED. Positive authorizes ONLY creation of new exact-head A2 production acceptance task. Lease 60 minutes. AGENT-SAFETY-NORMS binding.",
+      "canonical_issue": 161
     }
   ],
   "locks": {}
