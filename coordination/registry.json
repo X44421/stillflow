@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 213,
+  "revision": 214,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T07:36:26Z",
+  "updated_at": "2026-08-28T08:01:49Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2592,7 +2592,7 @@
     {
       "id": "O0-B2-A1-A2-FINAL-ACCEPT",
       "title": "Independent final production acceptance of consolidated A1 + A2 (PR #167, issue #168)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-o0b2a1a2finalacc-r1",
       "target_issue": 168,
@@ -2620,13 +2620,17 @@
         "O0-B2-A1-A2-FINAL-INTEGRATION"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T10:06:26Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T07:36:26Z",
-      "updated_at": "2026-08-28T07:36:26Z",
+      "updated_at": "2026-08-28T08:01:49Z",
       "queued_by": "maintainer:direct-chat (issue #168 dispatch 2026-08-28)",
       "queue_reason": "Issue #168 O0-B2-A1-A2-FINAL-ACCEPT: independent final combined production acceptance of PR #167 @ 37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af (base main@0496658). Fully fresh re-verification, no inheritance from #166. Gates: exact 5-file scope + 3-commit provenance + hardening boundary audit; Option-3 three-class exhaustive classification review; independent adversarial stale-index probes (12 mandated scenarios, retained entries == fresh build_ordinals on every accepted transition); A1 use_index(R>=max(32,F/8))/estimator boundary probes; A2 budget/error-position fresh reproduction; fresh 68-case semantic oracle re-run vs main + #167 (+A1/A2 references where practical); fresh fmt/clippy/engine/workspace/diff-check counts; fresh 4-binary 9-scenario matrix (>=4 windows x >=20 reps, Latin-square, A/A, raw sha256) with mixed_wide no robust >5% regression vs A2-only, sparse vs A1, controls clean, lookup/mutation value preserved; maintainability/future-rule gate. Verdict exactly one: APPROVE_FINAL_A1_A2_PRODUCTION | REQUEST_CHANGES. Reviewer independence: #166 implementation/Option-3 author sessions must not claim.",
       "notes": "Lease 150 minutes. Locks: none. Read-only: no source/test/doc edits (scratch probes allowed only if fully reverted with tree restored byte-identical), no branch writes, no PR-body edits, no Ready/merge/close. Binding before CLAIM and immediately before verdict: #167 Open+Draft @ 37b5a5ad..., main 0496658..., #154 Draft @ 7afdd656..., #160 Draft @ 6d228e0..., #164 Draft @ ac863966..., #91 HOLD. Deliverable: one independent review comment on PR #167 + registry completion with exact binding, scope/provenance, classification audit, adversarial probes, A1/A2 probes, fresh oracle hash/results, fresh static counts, fresh benchmark + A/A + raw sha256, remaining risks, exactly one verdict. Positive authorizes only the subsequent explicit Ready/Merge task.",
-      "canonical_issue": 168
+      "canonical_issue": 168,
+      "completed_at": "2026-08-28T08:01:49Z",
+      "result_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
+      "ci_url": "https://github.com/X44421/stillflow/pull/167#issuecomment-5450001129",
+      "completion_note": "APPROVE_FINAL_A1_A2_PRODUCTION — independent final combined acceptance; review comment posted (issuecomment-5450001129). Binding @ claim + @ verdict: #167 Open+Draft @ 37b5a5ad..., main 0496658..., #154/#160/#164 Draft at exact heads, #91 HOLD. A. scope exactly 5 Engine files; hardening-boundary audit: b5ae3f2 = incremental.rs 16+/8- with ONLY the four refresh removals + comments; tests commit 216 insertions/0 deletions; source-level provenance: use_index+estimator byte-identical to #154, field_text/text_bytes_of/into_schema byte-identical to #160, budget mutators differ only by A1 lookup redirection + mandated refresh. B. three-class classification exhaustive (no wildcard). C. 19/19 independent adversarial probes (C1-C12: entries==build_ordinals after every accepted transition incl. rename first/middle/last with immediate lookup, drop first/middle/last full ordinal shift, multiple drops, derive old+new lookup, mandated mixed chain, failed preserve/shift mutations, swap routing, disjoint ids, sparse never builds entries, projection-after-drop == legacy; legacy error parity on every rejection) - scratch removed, trees byte-identical. D. use_index boundaries R=31/32, F/8+-1, F=32/64/512/2048/4096 all verified; sparse linear / dense indexed; no second policy. E. A2 budget surfaces fresh-reproduced with exact legacy parity (rename text crossing, derive 4096->4097 & 4095->4096->4097, derive text/tz, cast tz, drop accounting incl. metadata+tz, exact-MAX, just-below-budget, earliest position). F. fresh 68-case oracle: byte-identical to fresh legacy run and all four references (sha prefix 3d27b080). G. fmt PASS; clippy 0 warnings; engine 118/118; workspace 23 suites 352 passed 0 failed; diff-check PASS. H. fresh 4-window Latin-square matrix (320 samples/cell; A/A floor worst 3.0%): mixed_wide FINAL 9.07ms vs A2 21.66ms = -58.1% (all windows -57.8..-58.2; gate met), lookup_dominant -69.9% vs A2 / -62.7% vs A1, mutation_dominant -68.4%, sparse = A1 (-0.3%), small controls noise, near_budget -58.0%, derive_heavy -70.6%; binary hashes L ad0ad703/A1 dbcf2284/A2 680461e3/FINAL 196707f2; raw samples agg sha256 a0ad5b3403.... I. maintainability gate PASS (centralized ownership, compiler-visible classification, structural semantics, production safety independent of verify_entries, oracles runnable, rollback = 5-file revert). Remaining risks: classification review on future reordering variants; preflight-scope claims. Authorizes ONLY the explicit Ready/Merge task; nothing executed here."
     }
   ],
   "locks": {}
