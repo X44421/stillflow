@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 204,
+  "revision": 205,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2498,6 +2498,43 @@
       "result_head": "ac86396685fae7054fa038f5ce552f318fd3e63c",
       "ci_url": "https://github.com/X44421/stillflow/pull/164",
       "completion_note": "FACTORIAL_KEEP_A1_A2 — Draft experimental PR #164 @ ac863966 (1 commit on exact main; 5 Engine files). Four-cell provenance L=0496658/A1=7afdd656/A2=6d228e0/A1A2=ac86396; #154/#160 Draft untouched, main unmoved. Overlap resolution: A2 IncrementalSchema remains sole mutation layer; A1 ordinal backend embedded via for_shape(use_index policy verbatim) with same-call entries rederivation on every accepted mutation (A1 refresh semantics); authorized-level AuthorizedLookup + project_schema_with unchanged; A2 boundary oracle kept. Stale-index proof: module-private schema/entries, all mutations end in refresh() before return, per-rule verify_entries in combined tests (114/114 engine suite). Semantic oracle: 68 cases byte-identical across all four cells incl. plan fingerprints (raw sha256 3d27b080... for each 68-line output); no differential. Benchmark: 4 windows x Latin-square 4-mode x 20 reps (+A/A pairs), raw samples sha256 7bccdeaebf...; COMPLEMENTARY on lookup_dominant (+61.4% A1|A2, +51.2% A2|A1), mutation_dominant (+70.2%, +96.6%), mixed_bridge, small_512, near_budget, derive_heavy; sparse_wide A2 NEUTRAL_BY_SCOPE (A1 dominant); small_64 noise; mixed_wide REGRESSIVE_INTERACTION narrow cell (A1A2 59.8ms vs A2 35.9ms, 4/4 windows) with mechanism-backed quantified cause: A1 same-call ordinal refresh ~25us x 256 rules under low per-rule lookup density; remedy (refresh cadence) explicitly out of task scope and deferred to the final integration/merge plan. Both mechanisms retain distinct conditional value; no blocking condition tripped. No merge/Ready; stop after attribution."
+    },
+    {
+      "id": "O0-B2-A1-A2-FINAL-PLAN",
+      "title": "Final integration and merge plan for accepted A1 + A2 (issue #165)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 165,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": null,
+      "locks": [],
+      "paths": [
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "finalplan:as-is-promotion-decision",
+        "finalplan:refresh-cadence-option-comparison",
+        "finalplan:integration-strategy",
+        "finalplan:final-topology",
+        "finalplan:final-acceptance-gate",
+        "finalplan:ready-merge-machine",
+        "finalplan:rollback-provenance",
+        "finalplan:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1-A2-FACTORIAL"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T05:07:57Z",
+      "queued_by": "maintainer:direct-chat (issue #165 dispatch 2026-08-28)",
+      "queue_reason": "Issue #165 O0-B2-A1-A2-FINAL-PLAN: read-only maintainer planning gate. Convert factorial attribution (#163, PR #164 ac863966) into a precise final production integration plan for A1+A2. Decide: as-is promotion vs narrow interaction hardening (mixed_wide -66.8% vs A2); compare 4 refresh-cadence options (eager / dirty-lazy / ordinal-shift-only / linear fallback); choose integration strategy S1/S2/S3; freeze final combined acceptance gate (mixed_wide no robust >5% regression vs A2 beyond A/A noise, full semantic oracle rerun, main performance matrix); Ready/merge sequencing; rollback/provenance. Read-only: no source edits, no pushes, no Ready/merge/close, main unmoved.",
+      "notes": "Lease 75 minutes. Locks: none. Binding before CLAIM and before terminal decision: main=0496658..., #154 Draft@7afdd656..., #160 Draft@6d228e0..., #164 Draft@ac863966..., #91 HOLD. Deliverable: maintainer-facing planning comment on PR #164 or #163 plus registry completion, with exact live bindings, as-is promotion decision, refresh-cadence option comparison, chosen integration strategy, exact next branch/base/path scope, final acceptance gate, Ready/merge state machine, rollback/provenance plan, exactly one verdict: FINAL_PLAN_HARDEN_INTERACTION_THEN_INTEGRATE | FINAL_PLAN_INTEGRATE_AS_IS | FINAL_PLAN_SEQUENCE_SINGLE_CANDIDATE_FIRST | FINAL_PLAN_BLOCKED.",
+      "canonical_issue": 165
     }
   ],
   "locks": {}
