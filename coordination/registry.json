@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 218,
+  "revision": 219,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:21:17Z",
+  "updated_at": "2026-08-28T08:36:02Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2678,9 +2678,9 @@
     {
       "id": "B0-POST-O0-REBASE",
       "title": "Refresh execution board and canonical baselines after O0 merge (issue #170)",
-      "status": "queued",
+      "status": "running",
       "mode": "maintenance",
-      "owner": null,
+      "owner": "ox-alpha-b0posto0-w1",
       "target_issue": 170,
       "target_pr": null,
       "target_branch": null,
@@ -2700,9 +2700,9 @@
         "O0-B2-A1-A2-FINAL-MERGE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-28T08:21:17Z",
+      "lease_expires_at": "2026-08-28T09:21:02Z",
+      "started_at": "2026-08-28T08:36:02Z",
+      "updated_at": "2026-08-28T08:36:02Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #170: coordination-only refresh of registry/execution board to main@81e817ad after O0 A1/A2 merge; no code changes.",
       "notes": "Lease 45 min. Lock github:issue-ledger-state. Update #81 CURRENT-EXECUTION-BOARD + registry facts: main=81e817ad, #167 merged, #154/#160 closed unmerged superseded, #164 Draft open, O0 CLOSED/PRODUCTION ON MAIN, stop Engine micro-opt scanning, #91 historical Draft head d0ea2a3b read-only + E4 rebind separate, #105/#106 approved evidence needing rebind, #158 stale base must not CLAIM, #150 Draft evidence, #151 open independent. Verdict: POST_O0_BASELINE_REFRESHED | POST_O0_BASELINE_REFRESH_BLOCKED.",
@@ -2857,5 +2857,13 @@
       "canonical_issue": 174
     }
   ],
-  "locks": {}
+  "locks": {
+    "github:issue-ledger-state": {
+      "task_id": "B0-POST-O0-REBASE",
+      "owner": "ox-alpha-b0posto0-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-28T08:36:02Z",
+      "lease_expires_at": "2026-08-28T09:21:02Z"
+    }
+  }
 }
