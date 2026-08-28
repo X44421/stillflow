@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 229,
+  "revision": 230,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:52:48Z",
+  "updated_at": "2026-08-28T08:54:22Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2788,7 +2788,7 @@
     {
       "id": "X-C0-REBIND-MERGE",
       "title": "Rebind, reaccept, and merge ADR-004 on post-O0 main (issue #173)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-xc0rebind-w1",
       "target_issue": 173,
@@ -2810,13 +2810,17 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T10:08:50Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T08:38:50Z",
-      "updated_at": "2026-08-28T08:38:50Z",
+      "updated_at": "2026-08-28T08:54:22Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #173: docs-only rebind of approved ADR-004 (accepted head 6e33a40994 on old base) onto main@81e817ad; Stage A author != Stage B reviewer; Stage C merge; supersede stale evidence after merge.",
       "notes": "Lease 90 min. Stage B verdicts: APPROVE_X_C0_REBOUND | REQUEST_CHANGES_X_C0_REBOUND. Terminal: MERGED_X_C0_ON_CURRENT_MAIN | X_C0_REBIND_BLOCKED | X_C0_REACCEPT_REJECTED | X_C0_POSTMERGE_HYGIENE_BLOCKED. No X-R1 implementation.",
-      "canonical_issue": 173
+      "canonical_issue": 173,
+      "completed_at": "2026-08-28T08:54:22Z",
+      "result_head": "b721f0b21b2751e87b49d5a76a12e47a16a1b686",
+      "ci_url": "https://github.com/X44421/stillflow/pull/106",
+      "completion_note": "MERGED_X_C0_ON_CURRENT_MAIN — ADR-004 rebind+reaccept+merge complete. Stage A: rebind onto main@81e817ad via cherry-pick (branch agent/issue-104-x-c0-export-contract; exact head b721f0b21b...; diff vs new main = exactly one ADR file; ADR blob c4ac58e9 byte-identical to accepted old head 6e33a409; Draft preserved). Stage B: INDEPENDENT reviewer returned APPROVE_X_C0_REBOUND (single-file scope; byte-identical content; #139 surface re-run vs new main: committed Snapshot input rule, CSV/TSV/JSONL/Parquet encoding laws, deterministic ordering, path/root/no-follow/overwrite semantics, digest/provenance/atomic publication/recovery, cancellation/retry, bounds incl. MAX_ACTIVE_EXPORT_PUBLISHERS=4, all links/anchors resolve, no O0 contradiction, no existing export surface). Stage C: pre-merge binding ok (head b721f0b exact, main a6019e76 exact after Q merge, CI all pass, mergeable) -> Ready -> merged via merge commit 25c110d8fbffa37515a539c652de11d09c512a39 (parents a6019e7648 + b721f0b21b); live main = 25c110d8fb. Result_head recorded as rebind branch head (merge SHA in note); no X-R1 runtime work. Q/X contract lanes both on main."
     },
     {
       "id": "E24-JSON-A2-PROD-REBIND",
@@ -2871,13 +2875,6 @@
       "expected_head": null,
       "acquired_at": "2026-08-28T08:37:41Z",
       "lease_expires_at": "2026-08-28T11:37:41Z"
-    },
-    "branch:agent/issue-104-x-c0-export-contract": {
-      "task_id": "X-C0-REBIND-MERGE",
-      "owner": "ox-alpha-xc0rebind-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-28T08:38:50Z",
-      "lease_expires_at": "2026-08-28T10:08:50Z"
     }
   }
 }
