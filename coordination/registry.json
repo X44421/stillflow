@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 225,
+  "revision": 226,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:38:50Z",
+  "updated_at": "2026-08-28T08:40:26Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2678,7 +2678,7 @@
     {
       "id": "B0-POST-O0-REBASE",
       "title": "Refresh execution board and canonical baselines after O0 merge (issue #170)",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-b0posto0-w1",
       "target_issue": 170,
@@ -2700,13 +2700,17 @@
         "O0-B2-A1-A2-FINAL-MERGE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-28T09:21:02Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-28T08:36:02Z",
-      "updated_at": "2026-08-28T08:36:02Z",
+      "updated_at": "2026-08-28T08:40:26Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #170: coordination-only refresh of registry/execution board to main@81e817ad after O0 A1/A2 merge; no code changes.",
       "notes": "Lease 45 min. Lock github:issue-ledger-state. Update #81 CURRENT-EXECUTION-BOARD + registry facts: main=81e817ad, #167 merged, #154/#160 closed unmerged superseded, #164 Draft open, O0 CLOSED/PRODUCTION ON MAIN, stop Engine micro-opt scanning, #91 historical Draft head d0ea2a3b read-only + E4 rebind separate, #105/#106 approved evidence needing rebind, #158 stale base must not CLAIM, #150 Draft evidence, #151 open independent. Verdict: POST_O0_BASELINE_REFRESHED | POST_O0_BASELINE_REFRESH_BLOCKED.",
-      "canonical_issue": 170
+      "canonical_issue": 170,
+      "completed_at": "2026-08-28T08:40:26Z",
+      "result_head": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "ci_url": "https://github.com/X44421/stillflow/issues/81",
+      "completion_note": "POST_O0_BASELINE_REFRESHED — execution board (#81 CURRENT-EXECUTION-BOARD between its markers) refreshed to main@81e817adec9f344416b01d7d28a84c5f17e55e57 with O0 archival facts: #167 MERGED (parents 0496658 x 37b5a5ad), #154/#160 CLOSED unmerged superseded, #164 OPEN+Draft evidence, #91 historical Draft d0ea2a3b read-only with E4 rebind task #171 separate, stop-Engine-micro-opt policy, topology E4->Q/X->E5, #105/#106/#158 rebind bindings, #151 independent, #150 evidence. Registry: all active rows use live new base (81e817ad); no active claim states main=0496658; locks consistent (github:issue-ledger-state released by completion); wave #170-#174 parallel running."
     },
     {
       "id": "E4-S2-REBIND-FINAL",
@@ -2846,13 +2850,6 @@
     }
   ],
   "locks": {
-    "github:issue-ledger-state": {
-      "task_id": "B0-POST-O0-REBASE",
-      "owner": "ox-alpha-b0posto0-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-28T08:36:02Z",
-      "lease_expires_at": "2026-08-28T09:21:02Z"
-    },
     "branch:agent/e4-s2-final-rebind-verification": {
       "task_id": "E4-S2-REBIND-FINAL",
       "owner": "ox-alpha-e4s2rebind-w1",
