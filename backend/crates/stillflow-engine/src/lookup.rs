@@ -34,6 +34,7 @@
 
 use stillflow_core::{ColumnId, LogicalField, LogicalSchema};
 
+#[cfg(test)]
 use crate::error::EngineError;
 
 /// Abstraction over `ColumnId -> field` resolution used by the preflight
@@ -177,6 +178,7 @@ impl ColumnLookup for AuthorizedLookup<'_> {
 /// The struct name is crate-visible (it appears in the `pub(crate)` enum
 /// variant's type) but both **fields are private to this module** — that is
 /// what makes the schema/index pair opaque outside `lookup.rs`.
+#[cfg(test)]
 pub(crate) struct IndexedSchema {
     schema: LogicalSchema,
     entries: Vec<(ColumnId, u32)>,
@@ -198,11 +200,18 @@ pub(crate) struct IndexedSchema {
 /// exists. Mutations replace or revalidate the whole field list through
 /// [`LogicalSchema::new`] exactly like the baseline path (no incremental
 /// validation semantics).
+///
+/// O0-B2-A1-A2-FINAL-INTEGRATION (#166): in the final combined cell, rule
+/// propagation is owned by `IncrementalSchema` (production path), so this
+/// reference backend is preserved as test-only infrastructure for
+/// lookup.rs's own differential suite (`cfg(test)`; semantics unchanged).
+#[cfg(test)]
 pub(crate) enum WorkingSchema {
     Linear(LogicalSchema),
     Indexed(IndexedSchema),
 }
 
+#[cfg(test)]
 impl WorkingSchema {
     /// Deterministic choice for an owned schema and the exact number of
     /// lookups the propagation pass will serve.
@@ -282,6 +291,7 @@ impl WorkingSchema {
         debug_assert!(self.verify());
     }
 
+    #[allow(dead_code)] // test-only reference backend surface (final combined cell)
     pub(crate) fn into_schema(self) -> LogicalSchema {
         match self {
             Self::Linear(schema) => schema,
@@ -297,6 +307,7 @@ impl WorkingSchema {
     }
 }
 
+#[cfg(test)]
 impl ColumnLookup for WorkingSchema {
     fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField> {
         match self {

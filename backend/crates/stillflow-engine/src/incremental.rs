@@ -111,6 +111,8 @@ pub(crate) struct IncrementalSchema {
 
 impl IncrementalSchema {
     /// Linear-reference working schema (exactly the A2 production behavior).
+    /// Test-only in the final combination: production uses `for_shape`.
+    #[cfg(test)]
     pub(crate) fn from_schema(schema: LogicalSchema) -> Self {
         let text_bytes = text_bytes_of(&schema);
         Self {
@@ -201,6 +203,20 @@ impl IncrementalSchema {
     /// Applies one rule with legacy-equivalent preconditions and in-place
     /// mutation. Exhaustive over all `Rule` variants: a new variant cannot
     /// compile without extending this match (anti-drift requirement).
+    ///
+    /// O0-B2-A1-A2-FINAL-INTEGRATION (#166) mutation classification — every
+    /// current Rule variant falls in exactly one class (a new variant cannot
+    /// compile without being classified here; no wildcard arm):
+    ///
+    /// - non-mutating (no schema/index change, no rebuild): Trim, FilterRows,
+    ///   Validate, Deduplicate;
+    /// - schema-mutating but ordinal-preserving (entries stay exact without
+    ///   rebuild by construction — entries depend only on ColumnId+position;
+    ///   Rename changes name, Cast type/nullability, ReplaceLiteral and
+    ///   FillNull nullability): Rename, Cast, ReplaceLiteral, FillNull;
+    /// - schema-mutating and ordinal-shifting (same-call rebuild before
+    ///   return): DropColumn (retain shifts positions), DeriveColumn
+    ///   (append), and `swap_with` (projection replaces the field list).
     pub(crate) fn apply_rule(&mut self, rule: &Rule) -> Result<(), EngineError> {
         match rule {
             Rule::Rename { column, to } => self.apply_rename(*column, to),
@@ -1344,5 +1360,194 @@ mod tests {
             assert!(swapped.entries.is_some(), "swap_with must preserve indexed");
             assert!(swapped.verify_entries());
         }
+    }
+
+    // ------------------------------------------------------------------
+    // O0-B2-A1-A2-FINAL-INTEGRATION (#166) Option-3 mechanical tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn option3_ordinal_preserving_rules_leave_entries_bit_exact() {
+        // Rename / Cast / ReplaceLiteral / FillNull must not change the
+        // ColumnId -> ordinal table at all (before == after), and the
+        // retained entries must equal a fresh rebuild of the post-rule
+        // schema (no stale drift possible).
+        let before = build_ordinals(&LogicalSchema::new(fields(64)).expect("base"));
+        let mut working = IncrementalSchema::indexed(LogicalSchema::new(fields(64)).expect("base"));
+        working
+            .apply_rule(&Rule::Rename {
+                column: id(1),
+                to: "renamed".into(),
+            })
+            .expect("rename");
+        assert!(working.verify_entries());
+        working
+            .apply_rule(&Rule::Cast {
+                column: id(2),
+                data_type: LogicalType::Float64,
+                on_failure: CastFailurePolicy::Error,
+            })
+            .expect("cast");
+        assert!(working.verify_entries());
+        working
+            .apply_rule(&Rule::ReplaceLiteral {
+                column: id(3),
+                from: ScalarValue::Null,
+                to: ScalarValue::Null,
+            })
+            .expect("replace");
+        assert!(working.verify_entries());
+        working
+            .apply_rule(&Rule::FillNull {
+                column: id(4),
+                value: ScalarValue::Int64(0),
+            })
+            .expect("fillnull");
+        assert!(working.verify_entries());
+        assert!(
+            working.entries.as_ref().expect("indexed") == &before,
+            "ordinal-preserving rules must leave entries bit-exactly unchanged"
+        );
+        assert_eq!(
+            working.lookup_field(id(1)).map(|f| f.name.as_str()),
+            Some("renamed"),
+            "indexed lookup resolves the renamed field"
+        );
+    }
+
+    #[test]
+    fn option3_drop_shifts_and_derive_appends_with_exact_rebuild() {
+        let mut working = IncrementalSchema::indexed(LogicalSchema::new(fields(8)).expect("base"));
+        working
+            .apply_rule(&Rule::Rename {
+                column: id(5),
+                to: "r5".into(),
+            })
+            .expect("rename");
+        let ordinal = |w: &IncrementalSchema, c: u128| -> usize {
+            w.entries
+                .as_ref()
+                .expect("indexed")
+                .iter()
+                .find(|(k, _)| *k == id(c))
+                .expect("present")
+                .1 as usize
+        };
+        assert_eq!(ordinal(&working, 4), 3);
+        working
+            .apply_rule(&Rule::DropColumn { column: id(3) })
+            .expect("drop");
+        assert_eq!(ordinal(&working, 4), 2, "drop must shift later ordinals");
+        assert_eq!(
+            working.entries.as_ref().expect("indexed"),
+            &build_ordinals(&working.schema)
+        );
+        assert!(working.verify_entries());
+        working
+            .apply_rule(&derive(
+                900,
+                "new_field",
+                LogicalType::Int64,
+                Expr::Literal(ScalarValue::Int64(1)),
+            ))
+            .expect("derive");
+        assert_eq!(
+            ordinal(&working, 900),
+            working.schema.fields.len() - 1,
+            "derived field at the new last ordinal"
+        );
+        assert_eq!(
+            working.entries.as_ref().expect("indexed"),
+            &build_ordinals(&working.schema)
+        );
+        assert!(working.verify_entries());
+        assert!(working.text_bytes_exact());
+    }
+
+    #[test]
+    fn option3_failed_mutations_keep_schema_and_entries_consistent() {
+        let bad_derive = derive(
+            901,
+            "bad",
+            LogicalType::Utf8,
+            Expr::Literal(ScalarValue::Int64(1)),
+        );
+        assert_indexed_chain_equivalent(
+            LogicalSchema::new(fields(8)).expect("base"),
+            &[
+                bad_derive.clone(),
+                Rule::Rename {
+                    column: id(1),
+                    to: "".into(),
+                },
+                Rule::Rename {
+                    column: id(2),
+                    to: "ok".into(),
+                },
+            ],
+        );
+        let mut working = IncrementalSchema::indexed(LogicalSchema::new(fields(8)).expect("base"));
+        assert!(working.apply_rule(&bad_derive).is_err());
+        assert_eq!(
+            working.entries.as_ref().expect("indexed"),
+            &build_ordinals(&working.schema)
+        );
+        assert!(working.verify_entries());
+        assert_indexed_chain_equivalent(
+            LogicalSchema::new(fields(8)).expect("base"),
+            &[
+                Rule::Rename {
+                    column: id(1),
+                    to: "ok".into(),
+                },
+                Rule::DropColumn { column: id(2) },
+            ],
+        );
+    }
+
+    #[test]
+    fn option3_mixed_sequence_verifies_after_every_rule() {
+        // Rename -> Cast(SetNull) -> FillNull -> Drop -> ReplaceLiteral ->
+        // Derive: indexed chain must agree with legacy per rule and
+        // verify_entries must hold after every rule (drop/derive rebuild,
+        // the rest keep entries exact).
+        let rules = vec![
+            Rule::Rename {
+                column: id(1),
+                to: "a1".into(),
+            },
+            Rule::Cast {
+                column: id(2),
+                data_type: LogicalType::Float64,
+                on_failure: CastFailurePolicy::SetNull,
+            },
+            Rule::FillNull {
+                column: id(2),
+                value: ScalarValue::Float64(stillflow_core::FiniteF64::new(1.5).expect("finite")),
+            },
+            Rule::DropColumn { column: id(3) },
+            Rule::ReplaceLiteral {
+                column: id(4),
+                from: ScalarValue::Null,
+                to: ScalarValue::Null,
+            },
+            derive(
+                902,
+                "derived_now",
+                LogicalType::Int64,
+                Expr::Literal(ScalarValue::Int64(2)),
+            ),
+        ];
+        for take in 1..=rules.len() {
+            assert_indexed_chain_equivalent(
+                LogicalSchema::new(fields(8)).expect("base"),
+                &rules[..take],
+            );
+        }
+        // Sparse/non-indexed routing unchanged: policy below threshold stays
+        // linear and behaves exactly like the plain A2 layer.
+        let sparse = IncrementalSchema::for_shape(LogicalSchema::new(fields(8)).expect("base"), 1);
+        assert!(sparse.entries.is_none(), "sparse policy stays linear");
+        assert!(sparse.verify_entries());
     }
 }
