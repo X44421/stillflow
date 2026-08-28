@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 222,
+  "revision": 223,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:37:53Z",
+  "updated_at": "2026-08-28T08:38:09Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2817,9 +2817,9 @@
     {
       "id": "E24-JSON-A2-PROD-REBIND",
       "title": "Rebind direct projected NDJSON productionization to post-O0 main (issue #174)",
-      "status": "queued",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-jsona2re-w1",
       "target_issue": 174,
       "target_pr": null,
       "target_branch": null,
@@ -2840,9 +2840,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-28T08:21:17Z",
+      "lease_expires_at": "2026-08-28T09:23:09Z",
+      "started_at": "2026-08-28T08:38:09Z",
+      "updated_at": "2026-08-28T08:38:09Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #174: read-only rebind authorization for #158 to CLAIM on main@81e817ad after verifying no connector/dependency drift; no implementation.",
       "notes": "Lease 45 min. Verify: main exact; PR #150 @ e9a4fa61 Draft/unmerged; O0 merge touched only Engine; #151 TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM; Polars version unchanged old->new; connector lock free; E4 rebind Engine-only. Verdict: REBIND_JSON_A2_PROD_TO_81E817AD | JSON_A2_PROD_REBIND_REQUIRES_REVIEW | JSON_A2_PROD_REBIND_BLOCKED. No source edit/branch/#158 CLAIM/benchmark/PR#150 mutation/Polars upgrade/#151 closure.",
