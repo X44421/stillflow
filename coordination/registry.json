@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 227,
+  "revision": 228,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2758,7 +2758,7 @@
       "target_pr": 105,
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
       "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
-      "expected_head": null,
+      "expected_head": "daf148d3ad41c2c0d49f2fbf416366444fada256",
       "locks": [
         "branch:agent/issue-103-q-c0-profiling-finding-contract"
       ],
@@ -2791,7 +2791,7 @@
       "target_pr": 106,
       "target_branch": "agent/issue-104-x-c0-export-contract",
       "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
-      "expected_head": null,
+      "expected_head": "b721f0b21b2751e87b49d5a76a12e47a16a1b686",
       "locks": [
         "branch:agent/issue-104-x-c0-export-contract"
       ],
