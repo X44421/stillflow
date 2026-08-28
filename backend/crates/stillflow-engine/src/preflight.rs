@@ -3,12 +3,13 @@ use std::time::Duration;
 
 use stillflow_connectors::{Capability, ConnectorRegistry};
 use stillflow_core::{
-    ColumnId, ConnectorKind, Expr, InspectRequest, LogicalField, LogicalSchema, LogicalType,
-    RequestContext, ScalarValue, SourceAsset, SourceConnection,
+    ColumnId, ConnectorKind, Expr, InspectRequest, LogicalSchema, LogicalType, RequestContext,
+    ScalarValue, SourceAsset, SourceConnection,
 };
-use stillflow_plan::{CastFailurePolicy, LogicalPlan, PlanNodeId, PlanNodeKind, Rule};
+use stillflow_plan::{LogicalPlan, PlanNodeId, PlanNodeKind, Rule};
 
 use crate::error::{deadline_too_long, map_context_error, EngineError};
+use crate::lookup::{AuthorizedLookup, ColumnLookup};
 use crate::{
     ENGINE_MAX_DEADLINE, MAX_COMPILED_PLAN_BYTES, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_PLAN_NODES,
     MAX_RULES_PER_NODE,
@@ -220,18 +221,27 @@ pub(crate) async fn preflight(
     let authorized =
         authorized_source_schema(registry, connection, asset, schema_override, context).await?;
     reject_paused_schema(&authorized)?;
+    // One Engine-private lookup view over the exact validated schema state,
+    // shared by the projection existence check and both scan projections.
+    // The deterministic A1 shape policy builds the ordinal index only when
+    // the lookups this projection will serve amortize its build; otherwise
+    // the linear reference resolution runs unchanged.
+    let authorized_lookup = AuthorizedLookup::for_shape(
+        &authorized,
+        projection_served_lookups(&scan_projection, push_projection),
+    );
     for id in &scan_projection {
-        if authorized.field(*id).is_none() {
+        if authorized_lookup.lookup_field(*id).is_none() {
             return Err(EngineError::UnknownColumn(*id));
         }
     }
 
     let expected_connector = if push_projection {
-        project_schema(&authorized, &scan_projection)?
+        project_schema_with(&authorized_lookup, &scan_projection)?
     } else {
         authorized.clone()
     };
-    let scan_output = project_schema(&authorized, &scan_projection)?;
+    let scan_output = project_schema_with(&authorized_lookup, &scan_projection)?;
     reject_paused_schema(&scan_output)?;
     let materialize_schema = propagate_schema(&scan_output, &steps)?;
     reject_paused_schema(&materialize_schema)?;
@@ -492,8 +502,64 @@ async fn authorized_source_schema(
     Ok(metadata.schema)
 }
 
+/// Exact count of `ColumnId` resolutions the authorized-level lookup will
+/// serve in `preflight`: the scan-projection existence check, then the
+/// `expected_connector` and `scan_output` projections (both run when the
+/// connector pushes projection; only the latter otherwise). Part of the
+/// deterministic A1 shape policy: a pure function of plan/schema shape
+/// (O0-B2-A1-A2 #163: semantics unchanged from the accepted A1 estimator).
+fn projection_served_lookups(scan_projection: &[ColumnId], push_projection: bool) -> usize {
+    let factor = if push_projection { 3 } else { 2 };
+    scan_projection.len().saturating_mul(factor)
+}
+
+/// Exact count of `ColumnId` resolutions the propagation working schema will
+/// serve for `steps`, mirroring the passes that run in `propagate_schema`
+/// (one type-check walk per predicate, four walks per derive expression, one
+/// rule-argument lookup per column rule, one per projection column). Part of
+/// the deterministic A1 shape policy: a pure function of plan/schema shape.
+fn steps_served_lookups(steps: &[CompiledStep]) -> usize {
+    steps.iter().map(step_served_lookups).sum()
+}
+
+fn step_served_lookups(step: &CompiledStep) -> usize {
+    match step {
+        CompiledStep::Project { columns } => columns.len(),
+        CompiledStep::Filter { predicate } => crate::typing::count_expr_column_refs(predicate),
+        CompiledStep::Rules { rules } => rules.iter().map(rule_served_lookups).sum(),
+    }
+}
+
+fn rule_served_lookups(rule: &Rule) -> usize {
+    match rule {
+        Rule::Rename { .. } => 1,
+        // DropColumn filters the field list directly and performs no
+        // `ColumnId` resolution through the lookup backend.
+        Rule::DropColumn { .. } => 0,
+        Rule::Trim { .. } => 1,
+        Rule::Cast { .. } => 1,
+        Rule::ReplaceLiteral { .. } => 1,
+        Rule::FillNull { .. } => 1,
+        Rule::DeriveColumn { expression, .. } => {
+            4 * crate::typing::count_expr_column_refs(expression) + 1
+        }
+        Rule::FilterRows { predicate } => crate::typing::count_expr_column_refs(predicate),
+        // Rejected during step compilation, before schema propagation.
+        Rule::Validate { .. } | Rule::Deduplicate { .. } => 0,
+    }
+}
+
 pub(crate) fn project_schema(
     schema: &LogicalSchema,
+    columns: &[ColumnId],
+) -> Result<LogicalSchema, EngineError> {
+    // Standalone calls (e.g. lowering) decide by the same deterministic
+    // policy over the lookups this single call will serve.
+    project_schema_with(&AuthorizedLookup::for_shape(schema, columns.len()), columns)
+}
+
+fn project_schema_with<L: ColumnLookup + ?Sized>(
+    lookup: &L,
     columns: &[ColumnId],
 ) -> Result<LogicalSchema, EngineError> {
     let mut fields = Vec::with_capacity(columns.len());
@@ -504,8 +570,8 @@ pub(crate) fn project_schema(
                 "projection contains duplicate columns",
             ));
         }
-        let field = schema
-            .field(*id)
+        let field = lookup
+            .lookup_field(*id)
             .ok_or(EngineError::UnknownColumn(*id))?
             .clone();
         fields.push(field);
@@ -517,24 +583,54 @@ fn propagate_schema(
     scan_output: &LogicalSchema,
     steps: &[CompiledStep],
 ) -> Result<LogicalSchema, EngineError> {
-    let mut schema = scan_output.clone();
+    // O0-B2-A1-A2 (#163): one Engine-private working schema threaded through
+    // the whole propagation. A2's `IncrementalSchema` remains the SOLE
+    // ApplyRules mutation ownership layer (in-place mutation, exact per-rule
+    // checks incl. budget accounting); it additionally carries the accepted
+    // A1 ordinal-index lookup backend whenever the deterministic A1 policy
+    // (`use_index(field_count, steps_served_lookups)`) says indexing is
+    // warranted, and every accepted mutation rederives the ordinal table in
+    // the same call. The full `LogicalSchema::new` validation remains a
+    // permanent production safety oracle at the ApplyRules boundary (A2),
+    // and projection/filter steps resolve columns through the same working
+    // lookup view (A1).
+    let mut working = crate::incremental::IncrementalSchema::for_shape(
+        scan_output.clone(),
+        steps_served_lookups(steps),
+    );
     for step in steps {
         match step {
-            CompiledStep::Project { columns } => schema = project_schema(&schema, columns)?,
+            CompiledStep::Project { columns } => {
+                let projected = project_schema_with(&working, columns)?;
+                working = working.swap_with(projected);
+            }
             CompiledStep::Filter { predicate } => {
-                crate::typing::require_boolean(predicate, &schema)?;
+                crate::typing::require_boolean_in(predicate, &working)?;
             }
             CompiledStep::Rules { rules } => {
                 for rule in rules {
-                    schema = apply_rule_schema(schema, rule)?;
+                    working.apply_rule(rule)?;
                 }
             }
         }
     }
+    let schema = working.into_schema()?;
     Ok(schema)
 }
 
-fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSchema, EngineError> {
+/// Legacy per-rule propagation: every schema-mutating rule clones the field
+/// vector and re-runs full `LogicalSchema::new` validation. Kept under
+/// `cfg(test)` as the mechanically runnable reference path for the
+/// differential/property batteries (legacy full-rebuild vs production
+/// incremental layer); the production single path is
+/// `crate::incremental::IncrementalSchema`.
+#[cfg(test)]
+pub(crate) fn apply_rule_schema_legacy(
+    mut schema: LogicalSchema,
+    rule: &Rule,
+) -> Result<LogicalSchema, EngineError> {
+    use stillflow_core::LogicalField;
+    use stillflow_plan::CastFailurePolicy;
     match rule {
         Rule::Rename { column, to } => {
             schema
@@ -674,7 +770,7 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
                 .map_err(|_| EngineError::InvalidPlan("derive produced an invalid schema"))
         }
         Rule::FilterRows { predicate } => {
-            crate::typing::require_boolean(predicate, &schema)?;
+            crate::typing::require_boolean_in(predicate, &schema)?;
             Ok(schema)
         }
         Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
@@ -688,7 +784,7 @@ fn apply_rule_schema(mut schema: LogicalSchema, rule: &Rule) -> Result<LogicalSc
     }
 }
 
-fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), EngineError> {
+pub(crate) fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), EngineError> {
     if matches!(from, LogicalType::Date32 | LogicalType::Timestamp { .. })
         && matches!(to, LogicalType::Utf8)
     {
@@ -706,13 +802,16 @@ fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), Engine
     Ok(())
 }
 
-fn reject_paused_cast_in_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
+pub(crate) fn reject_paused_cast_in_expr<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
+) -> Result<(), EngineError> {
     match expr {
         Expr::Cast {
             expression,
             data_type,
         } => {
-            let from = crate::typing::type_check_expr(expression, schema)?;
+            let from = crate::typing::type_check_expr_in(expression, schema)?;
             reject_paused_cast(&from, data_type)?;
             reject_paused_cast_in_expr(expression, schema)
         }
@@ -733,7 +832,7 @@ fn reject_paused_cast_in_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(),
     }
 }
 
-fn validate_literal_for_column(
+pub(crate) fn validate_literal_for_column(
     column_type: &LogicalType,
     value: &ScalarValue,
 ) -> Result<(), EngineError> {
@@ -852,7 +951,10 @@ fn validate_plan_exprs_iterative(plan: &LogicalPlan) -> Result<(), EngineError> 
     Ok(())
 }
 
-fn validate_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
+pub(crate) fn validate_expr<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
+) -> Result<(), EngineError> {
     expr.validate_shape()
         .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
     let mut nodes = 0_usize;
@@ -868,7 +970,7 @@ fn validate_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError>
         }
         match current {
             Expr::Column(id) => {
-                if schema.field(*id).is_none() {
+                if schema.lookup_field(*id).is_none() {
                     return Err(EngineError::UnknownColumn(*id));
                 }
             }
@@ -890,11 +992,14 @@ fn validate_expr(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError>
     Ok(())
 }
 
-fn infer_nullability(expr: &Expr, schema: &LogicalSchema) -> Result<bool, EngineError> {
+pub(crate) fn infer_nullability<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
+) -> Result<bool, EngineError> {
     Ok(match expr {
         Expr::Column(id) => {
             schema
-                .field(*id)
+                .lookup_field(*id)
                 .ok_or(EngineError::UnknownColumn(*id))?
                 .nullable
         }
