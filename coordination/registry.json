@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 215,
+  "revision": 216,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:01:49Z",
+  "updated_at": "2026-08-28T08:15:52Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2635,9 +2635,9 @@
     {
       "id": "O0-B2-A1-A2-FINAL-MERGE",
       "title": "Ready and merge final consolidated A1 + A2 production candidate (PR #167, issue #169)",
-      "status": "queued",
+      "status": "running",
       "mode": "maintenance",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1a2finalmerge-w1",
       "target_issue": 169,
       "target_pr": 167,
       "target_branch": "agent/o0-b2-a1-a2-final-integration",
@@ -2663,14 +2663,29 @@
         "O0-B2-A1-A2-FINAL-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-28T08:01:49Z",
+      "lease_expires_at": "2026-08-28T09:00:52Z",
+      "started_at": "2026-08-28T08:15:52Z",
+      "updated_at": "2026-08-28T08:15:52Z",
       "queued_by": "maintainer:direct-chat (issue #169 dispatch 2026-08-28)",
       "queue_reason": "Issue #169 O0-B2-A1-A2-FINAL-MERGE: final state transition for accepted consolidated A1+A2 (PR #167 @ 37b5a5ad, APPROVE_FINAL_A1_A2_PRODUCTION, exact-head CI run 33148332668 success). Frozen order: pre-merge exact binding -> #167 Draft->Ready -> merge commit (NO squash/rebase, preserve cb3dde4/b5ae3f2/37b5a5a) -> verify parents (main 0496658 + 37b5a5ad) -> main = merge commit -> close #154/#160 unmerged as superseded -> #164 stays Draft, #91 HOLD.",
       "notes": "Lease 45 minutes. Locks on claim: merge:main, pr:167 (DO NOT take engine lock; no code writing). Pre-mutation binding: #167 Open+Draft @ exact head; base main 0496658; mergeable; 5-file scope; exact-head CI run 33148332668 success (or equivalent newer); live main 0496658; #154/#160/#164 Draft at exact heads; #91 HOLD. Any drift => FINAL_A1_A2_MERGE_BLOCKED, do not partially advance. Merge via GitHub merge commit; first parent = old main, second parent = accepted head. Post-merge: provenance comment on #167; supersede+close #154/#160 unmerged; #164 Draft/open untouched; #91 untouched; registry locks empty. No branch deletion; preserve provenance. Verdict: MERGED_FINAL_A1_A2_PRODUCTION | FINAL_A1_A2_MERGE_BLOCKED | FINAL_A1_A2_POSTMERGE_HYGIENE_BLOCKED.",
       "canonical_issue": 169
     }
   ],
-  "locks": {}
+  "locks": {
+    "merge:main": {
+      "task_id": "O0-B2-A1-A2-FINAL-MERGE",
+      "owner": "ox-alpha-o0b2a1a2finalmerge-w1",
+      "expected_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
+      "acquired_at": "2026-08-28T08:15:52Z",
+      "lease_expires_at": "2026-08-28T09:00:52Z"
+    },
+    "pr:167": {
+      "task_id": "O0-B2-A1-A2-FINAL-MERGE",
+      "owner": "ox-alpha-o0b2a1a2finalmerge-w1",
+      "expected_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
+      "acquired_at": "2026-08-28T08:15:52Z",
+      "lease_expires_at": "2026-08-28T09:00:52Z"
+    }
+  }
 }
