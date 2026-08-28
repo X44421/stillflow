@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 223,
+  "revision": 224,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2768,9 +2768,7 @@
         "qc0:single-terminal-verdict"
       ],
       "depends_on": [],
-      "conflicts_with": [
-        "X-C0-REBIND-MERGE"
-      ],
+      "conflicts_with": [],
       "lease_expires_at": "2026-08-28T10:07:53Z",
       "started_at": "2026-08-28T08:37:53Z",
       "updated_at": "2026-08-28T08:37:53Z",
@@ -2803,9 +2801,7 @@
         "xc0:single-terminal-verdict"
       ],
       "depends_on": [],
-      "conflicts_with": [
-        "Q-C0-REBIND-MERGE"
-      ],
+      "conflicts_with": [],
       "lease_expires_at": null,
       "started_at": null,
       "updated_at": "2026-08-28T08:21:17Z",
