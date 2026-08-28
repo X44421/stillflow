@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 224,
+  "revision": 225,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:38:09Z",
+  "updated_at": "2026-08-28T08:38:50Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2780,9 +2780,9 @@
     {
       "id": "X-C0-REBIND-MERGE",
       "title": "Rebind, reaccept, and merge ADR-004 on post-O0 main (issue #173)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-xc0rebind-w1",
       "target_issue": 173,
       "target_pr": 106,
       "target_branch": "agent/issue-104-x-c0-export-contract",
@@ -2802,9 +2802,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-28T08:21:17Z",
+      "lease_expires_at": "2026-08-28T10:08:50Z",
+      "started_at": "2026-08-28T08:38:50Z",
+      "updated_at": "2026-08-28T08:38:50Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #173: docs-only rebind of approved ADR-004 (accepted head 6e33a40994 on old base) onto main@81e817ad; Stage A author != Stage B reviewer; Stage C merge; supersede stale evidence after merge.",
       "notes": "Lease 90 min. Stage B verdicts: APPROVE_X_C0_REBOUND | REQUEST_CHANGES_X_C0_REBOUND. Terminal: MERGED_X_C0_ON_CURRENT_MAIN | X_C0_REBIND_BLOCKED | X_C0_REACCEPT_REJECTED | X_C0_POSTMERGE_HYGIENE_BLOCKED. No X-R1 implementation.",
@@ -2873,6 +2873,13 @@
       "expected_head": null,
       "acquired_at": "2026-08-28T08:37:53Z",
       "lease_expires_at": "2026-08-28T10:07:53Z"
+    },
+    "branch:agent/issue-104-x-c0-export-contract": {
+      "task_id": "X-C0-REBIND-MERGE",
+      "owner": "ox-alpha-xc0rebind-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-28T08:38:50Z",
+      "lease_expires_at": "2026-08-28T10:08:50Z"
     }
   }
 }
