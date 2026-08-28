@@ -3,18 +3,29 @@ use stillflow_core::{
 };
 
 use crate::error::EngineError;
+use crate::lookup::ColumnLookup;
 
 pub(crate) fn type_check_expr(
     expr: &Expr,
     schema: &LogicalSchema,
+) -> Result<LogicalType, EngineError> {
+    type_check_expr_in(expr, schema)
+}
+
+pub(crate) fn type_check_expr_in<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
 ) -> Result<LogicalType, EngineError> {
     expr.validate_shape()
         .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
     infer_type(expr, schema)
 }
 
-pub(crate) fn require_boolean(expr: &Expr, schema: &LogicalSchema) -> Result<(), EngineError> {
-    match type_check_expr(expr, schema)? {
+pub(crate) fn require_boolean_in<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
+) -> Result<(), EngineError> {
+    match type_check_expr_in(expr, schema)? {
         LogicalType::Boolean => Ok(()),
         _ => Err(EngineError::TypeError("predicate must be boolean")),
     }
@@ -88,10 +99,15 @@ pub(crate) fn reject_paused_type(data_type: &LogicalType) -> Result<(), EngineEr
     }
 }
 
-fn infer_type(expr: &Expr, schema: &LogicalSchema) -> Result<LogicalType, EngineError> {
+fn infer_type<L: ColumnLookup + ?Sized>(
+    expr: &Expr,
+    schema: &L,
+) -> Result<LogicalType, EngineError> {
     match expr {
         Expr::Column(id) => {
-            let field = schema.field(*id).ok_or(EngineError::UnknownColumn(*id))?;
+            let field = schema
+                .lookup_field(*id)
+                .ok_or(EngineError::UnknownColumn(*id))?;
             reject_paused_type(&field.data_type)?;
             Ok(field.data_type.clone())
         }
@@ -105,7 +121,7 @@ fn infer_type(expr: &Expr, schema: &LogicalSchema) -> Result<LogicalType, Engine
             operator: UnaryOperator::Not,
             expression,
         } => {
-            require_boolean(expression, schema)?;
+            require_boolean_in(expression, schema)?;
             Ok(LogicalType::Boolean)
         }
         Expr::Unary {
@@ -158,11 +174,11 @@ fn infer_type(expr: &Expr, schema: &LogicalSchema) -> Result<LogicalType, Engine
     }
 }
 
-fn infer_binary(
+fn infer_binary<L: ColumnLookup + ?Sized>(
     operator: BinaryOperator,
     left: &Expr,
     right: &Expr,
-    schema: &LogicalSchema,
+    schema: &L,
 ) -> Result<LogicalType, EngineError> {
     let left_type = infer_type(left, schema)?;
     let right_type = infer_type(right, schema)?;
@@ -232,4 +248,27 @@ fn ordered_pair(left: &LogicalType, right: &LogicalType) -> Result<(), EngineErr
             "ordered comparison requires numeric, date32, or timestamp operands",
         )),
     }
+}
+
+/// Counts every `Expr::Column` occurrence in an expression tree. Used by the
+/// deterministic index-policy estimator (each occurrence is one resolution
+/// performed by the expression passes).
+pub(crate) fn count_expr_column_refs(expr: &Expr) -> usize {
+    let mut count = 0_usize;
+    let mut pending = vec![expr];
+    while let Some(current) = pending.pop() {
+        match current {
+            Expr::Column(_) => count += 1,
+            Expr::Literal(_) => {}
+            Expr::Unary { expression, .. }
+            | Expr::IsNull { expression, .. }
+            | Expr::Cast { expression, .. } => pending.push(expression),
+            Expr::Binary { left, right, .. } => {
+                pending.push(left);
+                pending.push(right);
+            }
+            Expr::Coalesce { expressions } => pending.extend(expressions.iter()),
+        }
+    }
+    count
 }
