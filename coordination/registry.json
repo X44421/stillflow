@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 217,
+  "revision": 218,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2674,6 +2674,187 @@
       "result_head": "81e817adec9f344416b01d7d28a84c5f17e55e57",
       "ci_url": "https://github.com/X44421/stillflow/pull/167#issuecomment-5450165358",
       "completion_note": "MERGED_FINAL_A1_A2_PRODUCTION — final state transition complete. Pre-mutation binding (all passed): #167 Open+Draft @ 37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af, base main 0496658, MERGEABLE/CLEAN, changed files exactly the 5 Engine files, exact-head CI run 33148332668 success, live main 0496658, #154/#160/#164 Draft at exact heads, #91 HOLD. Transition in frozen order: Ready; merged via merge commit (no squash/rebase; cb3dde4/b5ae3f2/37b5a5a preserved) = 81e817adec9f344416b01d7d28a84c5f17e55e57, parents verified first=04966586192f8750a02790da988db71a28d82074 second=37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af; provenance comment on #167 (issuecomment-5450165358); #154 closed unmerged as superseded; #160 closed unmerged as superseded; #164 OPEN+Draft untouched; #91 HOLD untouched. Post-merge: main = 81e817adec (single movement), registry locks released, no branch deletion. Post-merge CI recorded: CI 33154762114 in_progress; Deploy-to-GitHub-Pages failure pre-existing on all main pushes (env issue, not an acceptance gate)."
+    },
+    {
+      "id": "B0-POST-O0-REBASE",
+      "title": "Refresh execution board and canonical baselines after O0 merge (issue #170)",
+      "status": "queued",
+      "mode": "maintenance",
+      "owner": null,
+      "target_issue": 170,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "expected_head": null,
+      "locks": [
+        "github:issue-ledger-state"
+      ],
+      "paths": [],
+      "acceptance_keys": [
+        "posto0:ledger-refreshed",
+        "posto0:no-stale-main-claims",
+        "posto0:topology-intact",
+        "posto0:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1-A2-FINAL-MERGE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T08:21:17Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
+      "queue_reason": "Issue #170: coordination-only refresh of registry/execution board to main@81e817ad after O0 A1/A2 merge; no code changes.",
+      "notes": "Lease 45 min. Lock github:issue-ledger-state. Update #81 CURRENT-EXECUTION-BOARD + registry facts: main=81e817ad, #167 merged, #154/#160 closed unmerged superseded, #164 Draft open, O0 CLOSED/PRODUCTION ON MAIN, stop Engine micro-opt scanning, #91 historical Draft head d0ea2a3b read-only + E4 rebind separate, #105/#106 approved evidence needing rebind, #158 stale base must not CLAIM, #150 Draft evidence, #151 open independent. Verdict: POST_O0_BASELINE_REFRESHED | POST_O0_BASELINE_REFRESH_BLOCKED.",
+      "canonical_issue": 170
+    },
+    {
+      "id": "E4-S2-REBIND-FINAL",
+      "title": "Port Verification materialization onto post-O0 Engine main (issue #171)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 171,
+      "target_pr": null,
+      "target_branch": "agent/e4-s2-final-rebind-verification",
+      "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/e4-s2-final-rebind-verification",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "e4s2rebind:verification-on-a1a2-propagation",
+        "e4s2rebind:v01-v31-matrix",
+        "e4s2rebind:o0-regression-gate",
+        "e4s2rebind:static-gates",
+        "e4s2rebind:provenance-from-91",
+        "e4s2rebind:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "B0-POST-O0-REBASE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T08:21:17Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
+      "queue_reason": "Issue #171 P0: reconstruct E4-S2 Verification materialization from historical evidence PR #91 @ d0ea2a3bce onto fresh branch from main@81e817ad; NO mechanical rebase; compose with A1/A2 IncrementalSchema/lookup; V01-V31 full matrix; O0 regression gates.",
+      "notes": "Lease 180 min. Locks branch:agent/e4-s2-final-rebind-verification + engine:stillflow-engine. HOLD lifted ONLY for the new integration branch; #91 branch stays read-only evidence. Import only necessary surfaces (verification.rs, engine.rs, preflight.rs, lower.rs, tests.rs, lib.rs, deps sha2/serde_json as disclosed). Verdict: PROMOTE_E4_S2_FINAL_REBIND_CANDIDATE | E4_S2_REBIND_SEMANTIC_REJECT | E4_S2_REBIND_O0_INTEGRATION_REJECT | E4_S2_REBIND_SCOPE_BLOCKED. Draft PR only.",
+      "canonical_issue": 171
+    },
+    {
+      "id": "Q-C0-REBIND-MERGE",
+      "title": "Rebind, reaccept, and merge ADR-003 on post-O0 main (issue #172)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 172,
+      "target_pr": 105,
+      "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
+      "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-103-q-c0-profiling-finding-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md"
+      ],
+      "acceptance_keys": [
+        "qc0:stage-a-rebind-single-file",
+        "qc0:stage-b-independent-reaccept",
+        "qc0:stage-c-merge-parents",
+        "qc0:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "B0-POST-O0-REBASE"
+      ],
+      "conflicts_with": [
+        "X-C0-REBIND-MERGE"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T08:21:17Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
+      "queue_reason": "Issue #172: docs-only rebind of approved ADR-003 (accepted head eb8408fc15 on old base) onto main@81e817ad; Stage A author != Stage B independent reviewer; Stage C normal merge with merge:main lock; supersede stale evidence after merge.",
+      "notes": "Lease 90 min. Stage B verdicts: APPROVE_Q_C0_REBOUND | REQUEST_CHANGES_Q_C0_REBOUND. Terminal: MERGED_Q_C0_ON_CURRENT_MAIN | Q_C0_REBIND_BLOCKED | Q_C0_REACCEPT_REJECTED | Q_C0_POSTMERGE_HYGIENE_BLOCKED. No Q-R1/Q-R2 implementation.",
+      "canonical_issue": 172
+    },
+    {
+      "id": "X-C0-REBIND-MERGE",
+      "title": "Rebind, reaccept, and merge ADR-004 on post-O0 main (issue #173)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 173,
+      "target_pr": 106,
+      "target_branch": "agent/issue-104-x-c0-export-contract",
+      "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-104-x-c0-export-contract"
+      ],
+      "paths": [
+        "docs/architecture/adr-004-export-and-output-artifacts.md"
+      ],
+      "acceptance_keys": [
+        "xc0:stage-a-rebind-single-file",
+        "xc0:stage-b-independent-reaccept",
+        "xc0:stage-c-merge-parents",
+        "xc0:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "B0-POST-O0-REBASE"
+      ],
+      "conflicts_with": [
+        "Q-C0-REBIND-MERGE"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T08:21:17Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
+      "queue_reason": "Issue #173: docs-only rebind of approved ADR-004 (accepted head 6e33a40994 on old base) onto main@81e817ad; Stage A author != Stage B reviewer; Stage C merge; supersede stale evidence after merge.",
+      "notes": "Lease 90 min. Stage B verdicts: APPROVE_X_C0_REBOUND | REQUEST_CHANGES_X_C0_REBOUND. Terminal: MERGED_X_C0_ON_CURRENT_MAIN | X_C0_REBIND_BLOCKED | X_C0_REACCEPT_REJECTED | X_C0_POSTMERGE_HYGIENE_BLOCKED. No X-R1 implementation.",
+      "canonical_issue": 173
+    },
+    {
+      "id": "E24-JSON-A2-PROD-REBIND",
+      "title": "Rebind direct projected NDJSON productionization to post-O0 main (issue #174)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 174,
+      "target_pr": null,
+      "target_branch": null,
+      "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
+      "expected_head": null,
+      "locks": [],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/**"
+      ],
+      "acceptance_keys": [
+        "jsona2:main-exact",
+        "jsona2:pr150-unchanged",
+        "jsona2:overlap-analysis",
+        "jsona2:polar-drift-check",
+        "jsona2:timestamp-151",
+        "jsona2:locks-free",
+        "jsona2:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "B0-POST-O0-REBASE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T08:21:17Z",
+      "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
+      "queue_reason": "Issue #174: read-only rebind authorization for #158 to CLAIM on main@81e817ad after verifying no connector/dependency drift; no implementation.",
+      "notes": "Lease 45 min. Verify: main exact; PR #150 @ e9a4fa61 Draft/unmerged; O0 merge touched only Engine; #151 TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM; Polars version unchanged old->new; connector lock free; E4 rebind Engine-only. Verdict: REBIND_JSON_A2_PROD_TO_81E817AD | JSON_A2_PROD_REBIND_REQUIRES_REVIEW | JSON_A2_PROD_REBIND_BLOCKED. No source edit/branch/#158 CLAIM/benchmark/PR#150 mutation/Polars upgrade/#151 closure.",
+      "canonical_issue": 174
     }
   ],
   "locks": {}
