@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 201,
+  "revision": 202,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T02:39:03Z",
+  "updated_at": "2026-08-28T03:23:46Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2453,9 +2453,9 @@
     {
       "id": "O0-B2-A1-A2-FACTORIAL",
       "title": "Four-cell attribution: schema lookup index x incremental schema propagation (issue #163)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-o0b2a1a2fact-w1",
       "target_issue": 163,
       "target_pr": null,
       "target_branch": "agent/o0-b2-a1-a2-factorial-attribution",
@@ -2487,14 +2487,29 @@
         "O0-B2-A1-PROD-REACCEPT-R2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-28T02:39:03Z",
+      "lease_expires_at": "2026-08-28T05:53:46Z",
+      "started_at": "2026-08-28T03:23:46Z",
+      "updated_at": "2026-08-28T03:23:46Z",
       "queued_by": "maintainer:direct-chat (issue #163 dispatch 2026-08-28)",
       "queue_reason": "Issue #163 O0-B2-A1-A2-FACTORIAL: isolated four-cell attribution legacy/A1/A2/A1A2. Fresh integration branch from exact main; import only accepted A1 (PR #154 @ 7afdd656) and A2 (PR #160 @ 6d228e0) production mechanisms; minimal overlap resolution in preflight.rs/lib.rs; no redesign, no new heuristics, no threshold retuning, no feature flags; combined invariant: A2 sole mutation layer with NO stale A1 ordinal-index window (mechanically proven); semantic equality across all four cells before performance; 8-scenario x 4-cell fresh benchmark with conditional marginals and per-scenario interaction classification; single terminal verdict.",
       "notes": "Lease 150 minutes. Required locks on claim: branch:agent/o0-b2-a1-a2-factorial-attribution, engine:stillflow-engine. Before CLAIM: unique registry row; re-fetch main/A1/A2 exact heads (0496658..., 7afdd656..., 6d228e0...); confirm #154 and #160 both Draft/unmerged; confirm #91 HOLD; no other Engine writer. Deliverable: one Draft experimental PR or equivalent isolated branch evidence handoff with four-cell provenance, combined changed-file list, overlap-resolution explanation, semantic oracle hashes/results, stale-index + boundary-oracle combined proof, raw benchmark hashes, per-scenario P50/P95, conditional marginals, interaction classifications, maintenance implications, exactly one verdict: FACTORIAL_KEEP_A1_A2 | FACTORIAL_KEEP_A1_ONLY | FACTORIAL_KEEP_A2_ONLY | FACTORIAL_REDESIGN_INTERACTION | FACTORIAL_INTEGRATION_BLOCKED | FACTORIAL_SEMANTIC_REJECT. No merge/Ready; stop after attribution.",
       "canonical_issue": 163
     }
   ],
-  "locks": {}
+  "locks": {
+    "branch:agent/o0-b2-a1-a2-factorial-attribution": {
+      "task_id": "O0-B2-A1-A2-FACTORIAL",
+      "owner": "ox-alpha-o0b2a1a2fact-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-28T03:23:46Z",
+      "lease_expires_at": "2026-08-28T05:53:46Z"
+    },
+    "engine:stillflow-engine": {
+      "task_id": "O0-B2-A1-A2-FACTORIAL",
+      "owner": "ox-alpha-o0b2a1a2fact-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-28T03:23:46Z",
+      "lease_expires_at": "2026-08-28T05:53:46Z"
+    }
+  }
 }
