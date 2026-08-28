@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 214,
+  "revision": 215,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2631,6 +2631,45 @@
       "result_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
       "ci_url": "https://github.com/X44421/stillflow/pull/167#issuecomment-5450001129",
       "completion_note": "APPROVE_FINAL_A1_A2_PRODUCTION — independent final combined acceptance; review comment posted (issuecomment-5450001129). Binding @ claim + @ verdict: #167 Open+Draft @ 37b5a5ad..., main 0496658..., #154/#160/#164 Draft at exact heads, #91 HOLD. A. scope exactly 5 Engine files; hardening-boundary audit: b5ae3f2 = incremental.rs 16+/8- with ONLY the four refresh removals + comments; tests commit 216 insertions/0 deletions; source-level provenance: use_index+estimator byte-identical to #154, field_text/text_bytes_of/into_schema byte-identical to #160, budget mutators differ only by A1 lookup redirection + mandated refresh. B. three-class classification exhaustive (no wildcard). C. 19/19 independent adversarial probes (C1-C12: entries==build_ordinals after every accepted transition incl. rename first/middle/last with immediate lookup, drop first/middle/last full ordinal shift, multiple drops, derive old+new lookup, mandated mixed chain, failed preserve/shift mutations, swap routing, disjoint ids, sparse never builds entries, projection-after-drop == legacy; legacy error parity on every rejection) - scratch removed, trees byte-identical. D. use_index boundaries R=31/32, F/8+-1, F=32/64/512/2048/4096 all verified; sparse linear / dense indexed; no second policy. E. A2 budget surfaces fresh-reproduced with exact legacy parity (rename text crossing, derive 4096->4097 & 4095->4096->4097, derive text/tz, cast tz, drop accounting incl. metadata+tz, exact-MAX, just-below-budget, earliest position). F. fresh 68-case oracle: byte-identical to fresh legacy run and all four references (sha prefix 3d27b080). G. fmt PASS; clippy 0 warnings; engine 118/118; workspace 23 suites 352 passed 0 failed; diff-check PASS. H. fresh 4-window Latin-square matrix (320 samples/cell; A/A floor worst 3.0%): mixed_wide FINAL 9.07ms vs A2 21.66ms = -58.1% (all windows -57.8..-58.2; gate met), lookup_dominant -69.9% vs A2 / -62.7% vs A1, mutation_dominant -68.4%, sparse = A1 (-0.3%), small controls noise, near_budget -58.0%, derive_heavy -70.6%; binary hashes L ad0ad703/A1 dbcf2284/A2 680461e3/FINAL 196707f2; raw samples agg sha256 a0ad5b3403.... I. maintainability gate PASS (centralized ownership, compiler-visible classification, structural semantics, production safety independent of verify_entries, oracles runnable, rollback = 5-file revert). Remaining risks: classification review on future reordering variants; preflight-scope claims. Authorizes ONLY the explicit Ready/Merge task; nothing executed here."
+    },
+    {
+      "id": "O0-B2-A1-A2-FINAL-MERGE",
+      "title": "Ready and merge final consolidated A1 + A2 production candidate (PR #167, issue #169)",
+      "status": "queued",
+      "mode": "maintenance",
+      "owner": null,
+      "target_issue": 169,
+      "target_pr": 167,
+      "target_branch": "agent/o0-b2-a1-a2-final-integration",
+      "expected_base": "04966586192f8750a02790da988db71a28d82074",
+      "expected_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
+      "locks": [
+        "merge:main",
+        "pr:167"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "finalmerge:pre-mutation-binding",
+        "finalmerge:ready-transition",
+        "finalmerge:merge-commit-parents",
+        "finalmerge:main-moved-once",
+        "finalmerge:supersede-154-160",
+        "finalmerge:164-and-91-untouched",
+        "finalmerge:single-terminal-verdict"
+      ],
+      "depends_on": [
+        "O0-B2-A1-A2-FINAL-ACCEPT"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-28T08:01:49Z",
+      "queued_by": "maintainer:direct-chat (issue #169 dispatch 2026-08-28)",
+      "queue_reason": "Issue #169 O0-B2-A1-A2-FINAL-MERGE: final state transition for accepted consolidated A1+A2 (PR #167 @ 37b5a5ad, APPROVE_FINAL_A1_A2_PRODUCTION, exact-head CI run 33148332668 success). Frozen order: pre-merge exact binding -> #167 Draft->Ready -> merge commit (NO squash/rebase, preserve cb3dde4/b5ae3f2/37b5a5a) -> verify parents (main 0496658 + 37b5a5ad) -> main = merge commit -> close #154/#160 unmerged as superseded -> #164 stays Draft, #91 HOLD.",
+      "notes": "Lease 45 minutes. Locks on claim: merge:main, pr:167 (DO NOT take engine lock; no code writing). Pre-mutation binding: #167 Open+Draft @ exact head; base main 0496658; mergeable; 5-file scope; exact-head CI run 33148332668 success (or equivalent newer); live main 0496658; #154/#160/#164 Draft at exact heads; #91 HOLD. Any drift => FINAL_A1_A2_MERGE_BLOCKED, do not partially advance. Merge via GitHub merge commit; first parent = old main, second parent = accepted head. Post-merge: provenance comment on #167; supersede+close #154/#160 unmerged; #164 Draft/open untouched; #91 untouched; registry locks empty. No branch deletion; preserve provenance. Verdict: MERGED_FINAL_A1_A2_PRODUCTION | FINAL_A1_A2_MERGE_BLOCKED | FINAL_A1_A2_POSTMERGE_HYGIENE_BLOCKED.",
+      "canonical_issue": 169
     }
   ],
   "locks": {}
