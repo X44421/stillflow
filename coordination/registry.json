@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 221,
+  "revision": 222,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-28T08:37:41Z",
+  "updated_at": "2026-08-28T08:37:53Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2747,9 +2747,9 @@
     {
       "id": "Q-C0-REBIND-MERGE",
       "title": "Rebind, reaccept, and merge ADR-003 on post-O0 main (issue #172)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-qc0rebind-w1",
       "target_issue": 172,
       "target_pr": 105,
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
@@ -2771,9 +2771,9 @@
       "conflicts_with": [
         "X-C0-REBIND-MERGE"
       ],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-28T08:21:17Z",
+      "lease_expires_at": "2026-08-28T10:07:53Z",
+      "started_at": "2026-08-28T08:37:53Z",
+      "updated_at": "2026-08-28T08:37:53Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #172: docs-only rebind of approved ADR-003 (accepted head eb8408fc15 on old base) onto main@81e817ad; Stage A author != Stage B independent reviewer; Stage C normal merge with merge:main lock; supersede stale evidence after merge.",
       "notes": "Lease 90 min. Stage B verdicts: APPROVE_Q_C0_REBOUND | REQUEST_CHANGES_Q_C0_REBOUND. Terminal: MERGED_Q_C0_ON_CURRENT_MAIN | Q_C0_REBIND_BLOCKED | Q_C0_REACCEPT_REJECTED | Q_C0_POSTMERGE_HYGIENE_BLOCKED. No Q-R1/Q-R2 implementation.",
@@ -2870,6 +2870,13 @@
       "expected_head": null,
       "acquired_at": "2026-08-28T08:37:41Z",
       "lease_expires_at": "2026-08-28T11:37:41Z"
+    },
+    "branch:agent/issue-103-q-c0-profiling-finding-contract": {
+      "task_id": "Q-C0-REBIND-MERGE",
+      "owner": "ox-alpha-qc0rebind-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-28T08:37:53Z",
+      "lease_expires_at": "2026-08-28T10:07:53Z"
     }
   }
 }
