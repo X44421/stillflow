@@ -2934,8 +2934,39 @@
       "result_head": "f135abd5b9e19cec9e810726129b5fdf254848b0",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33234395607",
       "completion_note": "D1+D2 fixed. D1: canonical_batch_bytes rebuilds every column through its typed builder before encoding - canonical bytes depend only on logical schema/values, never validity-buffer layout; A/B golden vectors (builder vs parquet-decoded vs sliced/offset) byte-identical; rejected payloads with nulls now survive the section integrity gate. D2: VerificationBundleDraft::with_rejected_source_schema binds the rejected section to the frozen scan-output schema; accepted-derived fallback deprecated (kept for unmigrated callers; the E4-S2 engine wires it in #171 REBIND-R2); Drop/Rename/Cast evolution + negative control covered at storage level. Scope stillflow-storage only; engine untouched (PR #175 ignored repros remain external evidence for REBIND-R2); #91 untouched; not Ready, not merged. Local gates: fmt/clippy -D warnings green; 64 storage tests pass; 4 pre-existing Windows-only lock failures verified on clean main. Successor: E4-S1-CANONICAL-FIDELITY-ACCEPT then #175/#176 merge then #171 REBIND-R2."
+    },
+    {
+      "id": "E4-S1-CANONICAL-FIDELITY-ACCEPT",
+      "title": "Independent acceptance of the E4-S1 canonical fidelity fix (issue #176 / PR #177)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 176,
+      "target_pr": 177,
+      "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
+      "expected_base": "25c110d8fbffa37515a539c652de11d09c512a39",
+      "expected_head": "f135abd5b9e19cec9e810726129b5fdf254848b0",
+      "locks": [],
+      "acceptance_keys": [
+        "e4s1accept:d1-golden-vectors-reproduced",
+        "e4s1accept:d1-roundtrip-byte-identical",
+        "e4s1accept:d2-binding-verified",
+        "e4s1accept:d2-negative-control-reproduced",
+        "e4s1accept:scope-stillflow-storage-only",
+        "e4s1accept:ci-green-exact-head"
+      ],
+      "depends_on": [
+        "E4-S1-CANONICAL-FIDELITY-FIX"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-29T04:45:51Z",
+      "queued_by": "maintainer:frozen-topology-2026-08-29",
+      "queue_reason": "Independent acceptance gate before any merge of PR #177; APPROVE FOR MERGE unlocks the E4-S1 storage fix, after which #171 REBIND-R2 re-runs the affected evidence and the full final gates.",
+      "notes": "Read-only exact-head review of PR #177. Re-fetch main/head/diff/CI (run 33234395607). D1: reproduce the A/B golden vectors (builder vs parquet-decoded vs sliced/offset byte-identical) and the null-payload publish->integrity->read-back test. D2: verify the with_rejected_source_schema binding, the Drop/Rename/Cast evolution matrix, and the negative control (deprecated fallback refuses divergent publication with SchemaDrift). Verify scope: stillflow-storage only, no engine/#91 mutation, deprecated fallback documented. Publish APPROVE FOR MERGE or REQUEST CHANGES bound to the full head. Acceptor does not merge."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T04:45:14Z"
+  "updated_at": "2026-08-29T04:45:51Z"
 }
