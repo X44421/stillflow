@@ -1,10 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 235,
+  "revision": 236,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-29T02:20:04Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2896,7 +2895,43 @@
       "result_head": "25c110d8fbffa37515a539c652de11d09c512a39",
       "ci_url": null,
       "completion_note": "REBIND_JSON_A2_PROD_TO_25C110D8 — read-only rebind re-verification complete 2026-08-29: main exact 25c110d8fbffa37515a539c652de11d09c512a39 (merge of PR #106; parents a6019e76484bd6b61d5407c72a7230c7a2ca9b62 = merge of PR #105, and b721f0b21b2751e87b49d5a76a12e47a16a1b686); drift 81e817ad..25c110d8 verified docs-only = exactly two new ADR files (docs/architecture/adr-003-profiling-quality-and-findings.md +722, docs/architecture/adr-004-export-and-output-artifacts.md +505), zero Rust/connector source and Cargo.lock byte-identical for polars (0.46.0 both sides); PR #150 re-verified Open+Draft at e9a4fa61dfa8ad73eee73c047a7e1419fb1ce2ac; #151 OPEN with TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM lineage and independent; connector-local-tabular locks free; E4 rebind (#171) engine-only. Authorization refreshed on #158: productionization task may CLAIM fresh from main@25c110d8 with the original contract unchanged. No source edits, no #158 CLAIM, no benchmark, no PR #150 mutation, no Polars upgrade, no #151 closure."
+    },
+    {
+      "id": "E4-S1-CANONICAL-FIDELITY-FIX",
+      "title": "Fix E4-S1 canonical digest instability (D1) and rejected-section schema binding (D2) (issue #176)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 176,
+      "target_pr": null,
+      "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
+      "expected_base": "25c110d8fbffa37515a539c652de11d09c512a39",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-176-e4s1-canonical-fidelity-fix",
+        "storage:stillflow-storage"
+      ],
+      "paths": [
+        "backend/crates/stillflow-storage/**"
+      ],
+      "acceptance_keys": [
+        "e4s1fix:d1-logical-only-canonical-bytes",
+        "e4s1fix:d1-null-ab-golden-vectors",
+        "e4s1fix:d1-roundtrip-byte-identical",
+        "e4s1fix:d2-rejected-schema-bound-to-scan-output",
+        "e4s1fix:d2-schema-evolution-coverage",
+        "e4s1fix:engine-repro-tests-unignored-green"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "queued_by": "maintainer:dispatch-snapshot-2026-08-29 (E4-S1-STORAGE-CANONICAL-FIDELITY-FIX)",
+      "queue_reason": "P0 blocker discovered by E4-S2-REBIND-FINAL (#171, SCOPE_BLOCKED): D1 canonical_batch_bytes digest instability for payloads containing nulls and D2 rejected-section schema derived from the materialized schema instead of the frozen scan-output schema. Both block V21 / bundle round-trip correctness and the E4-S2 final acceptance.",
+      "notes": "Scope strictly stillflow-storage. D1: canonical bytes depend only on logical Arrow values/schema; A/B golden vectors over differing null-buffer layouts; writer->reader->recompute byte-identical; null/non-null/slice/offset/rebatch coverage. D2: rejected section explicitly bound to the frozen scan-output schema carried through the draft/begin surface; Drop/Rename/Cast/Derive evolution coverage; original ColumnId/value fidelity. Engine repro tests to un-ignore: tests::verification_evidence::{d1_minimal_repro_null_rejected_payload_fails_section_digest, v21_rejected_rows_preserve_scan_schema_and_original_values, o0_drop_column_before_dedup_keeps_the_lookup_exact} on agent/e4-s2-final-rebind-verification@f9529ce. No #91 mutation; no engine/connector/frontend/API change; Draft PR + independent acceptance; then #171 REBIND-R2.",
+      "updated_at": "2026-08-29T02:22:34Z"
     }
   ],
-  "locks": {}
+  "locks": {},
+  "updated_at": "2026-08-29T02:22:34Z"
 }
