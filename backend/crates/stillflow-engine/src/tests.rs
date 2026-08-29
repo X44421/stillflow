@@ -7049,13 +7049,12 @@ mod verification_evidence {
 
     // -- V21: schema, ColumnId and original value fidelity ----------------
 
-    /// BLOCKED by E4-S1 defect D1 (canonical_batch_bytes depends on the
-    /// physical validity-buffer layout): a rejected payload containing null
-    /// fails the section digest on read-back. Ignored, not deleted: this is
-    /// the V21 dedicated evidence and must pass after
-    /// E4-S1-STORAGE-CANONICAL-FIDELITY-FIX lands.
+    /// Storage fix D1 (wired by E4-S2-REBIND-R2; previously blocking:
+    /// canonical_batch_bytes depended on the physical validity-buffer layout): a rejected payload containing null
+    /// fails the section digest on read-back. This is
+    /// the V21 dedicated evidence.
     #[tokio::test(flavor = "current_thread")]
-    #[ignore = "E4-S1 D1: canonical digest instability for payloads with nulls (see PR notes)"]
+
     async fn v21_rejected_rows_preserve_scan_schema_and_original_values() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Float64);
@@ -7075,9 +7074,15 @@ mod verification_evidence {
             schema.clone(),
             vec![envelope],
             vec![vec![Rule::Validate {
-                predicate: gt(value, 0),
+                predicate: Expr::Binary {
+                    left: Box::new(Expr::Column(value)),
+                    operator: BinaryOperator::Equal,
+                    right: Box::new(Expr::Literal(stillflow_core::ScalarValue::Float64(
+                        stillflow_core::FiniteF64::new(1.5).expect("finite"),
+                    ))),
+                },
                 severity: ValidationSeverity::Error,
-                message: "positive only".to_owned(),
+                message: "exactly one point five".to_owned(),
             }]],
             0x2100,
         )
@@ -7425,12 +7430,12 @@ mod verification_evidence {
         assert!(matches!(e4_error, EngineError::TypeError(_)));
     }
 
-    /// BLOCKED by E4-S1 defect D2 (the rejected section schema is derived
+    /// Storage fix D2 (wired by E4-S2-REBIND-R2; previously blocking: the rejected section schema was derived
     /// from the accepted/materialized schema instead of the frozen
     /// scan-output schema): any schema-mutating rule before a terminal
-    /// rejection fails publication with Storage SchemaDrift.
+    /// rejection failed publication with Storage SchemaDrift until the storage fix landed (now wired via with_rejected_source_schema).
     #[tokio::test(flavor = "current_thread")]
-    #[ignore = "E4-S1 D2: rejected section schema derives from materialized schema (see PR notes)"]
+
     async fn o0_drop_column_before_dedup_keeps_the_lookup_exact() {
         let _guard = exclusive_test_lock().lock().await;
         // Three columns; the middle one is dropped (an ordinal-shifting A2
@@ -7572,7 +7577,7 @@ mod verification_evidence {
     /// from the canonical bytes of the written payload). Regression anchor
     /// for E4-S1-STORAGE-CANONICAL-FIDELITY-FIX.
     #[tokio::test(flavor = "current_thread")]
-    #[ignore = "E4-S1 D1: canonical digest instability for payloads with nulls (see PR notes)"]
+
     async fn d1_minimal_repro_null_rejected_payload_fails_section_digest() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Int64);

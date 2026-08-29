@@ -2926,7 +2926,12 @@ impl ExecutionEngine {
             request.identities.rejected_rows_artifact_id,
             request.identities.deduplication_report_artifact_id,
         )
-        .map_err(map_verification_storage_error)?;
+        .map_err(map_verification_storage_error)?
+        // Issue #176 (D2), wired by E4-S2-REBIND-R2: the rejected artifact is
+        // bound to the frozen logical Scan-output schema — NOT to the
+        // materialized/post-rule schema — so terminal rejections keep their
+        // original row schema and values across Drop/Rename/Cast/Derive.
+        .with_rejected_source_schema(prepared.scan_output.clone());
 
         // Step 4: exactly one storage publisher permit + staging context.
         let mut writer = request
