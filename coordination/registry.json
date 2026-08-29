@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 252,
+  "revision": 253,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3171,9 +3171,9 @@
     {
       "id": "E4-S2-FINAL-MERGE",
       "title": "Merge the accepted E4-S2 rebind into main (issue #171 / PR #175)",
-      "status": "queued",
+      "status": "running",
       "mode": "maintenance",
-      "owner": null,
+      "owner": "ox-alpha-e4s2merge-w1",
       "target_issue": 171,
       "target_pr": 175,
       "target_branch": "agent/e4-s2-final-rebind-verification",
@@ -3192,14 +3192,22 @@
         "E4-S2-FINAL-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-29T09:51:09Z",
+      "lease_expires_at": "2026-08-29T10:51:19Z",
+      "started_at": "2026-08-29T09:51:19Z",
+      "updated_at": "2026-08-29T09:51:19Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "Final acceptance verdict APPROVE_E4_S2_FINAL_ACCEPTANCE authorizes the E4-S2 merge task: merge PR #175 into main with an exact-head sha guard and a normal merge commit, record the resulting main SHA, then stop for E4-G1 closure.",
       "notes": "Pre-merge gate (all must hold, else STOP with E4_S2_FINAL_MERGE_REBIND_REQUIRED): live main == 31e5e397145afcc23957456f16bc72514b4a8c93; PR #175 head == 9119cf216cfeb218f8afe91d21440a2d066fef21; final acceptance comment 5461488979 bound to that head; CI 33243997359 success on that head; PR still Draft; mergeable CLEAN; #91 head still d0ea2a3bce548a6cdc311dea4387e29e35e440ab. Mark Ready only inside this task; merge with the sha guard and merge_method=merge (never squash/rebase). Record the merge SHA, new main SHA, and parents. No source edits, no force-push, no PR-body rewrite, no #91 mutation."
     }
   ],
-  "locks": {},
-  "updated_at": "2026-08-29T09:51:09Z"
+  "locks": {
+    "merge:main": {
+      "task_id": "E4-S2-FINAL-MERGE",
+      "owner": "ox-alpha-e4s2merge-w1",
+      "expected_head": "9119cf216cfeb218f8afe91d21440a2d066fef21",
+      "acquired_at": "2026-08-29T09:51:19Z",
+      "lease_expires_at": "2026-08-29T10:51:19Z"
+    }
+  },
+  "updated_at": "2026-08-29T09:51:19Z"
 }
