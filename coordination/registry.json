@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 249,
+  "revision": 250,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3090,7 +3090,7 @@
     {
       "id": "E4-S2-REBIND-R2",
       "title": "Rebind E4-S2 engine reconstruction onto post-storage-fix main and run full V01-V31 final gates (issue #171 / PR #175)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-e4s2rebindr2-w1",
       "target_issue": 171,
@@ -3121,29 +3121,18 @@
         "E4-S1-CANONICAL-FIDELITY-MERGE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-29T10:56:18Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T06:56:18Z",
-      "updated_at": "2026-08-29T06:56:18Z",
+      "updated_at": "2026-08-29T08:52:02Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29 (R2 dispatch)",
       "queue_reason": "Storage fix merged (main 31e5e39): rebase the completed E4-S2 engine reconstruction onto new main, wire with_rejected_source_schema(prepared.scan_output) as the single production seam, un-ignore the three blocked repros, and re-run the full V01-V31 final gates on the new base.",
-      "notes": "Rebase authorized this round (record old head f9529ce, range-diff after). Engine reconstruction semantics preserved; do not restart from #91; do not copy storage implementation (already in main). D2 wiring: VerificationBundleDraft must receive prepared.scan_output (the frozen logical Scan-output schema), never the materialized schema; bundles without a rejected artifact unaffected; storage fail-closed must not be bypassed. Un-ignore the three blocked repro tests as-is/minimally adapted; no test deletion or assertion weakening. Non-mechanical conflicts in verification.rs/preflight.rs/lower.rs from main Engine behavior = STOP and report. Gates: fmt --all --check, clippy --workspace --all-targets --all-features -D warnings, cargo test -p stillflow-engine -p stillflow-storage --no-fail-fast, cargo test --workspace --all-features --no-fail-fast, git diff --check, exact-head CI; Windows platform failures disclosed A/B on clean main/head, never patched around. Terminal verdicts: READY_FOR_E4_S2_FINAL_ACCEPTANCE | E4_S2_REBIND_R2_SEMANTIC_REJECT | E4_S2_REBIND_R2_SCOPE_BLOCKED. Not Ready, not merged; E4-S2-FINAL-ACCEPT dispatches next."
+      "notes": "Rebase authorized this round (record old head f9529ce, range-diff after). Engine reconstruction semantics preserved; do not restart from #91; do not copy storage implementation (already in main). D2 wiring: VerificationBundleDraft must receive prepared.scan_output (the frozen logical Scan-output schema), never the materialized schema; bundles without a rejected artifact unaffected; storage fail-closed must not be bypassed. Un-ignore the three blocked repro tests as-is/minimally adapted; no test deletion or assertion weakening. Non-mechanical conflicts in verification.rs/preflight.rs/lower.rs from main Engine behavior = STOP and report. Gates: fmt --all --check, clippy --workspace --all-targets --all-features -D warnings, cargo test -p stillflow-engine -p stillflow-storage --no-fail-fast, cargo test --workspace --all-features --no-fail-fast, git diff --check, exact-head CI; Windows platform failures disclosed A/B on clean main/head, never patched around. Terminal verdicts: READY_FOR_E4_S2_FINAL_ACCEPTANCE | E4_S2_REBIND_R2_SEMANTIC_REJECT | E4_S2_REBIND_R2_SCOPE_BLOCKED. Not Ready, not merged; E4-S2-FINAL-ACCEPT dispatches next.",
+      "completed_at": "2026-08-29T08:52:02Z",
+      "result_head": "9119cf216cfeb218f8afe91d21440a2d066fef21",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33243997359",
+      "completion_note": "READY_FOR_E4_S2_FINAL_ACCEPTANCE - rebase onto main@31e5e397145afcc23957456f16bc72514b4a8c93 complete: range-diff 2=2 identical patches (91c08a0->34c50cf port, f9529ce->de172b5 evidence), zero semantic drift, no storage source copied, #91 untouched, non-mechanical conflicts none. D2 wiring: single production seam in materialize_verification_inner binds the draft with with_rejected_source_schema(prepared.scan_output.clone()) - the frozen logical Scan-output schema, never materialized; bundles without rejected artifacts unaffected; storage fail-closed not bypassed; storage API untouched. Three ignored repros un-ignored and green: D1 null-payload digest repro, V21 deep value fidelity (corrected the V21 predicate to float equality - NaN compares greater-than in Polars so the old gt(0) accepted the NaN row; assertions not weakened), drop-column-then-reject composition. Full V01-V31 suite green on new base: engine 159 pass 0 fail 0 ignored; O0 A1/A2 composition, E2 rejection parity, preview unchanged. Gates: fmt --all --check, clippy --workspace --all-targets --all-features -D warnings (only pre-existing connector-local-tabular cfg(unix) unused-var, A/B on clean main), git diff --check; workspace --all-features run: engine 159/0, storage 68 pass + 4 pre-existing Windows lock failures (A/B clean main), workbook 1 pre-existing Windows path failure (A/B), object-store real_s3 environmental (needs S3 credentials, untouched crate). Exact-head CI 33243997359 success 7/7. diff 31e5e39..HEAD contains no PR #177 storage source. Scope: stillflow-engine + Cargo.lock only. Not Ready, not merged; successor E4-S2-FINAL-ACCEPT."
     }
   ],
-  "locks": {
-    "branch:agent/e4-s2-final-rebind-verification": {
-      "task_id": "E4-S2-REBIND-R2",
-      "owner": "ox-alpha-e4s2rebindr2-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-29T06:56:18Z",
-      "lease_expires_at": "2026-08-29T10:56:18Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "E4-S2-REBIND-R2",
-      "owner": "ox-alpha-e4s2rebindr2-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-29T06:56:18Z",
-      "lease_expires_at": "2026-08-29T10:56:18Z"
-    }
-  },
-  "updated_at": "2026-08-29T06:56:18Z"
+  "locks": {},
+  "updated_at": "2026-08-29T08:52:02Z"
 }
