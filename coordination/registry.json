@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 240,
+  "revision": 241,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2969,8 +2969,48 @@
       "result_head": "f135abd5b9e19cec9e810726129b5fdf254848b0",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33234395607",
       "completion_note": "REQUEST_CHANGES_E4_S1_CANONICAL_FIDELITY - exact-head read-only review complete (base main@25c110d8, head f135abd5, CI 33234395607 success on that head). D1 builder-rebuild normalization and D2 binding mechanism verified directionally correct (golden A/B vectors and Drop/Rename/Cast publish->read genuinely pass). Seven findings mechanically reproduced at the exact head and itemized in PR #177 review comment: F1 debug channels remaining in production code (bundle.rs:1070, artifact.rs:503); F2 unused arrow-data dependency; F3 accepted-derived rejected-schema fallback must fail closed per issue #176 (engine wiring stays in #171 REBIND-R2); F4 Derive variant missing from the evolution matrix; F5 rebatch-boundary and validation/dedup section layout goldens missing; F6 unsupported-type stance needs explicit fail-closed documentation; F7 Timestamp-Second timezone dropped by the rebuild plus missing tz-preservation mechanical test. Fix round bounded to PR #177, stillflow-storage only; new head requires re-acceptance before any merge. No source edits, no push, no Ready, no merge, no #91 mutation by this review."
+    },
+    {
+      "id": "E4-S1-CANONICAL-FIDELITY-FIX-R1",
+      "title": "Fix round R1: close F1-F7 from the canonical fidelity acceptance (issue #176 / PR #177)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 176,
+      "target_pr": 177,
+      "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
+      "expected_base": "25c110d8fbffa37515a539c652de11d09c512a39",
+      "starting_head": "f135abd5b9e19cec9e810726129b5fdf254848b0",
+      "locks": [
+        "branch:agent/issue-176-e4s1-canonical-fidelity-fix",
+        "storage:stillflow-storage"
+      ],
+      "paths": [
+        "backend/crates/stillflow-storage/**"
+      ],
+      "acceptance_keys": [
+        "r1:f1-debug-grep-zero",
+        "r1:f2-arrow-data-removed",
+        "r1:f3-begin-fail-closed",
+        "r1:f4-derive-variant",
+        "r1:f5-section-and-rebatch-coverage",
+        "r1:f6-type-surface-policy",
+        "r1:f7-timezone-preservation",
+        "r1:fmt-clippy-test-green",
+        "r1:ci-green-exact-head"
+      ],
+      "depends_on": [
+        "E4-S1-CANONICAL-FIDELITY-ACCEPT"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-29T05:20:31Z",
+      "queued_by": "maintainer:frozen-topology-2026-08-29 (R1 dispatch)",
+      "queue_reason": "Close the seven REQUEST_CHANGES findings on PR #177: F1 debug residue, F2 unused arrow-data dependency, F3 fail-closed rejected binding, F4 Derive variant, F5 section/rebatch layout goldens, F6 type-surface policy documentation, F7 timezone preservation across all four units.",
+      "notes": "Writer identity must be fresh (not ox-alpha-e4s1caccept-w1). Same branch agent/issue-176-e4s1-canonical-fidelity-fix, starting head f135abd5; PR #177 stays Draft. Scope stillflow-storage only; engine/#175/#91/connector/frontend untouched; no Ready/merge. Terminal verdicts: READY_FOR_CANONICAL_FIDELITY_REACCEPTANCE or CANONICAL_FIDELITY_R1_SCOPE_BLOCKED. Required regressions: fmt --all --check, clippy -p stillflow-storage -D warnings, cargo test -p stillflow-storage, git diff --check, exact-head CI; Windows base failures disclosed A/B, never patched around."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T05:07:20Z"
+  "updated_at": "2026-08-29T05:20:31Z"
 }
