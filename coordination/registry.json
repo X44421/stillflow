@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 243,
+  "revision": 244,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3017,9 +3017,9 @@
     {
       "id": "E4-S1-CANONICAL-FIDELITY-ACCEPT-R2",
       "title": "Re-acceptance of the R1 canonical fidelity fix (issue #176 / PR #177)",
-      "status": "queued",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-e4s1caccept-r2-w1",
       "target_issue": 176,
       "target_pr": 177,
       "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
@@ -3041,14 +3041,14 @@
         "E4-S1-CANONICAL-FIDELITY-FIX-R1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-29T06:01:20Z",
+      "lease_expires_at": "2026-08-29T08:16:14Z",
+      "started_at": "2026-08-29T06:16:14Z",
+      "updated_at": "2026-08-29T06:16:14Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "Fresh exact-head re-acceptance of the R1 fix round on PR #177; APPROVE FOR MERGE unlocks the E4-S1 storage fix merge, after which #171 REBIND-R2 re-runs the affected evidence and the full final gates.",
       "notes": "Read-only exact-head review of PR #177 at f91dc8495be89e68aed7ecb72201164b1d8b2e96 (CI run 33237305567). Verify against the seven REQUEST_CHANGES findings from comment 5460483956: F1 zero debug grep; F2 no arrow-data in storage manifest/lock delta; F3 begin-stage fail-closed for unbound rejected artifacts; F4 Derive in the evolution matrix with publish->integrity->read; F5 section + rejected layout goldens and rebatch-boundary evidence; F6 documented type-surface policy with fail-closed mechanical test; F7 timezone preservation across all four units. Verify scope stillflow-storage only, no engine/#91 mutation. Publish APPROVE_E4_S1_CANONICAL_FIDELITY_FOR_MERGE or REQUEST_CHANGES_E4_S1_CANONICAL_FIDELITY bound to the full head. Acceptor does not merge."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T06:01:20Z"
+  "updated_at": "2026-08-29T06:16:14Z"
 }
