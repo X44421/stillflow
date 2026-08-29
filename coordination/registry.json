@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 253,
+  "revision": 254,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3171,7 +3171,7 @@
     {
       "id": "E4-S2-FINAL-MERGE",
       "title": "Merge the accepted E4-S2 rebind into main (issue #171 / PR #175)",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-e4s2merge-w1",
       "target_issue": 171,
@@ -3192,22 +3192,18 @@
         "E4-S2-FINAL-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-29T10:51:19Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T09:51:19Z",
-      "updated_at": "2026-08-29T09:51:19Z",
+      "updated_at": "2026-08-29T09:53:44Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "Final acceptance verdict APPROVE_E4_S2_FINAL_ACCEPTANCE authorizes the E4-S2 merge task: merge PR #175 into main with an exact-head sha guard and a normal merge commit, record the resulting main SHA, then stop for E4-G1 closure.",
-      "notes": "Pre-merge gate (all must hold, else STOP with E4_S2_FINAL_MERGE_REBIND_REQUIRED): live main == 31e5e397145afcc23957456f16bc72514b4a8c93; PR #175 head == 9119cf216cfeb218f8afe91d21440a2d066fef21; final acceptance comment 5461488979 bound to that head; CI 33243997359 success on that head; PR still Draft; mergeable CLEAN; #91 head still d0ea2a3bce548a6cdc311dea4387e29e35e440ab. Mark Ready only inside this task; merge with the sha guard and merge_method=merge (never squash/rebase). Record the merge SHA, new main SHA, and parents. No source edits, no force-push, no PR-body rewrite, no #91 mutation."
+      "notes": "Pre-merge gate (all must hold, else STOP with E4_S2_FINAL_MERGE_REBIND_REQUIRED): live main == 31e5e397145afcc23957456f16bc72514b4a8c93; PR #175 head == 9119cf216cfeb218f8afe91d21440a2d066fef21; final acceptance comment 5461488979 bound to that head; CI 33243997359 success on that head; PR still Draft; mergeable CLEAN; #91 head still d0ea2a3bce548a6cdc311dea4387e29e35e440ab. Mark Ready only inside this task; merge with the sha guard and merge_method=merge (never squash/rebase). Record the merge SHA, new main SHA, and parents. No source edits, no force-push, no PR-body rewrite, no #91 mutation.",
+      "completed_at": "2026-08-29T09:53:44Z",
+      "result_head": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
+      "ci_url": null,
+      "completion_note": "MERGED_E4_S2_FINAL - sha-guarded normal merge commit executed after six-anchor re-verification (main 31e5e39 unchanged; PR #175 head 9119cf2; final acceptance comment 5461488979 bound to that head with verdict APPROVE_E4_S2_FINAL_ACCEPTANCE; CI 33243997359 success on that head; PR still Draft + mergeable CLEAN; #91 head d0ea2a3 untouched). Merge commit 533f75badbb46f75ceb453dcf2f5e54b1384caaa with verified parents [31e5e397145afcc23957456f16bc72514b4a8c93, 9119cf216cfeb218f8afe91d21440a2d066fef21]; merge_method=merge (not squash/rebase); PR #175 marked Ready only inside this task and merged at the guarded head (mergedAt 2026-08-29T09:53:00Z). New main SHA = 533f75badbb46f75ceb453dcf2f5e54b1384caaa. merge:main lock released. No source edits, no force-push, no PR-body rewrite, no #91 mutation. Next: E4-G1 closure/hygiene by the maintainer, then Q-R1 Profile Runtime."
     }
   ],
-  "locks": {
-    "merge:main": {
-      "task_id": "E4-S2-FINAL-MERGE",
-      "owner": "ox-alpha-e4s2merge-w1",
-      "expected_head": "9119cf216cfeb218f8afe91d21440a2d066fef21",
-      "acquired_at": "2026-08-29T09:51:19Z",
-      "lease_expires_at": "2026-08-29T10:51:19Z"
-    }
-  },
-  "updated_at": "2026-08-29T09:51:19Z"
+  "locks": {},
+  "updated_at": "2026-08-29T09:53:44Z"
 }
