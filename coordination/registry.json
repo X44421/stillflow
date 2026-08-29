@@ -3013,8 +3013,42 @@
       "result_head": "f91dc8495be89e68aed7ecb72201164b1d8b2e96",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33237305567",
       "completion_note": "READY_FOR_CANONICAL_FIDELITY_REACCEPTANCE - all seven findings closed on PR #177 at new exact head (result head; parent f135abd5; base main@25c110d8). F1: debug channels removed, mechanical grep zero. F2: unused arrow-data dependency and lockfile delta removed. F3: fail closed - begin_verification_bundle refuses a rejected artifact without an explicit scan-output binding (InvalidDraft); accepted-derived fallback retired; negative control upgraded to begin-stage; all fixtures bind explicitly. F4: Derive variant added to the evolution matrix with publish -> integrity -> read coverage. F5: layout-independence goldens for all report section schemas plus the rejected section, rebatch-boundary evidence (same rows across two envelope boundaries, second envelope sliced with nonzero offset, integrity clean, values intact), accepted-snapshot null coverage. F6: supported canonical-rebuild matrix documented in rebuild_via_builder (= the post-reject_paused_schema reachable surface); out-of-matrix layouts fail closed with a mechanical test. F7: TimestampSecond rebuild preserves the timezone; all four units x timezone presence x null/non-null verified stable across Parquet round trips. Scope stillflow-storage only; engine/#175/#91 untouched. Local gates: fmt --all --check, clippy -p stillflow-storage -D warnings, cargo test -p stillflow-storage (68 pass; 4 pre-existing Windows-only lock failures disclosed A/B on clean main), git diff --check. Successor: E4-S1-CANONICAL-FIDELITY-ACCEPT-R2 (fresh exact-head re-acceptance) then merge then #171 REBIND-R2."
+    },
+    {
+      "id": "E4-S1-CANONICAL-FIDELITY-ACCEPT-R2",
+      "title": "Re-acceptance of the R1 canonical fidelity fix (issue #176 / PR #177)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 176,
+      "target_pr": 177,
+      "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
+      "expected_base": "25c110d8fbffa37515a539c652de11d09c512a39",
+      "expected_head": "f91dc8495be89e68aed7ecb72201164b1d8b2e96",
+      "locks": [],
+      "acceptance_keys": [
+        "r2:f1-debug-grep-zero-verified",
+        "r2:f2-dependency-delta-verified",
+        "r2:f3-fail-closed-begin-verified",
+        "r2:f4-derive-and-evolution-matrix-reproduced",
+        "r2:f5-section-and-rebatch-goldens-reproduced",
+        "r2:f6-type-surface-policy-verified",
+        "r2:f7-timezone-preservation-reproduced",
+        "r2:ci-green-exact-head",
+        "r2:scope-stillflow-storage-only"
+      ],
+      "depends_on": [
+        "E4-S1-CANONICAL-FIDELITY-FIX-R1"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-29T06:01:20Z",
+      "queued_by": "maintainer:frozen-topology-2026-08-29",
+      "queue_reason": "Fresh exact-head re-acceptance of the R1 fix round on PR #177; APPROVE FOR MERGE unlocks the E4-S1 storage fix merge, after which #171 REBIND-R2 re-runs the affected evidence and the full final gates.",
+      "notes": "Read-only exact-head review of PR #177 at f91dc8495be89e68aed7ecb72201164b1d8b2e96 (CI run 33237305567). Verify against the seven REQUEST_CHANGES findings from comment 5460483956: F1 zero debug grep; F2 no arrow-data in storage manifest/lock delta; F3 begin-stage fail-closed for unbound rejected artifacts; F4 Derive in the evolution matrix with publish->integrity->read; F5 section + rejected layout goldens and rebatch-boundary evidence; F6 documented type-surface policy with fail-closed mechanical test; F7 timezone preservation across all four units. Verify scope stillflow-storage only, no engine/#91 mutation. Publish APPROVE_E4_S1_CANONICAL_FIDELITY_FOR_MERGE or REQUEST_CHANGES_E4_S1_CANONICAL_FIDELITY bound to the full head. Acceptor does not merge."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T06:00:48Z"
+  "updated_at": "2026-08-29T06:01:20Z"
 }
