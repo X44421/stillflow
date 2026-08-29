@@ -11,6 +11,7 @@ mod lookup;
 mod lower;
 mod memory;
 mod predict;
+mod profile;
 mod preflight;
 pub(crate) mod preview;
 mod remainder;
@@ -34,6 +35,7 @@ use uuid::Uuid;
 pub use engine::ExecutionEngine;
 pub use error::EngineError;
 pub use preflight::PreparedPlan;
+pub use profile::{ProfileColumns, ProfileRequest, ProfileResult};
 pub use verification::{
     VerificationIdentities, VerificationRequest, MAX_DEDUP_KEY_COLUMNS,
     MAX_VALIDATION_FINDINGS_PER_ROW, MAX_VALIDATION_MESSAGE_BYTES,
@@ -42,6 +44,19 @@ pub use verification::{
 };
 
 pub const ENGINE_CONTRACT_VERSION: u16 = 1;
+
+// Q-R1 frozen profiling constants (ADR-003 section 3.1)
+pub const PROFILING_CONTRACT_VERSION: u16 = 1;
+pub const PROFILE_MAX_ROWS: usize = 1_048_576;
+pub const PROFILE_MAX_SCAN_BYTES: usize = 536_870_912;
+pub const PROFILE_MAX_COLUMNS: usize = 256;
+pub const PROFILE_MAX_TOP_K: usize = 100;
+pub const PROFILE_MAX_HISTOGRAM_BUCKETS: usize = 64;
+pub const PROFILE_MAX_DISTINCT_ENTRIES_PER_COLUMN: usize = 100_000;
+pub const PROFILE_MAX_FULL_ROW_DISTINCT_ENTRIES: usize = 100_000;
+pub const PROFILE_MAX_RETAINED_VALUE_BYTES: usize = 256;
+pub const PROFILE_DEFAULT_TOP_K: usize = 20;
+pub const PROFILE_DEFAULT_HISTOGRAM_BUCKETS: usize = 32;
 /// Compile-time engine build identity stamped into bundle provenance
 /// (contract 7.2/10.5); never generated at runtime.
 pub const ENGINE_BUILD: &str = concat!("stillflow-engine ", env!("CARGO_PKG_VERSION"));
