@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 259,
+  "revision": 260,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3250,7 +3250,7 @@
     {
       "id": "Q-R1-PROFILE-RUNTIME",
       "title": "Q-R1 bounded deterministic streaming profiler (issue #178)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-qr1-w1",
       "target_issue": 178,
@@ -3282,29 +3282,18 @@
         "E4-G1-CLOSURE-HYGIENE"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-29T15:23:08Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T10:23:08Z",
-      "updated_at": "2026-08-29T10:23:08Z",
+      "updated_at": "2026-08-29T12:03:39Z",
       "queued_by": "maintainer:dispatch-2026-08-29 (Q-R1 wave, issue #178)",
       "queue_reason": "E4 chain closed on main@533f75b; Q-R1 is the next frozen mainline item: implement ADR-003 sections 3-6 and the profile_report.v1 canonical body/digest (section 9) as a bounded deterministic streaming profiler with 25 dedicated evidence tests.",
-      "notes": "Contract: ADR-003 via PR #105; Q-C0 acceptance #136 APPROVE. Scope: stillflow-engine (+core only if stable domain values added; avoid to keep core lock free) + Cargo.lock. Frozen constants exactly per ADR-003 section 3.1; no sampling parameter. Float sum/mean order-invariant exact method (superaccumulator/eft-over-multiset standard: identical multisets bit-identical across partitions); integer histogram exact i128; float histogram infinite-width branch before general formula; -0.0 normalized. Canonical JSON per section 9 (sorted keys, pinned escaping, 16-hex uppercase floats, temporal tags, rationals reduced, run-id/provenance excluded) + lowercase-hex SHA-256 digest + golden fixtures. Reuse run gate MAX_ENGINE_CONCURRENT_RUNS and RequestContext; deadline required; no second concurrency system. Distinct overflow = absent+flag (no HLL/sampling); fixed budget exhaustion = existing typed resource-limit. Forbidden: Q-R2, QualityScore, AI findings, history/drift, E5, storage, frontend, #158, #151, E4 semantics, sampled metrics, unrelated micro-optimization. Terminal verdicts: READY_FOR_Q_R1_INDEPENDENT_ACCEPTANCE | Q_R1_SEMANTIC_REJECT | Q_R1_MEMORY_BOUND_REJECT | Q_R1_SCOPE_BLOCKED. Draft PR only; independent acceptance next; not Ready/merged by this task."
+      "notes": "Contract: ADR-003 via PR #105; Q-C0 acceptance #136 APPROVE. Scope: stillflow-engine (+core only if stable domain values added; avoid to keep core lock free) + Cargo.lock. Frozen constants exactly per ADR-003 section 3.1; no sampling parameter. Float sum/mean order-invariant exact method (superaccumulator/eft-over-multiset standard: identical multisets bit-identical across partitions); integer histogram exact i128; float histogram infinite-width branch before general formula; -0.0 normalized. Canonical JSON per section 9 (sorted keys, pinned escaping, 16-hex uppercase floats, temporal tags, rationals reduced, run-id/provenance excluded) + lowercase-hex SHA-256 digest + golden fixtures. Reuse run gate MAX_ENGINE_CONCURRENT_RUNS and RequestContext; deadline required; no second concurrency system. Distinct overflow = absent+flag (no HLL/sampling); fixed budget exhaustion = existing typed resource-limit. Forbidden: Q-R2, QualityScore, AI findings, history/drift, E5, storage, frontend, #158, #151, E4 semantics, sampled metrics, unrelated micro-optimization. Terminal verdicts: READY_FOR_Q_R1_INDEPENDENT_ACCEPTANCE | Q_R1_SEMANTIC_REJECT | Q_R1_MEMORY_BOUND_REJECT | Q_R1_SCOPE_BLOCKED. Draft PR only; independent acceptance next; not Ready/merged by this task.",
+      "completed_at": "2026-08-29T12:03:39Z",
+      "result_head": "20de8c177ae050b58963b97d33eb37187218027e",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33251379818",
+      "completion_note": "READY_FOR_Q_R1_INDEPENDENT_ACCEPTANCE - bounded deterministic streaming profiler delivered on PR #179 at exact head 20de8c17 (base main@533f75b, two commits: e939123 core + 20de8c1 evidence). ADR-003 sections 3-6: ProfileRequest with deadline-required/frozen-bounds/duplicate-unknown-column fail-closed validation and contract defaults; per-column streaming accumulators covering every type family with explicit skipped_unsupported_type for Timestamp-Second/List/Struct/Null; exact per-value distinct state with 100k entry caps and distinct_overflow flags (no HLL/sampling); exact full-row framed keys with 100k cap and duplicate absence on overflow; integer histogram via the exact i128 formula; float histogram with the infinite-width branch evaluated before the general formula; -0.0 normalization; non-finite exclusion and counting; float sum/mean via a fixed-point superaccumulator on the 2^-1074 grid (exact, order-invariant, partition-identical - naive f64 accumulation never used); integer mean and length averages as reduced rationals; fixed length histogram; top-K for Utf8/Binary with 256-byte retention cap, count-desc/byte-lex-asc ordering; canonical profile_report.v1 body (sorted keys, pinned escaping, 16-hex uppercase floats, temporal tags) + lowercase-hex SHA-256 digest with golden fixture; run-gate/deadline/cancellation through existing engine machinery. Disclosed interpretation: scanned_bytes excluded from the canonical body as envelope packaging disclosure (partition-variant), mirroring run-id exclusion; typed result retains it. 23 evidence test fns cover all 25 contract items; engine suite 182/0/0; storage 68 pass + 4 pre-existing Windows lock failures A/B on clean main; workspace --all-features failures are pre-existing (workbook path, object-store real-S3, cfg(unix) clippy) untouched. Not Ready, not merged; successor: Q-R1 independent acceptance."
     }
   ],
-  "locks": {
-    "branch:agent/issue-178-q-r1-profile-runtime": {
-      "task_id": "Q-R1-PROFILE-RUNTIME",
-      "owner": "ox-alpha-qr1-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-29T10:23:08Z",
-      "lease_expires_at": "2026-08-29T15:23:08Z"
-    },
-    "engine:stillflow-engine": {
-      "task_id": "Q-R1-PROFILE-RUNTIME",
-      "owner": "ox-alpha-qr1-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-29T10:23:08Z",
-      "lease_expires_at": "2026-08-29T15:23:08Z"
-    }
-  },
-  "updated_at": "2026-08-29T10:23:08Z"
+  "locks": {},
+  "updated_at": "2026-08-29T12:03:39Z"
 }
