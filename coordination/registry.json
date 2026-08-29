@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 244,
+  "revision": 245,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3017,7 +3017,7 @@
     {
       "id": "E4-S1-CANONICAL-FIDELITY-ACCEPT-R2",
       "title": "Re-acceptance of the R1 canonical fidelity fix (issue #176 / PR #177)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-e4s1caccept-r2-w1",
       "target_issue": 176,
@@ -3041,14 +3041,18 @@
         "E4-S1-CANONICAL-FIDELITY-FIX-R1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-29T08:16:14Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T06:16:14Z",
-      "updated_at": "2026-08-29T06:16:14Z",
+      "updated_at": "2026-08-29T06:20:41Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "Fresh exact-head re-acceptance of the R1 fix round on PR #177; APPROVE FOR MERGE unlocks the E4-S1 storage fix merge, after which #171 REBIND-R2 re-runs the affected evidence and the full final gates.",
-      "notes": "Read-only exact-head review of PR #177 at f91dc8495be89e68aed7ecb72201164b1d8b2e96 (CI run 33237305567). Verify against the seven REQUEST_CHANGES findings from comment 5460483956: F1 zero debug grep; F2 no arrow-data in storage manifest/lock delta; F3 begin-stage fail-closed for unbound rejected artifacts; F4 Derive in the evolution matrix with publish->integrity->read; F5 section + rejected layout goldens and rebatch-boundary evidence; F6 documented type-surface policy with fail-closed mechanical test; F7 timezone preservation across all four units. Verify scope stillflow-storage only, no engine/#91 mutation. Publish APPROVE_E4_S1_CANONICAL_FIDELITY_FOR_MERGE or REQUEST_CHANGES_E4_S1_CANONICAL_FIDELITY bound to the full head. Acceptor does not merge."
+      "notes": "Read-only exact-head review of PR #177 at f91dc8495be89e68aed7ecb72201164b1d8b2e96 (CI run 33237305567). Verify against the seven REQUEST_CHANGES findings from comment 5460483956: F1 zero debug grep; F2 no arrow-data in storage manifest/lock delta; F3 begin-stage fail-closed for unbound rejected artifacts; F4 Derive in the evolution matrix with publish->integrity->read; F5 section + rejected layout goldens and rebatch-boundary evidence; F6 documented type-surface policy with fail-closed mechanical test; F7 timezone preservation across all four units. Verify scope stillflow-storage only, no engine/#91 mutation. Publish APPROVE_E4_S1_CANONICAL_FIDELITY_FOR_MERGE or REQUEST_CHANGES_E4_S1_CANONICAL_FIDELITY bound to the full head. Acceptor does not merge.",
+      "completed_at": "2026-08-29T06:20:41Z",
+      "result_head": "f91dc8495be89e68aed7ecb72201164b1d8b2e96",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33237305567",
+      "completion_note": "APPROVE_E4_S1_CANONICAL_FIDELITY_R2 - fresh exact-head re-acceptance complete (base main@25c110d8, head f91dc84, rejected predecessor f135abd, CI 33237305567 success on that head). Fix-delta audit: only stillflow-storage + Cargo.lock arrow-data removal, no scope creep. All seven REQUEST_CHANGES findings re-verified mechanically: F1 debug grep zero; F2 arrow-data absent from storage manifest and lock block; F3 accepted-derived fallback gone, begin-stage fail closed with InvalidDraft, negative control asserts it; F4 Drop/Rename/Cast/Derive evolution matrix with ColumnId/name/type fidelity; F5 layout-independence goldens across validation/dedup/duplicate/rejected section schemas plus rebatch-boundary evidence with value fidelity; F6 supported matrix documented (= post-reject_paused_schema reachable surface) with fail-closed mechanical test; F7 timezone preservation across Second/Milli/Micro/Nano x presence x null/non-null with Parquet-roundtrip stability. Gates: fmt, clippy -D warnings, git diff --check green; storage tests 68 pass, 4 pre-existing Windows-only lock failures verified by clean-main A/B (not a blocker). No source edits, no push, no Ready, no merge, no #91 mutation by this review. Verdict authorizes the storage merge task only; next dispatch is E4-S1-CANONICAL-FIDELITY-MERGE by the maintainer."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T06:16:14Z"
+  "updated_at": "2026-08-29T06:20:41Z"
 }
