@@ -1180,12 +1180,15 @@ impl VerificationMemory {
     }
 
     pub(crate) fn drop_envelope(&mut self) -> Result<(), EngineError> {
-        let bytes = std::mem::take(&mut self.envelope_bytes);
+        // mem::take zeroes the counter; `release` observes the zeroed slot
+        // counter and kills the slot (contract 12.1: a slot dies when
+        // emptied).
+        std::mem::take(&mut self.envelope_bytes);
         Self::release(
             &mut self.slots,
             &mut self.live_payloads,
             Self::SLOT_ENVELOPE,
-            &mut { bytes },
+            &mut self.envelope_bytes,
         );
         Ok(())
     }
@@ -1205,23 +1208,23 @@ impl VerificationMemory {
     }
 
     pub(crate) fn drop_polars(&mut self) -> Result<(), EngineError> {
-        let bytes = std::mem::take(&mut self.polars_bytes);
+        std::mem::take(&mut self.polars_bytes);
         Self::release(
             &mut self.slots,
             &mut self.live_payloads,
             Self::SLOT_POLARS,
-            &mut { bytes },
+            &mut self.polars_bytes,
         );
         Ok(())
     }
 
     pub(crate) fn swap_envelope(&mut self, incoming: usize) -> Result<(), EngineError> {
-        let previous = std::mem::take(&mut self.envelope_bytes);
+        std::mem::take(&mut self.envelope_bytes);
         Self::release(
             &mut self.slots,
             &mut self.live_payloads,
             Self::SLOT_ENVELOPE,
-            &mut { previous },
+            &mut self.envelope_bytes,
         );
         self.hold_envelope(incoming)
     }
@@ -3218,5 +3221,97 @@ impl ExecutionEngine {
             )?;
         }
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// V14 evidence: the six-slot memory law exercised directly (contract 12.1/12.2)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod verification_memory_law_tests {
+    use super::*;
+
+    /// Holding all six slot kinds makes exactly six payloads live; releasing
+    /// one drops the count; a slot never double-counts.
+    #[test]
+    fn six_slot_ceiling_is_exact_and_slots_die_when_emptied() {
+        let mut memory = VerificationMemory::default();
+        memory.hold_envelope(8).expect("envelope");
+        memory.hold_polars(8).expect("polars");
+        memory.hold_accepted_remainder(8).expect("accepted");
+        memory.hold_rejected_remainder(8).expect("rejected");
+        memory.hold_validation_report(8).expect("validation");
+        memory.hold_dedup_report(8).expect("dedup");
+        assert_eq!(memory.live_payloads, 6);
+        memory.drop_envelope().expect("drop envelope");
+        assert_eq!(memory.live_payloads, 5);
+        assert!(!memory.slots[VerificationMemory::SLOT_ENVELOPE]);
+        memory.hold_envelope(8).expect("re-arm envelope slot");
+        assert_eq!(memory.live_payloads, 6);
+    }
+
+    /// A bounded slot refuses bytes beyond its cap even while live.
+    #[test]
+    fn slot_cap_refuses_bytes_beyond_the_batch_budget() {
+        let mut memory = VerificationMemory::default();
+        memory
+            .hold_envelope(stillflow_core::MAX_BATCH_BYTES)
+            .expect("full envelope slot");
+        let error = memory.hold_envelope(1).expect_err("slot cap must refuse");
+        assert!(matches!(error, EngineError::BoundExceeded(_)));
+        memory.drop_envelope().expect("release");
+        assert_eq!(memory.live_payloads, 0);
+    }
+
+    /// The engine-peak law: four full batch slots plus two full report slots
+    /// fit exactly; one more byte anywhere exceeds the 265 MiB peak.
+    #[test]
+    fn engine_peak_law_admits_the_exact_six_slot_sum_only() {
+        let mut memory = VerificationMemory::default();
+        memory
+            .hold_envelope(stillflow_core::MAX_BATCH_BYTES)
+            .expect("envelope");
+        memory
+            .hold_polars(stillflow_core::MAX_BATCH_BYTES)
+            .expect("polars");
+        memory
+            .hold_accepted_remainder(stillflow_core::MAX_BATCH_BYTES)
+            .expect("accepted");
+        memory
+            .hold_rejected_remainder(stillflow_core::MAX_BATCH_BYTES)
+            .expect("rejected");
+        memory
+            .hold_validation_report(stillflow_storage::artifact::REPORT_PACK_BYTES)
+            .expect("validation");
+        memory
+            .hold_dedup_report(stillflow_storage::artifact::REPORT_PACK_BYTES)
+            .expect("dedup");
+        assert_eq!(memory.live_payloads, 6);
+        let error = memory
+            .hold_polars(1)
+            .expect_err("polars slot is empty but the peak is full");
+        assert!(matches!(error, EngineError::BoundExceeded(_)));
+    }
+
+    /// The operator-state law: compiled plan + FFI scratch + routing +
+    /// configured dedup cache must stay within the 5 MiB engine budget.
+    #[test]
+    fn operator_state_law_bounds_the_engine_side_sum() {
+        let mut memory = VerificationMemory::default();
+        memory
+            .hold_routing(VERIFICATION_MAX_ROUTING_STATE_BYTES)
+            .expect("full routing budget");
+        memory
+            .check_operator_state(VERIFICATION_MAX_COMPILED_PLAN_BYTES)
+            .expect("exact operator-state sum fits");
+        let error = memory
+            .check_operator_state(VERIFICATION_MAX_COMPILED_PLAN_BYTES + 1)
+            .expect_err("one byte over the operator-state budget");
+        assert!(matches!(error, EngineError::BoundExceeded(_)));
+        let error = memory
+            .hold_routing(1)
+            .expect_err("routing budget is exhausted");
+        assert!(matches!(error, EngineError::BoundExceeded(_)));
     }
 }

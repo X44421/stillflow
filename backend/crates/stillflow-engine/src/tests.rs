@@ -5317,7 +5317,6 @@ async fn preview_all_valid_then_nullable_chunk_without_flush() {
     drop(_guard);
 }
 
-
 // ---------------------------------------------------------------------------
 // E4-S2 verification evidence (contract acceptance matrix V01–V31)
 // ---------------------------------------------------------------------------
@@ -5327,22 +5326,22 @@ mod verification {
     use super::*;
     use std::collections::BTreeMap;
 
-    struct VerIds {
-        run_id: Uuid,
-        bundle_id: Uuid,
-        bundle_artifact_id: Uuid,
-        snapshot_id: Uuid,
-        dataset_id: Uuid,
-        validation_report_artifact_id: Uuid,
-        rejected_rows_artifact_id: Option<Uuid>,
-        deduplication_report_artifact_id: Uuid,
-        session_id: Uuid,
-        created_at: chrono::DateTime<chrono::Utc>,
-        started_at: chrono::DateTime<chrono::Utc>,
-        committed_at: chrono::DateTime<chrono::Utc>,
+    pub(crate) struct VerIds {
+        pub(crate) run_id: Uuid,
+        pub(crate) bundle_id: Uuid,
+        pub(crate) bundle_artifact_id: Uuid,
+        pub(crate) snapshot_id: Uuid,
+        pub(crate) dataset_id: Uuid,
+        pub(crate) validation_report_artifact_id: Uuid,
+        pub(crate) rejected_rows_artifact_id: Option<Uuid>,
+        pub(crate) deduplication_report_artifact_id: Uuid,
+        pub(crate) session_id: Uuid,
+        pub(crate) created_at: chrono::DateTime<chrono::Utc>,
+        pub(crate) started_at: chrono::DateTime<chrono::Utc>,
+        pub(crate) committed_at: chrono::DateTime<chrono::Utc>,
     }
 
-    fn ver_ids(base: u128) -> VerIds {
+    pub(crate) fn ver_ids(base: u128) -> VerIds {
         let now = Utc::now();
         VerIds {
             run_id: Uuid::from_u128(base),
@@ -5360,12 +5359,12 @@ mod verification {
         }
     }
 
-    fn canonical_digest(plan: &LogicalPlan) -> [u8; 32] {
+    pub(crate) fn canonical_digest(plan: &LogicalPlan) -> [u8; 32] {
         use sha2::Digest as _;
         sha2::Sha256::digest(plan.canonical_bytes().expect("canonical")).into()
     }
 
-    fn ver_plan(
+    pub(crate) fn ver_plan(
         source_asset_id: Uuid,
         projection: Vec<ColumnId>,
         keys: &[ColumnId],
@@ -5429,7 +5428,7 @@ mod verification {
         LogicalPlan::new(materialize, nodes).expect("plan")
     }
 
-    fn verify_request<'a>(
+    pub(crate) fn verify_request<'a>(
         engine_and_store: (&'a ExecutionEngine, &'a SnapshotStore),
         connection: &SourceConnection,
         source: &SourceAsset,
@@ -5546,7 +5545,7 @@ mod verification {
 
     use crate::EngineError;
 
-    fn reject_plan(source_id: Uuid, id: ColumnId) -> LogicalPlan {
+    pub(crate) fn reject_plan(source_id: Uuid, id: ColumnId) -> LogicalPlan {
         ver_plan(
             source_id,
             vec![id],
@@ -5667,5 +5666,2027 @@ mod verification {
             }
         ));
         drop(_guard);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// E4-S2 dedicated evidence for the V01–V31 contract matrix (issue #171) plus
+// O0 A1/A2 composition evidence. Each test name carries its V id; the PR
+// body maps every id of the contract acceptance matrix to its evidence.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod verification_evidence {
+    use super::verification::{canonical_digest, ver_ids, verify_request, VerIds};
+    use super::*;
+    use arrow_array::{
+        BinaryArray, Float64Array, TimestampMicrosecondArray, TimestampMillisecondArray,
+        TimestampNanosecondArray, UInt32Array, UInt64Array,
+    };
+    use stillflow_core::{BatchEnvelope, BatchEnvelopeFactory, BinaryOperator, TimeUnit};
+    use stillflow_storage::{
+        artifact::{
+            duplicate_finding_section_schema, MAX_BUNDLE_REPORT_PARTITIONS, MAX_REPORT_BYTES,
+            MAX_REPORT_PARTITIONS, MAX_REPORT_ROWS, REPORT_PACK_BYTES, REPORT_PACK_ROWS,
+        },
+        ArtifactSectionId,
+    };
+
+    // -- shared helpers ---------------------------------------------------
+
+    fn col_id(n: u128) -> ColumnId {
+        ColumnId::from_uuid(Uuid::from_u128(n))
+    }
+
+    fn schema_of(fields: Vec<(u128, String, LogicalType, bool)>) -> LogicalSchema {
+        let fields = fields
+            .into_iter()
+            .map(|(id, name, data_type, nullable)| {
+                LogicalField::new(col_id(id), name, data_type, nullable).expect("field")
+            })
+            .collect();
+        LogicalSchema::new(fields).expect("schema")
+    }
+
+    fn int_pair_schema() -> (LogicalSchema, ColumnId, ColumnId) {
+        (
+            schema_of(vec![
+                (1, "key".to_owned(), LogicalType::Int64, false),
+                (2, "payload".to_owned(), LogicalType::Int64, false),
+            ]),
+            col_id(1),
+            col_id(2),
+        )
+    }
+
+    pub(crate) fn single_schema(name: &str, data_type: LogicalType) -> (LogicalSchema, ColumnId) {
+        (
+            schema_of(vec![(1, name.to_owned(), data_type, true)]),
+            col_id(1),
+        )
+    }
+
+    fn all_projection(schema: &LogicalSchema) -> Vec<ColumnId> {
+        schema.fields.iter().map(|field| field.id).collect()
+    }
+
+    pub(crate) fn envelope_of(
+        schema: &LogicalSchema,
+        asset_id: Uuid,
+        sequence: u64,
+        arrays: Vec<std::sync::Arc<dyn arrow_array::Array>>,
+    ) -> BatchEnvelope {
+        let factory =
+            BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), asset_id).expect("factory");
+        let batch = RecordBatch::try_new(factory.arrow_schema().clone(), arrays).expect("batch");
+        factory.try_build(sequence, batch).expect("envelope")
+    }
+
+    fn gt(column: ColumnId, bound: i64) -> Expr {
+        Expr::Binary {
+            left: Box::new(Expr::Column(column)),
+            operator: BinaryOperator::GreaterThan,
+            right: Box::new(Expr::Literal(ScalarValue::Int64(bound))),
+        }
+    }
+
+    pub(crate) fn lt(column: ColumnId, bound: i64) -> Expr {
+        Expr::Binary {
+            left: Box::new(Expr::Column(column)),
+            operator: BinaryOperator::LessThan,
+            right: Box::new(Expr::Literal(ScalarValue::Int64(bound))),
+        }
+    }
+
+    fn equal_text(column: ColumnId, text: &str) -> Expr {
+        Expr::Binary {
+            left: Box::new(Expr::Column(column)),
+            operator: BinaryOperator::Equal,
+            right: Box::new(Expr::Literal(ScalarValue::Utf8(text.to_owned()))),
+        }
+    }
+
+    fn plan_with_rules(
+        source_asset_id: Uuid,
+        projection: Vec<ColumnId>,
+        rule_sets: Vec<Vec<Rule>>,
+    ) -> LogicalPlan {
+        let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+        let filter = PlanNodeId::from_uuid(Uuid::from_u128(3));
+        let materialize = PlanNodeId::from_uuid(Uuid::from_u128(5));
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            scan,
+            PlanNode::new(
+                PlanNodeKind::Scan {
+                    source_asset_id,
+                    projection,
+                    predicate: None,
+                },
+                Vec::new(),
+            ),
+        );
+        nodes.insert(
+            filter,
+            PlanNode::new(
+                PlanNodeKind::Filter {
+                    predicate: Expr::Literal(ScalarValue::Boolean(true)),
+                },
+                vec![scan],
+            ),
+        );
+        let mut previous = filter;
+        for (index, rules) in rule_sets.into_iter().enumerate() {
+            let id = PlanNodeId::from_uuid(Uuid::from_u128(1000 + index as u128));
+            nodes.insert(
+                id,
+                PlanNode::new(PlanNodeKind::ApplyRules { rules }, vec![previous]),
+            );
+            previous = id;
+        }
+        nodes.insert(
+            materialize,
+            PlanNode::new(
+                PlanNodeKind::Materialize {
+                    output_label: "out".to_owned(),
+                },
+                vec![previous],
+            ),
+        );
+        LogicalPlan::new(materialize, nodes).expect("plan")
+    }
+
+    fn submitted<'a>(
+        engine: &'a ExecutionEngine,
+        store: &'a SnapshotStore,
+        connection: &SourceConnection,
+        source: &SourceAsset,
+        schema: LogicalSchema,
+        plan: &LogicalPlan,
+        base: u128,
+    ) -> crate::verification::VerificationRequest<'a> {
+        let ids: VerIds = ver_ids(base);
+        let mut request = verify_request(
+            (engine, store),
+            connection,
+            source,
+            schema,
+            plan.clone(),
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = canonical_digest(plan);
+        request
+    }
+
+    fn read_section(
+        store: &SnapshotStore,
+        bundle_id: Uuid,
+        artifact_id: Uuid,
+        section: ArtifactSectionId,
+    ) -> (usize, Vec<RecordBatch>) {
+        let mut reader = store
+            .open_artifact_section(bundle_id, artifact_id, section)
+            .expect("open artifact section");
+        let mut rows = 0usize;
+        let mut payloads = Vec::new();
+        for item in reader.by_ref() {
+            let envelope = item.expect("section envelope");
+            rows += envelope.row_count();
+            payloads.push(envelope.payload().clone());
+        }
+        (rows, payloads)
+    }
+
+    fn section_fingerprints(
+        bundle: &stillflow_storage::VerificationBundle,
+    ) -> Vec<(ArtifactSectionId, u64, usize)> {
+        let mut fingerprints = Vec::new();
+        let artifacts = [
+            bundle.rejected_rows().map(|artifact| artifact.manifest()),
+            Some(bundle.validation_report().manifest()),
+            Some(bundle.deduplication_report().manifest()),
+        ];
+        for manifest in artifacts.into_iter().flatten() {
+            for section in manifest.sections() {
+                fingerprints.push((
+                    section.section_id(),
+                    section.stats().row_count(),
+                    section.partitions().len(),
+                ));
+            }
+        }
+        fingerprints.sort();
+        fingerprints
+    }
+
+    fn u64_column(batch: &RecordBatch, name: &str) -> Vec<Option<u64>> {
+        let column = batch
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("missing column {name}"));
+        let array = column
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .expect("u64 column");
+        (0..array.len())
+            .map(|index| {
+                if array.is_null(index) {
+                    None
+                } else {
+                    Some(array.value(index))
+                }
+            })
+            .collect()
+    }
+
+    fn u32_column(batch: &RecordBatch, name: &str) -> Vec<Option<u32>> {
+        let column = batch
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("missing column {name}"));
+        let array = column
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .expect("u32 column");
+        (0..array.len())
+            .map(|index| {
+                if array.is_null(index) {
+                    None
+                } else {
+                    Some(array.value(index))
+                }
+            })
+            .collect()
+    }
+
+    fn text_column(batch: &RecordBatch, name: &str) -> Vec<Option<String>> {
+        let column = batch
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("missing column {name}"));
+        let array = column
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("text column");
+        (0..array.len())
+            .map(|index| {
+                if array.is_null(index) {
+                    None
+                } else {
+                    Some(array.value(index).to_owned())
+                }
+            })
+            .collect()
+    }
+
+    fn i64_column(batch: &RecordBatch, name: &str) -> Vec<Option<i64>> {
+        let column = batch
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("missing column {name}"));
+        let array = column
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .expect("i64 column");
+        (0..array.len())
+            .map(|index| {
+                if array.is_null(index) {
+                    None
+                } else {
+                    Some(array.value(index))
+                }
+            })
+            .collect()
+    }
+
+    fn assert_no_sentinel_in_batches(batches: &[RecordBatch], sentinel: &str) {
+        for batch in batches {
+            for column in batch.columns() {
+                let rendered = format!("{column:?}");
+                assert!(!rendered.contains(sentinel));
+            }
+        }
+    }
+
+    pub(crate) struct BundleFixture {
+        pub(crate) bundle: stillflow_storage::VerificationBundle,
+        pub(crate) store: SnapshotStore,
+        pub(crate) _dir: tempfile::TempDir,
+    }
+
+    pub(crate) async fn run_verification(
+        schema: LogicalSchema,
+        envelopes: Vec<BatchEnvelope>,
+        rule_sets: Vec<Vec<Rule>>,
+        base: u128,
+    ) -> BundleFixture {
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), envelopes, true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = plan_with_rules(source.id, all_projection(&schema), rule_sets);
+        let request = submitted(
+            &engine,
+            &store,
+            &connection,
+            &source,
+            schema.clone(),
+            &plan,
+            base,
+        );
+        let bundle = engine
+            .materialize_verification(request)
+            .await
+            .expect("bundle");
+        BundleFixture {
+            bundle,
+            store,
+            _dir: dir,
+        }
+    }
+
+    // -- V03: cross-batch global dedup first-seen -------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v03_cross_batch_dedup_first_seen_spans_three_envelopes() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, key, _payload) = int_pair_schema();
+        let source = asset(connection().id());
+        let rows = |keys: &[i64], seq: u64| {
+            envelope_of(
+                &schema,
+                source.id,
+                seq,
+                vec![
+                    Arc::new(Int64Array::from(keys.to_vec())),
+                    Arc::new(Int64Array::from(
+                        keys.iter().map(|k| k + 100).collect::<Vec<_>>(),
+                    )),
+                ],
+            )
+        };
+        let envelopes = vec![
+            rows(&[7, 1, 2], 0),
+            rows(&[3, 4, 5], 1),
+            rows(&[7, 8, 9], 2),
+        ];
+        let fixture = run_verification(
+            schema,
+            envelopes,
+            vec![vec![Rule::Deduplicate { keys: vec![key] }]],
+            0x300,
+        )
+        .await;
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let rejected_id = fixture
+            .bundle
+            .rejected_rows()
+            .expect("duplicate publishes rejected artifact")
+            .manifest()
+            .artifact_id();
+        let (rows, payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            rejected_id,
+            ArtifactSectionId::RejectedRows,
+        );
+        assert_eq!(rows, 1);
+        assert_eq!(
+            u64_column(&payloads[0], "source_row_ordinal"),
+            vec![Some(6)]
+        );
+        assert_eq!(
+            text_column(&payloads[0], "rejection_kind"),
+            vec![Some("duplicate".to_owned())]
+        );
+        // Accepted keeps the first-seen rows only.
+        assert_eq!(
+            fixture
+                .bundle
+                .accepted()
+                .manifest()
+                .snapshot()
+                .stats()
+                .row_count(),
+            8
+        );
+        // Dedup summary: evaluated 9, unique 8, duplicates 1.
+        let dedup_id = fixture
+            .bundle
+            .deduplication_report()
+            .manifest()
+            .artifact_id();
+        let (summary_rows, summary_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            dedup_id,
+            ArtifactSectionId::DedupRuleSummary,
+        );
+        assert_eq!(summary_rows, 1);
+        assert_eq!(
+            u64_column(&summary_payloads[0], "evaluated_count"),
+            vec![Some(9)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "unique_count"),
+            vec![Some(8)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "duplicate_count"),
+            vec![Some(1)]
+        );
+        // The duplicate finding references the first-seen ordinal 0.
+        let (finding_rows, finding_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            dedup_id,
+            ArtifactSectionId::DuplicateFinding,
+        );
+        assert_eq!(finding_rows, 1);
+        assert_eq!(
+            u64_column(&finding_payloads[0], "source_row_ordinal"),
+            vec![Some(6)]
+        );
+        assert_eq!(
+            u64_column(&finding_payloads[0], "first_source_row_ordinal"),
+            vec![Some(0)]
+        );
+    }
+
+    // -- V04: connector partition invariance ------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v04_two_partitionings_produce_identical_artifacts() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, key, _payload) = int_pair_schema();
+        let keys: [i64; 9] = [7, 1, 2, 3, 4, 5, 7, 8, 9];
+        let connection = connection();
+        let source = asset(connection.id());
+        async fn build(
+            schema: &LogicalSchema,
+            key: ColumnId,
+            connection: &SourceConnection,
+            source: &SourceAsset,
+            chunks: &[&[i64]],
+        ) -> (u64, Vec<(ArtifactSectionId, u64, usize)>, tempfile::TempDir) {
+            let dir = tempfile::TempDir::new().expect("temp");
+            let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+            let envelopes = chunks
+                .iter()
+                .enumerate()
+                .map(|(seq, chunk)| {
+                    envelope_of(
+                        schema,
+                        source.id,
+                        seq as u64,
+                        vec![
+                            Arc::new(Int64Array::from(chunk.to_vec())),
+                            Arc::new(Int64Array::from(
+                                chunk.iter().map(|k| k + 100).collect::<Vec<_>>(),
+                            )),
+                        ],
+                    )
+                })
+                .collect::<Vec<_>>();
+            let (engine, _) = engine_with(schema.clone(), envelopes, true).await;
+            let plan = plan_with_rules(
+                source.id,
+                all_projection(schema),
+                vec![vec![Rule::Deduplicate { keys: vec![key] }]],
+            );
+            let request = submitted(
+                &engine,
+                &store,
+                connection,
+                source,
+                schema.clone(),
+                &plan,
+                0x400,
+            );
+            let bundle = engine
+                .materialize_verification(request)
+                .await
+                .expect("bundle");
+            let accepted_rows = bundle.accepted().manifest().snapshot().stats().row_count();
+            let fingerprints = section_fingerprints(&bundle);
+            (accepted_rows, fingerprints, dir)
+        }
+        let (single_rows, single_prints, _dir1) =
+            build(&schema, key, &connection, &source, &[&keys]).await;
+        let (split_rows, split_prints, _dir2) = build(
+            &schema,
+            key,
+            &connection,
+            &source,
+            &[&keys[..3], &keys[3..6], &keys[6..]],
+        )
+        .await;
+        assert_eq!(single_rows, split_rows);
+        assert_eq!(single_rows, 8);
+        assert_eq!(
+            single_prints, split_prints,
+            "partition boundaries and section shapes must be identical"
+        );
+    }
+
+    // -- V05: null, NaN, -0.0/+0.0 key equality ---------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v05_float_key_nan_null_and_zero_grouping() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Float64);
+        let source = asset(connection().id());
+        let other_nan = f64::from_bits(0x7ff8_0000_0000_0001);
+        let values = vec![
+            Some(f64::NAN),
+            Some(other_nan),
+            None,
+            None,
+            Some(-0.0f64),
+            Some(0.0f64),
+            Some(1.5),
+            Some(1.5),
+            Some(2.0),
+        ];
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(Float64Array::from(values))],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![Rule::Deduplicate { keys: vec![value] }]],
+            0x500,
+        )
+        .await;
+        let dedup_id = fixture
+            .bundle
+            .deduplication_report()
+            .manifest()
+            .artifact_id();
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let (summary_rows, summary_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            dedup_id,
+            ArtifactSectionId::DedupRuleSummary,
+        );
+        assert_eq!(summary_rows, 1);
+        assert_eq!(
+            u64_column(&summary_payloads[0], "evaluated_count"),
+            vec![Some(9)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "unique_count"),
+            vec![Some(5)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "duplicate_count"),
+            vec![Some(4)]
+        );
+        // Duplicates of NaN, null, +0.0 (first -0.0) and 1.5 reference the
+        // first-seen ordinals 0, 2, 4 and 6.
+        let (finding_rows, finding_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            dedup_id,
+            ArtifactSectionId::DuplicateFinding,
+        );
+        assert_eq!(finding_rows, 4);
+        let mut firsts: Vec<Option<u64>> = finding_payloads
+            .iter()
+            .flat_map(|batch| u64_column(batch, "first_source_row_ordinal"))
+            .collect();
+        firsts.sort();
+        assert_eq!(firsts, vec![Some(0), Some(2), Some(4), Some(6)]);
+    }
+
+    // -- V06: multiple Validate hits, one-payload, first-Error termination --
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v06_warning_then_error_emits_both_and_terminates_later_rules() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(Int64Array::from(vec![5]))],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![
+                Rule::Validate {
+                    predicate: lt(value, 1),
+                    severity: ValidationSeverity::Warning,
+                    message: "w1".to_owned(),
+                },
+                Rule::Validate {
+                    predicate: lt(value, 1),
+                    severity: ValidationSeverity::Error,
+                    message: "e1".to_owned(),
+                },
+                Rule::Validate {
+                    predicate: lt(value, 1),
+                    severity: ValidationSeverity::Warning,
+                    message: "w2".to_owned(),
+                },
+            ]],
+            0x600,
+        )
+        .await;
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let validation_id = fixture.bundle.validation_report().manifest().artifact_id();
+        let (finding_rows, finding_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            validation_id,
+            ArtifactSectionId::ValidationFinding,
+        );
+        // Both the warning and the error fired, in rule order; the third
+        // rule never saw the (terminally rejected) row.
+        assert_eq!(finding_rows, 2);
+        let ordinals: Vec<Option<u64>> = finding_payloads
+            .iter()
+            .flat_map(|batch| u64_column(batch, "source_row_ordinal"))
+            .collect();
+        assert_eq!(ordinals, vec![Some(0), Some(0)]);
+        let rules: Vec<Option<u32>> = finding_payloads
+            .iter()
+            .flat_map(|batch| u32_column(batch, "rule_ordinal"))
+            .collect();
+        assert_eq!(rules, vec![Some(0), Some(1)]);
+        let severities: Vec<Option<String>> = finding_payloads
+            .iter()
+            .flat_map(|batch| text_column(batch, "severity"))
+            .collect();
+        assert_eq!(
+            severities,
+            vec![Some("warning".to_owned()), Some("error".to_owned())]
+        );
+        // Exactly one rejected payload for the row despite two findings.
+        let rejected_id = fixture
+            .bundle
+            .rejected_rows()
+            .expect("terminal rejection")
+            .manifest()
+            .artifact_id();
+        let (rejected_rows, _) = read_section(
+            &fixture.store,
+            bundle_id,
+            rejected_id,
+            ArtifactSectionId::RejectedRows,
+        );
+        assert_eq!(rejected_rows, 1);
+        // Summaries count every rule ref once with the right tallies.
+        let (summary_rows, summary_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            validation_id,
+            ArtifactSectionId::ValidationRuleSummary,
+        );
+        assert_eq!(summary_rows, 3);
+        let evaluated: Vec<Option<u64>> = summary_payloads
+            .iter()
+            .flat_map(|batch| u64_column(batch, "evaluated_count"))
+            .collect();
+        assert_eq!(evaluated, vec![Some(1), Some(1), Some(0)]);
+        let errors: Vec<Option<u64>> = summary_payloads
+            .iter()
+            .flat_map(|batch| u64_column(batch, "error_count"))
+            .collect();
+        assert_eq!(errors, vec![Some(0), Some(1), Some(0)]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v06b_per_row_finding_cap_fails_closed_without_a_bundle() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let connection = connection();
+        let source = asset(connection.id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(Int64Array::from(vec![5]))],
+        );
+        let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        // MAX_VALIDATION_FINDINGS_PER_ROW == MAX_RULES_PER_NODE == 256: one
+        // node may hold exactly 256 rules, the second node pushes the row to
+        // finding 257, which exceeds the per-row cap.
+        let warning = |message: String| Rule::Validate {
+            predicate: lt(value, 1),
+            severity: ValidationSeverity::Warning,
+            message,
+        };
+        let first: Vec<Rule> = (0..256).map(|index| warning(index.to_string())).collect();
+        let second = vec![warning("over-the-cap".to_owned())];
+        let plan = plan_with_rules(source.id, all_projection(&schema), vec![first, second]);
+        let request = submitted(&engine, &store, &connection, &source, schema, &plan, 0x610);
+        let run_id = request.identities.run_id;
+        let bundle_id = request.identities.bundle_id;
+        let error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("finding cap must fail the run");
+        assert!(matches!(error, EngineError::BoundExceeded(_)));
+        assert!(error
+            .to_string()
+            .contains("MAX_VALIDATION_FINDINGS_PER_ROW"));
+        assert!(store.load_verification_bundle_by_run_id(run_id).is_err());
+        assert!(store.load_verification_bundle(bundle_id).is_err());
+    }
+
+    // -- V07: warning rows never enter the rejected artifact --------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v07_warning_only_run_keeps_rows_and_publishes_no_rejected_artifact() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(Int64Array::from(vec![5, 1, 2]))],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![Rule::Validate {
+                predicate: lt(value, 5),
+                severity: ValidationSeverity::Warning,
+                message: "watch the tail".to_owned(),
+            }]],
+            0x700,
+        )
+        .await;
+        assert!(fixture.bundle.rejected_rows().is_none());
+        assert_eq!(
+            fixture
+                .bundle
+                .accepted()
+                .manifest()
+                .snapshot()
+                .stats()
+                .row_count(),
+            3
+        );
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let validation_id = fixture.bundle.validation_report().manifest().artifact_id();
+        let (finding_rows, finding_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            validation_id,
+            ArtifactSectionId::ValidationFinding,
+        );
+        assert_eq!(finding_rows, 1);
+        assert_eq!(
+            u64_column(&finding_payloads[0], "source_row_ordinal"),
+            vec![Some(0)]
+        );
+        assert_eq!(
+            text_column(&finding_payloads[0], "severity"),
+            vec![Some("warning".to_owned())]
+        );
+        let (summary_rows, summary_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            validation_id,
+            ArtifactSectionId::ValidationRuleSummary,
+        );
+        assert_eq!(summary_rows, 1);
+        assert_eq!(
+            u64_column(&summary_payloads[0], "evaluated_count"),
+            vec![Some(3)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "pass_count"),
+            vec![Some(2)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "fail_count"),
+            vec![Some(1)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "warning_count"),
+            vec![Some(1)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "error_count"),
+            vec![Some(0)]
+        );
+        // The rule summary stores the message exactly once (V27 tail).
+        let messages: Vec<Option<String>> = summary_payloads
+            .iter()
+            .flat_map(|batch| text_column(batch, "message"))
+            .collect();
+        assert_eq!(messages, vec![Some("watch the tail".to_owned())]);
+    }
+
+    // -- V08: duplicates enter the rejected artifact and dedup report ------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v08_duplicates_get_payloads_and_findings_but_no_key_bytes() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, key, _payload) = int_pair_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![
+                Arc::new(Int64Array::from(vec![9, 9, 9])),
+                Arc::new(Int64Array::from(vec![1, 2, 3])),
+            ],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![Rule::Deduplicate { keys: vec![key] }]],
+            0x800,
+        )
+        .await;
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let rejected_id = fixture
+            .bundle
+            .rejected_rows()
+            .expect("duplicates publish rejected rows")
+            .manifest()
+            .artifact_id();
+        let (rejected_rows, rejected_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            rejected_id,
+            ArtifactSectionId::RejectedRows,
+        );
+        assert_eq!(rejected_rows, 2);
+        let kinds: Vec<Option<String>> = rejected_payloads
+            .iter()
+            .flat_map(|batch| text_column(batch, "rejection_kind"))
+            .collect();
+        assert!(kinds
+            .iter()
+            .all(|kind| kind.as_deref() == Some("duplicate")));
+        let dedup_id = fixture
+            .bundle
+            .deduplication_report()
+            .manifest()
+            .artifact_id();
+        let (finding_rows, finding_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            dedup_id,
+            ArtifactSectionId::DuplicateFinding,
+        );
+        assert_eq!(finding_rows, 2);
+        // The report carries no key material: no field other than the two
+        // counters may reference the key bytes.
+        for batch in &finding_payloads {
+            for field in batch.schema().fields() {
+                let name = field.name();
+                if name.contains("key") {
+                    assert!(
+                        name == "key_column_count" || name == "encoded_key_byte_count",
+                        "unexpected key-bearing field {name}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            duplicate_finding_section_schema().fields.len(),
+            finding_payloads[0].schema().fields().len()
+        );
+    }
+
+    // -- V09: cancellation and deadline publish nothing -------------------
+
+    fn store_files(root: &std::path::Path) -> Vec<(String, u64)> {
+        let mut files = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read dir").flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    let size = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+                    files.push((path.to_string_lossy().into_owned(), size));
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v09_cancellation_and_deadline_leave_no_visible_bundle() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let connection = connection();
+        let source = asset(connection.id());
+        let plan = plan_with_rules(
+            source.id,
+            vec![value],
+            vec![vec![Rule::Deduplicate { keys: vec![value] }]],
+        );
+        let digest = canonical_digest(&plan);
+
+        // (a) cancelled before the call: checkpoint 1 refuses and no file
+        // appears anywhere in the store directory.
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let ids: VerIds = ver_ids(0x900);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan.clone(),
+            ids,
+            Some(token),
+        );
+        request.identities.canonical_plan_digest = digest;
+        let run_id = request.identities.run_id;
+        let bundle_id = request.identities.bundle_id;
+        let before = store_files(dir.path());
+        let error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("cancelled run must fail");
+        assert!(matches!(error, EngineError::Cancelled));
+        assert!(store.load_verification_bundle_by_run_id(run_id).is_err());
+        assert!(store.load_verification_bundle(bundle_id).is_err());
+        assert_eq!(before, store_files(dir.path()), "no staging residue");
+
+        // (b) an already-expired deadline fails with Timeout and publishes
+        // nothing.
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let ids: VerIds = ver_ids(0x910);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan.clone(),
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = digest;
+        request.context =
+            stillflow_core::RequestContext::with_deadline(tokio::time::Instant::now());
+        let run_id = request.identities.run_id;
+        let bundle_id = request.identities.bundle_id;
+        let error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("expired deadline must fail");
+        assert!(matches!(error, EngineError::Timeout));
+        assert!(store.load_verification_bundle_by_run_id(run_id).is_err());
+        assert!(store.load_verification_bundle(bundle_id).is_err());
+
+        // (c) a run interrupted mid-stream (the future is dropped while the
+        // connector stream never completes) publishes nothing either.
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let (engine, _) = engine_with_pending(schema.clone(), true).await;
+        let ids: VerIds = ver_ids(0x920);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema,
+            plan,
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = digest;
+        let run_id = request.identities.run_id;
+        let bundle_id = request.identities.bundle_id;
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            engine.materialize_verification(request),
+        )
+        .await;
+        assert!(outcome.is_err(), "the pending stream must hit the timeout");
+        assert!(store.load_verification_bundle_by_run_id(run_id).is_err());
+        assert!(store.load_verification_bundle(bundle_id).is_err());
+    }
+
+    // -- V15: the secret sentinel never escapes error surfaces ------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v15_secret_sentinel_stays_inside_the_payload() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Utf8);
+        let connection = connection();
+        let source = asset(connection.id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(StringArray::from(vec![
+                Some(SENTINEL.to_owned()),
+                Some("safe".to_owned()),
+            ]))],
+        );
+        let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = plan_with_rules(
+            source.id,
+            all_projection(&schema),
+            vec![vec![Rule::Validate {
+                predicate: equal_text(value, "safe"),
+                severity: ValidationSeverity::Error,
+                message: "value must be safe".to_owned(),
+            }]],
+        );
+        let digest = canonical_digest(&plan);
+        // Without rejected authorization the terminal rejection of the
+        // sentinel row fails the run; the error surfaces must not carry the
+        // sentinel.
+        let ids: VerIds = ver_ids(0xA00);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan.clone(),
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = digest;
+        request.identities.rejected_rows_artifact_id = None;
+        let error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("unauthorized rejection must fail");
+        assert!(
+            !error.to_string().contains(SENTINEL),
+            "Display leaks sentinel"
+        );
+        assert!(
+            !format!("{error:?}").contains(SENTINEL),
+            "Debug leaks sentinel"
+        );
+        let summary = error.sanitized_summary();
+        let summary_json = serde_json::to_string(&serde_json::json!({
+            "category": format!("{:?}", summary.category),
+            "retryable": summary.retryable,
+        }))
+        .expect("summary json");
+        assert!(!summary_json.contains(SENTINEL));
+
+        // The authorized run publishes the payload (data, not error text);
+        // reports and provenance stay sentinel-free.
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let request = submitted(&engine, &store, &connection, &source, schema, &plan, 0xA10);
+        let bundle = engine
+            .materialize_verification(request)
+            .await
+            .expect("authorized bundle");
+        let bundle_id = bundle.membership().bundle_id();
+        let rejected_id = bundle
+            .rejected_rows()
+            .expect("sentinel row rejected")
+            .manifest()
+            .artifact_id();
+        let (rows, payloads) = read_section(
+            &store,
+            bundle_id,
+            rejected_id,
+            ArtifactSectionId::RejectedRows,
+        );
+        assert_eq!(rows, 1);
+        assert!(
+            text_column(&payloads[0], "value")[0]
+                .as_deref()
+                .is_some_and(|text| text == SENTINEL),
+            "payload fidelity carries the original cell"
+        );
+        let validation_id = bundle.validation_report().manifest().artifact_id();
+        let (_, finding_payloads) = read_section(
+            &store,
+            bundle_id,
+            validation_id,
+            ArtifactSectionId::ValidationFinding,
+        );
+        assert_no_sentinel_in_batches(&finding_payloads, SENTINEL);
+        let (_, summary_payloads) = read_section(
+            &store,
+            bundle_id,
+            validation_id,
+            ArtifactSectionId::ValidationRuleSummary,
+        );
+        assert_no_sentinel_in_batches(&summary_payloads, SENTINEL);
+        assert!(!format!("{:?}", bundle.provenance()).contains(SENTINEL));
+        assert!(!format!("{:?}", bundle.membership()).contains(SENTINEL));
+    }
+
+    // -- V16: retry determinism -------------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v16_identical_retry_produces_identical_artifacts() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, key, _payload) = int_pair_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![
+                Arc::new(Int64Array::from(vec![1, 1, 2, 3])),
+                Arc::new(Int64Array::from(vec![10, 11, 12, 13])),
+            ],
+        );
+        async fn run(
+            schema: &LogicalSchema,
+            key: ColumnId,
+            connection: &SourceConnection,
+            source: &SourceAsset,
+            envelope: &BatchEnvelope,
+        ) -> (u64, Vec<(ArtifactSectionId, u64, usize)>, tempfile::TempDir) {
+            let dir = tempfile::TempDir::new().expect("temp");
+            let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+            let (engine, _) = engine_with(schema.clone(), vec![envelope.clone()], true).await;
+            let plan = plan_with_rules(
+                source.id,
+                all_projection(schema),
+                vec![vec![Rule::Deduplicate { keys: vec![key] }]],
+            );
+            let request = submitted(
+                &engine,
+                &store,
+                connection,
+                source,
+                schema.clone(),
+                &plan,
+                0xB00,
+            );
+            let bundle = engine
+                .materialize_verification(request)
+                .await
+                .expect("bundle");
+            let accepted_rows = bundle.accepted().manifest().snapshot().stats().row_count();
+            let fingerprints = section_fingerprints(&bundle);
+            (accepted_rows, fingerprints, dir)
+        }
+        let (first_rows, first_prints, _dir1) =
+            run(&schema, key, &connection, &source, &envelope).await;
+        let (second_rows, second_prints, _dir2) =
+            run(&schema, key, &connection, &source, &envelope).await;
+        assert_eq!(first_rows, 3);
+        assert_eq!(first_rows, second_rows);
+        assert_eq!(first_prints, second_prints, "retry must be deterministic");
+    }
+
+    // -- V17/V18: key-type coverage ---------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v17_utf8_and_binary_key_equality_is_exact_bytes() {
+        let _guard = exclusive_test_lock().lock().await;
+        // Utf8: empty, null and grapheme-distinct text never normalize.
+        let (schema, value) = single_schema("value", LogicalType::Utf8);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(StringArray::from(vec![
+                Some("a".to_owned()),
+                None,
+                Some(String::new()),
+                Some("a".to_owned()),
+                Some(String::new()),
+                Some("é".to_owned()),
+                Some("e\u{301}".to_owned()),
+            ]))],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![Rule::Deduplicate { keys: vec![value] }]],
+            0xC00,
+        )
+        .await;
+        let dedup_id = fixture
+            .bundle
+            .deduplication_report()
+            .manifest()
+            .artifact_id();
+        let (summary_rows, summary_payloads) = read_section(
+            &fixture.store,
+            fixture.bundle.membership().bundle_id(),
+            dedup_id,
+            ArtifactSectionId::DedupRuleSummary,
+        );
+        assert_eq!(summary_rows, 1);
+        assert_eq!(
+            u64_column(&summary_payloads[0], "unique_count"),
+            vec![Some(5)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "duplicate_count"),
+            vec![Some(2)]
+        );
+
+        // Binary: empty binary is distinct from null; bytes compare exactly.
+        let (schema, value) = single_schema("value", LogicalType::Binary);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(BinaryArray::from_opt_vec(vec![
+                Some(b"a".as_slice()),
+                None,
+                Some(b"".as_slice()),
+                Some(b"a".as_slice()),
+                Some(b"\x00".as_slice()),
+                Some(b"\x00".as_slice()),
+            ]))],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![Rule::Deduplicate { keys: vec![value] }]],
+            0xC10,
+        )
+        .await;
+        let dedup_id = fixture
+            .bundle
+            .deduplication_report()
+            .manifest()
+            .artifact_id();
+        let (summary_rows, summary_payloads) = read_section(
+            &fixture.store,
+            fixture.bundle.membership().bundle_id(),
+            dedup_id,
+            ArtifactSectionId::DedupRuleSummary,
+        );
+        assert_eq!(summary_rows, 1);
+        assert_eq!(
+            u64_column(&summary_payloads[0], "unique_count"),
+            vec![Some(4)]
+        );
+        assert_eq!(
+            u64_column(&summary_payloads[0], "duplicate_count"),
+            vec![Some(2)]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v18_timestamp_key_units_and_paused_boundaries() {
+        let _guard = exclusive_test_lock().lock().await;
+        // Same-type same-epoch duplicates group for every supported unit.
+        let runs: [(&str, TimeUnit, std::sync::Arc<dyn arrow_array::Array>); 3] = [
+            (
+                "ms",
+                TimeUnit::Millisecond,
+                Arc::new(TimestampMillisecondArray::from(vec![
+                    Some(1_000i64),
+                    Some(1_000i64),
+                    Some(2_000i64),
+                ])),
+            ),
+            (
+                "us",
+                TimeUnit::Microsecond,
+                Arc::new(TimestampMicrosecondArray::from(vec![
+                    Some(1_000i64),
+                    Some(1_000i64),
+                    Some(2_000i64),
+                ])),
+            ),
+            (
+                "ns",
+                TimeUnit::Nanosecond,
+                Arc::new(TimestampNanosecondArray::from(vec![
+                    Some(1_000i64),
+                    Some(1_000i64),
+                    Some(2_000i64),
+                ])),
+            ),
+        ];
+        for (label, unit, array) in runs {
+            let (schema, value) = single_schema(
+                "value",
+                LogicalType::Timestamp {
+                    unit,
+                    timezone: None,
+                },
+            );
+            let source = asset(connection().id());
+            let envelope = envelope_of(&schema, source.id, 0, vec![array.clone()]);
+            let fixture = run_verification(
+                schema,
+                vec![envelope],
+                vec![vec![Rule::Deduplicate { keys: vec![value] }]],
+                0xD00 + label.len() as u128,
+            )
+            .await;
+            let dedup_id = fixture
+                .bundle
+                .deduplication_report()
+                .manifest()
+                .artifact_id();
+            let (summary_rows, summary_payloads) = read_section(
+                &fixture.store,
+                fixture.bundle.membership().bundle_id(),
+                dedup_id,
+                ArtifactSectionId::DedupRuleSummary,
+            );
+            assert_eq!(summary_rows, 1, "{label}");
+            assert_eq!(
+                u64_column(&summary_payloads[0], "unique_count"),
+                vec![Some(2)],
+                "{label}"
+            );
+            assert_eq!(
+                u64_column(&summary_payloads[0], "duplicate_count"),
+                vec![Some(1)],
+                "{label}"
+            );
+        }
+
+        // Timestamp Second keys are a preflight TypeError.
+        let (schema, value) = single_schema(
+            "value",
+            LogicalType::Timestamp {
+                unit: TimeUnit::Second,
+                timezone: None,
+            },
+        );
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = plan_with_rules(
+            source.id,
+            vec![value],
+            vec![vec![Rule::Deduplicate { keys: vec![value] }]],
+        );
+        let request = submitted(&engine, &store, &connection, &source, schema, &plan, 0xD10);
+        let error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("second-unit key must be refused");
+        assert!(matches!(error, EngineError::TypeError(_)));
+    }
+
+    // -- V21: schema, ColumnId and original value fidelity ----------------
+
+    /// BLOCKED by E4-S1 defect D1 (canonical_batch_bytes depends on the
+    /// physical validity-buffer layout): a rejected payload containing null
+    /// fails the section digest on read-back. Ignored, not deleted: this is
+    /// the V21 dedicated evidence and must pass after
+    /// E4-S1-STORAGE-CANONICAL-FIDELITY-FIX lands.
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "E4-S1 D1: canonical digest instability for payloads with nulls (see PR notes)"]
+    async fn v21_rejected_rows_preserve_scan_schema_and_original_values() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Float64);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(Float64Array::from(vec![
+                None,
+                Some(f64::NAN),
+                Some(-0.0f64),
+                Some(1.5),
+            ]))],
+        );
+        let fixture = run_verification(
+            schema.clone(),
+            vec![envelope],
+            vec![vec![Rule::Validate {
+                predicate: gt(value, 0),
+                severity: ValidationSeverity::Error,
+                message: "positive only".to_owned(),
+            }]],
+            0x2100,
+        )
+        .await;
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let rejected = fixture.bundle.rejected_rows().expect("rejected artifact");
+        let rejected_id = rejected.manifest().artifact_id();
+        let section = rejected
+            .manifest()
+            .sections()
+            .iter()
+            .find(|section| section.section_id() == ArtifactSectionId::RejectedRows)
+            .expect("rejected section");
+        // Field order, ids and types match the logical Scan output followed
+        // by the frozen control fields.
+        let expected =
+            stillflow_storage::artifact::rejected_rows_section_schema(&schema).expect("schema");
+        assert_eq!(section.schema().fields.len(), expected.fields.len());
+        for (field, expected_field) in section.schema().fields.iter().zip(&expected.fields) {
+            assert_eq!(field.id, expected_field.id, "ColumnId preserved");
+            assert_eq!(field.name, expected_field.name);
+            assert_eq!(field.data_type, expected_field.data_type);
+        }
+        let (_, payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            rejected_id,
+            ArtifactSectionId::RejectedRows,
+        );
+        let ordinals: Vec<Option<u64>> = payloads
+            .iter()
+            .flat_map(|batch| u64_column(batch, "source_row_ordinal"))
+            .collect();
+        assert_eq!(ordinals, vec![Some(0), Some(1), Some(2)]);
+        // Original values survive the round trip: null, NaN and -0.0.
+        let values: Vec<(bool, u64)> = payloads
+            .iter()
+            .flat_map(|batch| {
+                let column = batch.column_by_name("value").expect("value column");
+                let array = column
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .expect("f64 column");
+                (0..array.len())
+                    .map(|index| (array.is_null(index), array.value(index).to_bits()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(values.len(), 3);
+        assert!(values[0].0, "null stays null");
+        assert!(
+            values[1].1 & 0x7ff0_0000_0000_0000 == 0x7ff0_0000_0000_0000,
+            "NaN stays NaN"
+        );
+        assert_eq!(
+            values[2].1,
+            (-0.0f64).to_bits(),
+            "-0.0 keeps its exact bits"
+        );
+        // One payload per source row: the accepted snapshot keeps row 3.
+        assert_eq!(
+            fixture
+                .bundle
+                .accepted()
+                .manifest()
+                .snapshot()
+                .stats()
+                .row_count(),
+            1
+        );
+    }
+
+    // -- V28: dedup insert typed first ordinal ----------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v28_duplicate_finding_references_first_seen_even_after_its_rejection() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, key, _payload) = int_pair_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![
+                Arc::new(Int64Array::from(vec![9, 9])),
+                Arc::new(Int64Array::from(vec![1, 2])),
+            ],
+        );
+        // Deduplicate first, then a failing Error rule: the first-seen row
+        // dies after the index insert, but the duplicate finding still cites
+        // its Scan-output ordinal.
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![
+                Rule::Deduplicate { keys: vec![key] },
+                Rule::Validate {
+                    predicate: lt(key, 0),
+                    severity: ValidationSeverity::Error,
+                    message: "always fails".to_owned(),
+                },
+            ]],
+            0x2800,
+        )
+        .await;
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let dedup_id = fixture
+            .bundle
+            .deduplication_report()
+            .manifest()
+            .artifact_id();
+        let (finding_rows, finding_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            dedup_id,
+            ArtifactSectionId::DuplicateFinding,
+        );
+        assert_eq!(finding_rows, 1);
+        assert_eq!(
+            u64_column(&finding_payloads[0], "source_row_ordinal"),
+            vec![Some(1)]
+        );
+        assert_eq!(
+            u64_column(&finding_payloads[0], "first_source_row_ordinal"),
+            vec![Some(0)]
+        );
+        let rejected_id = fixture
+            .bundle
+            .rejected_rows()
+            .expect("both rows rejected")
+            .manifest()
+            .artifact_id();
+        let (rejected_rows, rejected_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            rejected_id,
+            ArtifactSectionId::RejectedRows,
+        );
+        assert_eq!(rejected_rows, 2);
+        let mut kinds: Vec<(Option<u64>, Option<String>)> = rejected_payloads
+            .iter()
+            .flat_map(|batch| {
+                let ordinals = u64_column(batch, "source_row_ordinal");
+                let kinds = text_column(batch, "rejection_kind");
+                ordinals.into_iter().zip(kinds)
+            })
+            .collect();
+        kinds.sort();
+        assert_eq!(
+            kinds,
+            vec![
+                (Some(0), Some("validation_error".to_owned())),
+                (Some(1), Some("duplicate".to_owned())),
+            ]
+        );
+    }
+
+    // -- V29: report resource math ----------------------------------------
+
+    #[test]
+    fn v29_report_ceiling_identities_hold() {
+        assert_eq!(
+            MAX_REPORT_ROWS,
+            u64::from(MAX_REPORT_PARTITIONS) * REPORT_PACK_ROWS as u64
+        );
+        assert_eq!(
+            MAX_REPORT_BYTES,
+            u64::from(MAX_REPORT_PARTITIONS) * REPORT_PACK_BYTES as u64
+        );
+        assert_eq!(MAX_BUNDLE_REPORT_PARTITIONS, 2 * MAX_REPORT_PARTITIONS);
+        assert_eq!(MAX_REPORT_ROWS % (REPORT_PACK_ROWS as u64), 0);
+        assert_eq!(MAX_REPORT_BYTES % (REPORT_PACK_BYTES as u64), 0);
+    }
+
+    // -- V31: FilterRows preserves Scan-output ordinals -------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v31_filter_rows_keep_original_ordinals_with_stable_gaps() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, key, _payload) = int_pair_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![
+                Arc::new(Int64Array::from(vec![0, 1, 2, 3])),
+                Arc::new(Int64Array::from(vec![100, 101, 102, 103])),
+            ],
+        );
+        // FilterRows between the Scan output and the terminal Error rule:
+        // rows 0 and 1 die in the filter, rows 2 and 3 survive to the rule
+        // and get rejected with their original ordinals.
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![
+                Rule::FilterRows {
+                    predicate: gt(key, 1),
+                },
+                Rule::Validate {
+                    predicate: lt(key, 0),
+                    severity: ValidationSeverity::Error,
+                    message: "always fails".to_owned(),
+                },
+            ]],
+            0x3100,
+        )
+        .await;
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let rejected_id = fixture
+            .bundle
+            .rejected_rows()
+            .expect("terminal rejections")
+            .manifest()
+            .artifact_id();
+        let (rejected_rows, rejected_payloads) = read_section(
+            &fixture.store,
+            bundle_id,
+            rejected_id,
+            ArtifactSectionId::RejectedRows,
+        );
+        assert_eq!(rejected_rows, 2);
+        let ordinals: Vec<Option<u64>> = rejected_payloads
+            .iter()
+            .flat_map(|batch| u64_column(batch, "source_row_ordinal"))
+            .collect();
+        assert_eq!(ordinals, vec![Some(2), Some(3)]);
+        // Payload values agree with the logical Scan output rows.
+        let payloads_col: Vec<Option<i64>> = rejected_payloads
+            .iter()
+            .flat_map(|batch| i64_column(batch, "payload"))
+            .collect();
+        assert_eq!(payloads_col, vec![Some(102), Some(103)]);
+        // The maximum ordinal exceeds the surviving row count (stable gaps).
+        let max_ordinal = ordinals.iter().flatten().max().copied().expect("ordinal");
+        assert!(max_ordinal as usize >= rejected_rows);
+    }
+
+    // -- O0 A1/A2 composition evidence ------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn o0_e4_admission_composes_with_a2_incremental_mutations() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, key, payload) = int_pair_schema();
+        let derived = col_id(9);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![
+                Arc::new(Int64Array::from(vec![1, 1, 2])),
+                Arc::new(Int64Array::from(vec![10, 11, 12])),
+            ],
+        );
+        // Derive (schema-mutating through A2), then dedup on the derived
+        // column (admitted E4 rule), then rename (A2 again).
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![
+                Rule::DeriveColumn {
+                    id: derived,
+                    name: "doubled".to_owned(),
+                    data_type: LogicalType::Int64,
+                    nullable: false,
+                    expression: Expr::Column(payload),
+                },
+                Rule::Deduplicate {
+                    keys: vec![derived],
+                },
+                Rule::Rename {
+                    column: key,
+                    to: "k".to_owned(),
+                },
+            ]],
+            0x40_00,
+        )
+        .await;
+        // doubled values 20, 22, 24 are unique; nothing is rejected.
+        assert!(fixture.bundle.rejected_rows().is_none());
+        assert_eq!(
+            fixture
+                .bundle
+                .accepted()
+                .manifest()
+                .snapshot()
+                .stats()
+                .row_count(),
+            3
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn o0_applyrules_boundary_validation_matches_current_main() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        // A derive whose declared type mismatches the inferred expression
+        // type must fail identically in both preflight paths.
+        let bad_derive = vec![Rule::DeriveColumn {
+            id: col_id(9),
+            name: "wrong".to_owned(),
+            data_type: LogicalType::Utf8,
+            nullable: false,
+            expression: Expr::Column(value),
+        }];
+        let plan = plan_with_rules(source.id, all_projection(&schema), vec![bad_derive]);
+
+        let e2_error = engine
+            .materialize(ExecutionRequest {
+                plan: plan.clone(),
+                connection: connection.clone(),
+                asset: source.clone(),
+                schema_override: Some(schema.clone()),
+                identities: identities(),
+                context: long_context(),
+                batch_size: 64,
+                store: &store,
+            })
+            .await
+            .expect_err("E2 boundary validation");
+        assert!(matches!(e2_error, EngineError::TypeError(_)));
+
+        let request = submitted(
+            &engine,
+            &store,
+            &connection,
+            &source,
+            schema,
+            &plan,
+            0x40_10,
+        );
+        let e4_error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("verification boundary validation");
+        assert!(matches!(e4_error, EngineError::TypeError(_)));
+    }
+
+    /// BLOCKED by E4-S1 defect D2 (the rejected section schema is derived
+    /// from the accepted/materialized schema instead of the frozen
+    /// scan-output schema): any schema-mutating rule before a terminal
+    /// rejection fails publication with Storage SchemaDrift.
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "E4-S1 D2: rejected section schema derives from materialized schema (see PR notes)"]
+    async fn o0_drop_column_before_dedup_keeps_the_lookup_exact() {
+        let _guard = exclusive_test_lock().lock().await;
+        // Three columns; the middle one is dropped (an ordinal-shifting A2
+        // mutation) before the dedup resolves its key. A stale ordinal table
+        // would misresolve the key column.
+        let (schema, _b) = (
+            schema_of(vec![
+                (1, "a".to_owned(), LogicalType::Int64, false),
+                (2, "b".to_owned(), LogicalType::Int64, false),
+                (3, "c".to_owned(), LogicalType::Int64, false),
+            ]),
+            col_id(2),
+        );
+        let c = col_id(3);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![
+                Arc::new(Int64Array::from(vec![1, 2])),
+                Arc::new(Int64Array::from(vec![5, 6])),
+                Arc::new(Int64Array::from(vec![7, 7])),
+            ],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![
+                Rule::DropColumn { column: col_id(2) },
+                Rule::Deduplicate { keys: vec![c] },
+            ]],
+            0x40_20,
+        )
+        .await;
+        assert!(fixture.bundle.rejected_rows().is_some());
+        assert_eq!(
+            fixture
+                .bundle
+                .accepted()
+                .manifest()
+                .snapshot()
+                .stats()
+                .row_count(),
+            1
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn o0_wide_schema_projection_and_dedup_stay_exact() {
+        let _guard = exclusive_test_lock().lock().await;
+        // A wide schema makes the A1 ordinal-index policy the live lookup
+        // backend; projection and dedup must resolve through it exactly.
+        let mut fields = Vec::new();
+        for index in 0..40u128 {
+            fields.push(
+                LogicalField::new(
+                    col_id(1 + index),
+                    format!("f{index}"),
+                    LogicalType::Int64,
+                    false,
+                )
+                .expect("field"),
+            );
+        }
+        let schema = LogicalSchema::new(fields).expect("schema");
+        let last = col_id(40);
+        let source = asset(connection().id());
+        let arrays: Vec<std::sync::Arc<dyn arrow_array::Array>> = (0..40u128)
+            .map(|index| {
+                let values = if index == 39 {
+                    vec![4i64, 4, 5]
+                } else {
+                    vec![1i64, 2, 3]
+                };
+                Arc::new(Int64Array::from(values)) as std::sync::Arc<dyn arrow_array::Array>
+            })
+            .collect();
+        let envelope = envelope_of(&schema, source.id, 0, arrays);
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![Rule::Deduplicate { keys: vec![last] }]],
+            0x40_30,
+        )
+        .await;
+        assert!(fixture.bundle.rejected_rows().is_some());
+        assert_eq!(
+            fixture
+                .bundle
+                .accepted()
+                .manifest()
+                .snapshot()
+                .stats()
+                .row_count(),
+            2
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn o0_e2_materialize_still_rejects_deduplicate_rules() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = plan_with_rules(
+            source.id,
+            vec![value],
+            vec![vec![Rule::Deduplicate { keys: vec![value] }]],
+        );
+        let error = engine
+            .materialize(ExecutionRequest {
+                plan,
+                connection: connection.clone(),
+                asset: source.clone(),
+                schema_override: Some(schema),
+                identities: identities(),
+                context: long_context(),
+                batch_size: 64,
+                store: &store,
+            })
+            .await
+            .expect_err("E2 must refuse deduplicate");
+        assert!(matches!(
+            error,
+            EngineError::UnsupportedRule {
+                kind: "deduplicate",
+                ..
+            }
+        ));
+    }
+
+    /// Minimal reproduction of E4-S1 defect D1: a rejected payload that
+    /// contains a single null fails the artifact-section digest on
+    /// read-back (canonical bytes of the decoded parquet payload differ
+    /// from the canonical bytes of the written payload). Regression anchor
+    /// for E4-S1-STORAGE-CANONICAL-FIDELITY-FIX.
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "E4-S1 D1: canonical digest instability for payloads with nulls (see PR notes)"]
+    async fn d1_minimal_repro_null_rejected_payload_fails_section_digest() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            vec![Arc::new(Int64Array::from(vec![None, Some(5)]))],
+        );
+        let fixture = run_verification(
+            schema,
+            vec![envelope],
+            vec![vec![Rule::Validate {
+                predicate: lt(value, 0),
+                severity: ValidationSeverity::Error,
+                message: "fail".to_owned(),
+            }]],
+            0x91_000,
+        )
+        .await;
+        let bundle_id = fixture.bundle.membership().bundle_id();
+        let rejected_id = fixture
+            .bundle
+            .rejected_rows()
+            .expect("rejected artifact")
+            .manifest()
+            .artifact_id();
+        let mut reader = fixture
+            .store
+            .open_artifact_section(
+                bundle_id,
+                rejected_id,
+                stillflow_storage::ArtifactSectionId::RejectedRows,
+            )
+            .expect("open rejected section");
+        for item in reader.by_ref() {
+            item.expect("rejected section envelope must survive integrity");
+        }
+    }
+
+    // -- V22: validation message safety and length -------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn v22_message_contract_rejects_empty_oversized_and_secret_like() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, value) = single_schema("value", LogicalType::Int64);
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let build_request = |message: String, digest: [u8; 32]| {
+            let plan = plan_with_rules(
+                source.id,
+                vec![value],
+                vec![vec![Rule::Validate {
+                    predicate: gt(value, 1),
+                    severity: ValidationSeverity::Error,
+                    message,
+                }]],
+            );
+            let ids: VerIds = ver_ids(0x2200);
+            let mut request = verify_request(
+                (&engine, &store),
+                &connection,
+                &source,
+                schema.clone(),
+                plan,
+                ids,
+                None,
+            );
+            request.identities.canonical_plan_digest = digest;
+            request
+        };
+        let digest_for = |message: String| {
+            let plan = plan_with_rules(
+                source.id,
+                vec![value],
+                vec![vec![Rule::Validate {
+                    predicate: gt(value, 1),
+                    severity: ValidationSeverity::Error,
+                    message,
+                }]],
+            );
+            canonical_digest(&plan)
+        };
+        // Defense in depth: an empty-after-trim message and a secret-like
+        // message are each rejected even earlier, at LogicalPlan
+        // construction in stillflow-plan (EmptyValidationMessage /
+        // UnsafeLiteral); the E4 preflight check is the second layer of the
+        // same contract. Oversized messages pass the core layer and are
+        // refused by the engine below.
+        let secret_like_plan = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            plan_with_rules(
+                source.id,
+                vec![value],
+                vec![vec![Rule::Validate {
+                    predicate: gt(value, 1),
+                    severity: ValidationSeverity::Error,
+                    message: "token=sk-abcdef0123456789".to_owned(),
+                }]],
+            )
+        }));
+        assert!(
+            secret_like_plan.is_err(),
+            "core layer must refuse secret-like messages"
+        );
+        let oversized = build_request("m".repeat(1_025), digest_for("m".repeat(1_025)));
+        let error = engine
+            .materialize_verification(oversized)
+            .await
+            .expect_err("oversized message must be refused");
+        assert!(matches!(error, EngineError::InvalidPlan(_)));
+        assert!(error.to_string().contains("MAX_VALIDATION_MESSAGE_BYTES"));
     }
 }

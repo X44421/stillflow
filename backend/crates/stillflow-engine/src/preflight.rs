@@ -63,6 +63,7 @@ pub(crate) async fn preflight(
 /// rejected so the E4-S2 path can apply its own rule checks on top of the
 /// shared checks (contract section 10.1 step 2). The public E2 behavior
 /// is unchanged.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn preflight_inner(
     registry: &ConnectorRegistry,
     plan: &LogicalPlan,
