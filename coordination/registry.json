@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 257,
+  "revision": 258,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3246,8 +3246,50 @@
       "result_head": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
       "ci_url": null,
       "completion_note": "CLOSED_E4_G1_ON_MAIN_533F75B - E4 facts mechanically verified (PR #175 MERGED @ 533f75b, parents 31e5e39+9119cf2, APPROVE_E4_S2_FINAL_ACCEPTANCE comment 5461488979, CI 33243997359 success, #177 ancestor of main, #91 d0ea2a3 never merged). #176 closed completed (receipt comment 5461678143; D1/D2 resolved via PR #177 @ 31e5e39). #171 closed completed (receipt 5461678441; final head 9119cf2; merge 533f75b). #80 closed completed (receipt 5461678704; PR #91 = historical evidence, PR #175 = production vehicle). PR #91 closed UNMERGED with superseded comment 5461682141; head unchanged d0ea2a3; no force-push, no branch changes. Canonical board refreshed: issue #81 CURRENT-EXECUTION-BOARD block replaced to main@533f75badbb46f75ceb453dcf2f5e54b1384caaa - E4-S2 CLOSED/PRODUCTION, D1/D2 remediation CLOSED, engine writer none, engine and merge locks free, no stale E4 Draft active, next = Q-R1 Profile Runtime; historical sections untouched. github:issue-ledger-state released."
+    },
+    {
+      "id": "Q-R1-PROFILE-RUNTIME",
+      "title": "Q-R1 bounded deterministic streaming profiler (issue #178)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 178,
+      "target_pr": null,
+      "target_branch": "agent/issue-178-q-r1-profile-runtime",
+      "expected_base": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-178-q-r1-profile-runtime",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/**",
+        "backend/Cargo.lock"
+      ],
+      "acceptance_keys": [
+        "qr1:request-validation-and-defaults",
+        "qr1:bounded-streaming-accumulator",
+        "qr1:exact-distinct-and-overflow-flags",
+        "qr1:order-invariant-float-sum",
+        "qr1:histogram-formulas-adr003",
+        "qr1:topk-ordering-and-retention",
+        "qr1:canonical-json-and-digest-goldens",
+        "qr1:partition-invariance",
+        "qr1:cancellation-deadline-rungate",
+        "qr1:e4-regression-green"
+      ],
+      "depends_on": [
+        "E4-G1-CLOSURE-HYGIENE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-29T10:23:00Z",
+      "queued_by": "maintainer:dispatch-2026-08-29 (Q-R1 wave, issue #178)",
+      "queue_reason": "E4 chain closed on main@533f75b; Q-R1 is the next frozen mainline item: implement ADR-003 sections 3-6 and the profile_report.v1 canonical body/digest (section 9) as a bounded deterministic streaming profiler with 25 dedicated evidence tests.",
+      "notes": "Contract: ADR-003 via PR #105; Q-C0 acceptance #136 APPROVE. Scope: stillflow-engine (+core only if stable domain values added; avoid to keep core lock free) + Cargo.lock. Frozen constants exactly per ADR-003 section 3.1; no sampling parameter. Float sum/mean order-invariant exact method (superaccumulator/eft-over-multiset standard: identical multisets bit-identical across partitions); integer histogram exact i128; float histogram infinite-width branch before general formula; -0.0 normalized. Canonical JSON per section 9 (sorted keys, pinned escaping, 16-hex uppercase floats, temporal tags, rationals reduced, run-id/provenance excluded) + lowercase-hex SHA-256 digest + golden fixtures. Reuse run gate MAX_ENGINE_CONCURRENT_RUNS and RequestContext; deadline required; no second concurrency system. Distinct overflow = absent+flag (no HLL/sampling); fixed budget exhaustion = existing typed resource-limit. Forbidden: Q-R2, QualityScore, AI findings, history/drift, E5, storage, frontend, #158, #151, E4 semantics, sampled metrics, unrelated micro-optimization. Terminal verdicts: READY_FOR_Q_R1_INDEPENDENT_ACCEPTANCE | Q_R1_SEMANTIC_REJECT | Q_R1_MEMORY_BOUND_REJECT | Q_R1_SCOPE_BLOCKED. Draft PR only; independent acceptance next; not Ready/merged by this task."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T10:06:23Z"
+  "updated_at": "2026-08-29T10:23:00Z"
 }
