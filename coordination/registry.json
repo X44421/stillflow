@@ -3086,8 +3086,49 @@
       "result_head": "31e5e397145afcc23957456f16bc72514b4a8c93",
       "ci_url": null,
       "completion_note": "MERGED_E4_S1_CANONICAL_FIDELITY - sha-guarded normal merge commit executed after four-anchor re-verification (main 25c110d8 unchanged; PR #177 head f91dc84; R2 APPROVE comment 5460783528 bound to that head; CI 33237305567 success on that head; mergeable CLEAN). Merge commit 31e5e397145afcc23957456f16bc72514b4a8c93 with verified parents [25c110d8fbffa37515a539c652de11d09c512a39, f91dc8495be89e68aed7ecb72201164b1d8b2e96]; merge_method=merge (not squash/rebase); PR #177 marked Ready only inside this task and merged at the guarded head. New main SHA = 31e5e397145afcc23957456f16bc72514b4a8c93. merge:main lock released. No source edits, no force-push, no PR-body rewrite, no #175/#91 mutation. Next: E4-S2-REBIND-R2 dispatch by the maintainer."
+    },
+    {
+      "id": "E4-S2-REBIND-R2",
+      "title": "Rebind E4-S2 engine reconstruction onto post-storage-fix main and run full V01-V31 final gates (issue #171 / PR #175)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 171,
+      "target_pr": 175,
+      "target_branch": "agent/e4-s2-final-rebind-verification",
+      "result_branch": "agent/e4-s2-final-rebind-verification",
+      "expected_base": "31e5e397145afcc23957456f16bc72514b4a8c93",
+      "starting_head": "f9529ce044e916d6dbcffce81bdfc99c405605d9",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/e4-s2-final-rebind-verification",
+        "engine:stillflow-engine"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/**",
+        "backend/Cargo.lock"
+      ],
+      "acceptance_keys": [
+        "r2:rebase-range-diff-semantic-preserved",
+        "r2:d2-scan-output-binding-wired",
+        "r2:three-repros-green",
+        "r2:v01-v31-full-rerun",
+        "r2:o0-regression-intact",
+        "r2:fmt-clippy-tests-gitdiff",
+        "r2:ci-green-exact-head"
+      ],
+      "depends_on": [
+        "E4-S1-CANONICAL-FIDELITY-MERGE"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-29T06:50:27Z",
+      "queued_by": "maintainer:frozen-topology-2026-08-29 (R2 dispatch)",
+      "queue_reason": "Storage fix merged (main 31e5e39): rebase the completed E4-S2 engine reconstruction onto new main, wire with_rejected_source_schema(prepared.scan_output) as the single production seam, un-ignore the three blocked repros, and re-run the full V01-V31 final gates on the new base.",
+      "notes": "Rebase authorized this round (record old head f9529ce, range-diff after). Engine reconstruction semantics preserved; do not restart from #91; do not copy storage implementation (already in main). D2 wiring: VerificationBundleDraft must receive prepared.scan_output (the frozen logical Scan-output schema), never the materialized schema; bundles without a rejected artifact unaffected; storage fail-closed must not be bypassed. Un-ignore the three blocked repro tests as-is/minimally adapted; no test deletion or assertion weakening. Non-mechanical conflicts in verification.rs/preflight.rs/lower.rs from main Engine behavior = STOP and report. Gates: fmt --all --check, clippy --workspace --all-targets --all-features -D warnings, cargo test -p stillflow-engine -p stillflow-storage --no-fail-fast, cargo test --workspace --all-features --no-fail-fast, git diff --check, exact-head CI; Windows platform failures disclosed A/B on clean main/head, never patched around. Terminal verdicts: READY_FOR_E4_S2_FINAL_ACCEPTANCE | E4_S2_REBIND_R2_SEMANTIC_REJECT | E4_S2_REBIND_R2_SCOPE_BLOCKED. Not Ready, not merged; E4-S2-FINAL-ACCEPT dispatches next."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T06:41:51Z"
+  "updated_at": "2026-08-29T06:50:27Z"
 }
