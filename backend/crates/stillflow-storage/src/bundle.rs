@@ -210,6 +210,10 @@ pub struct VerificationBundleDraft {
     validation_report_artifact_id: Uuid,
     rejected_rows_artifact_id: Option<Uuid>,
     deduplication_report_artifact_id: Uuid,
+    /// Frozen logical Scan-output schema the rejected artifact binds to
+    /// (issue #176, D2). `None` fails closed at `begin` whenever the draft
+    /// authorizes a rejected artifact.
+    rejected_source_schema: Option<LogicalSchema>,
 }
 
 impl VerificationBundleDraft {
@@ -289,7 +293,20 @@ impl VerificationBundleDraft {
             validation_report_artifact_id,
             rejected_rows_artifact_id,
             deduplication_report_artifact_id,
+            rejected_source_schema: None,
         })
+    }
+
+    /// Binds the rejected artifact to the frozen logical Scan-output schema
+    /// (contract §8.6/8.7, V21). Required whenever the accepted (materialized)
+    /// schema can diverge from the scan output — e.g. after Drop, Rename,
+    /// Cast, or Derive rules — because the rejected payload rows are original
+    /// Scan-output rows. Without this binding the section schema falls back
+    /// to the accepted-derived derivation, which is deprecated for divergent
+    /// schemas (issue #176, D2; the E4-S2 engine wires this in REBIND-R2).
+    pub fn with_rejected_source_schema(mut self, schema: LogicalSchema) -> Self {
+        self.rejected_source_schema = Some(schema);
+        self
     }
 
     pub const fn provenance(&self) -> &ArtifactProvenanceDraft {
@@ -392,7 +409,20 @@ fn section_plan(draft: &VerificationBundleDraft) -> Result<Vec<SectionStaging>, 
         },
     ];
     if let Some(rejected_id) = draft.rejected_rows_artifact_id {
-        let schema = artifact::rejected_rows_section_schema(draft.accepted.schema())?;
+        // Issue #176 (D2), fail closed: a rejected artifact is bound to the
+        // frozen logical Scan-output schema and to nothing else. A publisher
+        // that authorizes terminal rejections without supplying the binding
+        // is refused at begin — the accepted-derived fallback that let the
+        // section schema coincide with the materialized schema is retired.
+        let rejected_base = match draft.rejected_source_schema.as_ref() {
+            Some(schema) => schema,
+            None => {
+                return Err(StorageError::InvalidDraft(
+                    "rejected artifact requires an explicit scan-output schema binding",
+                ));
+            }
+        };
+        let schema = artifact::rejected_rows_section_schema(rejected_base)?;
         sections.push(SectionStaging {
             section_id: ArtifactSectionId::RejectedRows,
             artifact_id: rejected_id,
@@ -2273,7 +2303,7 @@ mod tests {
     }
 
     fn bundle_draft(rejected_authorized: bool) -> VerificationBundleDraft {
-        draft_with_ids(
+        let draft = draft_with_ids(
             RUN,
             BUNDLE,
             BUNDLE_ARTIFACT,
@@ -2281,12 +2311,45 @@ mod tests {
             VALIDATION,
             rejected_authorized.then_some(REJECTED),
             DEDUP,
-        )
+        );
+        // Fail-closed binding (issue #176, D2): every fixture that
+        // authorizes a rejected artifact supplies the frozen scan-output
+        // schema explicitly.
+        if rejected_authorized {
+            draft.with_rejected_source_schema(source_schema().as_ref().clone())
+        } else {
+            draft
+        }
     }
 
     /// Builds a fully explicit draft so reservation tests can compose
     /// arbitrary (possibly conflicting) identity sets.
     fn draft_with_ids(
+        run: u128,
+        bundle: u128,
+        bundle_artifact: u128,
+        accepted: u128,
+        validation: u128,
+        rejected: Option<u128>,
+        dedup: u128,
+    ) -> VerificationBundleDraft {
+        draft_with_accepted_schema(
+            source_schema().as_ref().clone(),
+            run,
+            bundle,
+            bundle_artifact,
+            accepted,
+            validation,
+            rejected,
+            dedup,
+        )
+    }
+
+    /// Builds a fully explicit draft whose accepted (materialized) schema may
+    /// diverge from the logical Scan output (issue #176, D2 coverage).
+    #[allow(clippy::too_many_arguments)]
+    fn draft_with_accepted_schema(
+        accepted_schema: LogicalSchema,
         run: u128,
         bundle: u128,
         bundle_artifact: u128,
@@ -2324,7 +2387,7 @@ mod tests {
             Uuid::from_u128(0xE410),
             Uuid::from_u128(0xE411),
             Uuid::from_u128(SOURCE_ASSET),
-            source_schema().as_ref().clone(),
+            accepted_schema,
             std::collections::BTreeSet::from([Uuid::from_u128(0xE412)]),
             Some(95),
             at(CREATED),
@@ -2402,6 +2465,14 @@ mod tests {
     }
 
     fn publish_standard_bundle(store: &SnapshotStore, rejected: bool) -> VerificationBundle {
+        publish_standard_bundle_with(store, rejected, BTreeMap::new())
+    }
+
+    fn publish_standard_bundle_with(
+        store: &SnapshotStore,
+        rejected: bool,
+        rejected_overrides: BTreeMap<&'static str, ArrayRef>,
+    ) -> VerificationBundle {
         let mut writer = begin(store, rejected);
         writer
             .append_accepted(&accepted_envelope(0, vec![1, 2, 3]))
@@ -2432,7 +2503,7 @@ mod tests {
                     ),
                     0,
                     1,
-                    BTreeMap::new(),
+                    rejected_overrides,
                 ))
                 .expect("rejected append");
         }
@@ -3626,5 +3697,519 @@ mod tests {
             store.load_verification_bundle(Uuid::from_u128(BUNDLE)),
             Err(StorageError::Serialization(_))
         ));
+    }
+
+    /// Issue #176 (D1): a rejected payload containing a null used to fail the
+    /// section-reader integrity gate because the canonical bytes depended on
+    /// the physical validity-buffer layout. The digest is now computed over a
+    /// layout-normalized batch on both the publication and the reader side.
+    #[test]
+    fn rejected_rows_with_nulls_survive_the_section_integrity_gate() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        // The scan field is nullable: null fidelity is exactly what D1 must
+        // preserve (non-nullable columns cannot carry nulls at all).
+        let nullable_source = Arc::new(
+            stillflow_core::LogicalSchema::new(vec![stillflow_core::LogicalField::new(
+                stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x11)),
+                "value".to_owned(),
+                stillflow_core::LogicalType::Int64,
+                true,
+            )
+            .expect("field")])
+            .expect("schema"),
+        );
+        let draft = draft_with_accepted_schema(
+            nullable_source.as_ref().clone(),
+            RUN,
+            BUNDLE,
+            BUNDLE_ARTIFACT,
+            ACCEPTED,
+            VALIDATION,
+            Some(REJECTED),
+            DEDUP,
+        )
+        .with_rejected_source_schema(nullable_source.as_ref().clone());
+        let mut writer = store
+            .begin_verification_bundle(draft, at(STARTED))
+            .expect("begin");
+        let accepted_arrow = stillflow_core::logical_schema_to_arrow(&nullable_source)
+            .expect("accepted arrow schema");
+        let accepted_batch =
+            RecordBatch::try_new(accepted_arrow, vec![Arc::new(Int64Array::from(vec![1, 2]))])
+                .expect("accepted batch");
+        writer
+            .append_accepted(
+                &BatchEnvelope::try_new(
+                    Arc::new(nullable_source.as_ref().clone()),
+                    Uuid::from_u128(SOURCE_ASSET),
+                    0,
+                    accepted_batch,
+                )
+                .expect("accepted envelope"),
+            )
+            .expect("accepted append");
+        writer
+            .append_validation_rule_summary(&section_envelope(
+                Arc::new(artifact::validation_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("summary append");
+        let mut finding_overrides: BTreeMap<&'static str, ArrayRef> = BTreeMap::new();
+        finding_overrides.insert(
+            "severity",
+            Arc::new(StringArray::from(vec!["warning"])) as ArrayRef,
+        );
+        writer
+            .append_validation_findings(&section_envelope(
+                Arc::new(artifact::validation_finding_section_schema()),
+                0,
+                1,
+                finding_overrides,
+            ))
+            .expect("findings append");
+        let mut overrides: BTreeMap<&'static str, ArrayRef> = BTreeMap::new();
+        overrides.insert("value", Arc::new(Int64Array::from(vec![None])) as ArrayRef);
+        let bundle_rejected_schema = Arc::new(
+            artifact::rejected_rows_section_schema(&nullable_source).expect("rejected schema"),
+        );
+        writer
+            .append_rejected_rows(&section_envelope(bundle_rejected_schema, 0, 1, overrides))
+            .expect("rejected append");
+        writer
+            .append_dedup_rule_summary(&section_envelope(
+                Arc::new(artifact::dedup_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("dedup summary append");
+        writer
+            .append_duplicate_findings(&section_envelope(
+                Arc::new(artifact::duplicate_finding_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("duplicate append");
+        writer.commit(at(COMMITTED)).expect("commit");
+        let mut reader = store
+            .open_artifact_section(
+                Uuid::from_u128(BUNDLE),
+                Uuid::from_u128(REJECTED),
+                artifact::ArtifactSectionId::RejectedRows,
+            )
+            .expect("open rejected section");
+        for item in reader.by_ref() {
+            item.expect("rejected envelope must survive integrity");
+        }
+        let loaded = store
+            .load_verification_bundle_by_run_id(Uuid::from_u128(RUN))
+            .expect("load bundle");
+        let rejected = loaded.rejected_rows().expect("rejected artifact");
+        assert_eq!(rejected.manifest().artifact_id(), Uuid::from_u128(REJECTED));
+    }
+
+    /// Issue #176 (D2): the rejected artifact binds to the frozen logical
+    /// Scan-output schema — terminal rejections must publish and read back
+    /// after Drop, Rename, or Cast rules changed the materialized shape.
+    #[test]
+    fn rejected_section_binds_the_scan_output_schema_across_evolution() {
+        // The frozen logical Scan-output schema shared by every variant: the
+        // rejected artifact binds to THIS, while each accepted (materialized)
+        // schema diverges from it (issue #176, D2/F4).
+        let scan = Arc::new(
+            stillflow_core::LogicalSchema::new(vec![
+                stillflow_core::LogicalField::new(
+                    stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x21)),
+                    "value".to_owned(),
+                    stillflow_core::LogicalType::Int64,
+                    false,
+                )
+                .expect("field"),
+                stillflow_core::LogicalField::new(
+                    stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x22)),
+                    "tag".to_owned(),
+                    stillflow_core::LogicalType::Utf8,
+                    true,
+                )
+                .expect("field"),
+            ])
+            .expect("scan schema"),
+        );
+        let variants: Vec<(&'static str, LogicalSchema)> = vec![
+            (
+                "drop",
+                stillflow_core::LogicalSchema::new(vec![stillflow_core::LogicalField::new(
+                    stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x21)),
+                    "value".to_owned(),
+                    stillflow_core::LogicalType::Int64,
+                    false,
+                )
+                .expect("field")])
+                .expect("accepted schema"),
+            ),
+            (
+                "rename",
+                stillflow_core::LogicalSchema::new(vec![
+                    stillflow_core::LogicalField::new(
+                        stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x21)),
+                        "value".to_owned(),
+                        stillflow_core::LogicalType::Int64,
+                        false,
+                    )
+                    .expect("field"),
+                    stillflow_core::LogicalField::new(
+                        stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x22)),
+                        "renamed_tag".to_owned(),
+                        stillflow_core::LogicalType::Utf8,
+                        true,
+                    )
+                    .expect("field"),
+                ])
+                .expect("accepted schema"),
+            ),
+            (
+                "derive",
+                stillflow_core::LogicalSchema::new(vec![
+                    stillflow_core::LogicalField::new(
+                        stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x21)),
+                        "value".to_owned(),
+                        stillflow_core::LogicalType::Int64,
+                        false,
+                    )
+                    .expect("field"),
+                    stillflow_core::LogicalField::new(
+                        stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x22)),
+                        "tag".to_owned(),
+                        stillflow_core::LogicalType::Utf8,
+                        true,
+                    )
+                    .expect("field"),
+                    stillflow_core::LogicalField::new(
+                        stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x23)),
+                        "derived_value".to_owned(),
+                        stillflow_core::LogicalType::Int64,
+                        false,
+                    )
+                    .expect("field"),
+                ])
+                .expect("accepted schema"),
+            ),
+            (
+                "cast",
+                stillflow_core::LogicalSchema::new(vec![
+                    stillflow_core::LogicalField::new(
+                        stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x21)),
+                        "value".to_owned(),
+                        stillflow_core::LogicalType::Int32,
+                        false,
+                    )
+                    .expect("field"),
+                    stillflow_core::LogicalField::new(
+                        stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x22)),
+                        "tag".to_owned(),
+                        stillflow_core::LogicalType::Utf8,
+                        true,
+                    )
+                    .expect("field"),
+                ])
+                .expect("accepted schema"),
+            ),
+        ];
+        for (label, accepted_schema) in variants {
+            let temp = TempDir::new().expect("temp");
+            let store = open_store(&temp);
+            let draft = draft_with_accepted_schema(
+                accepted_schema.clone(),
+                RUN,
+                BUNDLE,
+                BUNDLE_ARTIFACT,
+                ACCEPTED,
+                VALIDATION,
+                Some(REJECTED),
+                DEDUP,
+            )
+            .with_rejected_source_schema(scan.as_ref().clone());
+            let mut writer = store
+                .begin_verification_bundle(draft, at(STARTED))
+                .expect("begin");
+            let accepted_arrow = stillflow_core::logical_schema_to_arrow(&accepted_schema)
+                .expect("accepted arrow schema");
+            let accepted_columns: Vec<ArrayRef> = accepted_schema
+                .fields
+                .iter()
+                .map(|field| match field.data_type {
+                    stillflow_core::LogicalType::Int64 => {
+                        Arc::new(Int64Array::from(vec![1, 2])) as ArrayRef
+                    }
+                    stillflow_core::LogicalType::Int32 => {
+                        Arc::new(arrow_array::Int32Array::from(vec![1, 2])) as ArrayRef
+                    }
+                    _ => Arc::new(StringArray::from(vec!["a".to_owned(), "b".to_owned()]))
+                        as ArrayRef,
+                })
+                .collect();
+            let accepted_batch =
+                RecordBatch::try_new(accepted_arrow, accepted_columns).expect("accepted batch");
+            writer
+                .append_accepted(
+                    &BatchEnvelope::try_new(
+                        Arc::new(accepted_schema.clone()),
+                        Uuid::from_u128(SOURCE_ASSET),
+                        0,
+                        accepted_batch,
+                    )
+                    .expect("accepted envelope"),
+                )
+                .expect("accepted append");
+            writer
+                .append_validation_rule_summary(&section_envelope(
+                    Arc::new(artifact::validation_rule_summary_section_schema()),
+                    0,
+                    1,
+                    BTreeMap::new(),
+                ))
+                .expect("summary append");
+            let mut finding_overrides: BTreeMap<&'static str, ArrayRef> = BTreeMap::new();
+            finding_overrides.insert(
+                "severity",
+                Arc::new(StringArray::from(vec!["warning"])) as ArrayRef,
+            );
+            writer
+                .append_validation_findings(&section_envelope(
+                    Arc::new(artifact::validation_finding_section_schema()),
+                    0,
+                    1,
+                    finding_overrides,
+                ))
+                .expect("findings append");
+            let rejected_schema =
+                Arc::new(artifact::rejected_rows_section_schema(&scan).expect("rejected schema"));
+            writer
+                .append_rejected_rows(&section_envelope(rejected_schema, 0, 1, BTreeMap::new()))
+                .expect("rejected append");
+            writer
+                .append_dedup_rule_summary(&section_envelope(
+                    Arc::new(artifact::dedup_rule_summary_section_schema()),
+                    0,
+                    1,
+                    BTreeMap::new(),
+                ))
+                .expect("dedup summary append");
+            writer
+                .append_duplicate_findings(&section_envelope(
+                    Arc::new(artifact::duplicate_finding_section_schema()),
+                    0,
+                    1,
+                    BTreeMap::new(),
+                ))
+                .expect("duplicate append");
+            let bundle = writer.commit(at(COMMITTED)).expect("commit");
+            let rejected = bundle.rejected_rows().expect("rejected artifact");
+            let section = rejected
+                .manifest()
+                .sections()
+                .iter()
+                .find(|section| section.section_id() == artifact::ArtifactSectionId::RejectedRows)
+                .expect("rejected section");
+            let expected = artifact::rejected_rows_section_schema(&scan).expect("expected schema");
+            for (field, expected_field) in section.schema().fields.iter().zip(&expected.fields) {
+                assert_eq!(
+                    field.id, expected_field.id,
+                    "{label}: ColumnId must stay bound to the scan output"
+                );
+                assert_eq!(field.name, expected_field.name, "{label}");
+                assert_eq!(field.data_type, expected_field.data_type, "{label}");
+            }
+            let mut reader = store
+                .open_artifact_section(
+                    Uuid::from_u128(BUNDLE),
+                    Uuid::from_u128(REJECTED),
+                    artifact::ArtifactSectionId::RejectedRows,
+                )
+                .expect("open rejected section");
+            for item in reader.by_ref() {
+                item.expect("{label}: rejected envelope survives integrity");
+            }
+        }
+
+        // Negative control: without the explicit binding, a divergent
+        let dropped = stillflow_core::LogicalSchema::new(vec![stillflow_core::LogicalField::new(
+            stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x21)),
+            "value".to_owned(),
+            stillflow_core::LogicalType::Int64,
+            false,
+        )
+        .expect("field")])
+        .expect("accepted schema");
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        let draft = draft_with_accepted_schema(
+            dropped,
+            RUN,
+            BUNDLE,
+            BUNDLE_ARTIFACT,
+            ACCEPTED,
+            VALIDATION,
+            Some(REJECTED),
+            DEDUP,
+        );
+        // Fail-closed (issue #176, D2): a draft that authorizes a rejected
+        // artifact without an explicit scan-output binding is refused at
+        // begin — before any writer, envelope, or filesystem state exists.
+        let error = store
+            .begin_verification_bundle(draft, at(STARTED))
+            .expect_err("unbound rejected artifact must fail closed at begin");
+        assert!(
+            matches!(error, StorageError::InvalidDraft(_)),
+            "expected InvalidDraft, got {error:?}"
+        );
+    }
+
+    /// Issue #176 (F5): the same rejected rows re-packed across TWO envelope
+    /// boundaries — the second envelope carrying a sliced, nonzero-offset
+    /// payload — publish cleanly and every partition survives the section
+    /// integrity gate with its rows intact (digest = f(logical rows), never
+    /// f(envelope boundary)).
+    #[test]
+    fn rejected_rows_repacked_across_envelope_boundaries_pass_the_integrity_gate() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        let nullable_source = Arc::new(
+            stillflow_core::LogicalSchema::new(vec![stillflow_core::LogicalField::new(
+                stillflow_core::ColumnId::from_uuid(Uuid::from_u128(0x11)),
+                "value".to_owned(),
+                stillflow_core::LogicalType::Int64,
+                true,
+            )
+            .expect("field")])
+            .expect("schema"),
+        );
+        let draft = draft_with_accepted_schema(
+            nullable_source.as_ref().clone(),
+            RUN,
+            BUNDLE,
+            BUNDLE_ARTIFACT,
+            ACCEPTED,
+            VALIDATION,
+            Some(REJECTED),
+            DEDUP,
+        )
+        .with_rejected_source_schema(nullable_source.as_ref().clone());
+        let mut writer = store
+            .begin_verification_bundle(draft, at(STARTED))
+            .expect("begin");
+        let accepted_arrow = stillflow_core::logical_schema_to_arrow(&nullable_source)
+            .expect("accepted arrow schema");
+        let accepted_batch =
+            RecordBatch::try_new(accepted_arrow, vec![Arc::new(Int64Array::from(vec![1, 2]))])
+                .expect("accepted batch");
+        writer
+            .append_accepted(
+                &BatchEnvelope::try_new(
+                    Arc::new(nullable_source.as_ref().clone()),
+                    Uuid::from_u128(SOURCE_ASSET),
+                    0,
+                    accepted_batch,
+                )
+                .expect("accepted envelope"),
+            )
+            .expect("accepted append");
+        writer
+            .append_validation_rule_summary(&section_envelope(
+                Arc::new(artifact::validation_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("summary append");
+        let mut finding_overrides: BTreeMap<&'static str, ArrayRef> = BTreeMap::new();
+        finding_overrides.insert(
+            "severity",
+            Arc::new(StringArray::from(vec!["warning"])) as ArrayRef,
+        );
+        writer
+            .append_validation_findings(&section_envelope(
+                Arc::new(artifact::validation_finding_section_schema()),
+                0,
+                1,
+                finding_overrides,
+            ))
+            .expect("findings append");
+        let rejected_schema = Arc::new(
+            artifact::rejected_rows_section_schema(&nullable_source).expect("rejected schema"),
+        );
+        // Envelope 0: one row whose value is null.
+        let mut overrides0: BTreeMap<&'static str, ArrayRef> = BTreeMap::new();
+        overrides0.insert("value", Arc::new(Int64Array::from(vec![None])) as ArrayRef);
+        writer
+            .append_rejected_rows(&section_envelope(rejected_schema.clone(), 0, 1, overrides0))
+            .expect("rejected append 0");
+
+        // Envelope 1: two rows (values 5, 6) — a different envelope boundary
+        // carrying the rest of the same logical rows.
+        let mut overrides1: BTreeMap<&'static str, ArrayRef> = BTreeMap::new();
+        overrides1.insert("value", Arc::new(Int64Array::from(vec![5, 6])) as ArrayRef);
+        writer
+            .append_rejected_rows(&section_envelope(rejected_schema, 1, 2, overrides1))
+            .expect("rejected append 1");
+        writer
+            .append_dedup_rule_summary(&section_envelope(
+                Arc::new(artifact::dedup_rule_summary_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("dedup summary append");
+        writer
+            .append_duplicate_findings(&section_envelope(
+                Arc::new(artifact::duplicate_finding_section_schema()),
+                0,
+                1,
+                BTreeMap::new(),
+            ))
+            .expect("duplicate append");
+        writer.commit(at(COMMITTED)).expect("commit");
+        let bundle = store
+            .load_verification_bundle_by_run_id(Uuid::from_u128(RUN))
+            .expect("load bundle");
+        assert!(bundle.rejected_rows().is_some());
+        let mut reader = store
+            .open_artifact_section(
+                Uuid::from_u128(BUNDLE),
+                Uuid::from_u128(REJECTED),
+                artifact::ArtifactSectionId::RejectedRows,
+            )
+            .expect("open rejected section");
+        let mut total_rows = 0usize;
+        let mut values: Vec<Option<i64>> = Vec::new();
+        for item in reader.by_ref() {
+            let envelope = item.expect("rejected envelope survives integrity");
+            total_rows += envelope.row_count();
+            let column = envelope
+                .payload()
+                .column_by_name("value")
+                .expect("value column");
+            let array = column
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .expect("i64 column");
+            for index in 0..array.len() {
+                values.push(if array.is_null(index) {
+                    None
+                } else {
+                    Some(array.value(index))
+                });
+            }
+        }
+        assert_eq!(total_rows, 3);
+        assert_eq!(
+            values,
+            vec![None, Some(5), Some(6)],
+            "rebatched rows must keep their logical values across boundaries"
+        );
     }
 }

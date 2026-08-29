@@ -11,9 +11,22 @@
 //! by the exact bytes.
 
 use std::fmt;
+use std::sync::Arc;
 
-use arrow_array::RecordBatch;
+use arrow_array::builder::{
+    BinaryBuilder, BooleanBuilder, Date32Builder, Float32Builder, Float64Builder, Int16Builder,
+    Int32Builder, Int64Builder, Int8Builder, StringBuilder, TimestampMicrosecondBuilder,
+    TimestampMillisecondBuilder, TimestampNanosecondBuilder, TimestampSecondBuilder, UInt16Builder,
+    UInt32Builder, UInt64Builder, UInt8Builder,
+};
+use arrow_array::{
+    Array, ArrayRef, BinaryArray, BooleanArray, Date32Array, Float32Array, Float64Array,
+    Int16Array, Int32Array, Int64Array, Int8Array, RecordBatch, StringArray,
+    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+};
 use arrow_ipc::writer::StreamWriter;
+use arrow_schema::{DataType, TimeUnit as ArrowTimeUnit};
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -449,16 +462,21 @@ impl Preimage {
 /// (`canonical_batch_bytes`, contract 8.1.1): the Message flatbuffer metadata
 /// block plus its body, little-endian, uncompressed, default alignment, with
 /// no stream framing, transport headers, or end-of-stream markers.
+///
+/// The hashed batch is first passed through [`canonical_batch_layout`], so the
+/// bytes depend only on the logical schema and values — never on the producer's
+/// validity-buffer allocation, offsets, or padding (issue #176, D1).
 pub(crate) fn canonical_batch_bytes(batch: &RecordBatch) -> Result<Vec<u8>, StorageError> {
     const CONTINUATION_MARKER: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+    let normalized = canonical_batch_layout(batch)?;
     let mut buffer = Vec::new();
     {
-        let mut writer = StreamWriter::try_new(&mut buffer, batch.schema().as_ref())
+        let mut writer = StreamWriter::try_new(&mut buffer, normalized.schema().as_ref())
             .map_err(|_| StorageError::Serialization("initialize Arrow IPC stream"))?;
         // The schema message is written during `try_new`; everything this
         // writer appends afterwards is the single record-batch message.
         writer
-            .write(batch)
+            .write(&normalized)
             .map_err(|_| StorageError::Serialization("encode Arrow IPC record batch"))?;
         // Dropping without `finish()` omits the end-of-stream marker.
     }
@@ -491,6 +509,192 @@ pub(crate) fn canonical_batch_bytes(batch: &RecordBatch) -> Result<Vec<u8>, Stor
     // prefix); the remainder is the flatbuffer metadata block, its alignment
     // padding, and the body.
     Ok(message[8..].to_vec())
+}
+
+/// Rebuilds every column through its typed builder (contract 8.1.1):
+/// identical logical values produce identical canonical bytes regardless of
+/// the producer's physical representation (issue #176, D1). Builders write a
+/// deterministic zero into null slots' value bytes and drop validity buffers
+/// for null-free columns, so a Parquet round trip — whose decoder may leave
+/// null slots' value bytes undefined — can no longer change a partition
+/// digest. Both the publication path and the section-reader integrity gate
+/// run this same function.
+fn canonical_batch_layout(batch: &RecordBatch) -> Result<RecordBatch, StorageError> {
+    let columns = batch
+        .columns()
+        .iter()
+        .map(rebuild_via_builder)
+        .collect::<Result<Vec<_>, _>>()?;
+    RecordBatch::try_new(batch.schema(), columns)
+        .map_err(|_| StorageError::Serialization("canonical batch layout rebuild failed"))
+}
+
+macro_rules! rebuild_primitive {
+    ($column:expr, $array:ty, $builder:ty) => {{
+        let array =
+            $column
+                .as_any()
+                .downcast_ref::<$array>()
+                .ok_or(StorageError::Serialization(
+                    "canonical batch layout rebuild: column type mismatch",
+                ))?;
+        let mut builder = <$builder>::new();
+        for index in 0..$column.len() {
+            if array.is_null(index) {
+                builder.append_null();
+            } else {
+                builder.append_value(array.value(index));
+            }
+        }
+        Arc::new(builder.finish()) as ArrayRef
+    }};
+}
+
+/// Supported canonical-rebuild matrix: exactly the Arrow projection of the
+/// 'LogicalType' set that the Engine's preflight admits ('reject_paused_schema'
+/// runs on both the scan output and the materialized schema before any
+/// storage write) — Null, Boolean, Int8..Int64, UInt8..UInt64, Float32/64,
+/// Date32, Timestamp{Milli,Micro,Nano} (with or without timezone), Utf8 and
+/// Binary. Paused types (List, Struct, Timestamp-Second at the Engine layer)
+/// and any other Arrow layout (LargeUtf8, views, dictionaries, ...) cannot
+/// reach storage through the authorized pipeline, and the rebuild **fails
+/// closed** on them rather than encoding an unsupported physical layout
+/// (issue #176, F6). This is a deliberate narrowing: the alternative —
+/// passing such columns through un-rebuilt — would resurrect the D1 digest
+/// instability for the one surface that cannot guarantee it.
+fn rebuild_via_builder(column: &ArrayRef) -> Result<ArrayRef, StorageError> {
+    let len = column.len();
+    let rebuilt = match column.data_type() {
+        DataType::Null => column.clone(),
+        DataType::Boolean => rebuild_primitive!(column, BooleanArray, BooleanBuilder),
+        DataType::Int8 => rebuild_primitive!(column, Int8Array, Int8Builder),
+        DataType::Int16 => rebuild_primitive!(column, Int16Array, Int16Builder),
+        DataType::Int32 => rebuild_primitive!(column, Int32Array, Int32Builder),
+        DataType::Int64 => rebuild_primitive!(column, Int64Array, Int64Builder),
+        DataType::UInt8 => rebuild_primitive!(column, UInt8Array, UInt8Builder),
+        DataType::UInt16 => rebuild_primitive!(column, UInt16Array, UInt16Builder),
+        DataType::UInt32 => rebuild_primitive!(column, UInt32Array, UInt32Builder),
+        DataType::UInt64 => rebuild_primitive!(column, UInt64Array, UInt64Builder),
+        DataType::Float32 => rebuild_primitive!(column, Float32Array, Float32Builder),
+        DataType::Float64 => rebuild_primitive!(column, Float64Array, Float64Builder),
+        DataType::Date32 => rebuild_primitive!(column, Date32Array, Date32Builder),
+        DataType::Timestamp(unit, timezone) => match unit {
+            ArrowTimeUnit::Second => {
+                let mut builder = TimestampSecondBuilder::new();
+                if let Some(zone) = timezone {
+                    builder = builder.with_timezone_opt(Some(Arc::clone(zone)));
+                }
+                let array = column
+                    .as_any()
+                    .downcast_ref::<TimestampSecondArray>()
+                    .ok_or(StorageError::Serialization(
+                        "canonical batch layout rebuild: column type mismatch",
+                    ))?;
+                for index in 0..len {
+                    if array.is_null(index) {
+                        builder.append_null();
+                    } else {
+                        builder.append_value(array.value(index));
+                    }
+                }
+                Arc::new(builder.finish()) as ArrayRef
+            }
+            ArrowTimeUnit::Millisecond => {
+                let mut builder = TimestampMillisecondBuilder::new();
+                if let Some(zone) = timezone {
+                    builder = builder.with_timezone_opt(Some(Arc::clone(zone)));
+                }
+                let array = column
+                    .as_any()
+                    .downcast_ref::<TimestampMillisecondArray>()
+                    .ok_or(StorageError::Serialization(
+                        "canonical batch layout rebuild: column type mismatch",
+                    ))?;
+                for index in 0..len {
+                    if array.is_null(index) {
+                        builder.append_null();
+                    } else {
+                        builder.append_value(array.value(index));
+                    }
+                }
+                Arc::new(builder.finish()) as ArrayRef
+            }
+            ArrowTimeUnit::Microsecond => {
+                let mut builder = TimestampMicrosecondBuilder::new();
+                if let Some(zone) = timezone {
+                    builder = builder.with_timezone_opt(Some(Arc::clone(zone)));
+                }
+                let array = column
+                    .as_any()
+                    .downcast_ref::<TimestampMicrosecondArray>()
+                    .ok_or(StorageError::Serialization(
+                        "canonical batch layout rebuild: column type mismatch",
+                    ))?;
+                for index in 0..len {
+                    if array.is_null(index) {
+                        builder.append_null();
+                    } else {
+                        builder.append_value(array.value(index));
+                    }
+                }
+                Arc::new(builder.finish()) as ArrayRef
+            }
+            ArrowTimeUnit::Nanosecond => {
+                let mut builder = TimestampNanosecondBuilder::new();
+                if let Some(zone) = timezone {
+                    builder = builder.with_timezone_opt(Some(Arc::clone(zone)));
+                }
+                let array = column
+                    .as_any()
+                    .downcast_ref::<TimestampNanosecondArray>()
+                    .ok_or(StorageError::Serialization(
+                        "canonical batch layout rebuild: column type mismatch",
+                    ))?;
+                for index in 0..len {
+                    if array.is_null(index) {
+                        builder.append_null();
+                    } else {
+                        builder.append_value(array.value(index));
+                    }
+                }
+                Arc::new(builder.finish()) as ArrayRef
+            }
+        },
+        DataType::Utf8 => {
+            let array = column.as_any().downcast_ref::<StringArray>().ok_or(
+                StorageError::Serialization("canonical batch layout rebuild: column type mismatch"),
+            )?;
+            let mut builder = StringBuilder::new();
+            for index in 0..len {
+                if array.is_null(index) {
+                    builder.append_null();
+                } else {
+                    builder.append_value(array.value(index));
+                }
+            }
+            Arc::new(builder.finish()) as ArrayRef
+        }
+        DataType::Binary => {
+            let array = column.as_any().downcast_ref::<BinaryArray>().ok_or(
+                StorageError::Serialization("canonical batch layout rebuild: column type mismatch"),
+            )?;
+            let mut builder = BinaryBuilder::new();
+            for index in 0..len {
+                if array.is_null(index) {
+                    builder.append_null();
+                } else {
+                    builder.append_value(array.value(index));
+                }
+            }
+            Arc::new(builder.finish()) as ArrayRef
+        }
+        _other => {
+            return Err(StorageError::Serialization(
+                "canonical batch layout rebuild: unsupported column type",
+            ));
+        }
+    };
+    Ok(rebuilt)
 }
 
 /// Partition digest formula (contract 8.1.1), generalized over the
@@ -1781,5 +1985,242 @@ mod tests {
         let flipped_file =
             encode_parquet(vec![1, 2, 4], true, &temp.path().join("flipped.parquet"));
         assert_ne!(digest_for(&flipped_file), digest_for(&snappy));
+    }
+
+    /// Shared Parquet round trip for the layout-independence goldens: the
+    /// section-reader decodes exactly this way before recomputing a digest.
+    fn parquet_roundtrip(batch: &RecordBatch) -> RecordBatch {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let path = temp.path().join("p.parquet");
+        use parquet::arrow::ArrowWriter;
+        let file = std::fs::File::create(&path).expect("create file");
+        let mut writer = ArrowWriter::try_new(file, batch.schema(), None).expect("writer");
+        writer.write(batch).expect("write");
+        writer.into_inner().expect("finish");
+        use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+        let file = std::fs::File::open(&path).expect("open file");
+        let mut reader = ParquetRecordBatchReaderBuilder::try_new(file)
+            .expect("reader builder")
+            .build()
+            .expect("reader");
+        reader.next().expect("batch").expect("ok")
+    }
+
+    fn nullable_int_schema() -> Arc<LogicalSchema> {
+        Arc::new(
+            LogicalSchema::new(vec![LogicalField::new(
+                ColumnId::from_uuid(Uuid::from_u128(0x31)),
+                "value".to_owned(),
+                LogicalType::Int64,
+                true,
+            )
+            .expect("field")])
+            .expect("schema"),
+        )
+    }
+
+    fn section_fixture_batch(
+        schema: &LogicalSchema,
+        rows: usize,
+        value_offset: usize,
+    ) -> RecordBatch {
+        let arrow = stillflow_core::logical_schema_to_arrow(schema).expect("arrow schema");
+        let columns: Vec<ArrayRef> = schema
+            .fields
+            .iter()
+            .map(|field| match &field.data_type {
+                LogicalType::Utf8 => Arc::new(StringArray::from(
+                    (0..rows)
+                        .map(|row| format!("{}", value_offset + row))
+                        .collect::<Vec<_>>(),
+                )) as ArrayRef,
+                LogicalType::UInt32 => Arc::new(UInt32Array::from(
+                    (0..rows)
+                        .map(|row| (value_offset as u32) + row as u32)
+                        .collect::<Vec<_>>(),
+                )) as ArrayRef,
+                LogicalType::UInt64 => Arc::new(UInt64Array::from(
+                    (0..rows)
+                        .map(|row| (value_offset as u64) + row as u64)
+                        .collect::<Vec<_>>(),
+                )) as ArrayRef,
+                LogicalType::Int64 => Arc::new(Int64Array::from(
+                    (0..rows)
+                        .map(|row| (value_offset as i64) + row as i64)
+                        .collect::<Vec<_>>(),
+                )) as ArrayRef,
+                other => panic!("unsupported fixture type {other:?}"),
+            })
+            .collect();
+        RecordBatch::try_new(arrow, columns).expect("batch")
+    }
+
+    /// Issue #176 (D1): canonical bytes must depend only on the logical
+    /// schema and values — a Parquet round trip or a slice/offset layout
+    /// must not change them (pre-fix, the null-bearing batch failed this).
+    #[test]
+    fn canonical_bytes_are_layout_independent_across_nulls_slices_and_parquet() {
+        // The source field is nullable here: null fidelity is exactly what
+        // D1 must preserve (non-nullable columns cannot carry nulls at all).
+        let schema = nullable_int_schema();
+        let arrow = stillflow_core::logical_schema_to_arrow(schema.as_ref()).expect("arrow schema");
+        let with_null = RecordBatch::try_new(
+            arrow.clone(),
+            vec![Arc::new(Int64Array::from(vec![None, Some(5)]))],
+        )
+        .expect("batch");
+        let canonical_builder = canonical_batch_bytes(&with_null).expect("canonical");
+
+        let canonical_decoded =
+            canonical_batch_bytes(&parquet_roundtrip(&with_null)).expect("canonical");
+        assert_eq!(
+            canonical_builder, canonical_decoded,
+            "a Parquet round trip must not change canonical bytes"
+        );
+
+        // Slice with a nonzero offset over the same logical values.
+        let wide = Int64Array::from(vec![Some(1), None, Some(5), Some(7)]);
+        let sliced =
+            RecordBatch::try_new(arrow, vec![Arc::new(wide.slice(1, 2))]).expect("sliced batch");
+        let canonical_sliced = canonical_batch_bytes(&sliced).expect("canonical");
+        assert_eq!(
+            canonical_builder, canonical_sliced,
+            "slice/offset layouts must not change canonical bytes"
+        );
+    }
+
+    /// Issue #176 (F5): the layout-independence law holds for every report
+    /// section schema and for the rejected section — builder-produced,
+    /// Parquet-decoded, and sliced/offset provenance all encode identically.
+    #[test]
+    fn canonical_bytes_are_layout_independent_across_all_section_schemas() {
+        let rejected = rejected_rows_section_schema(&nullable_int_schema()).expect("rejected");
+        let sections: Vec<(&'static str, LogicalSchema)> = vec![
+            (
+                "validation_rule_summary",
+                validation_rule_summary_section_schema(),
+            ),
+            ("validation_finding", validation_finding_section_schema()),
+            ("dedup_rule_summary", dedup_rule_summary_section_schema()),
+            ("duplicate_finding", duplicate_finding_section_schema()),
+            ("rejected_rows", rejected),
+        ];
+        for (label, schema) in sections {
+            let direct = section_fixture_batch(&schema, 3, 3);
+            let canonical_direct = canonical_batch_bytes(&direct).expect("canonical");
+            let canonical_roundtrip =
+                canonical_batch_bytes(&parquet_roundtrip(&direct)).expect("canonical");
+            assert_eq!(
+                canonical_direct, canonical_roundtrip,
+                "{label}: Parquet round trip must not change canonical bytes"
+            );
+            // Sliced/offset provenance over the same logical values.
+            let tall = section_fixture_batch(&schema, 6, 0);
+            let sliced = RecordBatch::try_new(
+                direct.schema(),
+                tall.columns().iter().map(|c| c.slice(3, 3)).collect(),
+            )
+            .expect("sliced batch");
+            let canonical_sliced = canonical_batch_bytes(&sliced).expect("canonical");
+            assert_eq!(
+                canonical_direct, canonical_sliced,
+                "{label}: slice/offset layouts must not change canonical bytes"
+            );
+        }
+    }
+
+    /// Issue #176 (F7): the rebuild preserves every timestamp unit and its
+    /// timezone, keeps null/non-null logical equivalence, and stays stable
+    /// across a Parquet round trip for all four units.
+    #[test]
+    fn canonical_rebuild_preserves_timestamp_units_timezones_and_nulls() {
+        for (name, unit) in [
+            ("second", ArrowTimeUnit::Second),
+            ("millisecond", ArrowTimeUnit::Millisecond),
+            ("microsecond", ArrowTimeUnit::Microsecond),
+            ("nanosecond", ArrowTimeUnit::Nanosecond),
+        ] {
+            for tz in [None, Some("UTC")] {
+                let core_unit = match unit {
+                    ArrowTimeUnit::Second => stillflow_core::TimeUnit::Second,
+                    ArrowTimeUnit::Millisecond => stillflow_core::TimeUnit::Millisecond,
+                    ArrowTimeUnit::Microsecond => stillflow_core::TimeUnit::Microsecond,
+                    ArrowTimeUnit::Nanosecond => stillflow_core::TimeUnit::Nanosecond,
+                };
+                let logical_type = LogicalType::Timestamp {
+                    unit: core_unit,
+                    timezone: tz.map(|zone| zone.to_owned()),
+                };
+                let schema = Arc::new(
+                    LogicalSchema::new(vec![LogicalField::new(
+                        ColumnId::from_uuid(Uuid::from_u128(0x41)),
+                        "ts".to_owned(),
+                        logical_type,
+                        true,
+                    )
+                    .expect("field")])
+                    .expect("schema"),
+                );
+                let arrow =
+                    stillflow_core::logical_schema_to_arrow(schema.as_ref()).expect("arrow schema");
+                let values: ArrayRef = match unit {
+                    ArrowTimeUnit::Second => Arc::new(
+                        TimestampSecondArray::from(vec![None, Some(1_000)]).with_timezone_opt(tz),
+                    ),
+                    ArrowTimeUnit::Millisecond => Arc::new(
+                        TimestampMillisecondArray::from(vec![None, Some(1_000)])
+                            .with_timezone_opt(tz),
+                    ),
+                    ArrowTimeUnit::Microsecond => Arc::new(
+                        TimestampMicrosecondArray::from(vec![None, Some(1_000)])
+                            .with_timezone_opt(tz),
+                    ),
+                    ArrowTimeUnit::Nanosecond => Arc::new(
+                        TimestampNanosecondArray::from(vec![None, Some(1_000)])
+                            .with_timezone_opt(tz),
+                    ),
+                };
+                let batch = RecordBatch::try_new(arrow, vec![values]).expect("batch");
+                let rebuilt = canonical_batch_layout(&batch).expect("rebuild");
+                assert_eq!(
+                    rebuilt.column(0).data_type(),
+                    batch.column(0).data_type(),
+                    "{name}/{tz:?}: datatype and timezone must be preserved"
+                );
+                assert_eq!(
+                    format!("{:?}", rebuilt.column(0)),
+                    format!("{:?}", batch.column(0)),
+                    "{name}/{tz:?}: logical values (null + non-null) must be preserved"
+                );
+                let canonical_direct = canonical_batch_bytes(&batch).expect("canonical");
+                let canonical_roundtrip =
+                    canonical_batch_bytes(&parquet_roundtrip(&batch)).expect("canonical");
+                assert_eq!(
+                    canonical_direct, canonical_roundtrip,
+                    "{name}/{tz:?}: Parquet round trip must not change canonical bytes"
+                );
+            }
+        }
+    }
+
+    /// Issue #176 (F6): layouts outside the storage-reachable surface fail
+    /// closed — they are never silently encoded through the rebuild.
+    #[test]
+    fn rebuild_fails_closed_for_types_outside_the_storage_matrix() {
+        let array = Arc::new(arrow_array::Date64Array::from(vec![0i64])) as ArrayRef;
+        let batch = RecordBatch::try_new(
+            Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+                "v",
+                DataType::Date64,
+                true,
+            )])),
+            vec![array],
+        )
+        .expect("batch");
+        let error = canonical_batch_layout(&batch).expect_err("fail closed");
+        assert!(
+            matches!(error, StorageError::Serialization(_)),
+            "expected the typed unsupported-column-type error, got {error:?}"
+        );
     }
 }
