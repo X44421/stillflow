@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 241,
+  "revision": 242,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2973,9 +2973,9 @@
     {
       "id": "E4-S1-CANONICAL-FIDELITY-FIX-R1",
       "title": "Fix round R1: close F1-F7 from the canonical fidelity acceptance (issue #176 / PR #177)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-e4s1cfixr1-w1",
       "target_issue": 176,
       "target_pr": 177,
       "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
@@ -3003,14 +3003,29 @@
         "E4-S1-CANONICAL-FIDELITY-ACCEPT"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-29T05:20:31Z",
+      "lease_expires_at": "2026-08-29T08:21:49Z",
+      "started_at": "2026-08-29T05:21:49Z",
+      "updated_at": "2026-08-29T05:21:49Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29 (R1 dispatch)",
       "queue_reason": "Close the seven REQUEST_CHANGES findings on PR #177: F1 debug residue, F2 unused arrow-data dependency, F3 fail-closed rejected binding, F4 Derive variant, F5 section/rebatch layout goldens, F6 type-surface policy documentation, F7 timezone preservation across all four units.",
       "notes": "Writer identity must be fresh (not ox-alpha-e4s1caccept-w1). Same branch agent/issue-176-e4s1-canonical-fidelity-fix, starting head f135abd5; PR #177 stays Draft. Scope stillflow-storage only; engine/#175/#91/connector/frontend untouched; no Ready/merge. Terminal verdicts: READY_FOR_CANONICAL_FIDELITY_REACCEPTANCE or CANONICAL_FIDELITY_R1_SCOPE_BLOCKED. Required regressions: fmt --all --check, clippy -p stillflow-storage -D warnings, cargo test -p stillflow-storage, git diff --check, exact-head CI; Windows base failures disclosed A/B, never patched around."
     }
   ],
-  "locks": {},
-  "updated_at": "2026-08-29T05:20:31Z"
+  "locks": {
+    "branch:agent/issue-176-e4s1-canonical-fidelity-fix": {
+      "task_id": "E4-S1-CANONICAL-FIDELITY-FIX-R1",
+      "owner": "ox-alpha-e4s1cfixr1-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-29T05:21:49Z",
+      "lease_expires_at": "2026-08-29T08:21:49Z"
+    },
+    "storage:stillflow-storage": {
+      "task_id": "E4-S1-CANONICAL-FIDELITY-FIX-R1",
+      "owner": "ox-alpha-e4s1cfixr1-w1",
+      "expected_head": null,
+      "acquired_at": "2026-08-29T05:21:49Z",
+      "lease_expires_at": "2026-08-29T08:21:49Z"
+    }
+  },
+  "updated_at": "2026-08-29T05:21:49Z"
 }
