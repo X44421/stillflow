@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 239,
+  "revision": 240,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2938,7 +2938,7 @@
     {
       "id": "E4-S1-CANONICAL-FIDELITY-ACCEPT",
       "title": "Independent acceptance of the E4-S1 canonical fidelity fix (issue #176 / PR #177)",
-      "status": "running",
+      "status": "done",
       "mode": "review",
       "owner": "ox-alpha-e4s1caccept-w1",
       "target_issue": 176,
@@ -2959,14 +2959,18 @@
         "E4-S1-CANONICAL-FIDELITY-FIX"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-29T07:04:39Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T05:04:39Z",
-      "updated_at": "2026-08-29T05:04:39Z",
+      "updated_at": "2026-08-29T05:07:20Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "Independent acceptance gate before any merge of PR #177; APPROVE FOR MERGE unlocks the E4-S1 storage fix, after which #171 REBIND-R2 re-runs the affected evidence and the full final gates.",
-      "notes": "Read-only exact-head review of PR #177. Re-fetch main/head/diff/CI (run 33234395607). D1: reproduce the A/B golden vectors (builder vs parquet-decoded vs sliced/offset byte-identical) and the null-payload publish->integrity->read-back test. D2: verify the with_rejected_source_schema binding, the Drop/Rename/Cast evolution matrix, and the negative control (deprecated fallback refuses divergent publication with SchemaDrift). Verify scope: stillflow-storage only, no engine/#91 mutation, deprecated fallback documented. Publish APPROVE FOR MERGE or REQUEST CHANGES bound to the full head. Acceptor does not merge."
+      "notes": "Read-only exact-head review of PR #177. Re-fetch main/head/diff/CI (run 33234395607). D1: reproduce the A/B golden vectors (builder vs parquet-decoded vs sliced/offset byte-identical) and the null-payload publish->integrity->read-back test. D2: verify the with_rejected_source_schema binding, the Drop/Rename/Cast evolution matrix, and the negative control (deprecated fallback refuses divergent publication with SchemaDrift). Verify scope: stillflow-storage only, no engine/#91 mutation, deprecated fallback documented. Publish APPROVE FOR MERGE or REQUEST CHANGES bound to the full head. Acceptor does not merge.",
+      "completed_at": "2026-08-29T05:07:20Z",
+      "result_head": "f135abd5b9e19cec9e810726129b5fdf254848b0",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33234395607",
+      "completion_note": "REQUEST_CHANGES_E4_S1_CANONICAL_FIDELITY - exact-head read-only review complete (base main@25c110d8, head f135abd5, CI 33234395607 success on that head). D1 builder-rebuild normalization and D2 binding mechanism verified directionally correct (golden A/B vectors and Drop/Rename/Cast publish->read genuinely pass). Seven findings mechanically reproduced at the exact head and itemized in PR #177 review comment: F1 debug channels remaining in production code (bundle.rs:1070, artifact.rs:503); F2 unused arrow-data dependency; F3 accepted-derived rejected-schema fallback must fail closed per issue #176 (engine wiring stays in #171 REBIND-R2); F4 Derive variant missing from the evolution matrix; F5 rebatch-boundary and validation/dedup section layout goldens missing; F6 unsupported-type stance needs explicit fail-closed documentation; F7 Timestamp-Second timezone dropped by the rebuild plus missing tz-preservation mechanical test. Fix round bounded to PR #177, stillflow-storage only; new head requires re-acceptance before any merge. No source edits, no push, no Ready, no merge, no #91 mutation by this review."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T05:04:39Z"
+  "updated_at": "2026-08-29T05:07:20Z"
 }
