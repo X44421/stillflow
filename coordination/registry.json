@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 249,
+  "revision": 250,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3135,9 +3135,9 @@
     {
       "id": "E4-S2-FINAL-ACCEPT",
       "title": "Independent final acceptance of the E4-S2 rebind (issue #171 / PR #175)",
-      "status": "queued",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-e4s2finalacc-w1",
       "target_issue": 171,
       "target_pr": 175,
       "target_branch": "agent/e4-s2-final-rebind-verification",
@@ -3157,14 +3157,14 @@
         "E4-S2-REBIND-R2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-29T08:52:57Z",
+      "lease_expires_at": "2026-08-29T12:07:03Z",
+      "started_at": "2026-08-29T09:07:03Z",
+      "updated_at": "2026-08-29T09:07:03Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "Independent final acceptance gate for the E4-S2 rebind; APPROVE FOR MERGE unlocks the E4-S2 merge (issue #171 closure), after which the main functional chain proceeds (Q-R1 Profile Runtime -> Q-R2 -> X-R1 Export Runtime -> E5-C0 -> Golden E2E).",
       "notes": "Read-only exact-head review of PR #175 at 9119cf216cfeb218f8afe91d21440a2d066fef21 (base main@31e5e397145afcc23957456f16bc72514b4a8c93, CI run 33243997359). Reproduce: range-diff equivalence vs f9529ce; the D2 with_rejected_source_schema(prepared.scan_output) binding; the full V01-V31 evidence suite with zero ignored verification tests (159 engine tests); O0 A1/A2 composition and E2 parity; no PR #177 storage source inside the engine diff; #91 untouched. Publish APPROVE_E4_S2_FINAL or REQUEST_CHANGES bound to the full head. Acceptor does not merge."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T08:52:57Z"
+  "updated_at": "2026-08-29T09:07:03Z"
 }
