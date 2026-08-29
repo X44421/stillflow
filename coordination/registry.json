@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 237,
+  "revision": 238,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2899,7 +2899,7 @@
     {
       "id": "E4-S1-CANONICAL-FIDELITY-FIX",
       "title": "Fix E4-S1 canonical digest instability (D1) and rejected-section schema binding (D2) (issue #176)",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "ox-alpha-e4s1cfix-w1",
       "target_issue": 176,
@@ -2924,29 +2924,18 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-29T06:38:25Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T03:38:25Z",
       "queued_by": "maintainer:dispatch-snapshot-2026-08-29 (E4-S1-STORAGE-CANONICAL-FIDELITY-FIX)",
       "queue_reason": "P0 blocker discovered by E4-S2-REBIND-FINAL (#171, SCOPE_BLOCKED): D1 canonical_batch_bytes digest instability for payloads containing nulls and D2 rejected-section schema derived from the materialized schema instead of the frozen scan-output schema. Both block V21 / bundle round-trip correctness and the E4-S2 final acceptance.",
       "notes": "Scope strictly stillflow-storage. D1: canonical bytes depend only on logical Arrow values/schema; A/B golden vectors over differing null-buffer layouts; writer->reader->recompute byte-identical; null/non-null/slice/offset/rebatch coverage. D2: rejected section explicitly bound to the frozen scan-output schema carried through the draft/begin surface; Drop/Rename/Cast/Derive evolution coverage; original ColumnId/value fidelity. Engine repro tests to un-ignore: tests::verification_evidence::{d1_minimal_repro_null_rejected_payload_fails_section_digest, v21_rejected_rows_preserve_scan_schema_and_original_values, o0_drop_column_before_dedup_keeps_the_lookup_exact} on agent/e4-s2-final-rebind-verification@f9529ce. No #91 mutation; no engine/connector/frontend/API change; Draft PR + independent acceptance; then #171 REBIND-R2.",
-      "updated_at": "2026-08-29T03:38:25Z"
+      "updated_at": "2026-08-29T04:45:14Z",
+      "completed_at": "2026-08-29T04:45:14Z",
+      "result_head": "f135abd5b9e19cec9e810726129b5fdf254848b0",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33234395607",
+      "completion_note": "D1+D2 fixed. D1: canonical_batch_bytes rebuilds every column through its typed builder before encoding - canonical bytes depend only on logical schema/values, never validity-buffer layout; A/B golden vectors (builder vs parquet-decoded vs sliced/offset) byte-identical; rejected payloads with nulls now survive the section integrity gate. D2: VerificationBundleDraft::with_rejected_source_schema binds the rejected section to the frozen scan-output schema; accepted-derived fallback deprecated (kept for unmigrated callers; the E4-S2 engine wires it in #171 REBIND-R2); Drop/Rename/Cast evolution + negative control covered at storage level. Scope stillflow-storage only; engine untouched (PR #175 ignored repros remain external evidence for REBIND-R2); #91 untouched; not Ready, not merged. Local gates: fmt/clippy -D warnings green; 64 storage tests pass; 4 pre-existing Windows-only lock failures verified on clean main. Successor: E4-S1-CANONICAL-FIDELITY-ACCEPT then #175/#176 merge then #171 REBIND-R2."
     }
   ],
-  "locks": {
-    "branch:agent/issue-176-e4s1-canonical-fidelity-fix": {
-      "task_id": "E4-S1-CANONICAL-FIDELITY-FIX",
-      "owner": "ox-alpha-e4s1cfix-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-29T03:38:25Z",
-      "lease_expires_at": "2026-08-29T06:38:25Z"
-    },
-    "storage:stillflow-storage": {
-      "task_id": "E4-S1-CANONICAL-FIDELITY-FIX",
-      "owner": "ox-alpha-e4s1cfix-w1",
-      "expected_head": null,
-      "acquired_at": "2026-08-29T03:38:25Z",
-      "lease_expires_at": "2026-08-29T06:38:25Z"
-    }
-  },
-  "updated_at": "2026-08-29T03:38:25Z"
+  "locks": {},
+  "updated_at": "2026-08-29T04:45:14Z"
 }
