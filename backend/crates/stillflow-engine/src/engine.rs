@@ -107,6 +107,14 @@ impl ExecutionEngine {
         }
     }
 
+    pub(crate) fn registry(&self) -> &ConnectorRegistry {
+        &self.registry
+    }
+
+    pub(crate) fn run_gate(&self) -> &std::sync::Arc<tokio::sync::Semaphore> {
+        &self.run_gate
+    }
+
     pub async fn preflight(
         &self,
         plan: &LogicalPlan,
@@ -361,7 +369,7 @@ fn consume_envelope(
                 ));
             }
             let (transformed, deferred) =
-                crate::lower::transform(frame, &prepared.scan_output, &prepared.steps)?;
+                crate::lower::transform(frame, &prepared.scan_output, &prepared.steps, Vec::new())?;
             let transformed_bytes = transformed.estimated_size();
             tracker.hold_polars(transformed_bytes)?;
             dataframe_to_record_batch(

@@ -408,7 +408,7 @@ async fn lower_chunk(
         let frame_bytes = frame.estimated_size();
         tracker.hold_polars(frame_bytes)?;
         let (transformed, deferred) =
-            crate::lower::transform(frame, &prepared.scan_output, &prepared.target_steps)?;
+            crate::lower::transform(frame, &prepared.scan_output, &prepared.target_steps, Vec::new())?;
         let transformed_bytes = transformed.estimated_size();
         tracker.hold_polars(transformed_bytes)?;
         let batch = dataframe_to_record_batch(

@@ -13,10 +13,11 @@ pub(crate) fn transform(
     frame: DataFrame,
     schema: &LogicalSchema,
     steps: &[CompiledStep],
+    deferred_in: Vec<(String, ScalarValue)>,
 ) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
     let mut frame = frame;
     let mut schema = schema.clone();
-    let mut deferred = Vec::new();
+    let mut deferred = deferred_in;
     for step in steps {
         match step {
             CompiledStep::Project { columns } => {
@@ -244,7 +245,7 @@ fn field_name(schema: &LogicalSchema, id: ColumnId) -> Result<String, EngineErro
         .ok_or(EngineError::UnknownColumn(id))
 }
 
-fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsExpr, EngineError> {
+pub(crate) fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsExpr, EngineError> {
     Ok(match expr {
         Expr::Column(id) => col(field_name(schema, *id)?),
         Expr::Literal(value) => literal(value)?,

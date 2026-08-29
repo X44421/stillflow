@@ -2357,7 +2357,7 @@ fn t46_near_64mib_export_transition_respects_bounds() {
         let slice = batch.slice(0, k);
         let frame = crate::ffi::record_batch_to_dataframe(&slice).expect("import");
         let (transformed, deferred) =
-            crate::lower::transform(frame, &schema, &steps).expect("transform");
+            crate::lower::transform(frame, &schema, &steps, Vec::new()).expect("transform");
         let target_schema =
             stillflow_core::logical_schema_to_arrow(&manifest_schema_with_derived(&schema))
                 .expect("arrow schema");
@@ -5315,4 +5315,357 @@ async fn preview_all_valid_then_nullable_chunk_without_flush() {
     assert!(report.predicted_realloc_peak > 0);
     assert!(report.remainder_phase_peak > 0);
     drop(_guard);
+}
+
+
+// ---------------------------------------------------------------------------
+// E4-S2 verification evidence (contract acceptance matrix V01–V31)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod verification {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    struct VerIds {
+        run_id: Uuid,
+        bundle_id: Uuid,
+        bundle_artifact_id: Uuid,
+        snapshot_id: Uuid,
+        dataset_id: Uuid,
+        validation_report_artifact_id: Uuid,
+        rejected_rows_artifact_id: Option<Uuid>,
+        deduplication_report_artifact_id: Uuid,
+        session_id: Uuid,
+        created_at: chrono::DateTime<chrono::Utc>,
+        started_at: chrono::DateTime<chrono::Utc>,
+        committed_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    fn ver_ids(base: u128) -> VerIds {
+        let now = Utc::now();
+        VerIds {
+            run_id: Uuid::from_u128(base),
+            bundle_id: Uuid::from_u128(base + 1),
+            bundle_artifact_id: Uuid::from_u128(base + 2),
+            snapshot_id: Uuid::from_u128(base + 3),
+            dataset_id: Uuid::from_u128(base + 4),
+            validation_report_artifact_id: Uuid::from_u128(base + 5),
+            rejected_rows_artifact_id: Some(Uuid::from_u128(base + 6)),
+            deduplication_report_artifact_id: Uuid::from_u128(base + 7),
+            session_id: Uuid::from_u128(base + 8),
+            created_at: now,
+            started_at: now,
+            committed_at: now,
+        }
+    }
+
+    fn canonical_digest(plan: &LogicalPlan) -> [u8; 32] {
+        use sha2::Digest as _;
+        sha2::Sha256::digest(plan.canonical_bytes().expect("canonical")).into()
+    }
+
+    fn ver_plan(
+        source_asset_id: Uuid,
+        projection: Vec<ColumnId>,
+        keys: &[ColumnId],
+        validate: Option<(Expr, stillflow_plan::ValidationSeverity, &'static str)>,
+        filter_rows: Option<Expr>,
+    ) -> LogicalPlan {
+        let scan = PlanNodeId::from_uuid(Uuid::from_u128(1));
+        let filter = PlanNodeId::from_uuid(Uuid::from_u128(3));
+        let rules = PlanNodeId::from_uuid(Uuid::from_u128(4));
+        let materialize = PlanNodeId::from_uuid(Uuid::from_u128(5));
+        let mut node_rules: Vec<Rule> = Vec::new();
+        if let Some((predicate, severity, message)) = validate {
+            node_rules.push(Rule::Validate {
+                predicate,
+                severity,
+                message: message.to_owned(),
+            });
+        }
+        if !keys.is_empty() {
+            node_rules.push(Rule::Deduplicate {
+                keys: keys.to_vec(),
+            });
+        }
+        if let Some(predicate) = filter_rows {
+            node_rules.push(Rule::FilterRows { predicate });
+        }
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            scan,
+            PlanNode::new(
+                PlanNodeKind::Scan {
+                    source_asset_id,
+                    projection,
+                    predicate: None,
+                },
+                Vec::new(),
+            ),
+        );
+        nodes.insert(
+            filter,
+            PlanNode::new(
+                PlanNodeKind::Filter {
+                    predicate: Expr::Literal(ScalarValue::Boolean(true)),
+                },
+                vec![scan],
+            ),
+        );
+        nodes.insert(
+            rules,
+            PlanNode::new(PlanNodeKind::ApplyRules { rules: node_rules }, vec![filter]),
+        );
+        nodes.insert(
+            materialize,
+            PlanNode::new(
+                PlanNodeKind::Materialize {
+                    output_label: "out".to_owned(),
+                },
+                vec![rules],
+            ),
+        );
+        LogicalPlan::new(materialize, nodes).expect("plan")
+    }
+
+    fn verify_request<'a>(
+        engine_and_store: (&'a ExecutionEngine, &'a SnapshotStore),
+        connection: &SourceConnection,
+        source: &SourceAsset,
+        schema: LogicalSchema,
+        plan: LogicalPlan,
+        ids: VerIds,
+        cancel: Option<tokio_util::sync::CancellationToken>,
+    ) -> crate::verification::VerificationRequest<'a> {
+        use crate::verification::{VerificationIdentities as VI, VerificationRequest};
+        let context = match cancel {
+            Some(token) => stillflow_core::RequestContext::with_cancellation(token),
+            None => long_context(),
+        };
+        VerificationRequest {
+            plan,
+            connection: connection.clone(),
+            asset: source.clone(),
+            schema_override: Some(schema),
+            identities: VI {
+                run_id: ids.run_id,
+                bundle_id: ids.bundle_id,
+                bundle_artifact_id: ids.bundle_artifact_id,
+                snapshot_id: ids.snapshot_id,
+                dataset_id: ids.dataset_id,
+                validation_report_artifact_id: ids.validation_report_artifact_id,
+                rejected_rows_artifact_id: ids.rejected_rows_artifact_id,
+                deduplication_report_artifact_id: ids.deduplication_report_artifact_id,
+                session_id: ids.session_id,
+                logical_input: stillflow_core::verification::LogicalInputRef {
+                    input: stillflow_core::verification::InputRef::Asset {
+                        asset_id: source.id,
+                    },
+                    version_digest: [7u8; 32],
+                },
+                canonical_plan_digest: [0u8; 32], // patched by caller
+                created_at: ids.created_at,
+                started_at: ids.started_at,
+                committed_at: ids.committed_at,
+                lineage: Default::default(),
+                quality_score: None,
+            },
+            context,
+            batch_size: 64,
+            store: engine_and_store.1,
+        }
+    }
+
+    // V01/V06/V27: severity routing, one-payload guarantee, summary counts.
+    #[tokio::test(flavor = "current_thread")]
+    async fn v01_validate_routing_warning_keeps_error_rejects_null_fails() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let env = int_batch(&schema, source.id, 3); // rows 0,1,2
+        let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = ver_plan(
+            source.id,
+            vec![schema.fields[0].id],
+            &[],
+            Some((
+                Expr::Binary {
+                    left: Box::new(Expr::Column(id)),
+                    operator: stillflow_core::BinaryOperator::GreaterThan,
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(1))),
+                },
+                stillflow_plan::ValidationSeverity::Error,
+                "above one",
+            )),
+            None,
+        );
+        let digest = canonical_digest(&plan);
+        let ids = ver_ids(0xA0);
+        let bundle_id = ids.bundle_id;
+        let rejected_id = ids.rejected_rows_artifact_id.expect("authorized");
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan,
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = digest;
+        let bundle = engine
+            .materialize_verification(request)
+            .await
+            .expect("bundle");
+        let rejected = bundle
+            .rejected_rows()
+            .expect("terminal rejections publish payload");
+        assert_eq!(rejected.manifest().artifact_id(), rejected_id);
+        let reader = store
+            .open_artifact_section(
+                bundle_id,
+                rejected_id,
+                stillflow_storage::ArtifactSectionId::RejectedRows,
+            )
+            .expect("open rejected section");
+        let mut payload_rows = 0usize;
+        for item in reader {
+            payload_rows += item.expect("envelope").row_count();
+        }
+        assert_eq!(payload_rows, 2);
+        assert_eq!(
+            bundle.accepted().manifest().snapshot().stats().row_count(),
+            1
+        );
+        drop(_guard);
+    }
+
+    use crate::EngineError;
+
+    fn reject_plan(source_id: Uuid, id: ColumnId) -> LogicalPlan {
+        ver_plan(
+            source_id,
+            vec![id],
+            &[],
+            Some((
+                Expr::Binary {
+                    left: Box::new(Expr::Column(id)),
+                    operator: stillflow_core::BinaryOperator::GreaterThan,
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(0))),
+                },
+                stillflow_plan::ValidationSeverity::Error,
+                "always fails",
+            )),
+            None,
+        )
+    }
+
+    // V02: empty source publishes accepted + two zero-row reports; rejected
+    // stays absent even under Some(id) authorization.
+    #[tokio::test(flavor = "current_thread")]
+    async fn v02_empty_source_zero_rejection_protocol() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, _id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = reject_plan(source.id, schema.fields[0].id);
+        let digest = canonical_digest(&plan);
+        let ids = ver_ids(0xB0);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan,
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = digest;
+        let bundle = engine
+            .materialize_verification(request)
+            .await
+            .expect("bundle");
+        assert!(bundle.rejected_rows().is_none());
+
+        assert_eq!(bundle.validation_report().manifest().sections().len(), 2);
+        assert_eq!(bundle.deduplication_report().manifest().sections().len(), 2);
+        drop(_guard);
+    }
+
+    // V02b: None authorization + terminal rejection fails InvalidPlan and
+    // publishes nothing (contract 10.5).
+    #[tokio::test(flavor = "current_thread")]
+    async fn v02b_unauthorized_rejection_fails_closed() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, _id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let env = int_batch(&schema, source.id, 2);
+        let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = reject_plan(source.id, schema.fields[0].id);
+        let digest = canonical_digest(&plan);
+        let ids = ver_ids(0xC0);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan,
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = digest;
+        request.identities.rejected_rows_artifact_id = None;
+        let run_id = request.identities.run_id;
+        let error = engine
+            .materialize_verification(request)
+            .await
+            .expect_err("must fail");
+        assert!(matches!(error, EngineError::InvalidPlan(_)));
+        assert!(store.load_verification_bundle_by_run_id(run_id).is_err());
+        drop(_guard);
+    }
+
+    // V23: E2 materialize keeps rejecting Validate rules.
+    #[tokio::test(flavor = "current_thread")]
+    async fn v23_materialize_still_rejects_validate() {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, _id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = reject_plan(source.id, schema.fields[0].id);
+        let error = engine
+            .materialize(ExecutionRequest {
+                plan,
+                connection: connection.clone(),
+                asset: source.clone(),
+                schema_override: Some(schema),
+                identities: identities(),
+                context: long_context(),
+                batch_size: 64,
+                store: &store,
+            })
+            .await
+            .expect_err("E2 must refuse");
+        assert!(matches!(
+            error,
+            EngineError::UnsupportedRule {
+                kind: "validate",
+                ..
+            }
+        ));
+        drop(_guard);
+    }
 }
