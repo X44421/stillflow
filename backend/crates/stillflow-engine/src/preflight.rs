@@ -45,6 +45,35 @@ pub(crate) async fn preflight(
     context: &RequestContext,
     preview_target: Option<PlanNodeId>,
 ) -> Result<PreparedPlan, EngineError> {
+    preflight_inner(
+        registry,
+        plan,
+        connection,
+        asset,
+        schema_override,
+        context,
+        preview_target,
+        false,
+    )
+    .await
+}
+
+/// Shared E2 preflight. With `verification = true` the E4 routing rules
+/// (`Rule::Validate` / `Rule::Deduplicate`) are admitted instead of
+/// rejected so the E4-S2 path can apply its own rule checks on top of the
+/// shared checks (contract section 10.1 step 2). The public E2 behavior
+/// is unchanged.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn preflight_inner(
+    registry: &ConnectorRegistry,
+    plan: &LogicalPlan,
+    connection: &SourceConnection,
+    asset: &SourceAsset,
+    schema_override: Option<&LogicalSchema>,
+    context: &RequestContext,
+    preview_target: Option<PlanNodeId>,
+    verification: bool,
+) -> Result<PreparedPlan, EngineError> {
     context.ensure_active().map_err(map_context_error)?;
     if context
         .remaining()
@@ -56,9 +85,14 @@ pub(crate) async fn preflight(
     validate_plan_exprs_iterative(plan)?;
     plan.validate()
         .map_err(|_| EngineError::InvalidPlan("logical plan failed validation"))?;
-    if compiled_plan_bytes(plan) > MAX_COMPILED_PLAN_BYTES {
+    let compiled_plan_budget = if verification {
+        crate::verification::VERIFICATION_MAX_COMPILED_PLAN_BYTES
+    } else {
+        MAX_COMPILED_PLAN_BYTES
+    };
+    if compiled_plan_bytes(plan) > compiled_plan_budget {
         return Err(EngineError::BoundExceeded(
-            "compiled plan exceeds MAX_COMPILED_PLAN_BYTES",
+            "compiled plan exceeds the compiled-plan budget",
         ));
     }
     for (node_id, node) in &plan.nodes {
@@ -185,13 +219,13 @@ pub(crate) async fn preflight(
                 }
                 for rule in rules {
                     match rule {
-                        Rule::Validate { .. } => {
+                        Rule::Validate { .. } if !verification => {
                             return Err(EngineError::UnsupportedRule {
                                 node: node_id.as_uuid(),
                                 kind: "validate",
                             });
                         }
-                        Rule::Deduplicate { .. } => {
+                        Rule::Deduplicate { .. } if !verification => {
                             return Err(EngineError::UnsupportedRule {
                                 node: node_id.as_uuid(),
                                 kind: "deduplicate",
@@ -243,11 +277,11 @@ pub(crate) async fn preflight(
     };
     let scan_output = project_schema_with(&authorized_lookup, &scan_projection)?;
     reject_paused_schema(&scan_output)?;
-    let materialize_schema = propagate_schema(&scan_output, &steps)?;
+    let materialize_schema = propagate_schema(&scan_output, &steps, verification)?;
     reject_paused_schema(&materialize_schema)?;
     let (target_steps, target_schema) = match preview_target {
         Some(_) => {
-            let schema = propagate_schema(&scan_output, &preview_steps)?;
+            let schema = propagate_schema(&scan_output, &preview_steps, verification)?;
             reject_paused_schema(&schema)?;
             (preview_steps, schema)
         }
@@ -267,7 +301,7 @@ pub(crate) async fn preflight(
     })
 }
 
-fn linearize(
+pub(crate) fn linearize(
     plan: &LogicalPlan,
 ) -> Result<Vec<(PlanNodeId, stillflow_plan::PlanNode)>, EngineError> {
     let mut scans = Vec::new();
@@ -415,7 +449,7 @@ fn reject_paused_rule_exprs(rule: &Rule) -> Result<(), EngineError> {
     }
 }
 
-fn compiled_plan_bytes(plan: &LogicalPlan) -> usize {
+pub(crate) fn compiled_plan_bytes(plan: &LogicalPlan) -> usize {
     let mut bytes = plan.nodes.len().saturating_mul(64);
     for node in plan.nodes.values() {
         bytes = bytes.saturating_add(match &node.kind {
@@ -582,6 +616,7 @@ fn project_schema_with<L: ColumnLookup + ?Sized>(
 fn propagate_schema(
     scan_output: &LogicalSchema,
     steps: &[CompiledStep],
+    verification: bool,
 ) -> Result<LogicalSchema, EngineError> {
     // O0-B2-A1-A2 (#163): one Engine-private working schema threaded through
     // the whole propagation. A2's `IncrementalSchema` remains the SOLE
@@ -609,13 +644,43 @@ fn propagate_schema(
             }
             CompiledStep::Rules { rules } => {
                 for rule in rules {
-                    working.apply_rule(rule)?;
+                    match rule {
+                        // Validate and Deduplicate never change the working
+                        // schema. The shared E2 path still rejects them at
+                        // step compilation (V23); the verification path
+                        // admits them here as schema no-ops and applies its
+                        // own rule checks (contract 10.1). Every other rule
+                        // keeps mutating through the A2 incremental layer.
+                        Rule::Validate { .. } | Rule::Deduplicate { .. } if verification => {}
+                        other => working.apply_rule(other)?,
+                    }
                 }
             }
         }
     }
     let schema = working.into_schema()?;
     Ok(schema)
+}
+
+/// Single-rule production propagation for the E4 verification compiler:
+/// every schema-mutating rule mutates through the A2 `IncrementalSchema`
+/// layer (same in-place mutation, exact per-rule checks and budget
+/// accounting as the shared path) so no legacy propagation path is
+/// reintroduced. With `verification = true` the admitted routing rules
+/// (`Rule::Validate` / `Rule::Deduplicate`) are schema no-ops (contract
+/// 10.1/6.1); with `verification = false` they stay rejected.
+pub(crate) fn apply_rule_schema(
+    schema: LogicalSchema,
+    rule: &Rule,
+    verification: bool,
+) -> Result<LogicalSchema, EngineError> {
+    if verification && matches!(rule, Rule::Validate { .. } | Rule::Deduplicate { .. }) {
+        return Ok(schema);
+    }
+    let mut working =
+        crate::incremental::IncrementalSchema::for_shape(schema, rule_served_lookups(rule));
+    working.apply_rule(rule)?;
+    working.into_schema()
 }
 
 /// Legacy per-rule propagation: every schema-mutating rule clones the field

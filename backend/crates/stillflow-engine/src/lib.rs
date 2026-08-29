@@ -16,6 +16,7 @@ pub(crate) mod preview;
 mod remainder;
 mod types;
 mod typing;
+mod verification;
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -33,8 +34,17 @@ use uuid::Uuid;
 pub use engine::ExecutionEngine;
 pub use error::EngineError;
 pub use preflight::PreparedPlan;
+pub use verification::{
+    VerificationIdentities, VerificationRequest, MAX_DEDUP_KEY_COLUMNS,
+    MAX_VALIDATION_FINDINGS_PER_ROW, MAX_VALIDATION_MESSAGE_BYTES,
+    VERIFICATION_MAX_COMPILED_PLAN_BYTES, VERIFICATION_MAX_ENGINE_PEAK_BYTES,
+    VERIFICATION_MAX_LIVE_COLUMNAR_PAYLOADS, VERIFICATION_MAX_ROUTING_STATE_BYTES,
+};
 
 pub const ENGINE_CONTRACT_VERSION: u16 = 1;
+/// Compile-time engine build identity stamped into bundle provenance
+/// (contract 7.2/10.5); never generated at runtime.
+pub const ENGINE_BUILD: &str = concat!("stillflow-engine ", env!("CARGO_PKG_VERSION"));
 pub const MAX_PLAN_NODES: usize = 64;
 pub const MAX_RULES_PER_NODE: usize = 256;
 pub const MAX_EXPR_NODES: usize = 1_024;

@@ -25,10 +25,12 @@ polars = { version = "0.46", default-features = false, features = [
     "dtype-struct",
 ] }
 polars-arrow = "0.46"
+serde_json.workspace = true
 stillflow-connectors.workspace = true
 stillflow-core.workspace = true
 stillflow-plan.workspace = true
 stillflow-storage.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -36,5 +38,4 @@ uuid.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
