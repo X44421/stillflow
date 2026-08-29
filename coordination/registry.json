@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "revision": 233,
+  "revision": 234,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
-  "updated_at": "2026-08-29T00:32:47Z",
+  "updated_at": "2026-08-29T00:37:05Z",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -2715,9 +2715,9 @@
     {
       "id": "E4-S2-REBIND-FINAL",
       "title": "Port Verification materialization onto post-O0 Engine main (issue #171)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "ox-alpha-e4s2rebind-w2",
       "target_issue": 171,
       "target_pr": null,
       "target_branch": "agent/e4-s2-final-rebind-verification",
@@ -2737,9 +2737,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-29T00:32:06Z",
+      "lease_expires_at": "2026-08-29T03:37:05Z",
+      "started_at": "2026-08-29T00:37:05Z",
+      "updated_at": "2026-08-29T00:37:05Z",
       "queued_by": "maintainer:direct-chat (wave 2026-08-28 #170-#174)",
       "queue_reason": "Issue #171 P0: reconstruct E4-S2 Verification materialization from historical evidence PR #91 @ d0ea2a3bce onto fresh branch from main@81e817ad; NO mechanical rebase; compose with A1/A2 IncrementalSchema/lookup; V01-V31 full matrix; O0 regression gates.",
       "notes": "Lease 180 min. Locks branch:agent/e4-s2-final-rebind-verification + engine:stillflow-engine. HOLD lifted ONLY for the new integration branch; #91 branch stays read-only evidence. Import only necessary surfaces (verification.rs, engine.rs, preflight.rs, lower.rs, tests.rs, lib.rs, deps sha2/serde_json as disclosed). Verdict: PROMOTE_E4_S2_FINAL_REBIND_CANDIDATE | E4_S2_REBIND_SEMANTIC_REJECT | E4_S2_REBIND_O0_INTEGRATION_REJECT | E4_S2_REBIND_SCOPE_BLOCKED. Draft PR only. | REGISTRY-R232 maintainer-authorized docs-only main drift rebind (2026-08-29): main advanced 81e817ad -> 25c110d8 via merged PRs #105/#106 (ADR-003/ADR-004); verified drift diff = exactly two new docs/architecture files (adr-003-profiling-quality-and-findings.md +722, adr-004-export-and-output-artifacts.md +505), zero engine/connector source or Cargo.lock change. Expired lease of ox-alpha-e4s2rebind-w1 reclaimed (no heartbeat since 2026-08-28T09:04:33Z; remote branch agent/e4-s2-final-rebind-verification never pushed, nothing to preserve). expected_base refreshed to 25c110d8fbffa37515a539c652de11d09c512a39; lease released, status reset to queued for immediate re-CLAIM; executor must re-verify the exact base at claim time and stop on mismatch.",
