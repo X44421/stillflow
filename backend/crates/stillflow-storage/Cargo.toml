@@ -8,7 +8,6 @@ publish.workspace = true
 
 [dependencies]
 arrow-array.workspace = true
-arrow-data = "59"
 arrow-ipc.workspace = true
 arrow-schema.workspace = true
 chrono.workspace = true
