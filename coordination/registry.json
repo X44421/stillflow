@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 238,
+  "revision": 239,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -2938,9 +2938,9 @@
     {
       "id": "E4-S1-CANONICAL-FIDELITY-ACCEPT",
       "title": "Independent acceptance of the E4-S1 canonical fidelity fix (issue #176 / PR #177)",
-      "status": "queued",
+      "status": "running",
       "mode": "review",
-      "owner": null,
+      "owner": "ox-alpha-e4s1caccept-w1",
       "target_issue": 176,
       "target_pr": 177,
       "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
@@ -2959,14 +2959,14 @@
         "E4-S1-CANONICAL-FIDELITY-FIX"
       ],
       "conflicts_with": [],
-      "lease_expires_at": null,
-      "started_at": null,
-      "updated_at": "2026-08-29T04:45:51Z",
+      "lease_expires_at": "2026-08-29T07:04:39Z",
+      "started_at": "2026-08-29T05:04:39Z",
+      "updated_at": "2026-08-29T05:04:39Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "Independent acceptance gate before any merge of PR #177; APPROVE FOR MERGE unlocks the E4-S1 storage fix, after which #171 REBIND-R2 re-runs the affected evidence and the full final gates.",
       "notes": "Read-only exact-head review of PR #177. Re-fetch main/head/diff/CI (run 33234395607). D1: reproduce the A/B golden vectors (builder vs parquet-decoded vs sliced/offset byte-identical) and the null-payload publish->integrity->read-back test. D2: verify the with_rejected_source_schema binding, the Drop/Rename/Cast evolution matrix, and the negative control (deprecated fallback refuses divergent publication with SchemaDrift). Verify scope: stillflow-storage only, no engine/#91 mutation, deprecated fallback documented. Publish APPROVE FOR MERGE or REQUEST CHANGES bound to the full head. Acceptor does not merge."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T04:45:51Z"
+  "updated_at": "2026-08-29T05:04:39Z"
 }
