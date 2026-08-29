@@ -3202,8 +3202,45 @@
       "result_head": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
       "ci_url": null,
       "completion_note": "MERGED_E4_S2_FINAL - sha-guarded normal merge commit executed after six-anchor re-verification (main 31e5e39 unchanged; PR #175 head 9119cf2; final acceptance comment 5461488979 bound to that head with verdict APPROVE_E4_S2_FINAL_ACCEPTANCE; CI 33243997359 success on that head; PR still Draft + mergeable CLEAN; #91 head d0ea2a3 untouched). Merge commit 533f75badbb46f75ceb453dcf2f5e54b1384caaa with verified parents [31e5e397145afcc23957456f16bc72514b4a8c93, 9119cf216cfeb218f8afe91d21440a2d066fef21]; merge_method=merge (not squash/rebase); PR #175 marked Ready only inside this task and merged at the guarded head (mergedAt 2026-08-29T09:53:00Z). New main SHA = 533f75badbb46f75ceb453dcf2f5e54b1384caaa. merge:main lock released. No source edits, no force-push, no PR-body rewrite, no #91 mutation. Next: E4-G1 closure/hygiene by the maintainer, then Q-R1 Profile Runtime."
+    },
+    {
+      "id": "E4-G1-CLOSURE-HYGIENE",
+      "title": "E4-G1 closure and hygiene: close #176/#171/#80, retire PR #91 as historical, refresh board to main@533f75b",
+      "status": "queued",
+      "mode": "maintenance",
+      "owner": null,
+      "target_issue": 171,
+      "locks": [
+        "github:issue-ledger-state"
+      ],
+      "issue_targets": [
+        176,
+        171,
+        80,
+        91,
+        81
+      ],
+      "expected_head": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
+      "depends_on": [
+        "E4-S2-FINAL-MERGE"
+      ],
+      "conflicts_with": [],
+      "acceptance_keys": [
+        "g1:e4-facts-verified",
+        "g1:176-closed-with-receipt",
+        "g1:171-closed-with-receipt",
+        "g1:80-closed-with-receipt",
+        "g1:91-closed-unmerged-historical",
+        "g1:board-and-registry-current"
+      ],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-29T09:58:12Z",
+      "queued_by": "maintainer:frozen-topology-2026-08-29",
+      "queue_reason": "E4 chain complete on main@533f75b (storage fix #177 + verification materialization #175 + V01-V31 evidence): close the canonical issues, retire PR #91 as historical evidence, and refresh the canonical board before Q-R1 dispatch.",
+      "notes": "Coordination/GitHub hygiene ONLY: no Rust/Cargo/test/workflow edits, no merge, Q-R1 must not start. Verify E4 facts first (PR #175 merge commit 533f75b, parents 31e5e39+9119cf2, APPROVE_E4_S2_FINAL_ACCEPTANCE comment 5461488979, CI 33243997359 success, #177 an ancestor, #91 d0ea2a3 never merged); stop on any inconsistency. Then: completion receipts on #176/#171/#80 and close as completed; PR #91 superseded-historical comment + close UNMERGED (no force-push, no branch changes, no branch deletion unless registry hygiene explicitly requires); refresh registry/board to canonical main@533f75badbb46f75ceb453dcf2f5e54b1384caaa with E4-S2 CLOSED/PRODUCTION, D1/D2 remediation CLOSED, engine writer none, engine and merge locks free, next = Q-R1. Terminal verdicts: CLOSED_E4_G1_ON_MAIN_533F75B | E4_G1_HYGIENE_BLOCKED."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T09:53:44Z"
+  "updated_at": "2026-08-29T09:58:12Z"
 }
