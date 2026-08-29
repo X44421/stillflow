@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 247,
+  "revision": 248,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3055,7 +3055,7 @@
     {
       "id": "E4-S1-CANONICAL-FIDELITY-MERGE",
       "title": "Merge the accepted E4-S1 canonical fidelity fix into main (issue #176 / PR #177)",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-e4s1cmerge-w1",
       "target_issue": 176,
@@ -3076,22 +3076,18 @@
         "E4-S1-CANONICAL-FIDELITY-ACCEPT-R2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-29T07:38:53Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T06:38:53Z",
-      "updated_at": "2026-08-29T06:38:53Z",
+      "updated_at": "2026-08-29T06:41:51Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "R2 verdict APPROVE_E4_S1_CANONICAL_FIDELITY_R2 authorizes the storage merge task: merge PR #177 into main with an exact-head sha guard and a normal merge commit, record the resulting main SHA, then stop for E4-S2-REBIND-R2 dispatch.",
-      "notes": "Pre-merge gate (all must hold, else STOP with E4_S1_CANONICAL_FIDELITY_MERGE_REBIND_REQUIRED): live main == 25c110d8fbffa37515a539c652de11d09c512a39; PR #177 head == f91dc8495be89e68aed7ecb72201164b1d8b2e96; R2 APPROVE comment 5460783528 bound to that head; CI 33237305567 success on that head. Mark Ready only inside this task; merge with the sha guard and merge_method=merge (never squash/rebase). Record the merge SHA, new main SHA, and parents. No source edits, no force-push, no PR-body rewrite, no #175/#91 mutation."
+      "notes": "Pre-merge gate (all must hold, else STOP with E4_S1_CANONICAL_FIDELITY_MERGE_REBIND_REQUIRED): live main == 25c110d8fbffa37515a539c652de11d09c512a39; PR #177 head == f91dc8495be89e68aed7ecb72201164b1d8b2e96; R2 APPROVE comment 5460783528 bound to that head; CI 33237305567 success on that head. Mark Ready only inside this task; merge with the sha guard and merge_method=merge (never squash/rebase). Record the merge SHA, new main SHA, and parents. No source edits, no force-push, no PR-body rewrite, no #175/#91 mutation.",
+      "completed_at": "2026-08-29T06:41:51Z",
+      "result_head": "31e5e397145afcc23957456f16bc72514b4a8c93",
+      "ci_url": null,
+      "completion_note": "MERGED_E4_S1_CANONICAL_FIDELITY - sha-guarded normal merge commit executed after four-anchor re-verification (main 25c110d8 unchanged; PR #177 head f91dc84; R2 APPROVE comment 5460783528 bound to that head; CI 33237305567 success on that head; mergeable CLEAN). Merge commit 31e5e397145afcc23957456f16bc72514b4a8c93 with verified parents [25c110d8fbffa37515a539c652de11d09c512a39, f91dc8495be89e68aed7ecb72201164b1d8b2e96]; merge_method=merge (not squash/rebase); PR #177 marked Ready only inside this task and merged at the guarded head. New main SHA = 31e5e397145afcc23957456f16bc72514b4a8c93. merge:main lock released. No source edits, no force-push, no PR-body rewrite, no #175/#91 mutation. Next: E4-S2-REBIND-R2 dispatch by the maintainer."
     }
   ],
-  "locks": {
-    "merge:main": {
-      "task_id": "E4-S1-CANONICAL-FIDELITY-MERGE",
-      "owner": "ox-alpha-e4s1cmerge-w1",
-      "expected_head": "f91dc8495be89e68aed7ecb72201164b1d8b2e96",
-      "acquired_at": "2026-08-29T06:38:53Z",
-      "lease_expires_at": "2026-08-29T07:38:53Z"
-    }
-  },
-  "updated_at": "2026-08-29T06:38:53Z"
+  "locks": {},
+  "updated_at": "2026-08-29T06:41:51Z"
 }
