@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use arrow_array::{
-    Array as _, BinaryArray, BooleanArray, Date32Array, Float32Array, Float64Array, Int8Array,
-    Int16Array, Int32Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
+    Array as _, BinaryArray, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array,
+    Int32Array, Int64Array, Int8Array, RecordBatch, StringArray, TimestampMicrosecondArray,
     TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt16Array,
     UInt32Array, UInt64Array, UInt8Array,
 };
@@ -26,10 +26,10 @@ use uuid::Uuid;
 use crate::error::{map_context_error, EngineError};
 use crate::verification::{encode_component, KeyBytes, KeyValue};
 use crate::{
-    ExecutionEngine, PROFILING_CONTRACT_VERSION, PROFILE_DEFAULT_HISTOGRAM_BUCKETS,
-    PROFILE_DEFAULT_TOP_K, PROFILE_MAX_COLUMNS, PROFILE_MAX_DISTINCT_ENTRIES_PER_COLUMN,
-    PROFILE_MAX_FULL_ROW_DISTINCT_ENTRIES, PROFILE_MAX_HISTOGRAM_BUCKETS,
-    PROFILE_MAX_RETAINED_VALUE_BYTES, PROFILE_MAX_ROWS, PROFILE_MAX_SCAN_BYTES, PROFILE_MAX_TOP_K,
+    ExecutionEngine, PROFILE_DEFAULT_HISTOGRAM_BUCKETS, PROFILE_DEFAULT_TOP_K, PROFILE_MAX_COLUMNS,
+    PROFILE_MAX_DISTINCT_ENTRIES_PER_COLUMN, PROFILE_MAX_FULL_ROW_DISTINCT_ENTRIES,
+    PROFILE_MAX_HISTOGRAM_BUCKETS, PROFILE_MAX_RETAINED_VALUE_BYTES, PROFILE_MAX_ROWS,
+    PROFILE_MAX_SCAN_BYTES, PROFILE_MAX_TOP_K, PROFILING_CONTRACT_VERSION,
 };
 
 // ---------------------------------------------------------------------------
@@ -47,8 +47,7 @@ pub const PROFILE_STATE_BYTE_BUDGET: usize = MAX_BATCH_BYTES;
 
 /// Fixed Utf8/Binary length-histogram upper bounds (ADR-003 §6.3) plus the
 /// final open bucket `[4096, ∞)`.
-const LENGTH_HISTOGRAM_BOUNDS: [u64; 13] =
-    [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 4096];
+const LENGTH_HISTOGRAM_BOUNDS: [u64; 13] = [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 4096];
 const LENGTH_HISTOGRAM_BUCKETS: usize = LENGTH_HISTOGRAM_BOUNDS.len() + 1;
 
 const PROFILE_BATCH_SIZE: usize = 4096;
@@ -148,13 +147,24 @@ impl ProfileRational {
         let sign = if numerator < 0 { -1i128 } else { 1 };
         let n = numerator.unsigned_abs();
         let g = gcd_u128(n, denominator);
-        let (n, d) = if g == 0 { (n, denominator) } else { (n / g, denominator / g) };
-        Self { numerator: sign * n as i128, denominator: d }
+        let (n, d) = if g == 0 {
+            (n, denominator)
+        } else {
+            (n / g, denominator / g)
+        };
+        Self {
+            numerator: sign * n as i128,
+            denominator: d,
+        }
     }
 }
 
 fn gcd_u128(a: u128, b: u128) -> u128 {
-    if b == 0 { a } else { gcd_u128(b, a % b) }
+    if b == 0 {
+        a
+    } else {
+        gcd_u128(b, a % b)
+    }
 }
 
 /// One top-value pair (ADR-003 §6.2): count descending, ties by value
@@ -195,6 +205,7 @@ pub struct ProfileLengthStats {
 /// bit-exact so bucket membership is recomputable from the artifact alone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProfileHistogram {
+    pub float_domain: bool,
     pub min: ProfileFloat,
     pub max: ProfileFloat,
     pub width: ProfileFloat,
@@ -357,7 +368,9 @@ impl BigMag {
             std::cmp::Ordering::Equal => {}
             non_eq => return non_eq,
         }
-        let Some(top) = self.top_bit() else { return std::cmp::Ordering::Equal };
+        let Some(top) = self.top_bit() else {
+            return std::cmp::Ordering::Equal;
+        };
         for index in (0..=top).rev() {
             match self.bit(index).cmp(&other.bit(index)) {
                 std::cmp::Ordering::Equal => {}
@@ -375,12 +388,9 @@ impl BigMag {
             let mut a = self.bit(index);
             let b = other.bit(index);
             if borrow {
-                if a {
-                    a = false;
-                    borrow = false;
-                } else {
-                    a = true;
-                }
+                a = !a;
+                // when a flips to 1 the borrow is absorbed; the match below
+                // re-derives the outgoing borrow from (a, b).
             }
             let (diff, new_borrow) = match (a, b) {
                 (false, true) => (true, true),
@@ -453,7 +463,9 @@ impl ExactFloatSum {
         let mut produced = 0usize;
         let mut sticky = false;
         for position in (0..=top).rev() {
-            remainder = remainder.wrapping_mul(2).wrapping_add(magnitude.bit(position) as u64);
+            remainder = remainder
+                .wrapping_mul(2)
+                .wrapping_add(magnitude.bit(position) as u64);
             let quotient_bit = remainder >= count;
             if quotient_bit {
                 remainder -= count;
@@ -499,7 +511,11 @@ fn kept_to_f64(mut kept: u64, exponent: i64, negative: bool) -> f64 {
     }
     let sign = if negative { 1u64 << 63 } else { 0 };
     if value_exponent > 1023 {
-        return if negative { f64::NEG_INFINITY } else { f64::INFINITY };
+        return if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
     }
     if value_exponent < -1022 {
         // Subnormal: mantissa = value / 2^-1074 = kept × 2^(exponent + 1074),
@@ -540,7 +556,11 @@ fn magnitude_to_f64(magnitude: &BigMag, grid_shift: u32, negative: bool) -> f64 
     let value_exponent = top as i64 - grid_shift as i64;
     let sign = if negative { 1u64 << 63 } else { 0 };
     if value_exponent > 1023 {
-        return if negative { f64::NEG_INFINITY } else { f64::INFINITY };
+        return if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
     }
     if value_exponent < -1022 {
         let mut mantissa = 0u64;
@@ -571,7 +591,11 @@ fn magnitude_to_f64(magnitude: &BigMag, grid_shift: u32, negative: bool) -> f64 
         // Rounding carried out of the top bit.
         let biased = (value_exponent + 1023) as u64 + 1;
         if biased >= 0x7ff {
-            return if negative { f64::NEG_INFINITY } else { f64::INFINITY };
+            return if negative {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            };
         }
         return f64::from_bits(sign | (biased << 52));
     }
@@ -703,7 +727,9 @@ impl DatasetProfile {
                     "status",
                     CVal::Str(match column.status {
                         ProfileColumnStatus::Profiled => "profiled".to_owned(),
-                        ProfileColumnStatus::SkippedUnsupportedType => "skipped_unsupported_type".to_owned(),
+                        ProfileColumnStatus::SkippedUnsupportedType => {
+                            "skipped_unsupported_type".to_owned()
+                        }
                     }),
                 ),
                 ("type", CVal::Str(column.logical_type.clone())),
@@ -758,9 +784,18 @@ impl DatasetProfile {
                                 None => CVal::Bool(false),
                             },
                         ),
-                        ("long_value_count", CVal::Int(length.long_value_count as i128)),
-                        ("max_length", CVal::Int(length.max_length.unwrap_or(0) as i128)),
-                        ("min_length", CVal::Int(length.min_length.unwrap_or(0) as i128)),
+                        (
+                            "long_value_count",
+                            CVal::Int(length.long_value_count as i128),
+                        ),
+                        (
+                            "max_length",
+                            CVal::Int(length.max_length.unwrap_or(0) as i128),
+                        ),
+                        (
+                            "min_length",
+                            CVal::Int(length.min_length.unwrap_or(0) as i128),
+                        ),
                         (
                             "sum_of_lengths",
                             CVal::Int(i128::try_from(length.sum_of_lengths).unwrap_or(i128::MAX)),
@@ -769,22 +804,50 @@ impl DatasetProfile {
                 ));
                 entries.push((
                     "length_histogram",
-                    CVal::Arr(length.histogram.iter().map(|c| CVal::Int(*c as i128)).collect()),
+                    CVal::Arr(
+                        length
+                            .histogram
+                            .iter()
+                            .map(|c| CVal::Int(*c as i128))
+                            .collect(),
+                    ),
                 ));
             }
             if let Some(histogram) = &column.histogram {
-                entries.push((
-                    "histogram",
-                    CVal::Obj(vec![
-                        (
-                            "counts",
-                            CVal::Arr(histogram.counts.iter().map(|c| CVal::Int(*c as i128)).collect()),
+                // Float histograms record the frozen edge inputs (min/max/
+                // width) bit-exact per section 9; integer histograms are the
+                // exact counts only (their edges are min_value/max_value).
+                if histogram.float_domain {
+                    entries.push((
+                        "histogram",
+                        CVal::Obj(vec![
+                            (
+                                "counts",
+                                CVal::Arr(
+                                    histogram
+                                        .counts
+                                        .iter()
+                                        .map(|c| CVal::Int(*c as i128))
+                                        .collect(),
+                                ),
+                            ),
+                            ("max", CVal::Float(histogram.max.0)),
+                            ("min", CVal::Float(histogram.min.0)),
+                            ("width", CVal::Float(histogram.width.0)),
+                        ]),
+                    ));
+                } else {
+                    entries.push((
+                        "histogram",
+                        CVal::Arr(
+                            histogram
+                                .counts
+                                .iter()
+                                .map(|c| CVal::Int(*c as i128))
+                                .collect(),
                         ),
-                        ("max", CVal::Float(histogram.max.0)),
-                        ("min", CVal::Float(histogram.min.0)),
-                        ("width", CVal::Float(histogram.width.0)),
-                    ]),
-                ));
+                    ));
+                }
             }
             if let Some(top_values) = &column.top_values {
                 entries.push((
@@ -817,8 +880,14 @@ impl DatasetProfile {
                 "full_row_distinct_overflow",
                 CVal::Bool(self.dataset.full_row_distinct_overflow),
             ),
-            ("row_count_scanned", CVal::Int(self.dataset.row_count_scanned as i128)),
-            ("scanned_bytes", CVal::Int(self.dataset.scanned_bytes as i128)),
+            (
+                "row_count_scanned",
+                CVal::Int(self.dataset.row_count_scanned as i128),
+            ),
+            // scanned_bytes is envelope-packaging disclosure (ADR-003 §5):
+            // it legitimately differs across partitionings of the same rows,
+            // so it stays in the typed result and out of the canonical body
+            // — the same rule that excludes run ids and wall clock.
             ("truncated", CVal::Bool(self.dataset.truncated)),
         ];
         if let Some(distinct) = self.dataset.distinct_row_count {
@@ -828,7 +897,10 @@ impl DatasetProfile {
             dataset.push(("duplicate_row_count", CVal::Int(duplicates as i128)));
         }
         let body = CVal::Obj(vec![
-            ("artifact_body_version", CVal::Int(self.artifact_body_version as i128)),
+            (
+                "artifact_body_version",
+                CVal::Int(self.artifact_body_version as i128),
+            ),
             ("artifact_type", CVal::Str(self.artifact_type.to_owned())),
             ("columns", CVal::Arr(columns)),
             (
@@ -978,8 +1050,17 @@ fn charge(state_bytes: &mut usize, bytes: usize) -> Result<(), EngineError> {
     Ok(())
 }
 
-impl ColumnRuntime {    fn observe(&mut self, batch: &RecordBatch, column_index: usize) -> Result<(), EngineError> {
+impl ColumnRuntime {
+    fn observe(&mut self, batch: &RecordBatch, column_index: usize) -> Result<(), EngineError> {
         let array = batch.column(column_index);
+        if std::env::var_os("PROFILE_DEBUG").is_some() {
+            eprintln!(
+                "[prof-debug] col={} dtype={:?} nulls={}",
+                column_index,
+                array.data_type(),
+                array.null_count()
+            );
+        }
         self.null_count += array.null_count() as u64;
         match &mut self.state {
             ColumnState::Skipped => Ok(()),
@@ -1155,10 +1236,8 @@ impl ColumnRuntime {    fn observe(&mut self, batch: &RecordBatch, column_index:
                             state.empty_count += 1;
                         }
                         state.length_sum += length as u128;
-                        state.length_min =
-                            Some(state.length_min.map_or(length, |m| m.min(length)));
-                        state.length_max =
-                            Some(state.length_max.map_or(length, |m| m.max(length)));
+                        state.length_min = Some(state.length_min.map_or(length, |m| m.min(length)));
+                        state.length_max = Some(state.length_max.map_or(length, |m| m.max(length)));
                         state.length_histogram[length_bucket(length)] += 1;
                         if bytes.len() > PROFILE_MAX_RETAINED_VALUE_BYTES {
                             state.long_value_count += 1;
@@ -1189,10 +1268,8 @@ impl ColumnRuntime {    fn observe(&mut self, batch: &RecordBatch, column_index:
                             state.empty_count += 1;
                         }
                         state.length_sum += length as u128;
-                        state.length_min =
-                            Some(state.length_min.map_or(length, |m| m.min(length)));
-                        state.length_max =
-                            Some(state.length_max.map_or(length, |m| m.max(length)));
+                        state.length_min = Some(state.length_min.map_or(length, |m| m.min(length)));
+                        state.length_max = Some(state.length_max.map_or(length, |m| m.max(length)));
                         state.length_histogram[length_bucket(length)] += 1;
                         if raw.len() > PROFILE_MAX_RETAINED_VALUE_BYTES {
                             state.long_value_count += 1;
@@ -1232,10 +1309,22 @@ fn logical_type_name(logical: &LogicalType) -> &'static str {
         LogicalType::Utf8 => "utf8",
         LogicalType::Binary => "binary",
         LogicalType::Date32 => "date32",
-        LogicalType::Timestamp { unit: TimeUnit::Millisecond, .. } => "timestamp_ms",
-        LogicalType::Timestamp { unit: TimeUnit::Microsecond, .. } => "timestamp_us",
-        LogicalType::Timestamp { unit: TimeUnit::Nanosecond, .. } => "timestamp_ns",
-        LogicalType::Timestamp { unit: TimeUnit::Second, .. } => "timestamp_s",
+        LogicalType::Timestamp {
+            unit: TimeUnit::Millisecond,
+            ..
+        } => "timestamp_ms",
+        LogicalType::Timestamp {
+            unit: TimeUnit::Microsecond,
+            ..
+        } => "timestamp_us",
+        LogicalType::Timestamp {
+            unit: TimeUnit::Nanosecond,
+            ..
+        } => "timestamp_ns",
+        LogicalType::Timestamp {
+            unit: TimeUnit::Second,
+            ..
+        } => "timestamp_s",
         LogicalType::List(_) => "list",
         LogicalType::Struct(_) => "struct",
     }
@@ -1303,10 +1392,53 @@ impl FullRowState {
         for row in 0..batch.num_rows() {
             let mut key = KeyBytes::new();
             for (column_index, logical) in columns {
-                let value = if batch.column(*column_index).is_null(row) {
+                let array = batch.column(*column_index);
+                let is_null = array.is_null(row);
+                // A Null-typed column and every null value share the single
+                // zero-byte sentinel, distinct from every non-null encoding
+                // (E4 key-encoding tests).
+                if matches!(logical, LogicalType::Null) {
+                    key.push(0x00)?;
+                    continue;
+                }
+                // Timestamp-Second, List, and Struct have no v1 canonical
+                // value encoding (§9 defines $epoch_ms/$epoch_us only).
+                // Timestamp-Second keys are framed raw (reserved 0xFF tag +
+                // big-endian epoch), lossless and deterministic under the
+                // per-value length framing; List/Struct cannot be extracted
+                // losslessly here and fail closed to the overflow flag.
+                if matches!(
+                    logical,
+                    LogicalType::Timestamp {
+                        unit: TimeUnit::Second,
+                        ..
+                    }
+                ) {
+                    if is_null {
+                        key.push(0x00)?;
+                    } else {
+                        key.push(0xFF)?;
+                        let epoch = array
+                            .as_any()
+                            .downcast_ref::<TimestampSecondArray>()
+                            .ok_or(EngineError::Internal(
+                                "profile key timestamp-second read failed",
+                            ))?
+                            .value(row);
+                        key.extend_from_slice(&epoch.to_be_bytes())?;
+                    }
+                    continue;
+                }
+                if matches!(logical, LogicalType::List(_) | LogicalType::Struct(_)) {
+                    self.overflow = true;
+                    self.keys.clear();
+                    self.bytes = 0;
+                    return Ok(());
+                }
+                let value = if is_null {
                     KeyValue::Null
                 } else {
-                    arrow_key_value(batch.column(*column_index), row, logical)?
+                    arrow_key_value(array, row, logical)?
                 };
                 encode_component(logical, value, &mut key)?;
             }
@@ -1381,10 +1513,7 @@ fn arrow_key_value(
                 .into_boxed_slice(),
         )),
         (DataType::Date32, LogicalType::Date32) => primitive!(Date32Array, Date32, |v: i32| v),
-        (
-            DataType::Timestamp(arrow_unit, _),
-            LogicalType::Timestamp { unit, .. },
-        ) => {
+        (DataType::Timestamp(arrow_unit, _), LogicalType::Timestamp { unit, .. }) => {
             let epoch = match arrow_unit {
                 arrow_schema::TimeUnit::Millisecond => array
                     .as_any()
@@ -1407,7 +1536,11 @@ fn arrow_key_value(
                     ));
                 }
             };
-            KeyValue::Timestamp { epoch, unit: *unit, timezone: None }
+            KeyValue::Timestamp {
+                epoch,
+                unit: *unit,
+                timezone: None,
+            }
         }
         _ => return Err(mismatch()),
     })
@@ -1439,6 +1572,7 @@ fn integer_histogram(
         out[index] += *count;
     }
     ProfileHistogram {
+        float_domain: false,
         min: ProfileFloat(min as f64),
         max: ProfileFloat(max as f64),
         width: ProfileFloat(0.0),
@@ -1480,6 +1614,7 @@ fn float_histogram(
         out[index] += *count;
     }
     ProfileHistogram {
+        float_domain: true,
         min: ProfileFloat(normalize_float(min)),
         max: ProfileFloat(normalize_float(max)),
         width: ProfileFloat(width),
@@ -1507,7 +1642,10 @@ impl ProfileRun {
             } else {
                 ProfileColumnStatus::Profiled
             };
-            let non_null_count = self.dataset.row_count_scanned.saturating_sub(runtime.null_count);
+            let non_null_count = self
+                .dataset
+                .row_count_scanned
+                .saturating_sub(runtime.null_count);
             let mut column = ColumnProfile {
                 name: runtime.name.clone(),
                 logical_type: runtime.logical_type.to_owned(),
@@ -1546,8 +1684,12 @@ impl ProfileRun {
                         column.min_value = Some(ProfileExtreme::Int(min));
                         column.max_value = Some(ProfileExtreme::Int(max));
                         if !state.sum_overflow {
-                            column.histogram =
-                                Some(integer_histogram(histogram_buckets, min, max, &state.distinct));
+                            column.histogram = Some(integer_histogram(
+                                histogram_buckets,
+                                min,
+                                max,
+                                &state.distinct,
+                            ));
                         }
                     }
                     if state.sum_overflow {
@@ -1559,15 +1701,23 @@ impl ProfileRun {
                             non_null_count as u128,
                         )));
                     }
-                    column.unique_count = Some(state.distinct.len() as u64);
+                    column.unique_count = if column.distinct_overflow {
+                        None
+                    } else {
+                        Some(state.distinct.len() as u64)
+                    };
                 }
                 ColumnState::Float(state) => {
                     column.non_finite_count = Some(state.non_finite_count);
                     if let (Some(min), Some(max)) = (state.min, state.max) {
                         column.min_value = Some(ProfileExtreme::Float(ProfileFloat(min)));
                         column.max_value = Some(ProfileExtreme::Float(ProfileFloat(max)));
-                        column.histogram =
-                            Some(float_histogram(histogram_buckets, min, max, &state.distinct));
+                        column.histogram = Some(float_histogram(
+                            histogram_buckets,
+                            min,
+                            max,
+                            &state.distinct,
+                        ));
                     }
                     if state.finite_count > 0 {
                         column.sum = Some(ProfileSum::Float(ProfileFloat(
@@ -1577,14 +1727,22 @@ impl ProfileRun {
                             state.exact_sum.finalize_mean(state.finite_count),
                         )));
                     }
-                    column.unique_count = Some(state.distinct.len() as u64);
+                    column.unique_count = if column.distinct_overflow {
+                        None
+                    } else {
+                        Some(state.distinct.len() as u64)
+                    };
                 }
                 ColumnState::Date(state) => {
                     if let (Some(min), Some(max)) = (state.min, state.max) {
                         column.min_value = Some(ProfileExtreme::DateDays(min as i32));
                         column.max_value = Some(ProfileExtreme::DateDays(max as i32));
                     }
-                    column.unique_count = Some(state.distinct.len() as u64);
+                    column.unique_count = if column.distinct_overflow {
+                        None
+                    } else {
+                        Some(state.distinct.len() as u64)
+                    };
                 }
                 ColumnState::Timestamp(state) => {
                     if let (Some(min), Some(max)) = (state.min, state.max) {
@@ -1595,7 +1753,11 @@ impl ProfileRun {
                         column.min_value = Some(extreme(min));
                         column.max_value = Some(extreme(max));
                     }
-                    column.unique_count = Some(state.distinct.len() as u64);
+                    column.unique_count = if column.distinct_overflow {
+                        None
+                    } else {
+                        Some(state.distinct.len() as u64)
+                    };
                 }
                 ColumnState::Text(state) | ColumnState::Binary(state) => {
                     column.empty_count = Some(state.empty_count);
@@ -1612,7 +1774,11 @@ impl ProfileRun {
                             histogram: state.length_histogram,
                         });
                     }
-                    column.unique_count = Some(state.distinct.len() as u64);
+                    column.unique_count = if column.distinct_overflow {
+                        None
+                    } else {
+                        Some(state.distinct.len() as u64)
+                    };
                     if !column.distinct_overflow {
                         let mut candidates: Vec<(Vec<u8>, u64)> = state
                             .distinct
@@ -1706,9 +1872,9 @@ impl ExecutionEngine {
                         .fields
                         .iter()
                         .position(|field| &field.name == name)
-                        .ok_or_else(|| {
-                            EngineError::InvalidPlan("profile column not found in schema")
-                        })?;
+                        .ok_or(EngineError::InvalidPlan(
+                            "profile column not found in schema",
+                        ))?;
                     let field = &schema.fields[index];
                     resolved.push((index, field.data_type.clone(), field.name.clone()));
                 }
@@ -1765,7 +1931,9 @@ impl ExecutionEngine {
             // Byte-bound admission: payload bytes are envelope-level facts;
             // an envelope that would push scanned_bytes past the ceiling is
             // not consumed and truncation is disclosed (never an error).
-            if run.dataset.scanned_bytes + envelope.byte_count() as u64 > PROFILE_MAX_SCAN_BYTES as u64 {
+            if run.dataset.scanned_bytes + envelope.byte_count() as u64
+                > PROFILE_MAX_SCAN_BYTES as u64
+            {
                 run.dataset.truncated = true;
                 break;
             }

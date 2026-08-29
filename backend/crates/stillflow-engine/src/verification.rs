@@ -226,7 +226,7 @@ impl KeyBytes {
         Self { bytes: Vec::new() }
     }
 
-    fn push(&mut self, byte: u8) -> Result<(), EngineError> {
+    pub(crate) fn push(&mut self, byte: u8) -> Result<(), EngineError> {
         if self.bytes.len() >= MAX_DEDUP_KEY_BYTES {
             return Err(EngineError::BoundExceeded(
                 "encoded dedup key exceeds MAX_DEDUP_KEY_BYTES",
@@ -236,7 +236,7 @@ impl KeyBytes {
         Ok(())
     }
 
-    fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), EngineError> {
+    pub(crate) fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), EngineError> {
         let remaining = MAX_DEDUP_KEY_BYTES - self.bytes.len();
         if slice.len() > remaining {
             return Err(EngineError::BoundExceeded(

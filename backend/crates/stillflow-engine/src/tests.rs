@@ -5742,7 +5742,7 @@ mod verification_evidence {
         factory.try_build(sequence, batch).expect("envelope")
     }
 
-    fn gt(column: ColumnId, bound: i64) -> Expr {
+    pub(crate) fn gt(column: ColumnId, bound: i64) -> Expr {
         Expr::Binary {
             left: Box::new(Expr::Column(column)),
             operator: BinaryOperator::GreaterThan,
@@ -7693,5 +7693,1186 @@ mod verification_evidence {
             .expect_err("oversized message must be refused");
         assert!(matches!(error, EngineError::InvalidPlan(_)));
         assert!(error.to_string().contains("MAX_VALIDATION_MESSAGE_BYTES"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Q-R1 profiling evidence (issue #178, ADR-003 §§3–6/§9, contract matrix)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod profile_evidence {
+    use super::*;
+    use crate::{
+        ProfileColumns, ProfileRequest, PROFILE_MAX_ROWS, PROFILE_MAX_SCAN_BYTES,
+        PROFILING_CONTRACT_VERSION,
+    };
+    use arrow_array::{
+        ArrayRef, BinaryArray, BooleanArray, Date32Array, Float64Array, StringArray,
+        TimestampSecondArray,
+    };
+    use sha2::{Digest as _, Sha256};
+    use std::sync::Arc as StdArc;
+
+    // -- shared helpers ---------------------------------------------------
+
+    fn deadline_context() -> stillflow_core::RequestContext {
+        stillflow_core::RequestContext::with_cancellation_and_deadline(
+            tokio_util::sync::CancellationToken::new(),
+            tokio::time::Instant::now() + std::time::Duration::from_secs(300),
+        )
+    }
+
+    fn profile_request(
+        _schema: &LogicalSchema,
+        columns: ProfileColumns,
+        top_k: Option<usize>,
+        buckets: Option<usize>,
+        context: stillflow_core::RequestContext,
+    ) -> ProfileRequest {
+        let connection = connection();
+        let source = asset(connection.id());
+        ProfileRequest::new(connection, source, columns, top_k, buckets, context)
+            .expect("valid request")
+    }
+
+    async fn run_profile(
+        schema: &LogicalSchema,
+        envelopes: Vec<stillflow_core::BatchEnvelope>,
+        columns: ProfileColumns,
+        top_k: Option<usize>,
+        buckets: Option<usize>,
+    ) -> Result<crate::profile::ProfileResult, EngineError> {
+        let (engine, _) = engine_with(schema.clone(), envelopes, true).await;
+        let request = profile_request(schema, columns, top_k, buckets, deadline_context());
+        engine.profile(request).await
+    }
+
+    fn named_field(id: u128, name: &str, data_type: LogicalType) -> LogicalField {
+        LogicalField::new(
+            ColumnId::from_uuid(Uuid::from_u128(id)),
+            name.to_owned(),
+            data_type,
+            true,
+        )
+        .expect("field")
+    }
+
+    fn batch_of(schema: &LogicalSchema, columns: Vec<ArrayRef>) -> RecordBatch {
+        let arrow = stillflow_core::logical_schema_to_arrow(schema).expect("arrow schema");
+        RecordBatch::try_new(arrow, columns).expect("batch")
+    }
+
+    fn envelope_of(
+        schema: &LogicalSchema,
+        asset_id: Uuid,
+        sequence: u64,
+        batch: RecordBatch,
+    ) -> stillflow_core::BatchEnvelope {
+        let factory =
+            BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), asset_id).expect("factory");
+        factory.try_build(sequence, batch).expect("envelope")
+    }
+
+    /// Envelopes are capped at `MAX_BATCH_ROWS` rows each, so large scan
+    /// scopes are expressed as consecutive row-chunked envelopes.
+    fn chunked_int_envelopes(
+        schema: &LogicalSchema,
+        asset_id: Uuid,
+        first_sequence: u64,
+        rows: i64,
+    ) -> Vec<stillflow_core::BatchEnvelope> {
+        let mut envelopes = Vec::new();
+        let mut produced = 0i64;
+        let mut sequence = first_sequence;
+        while produced < rows {
+            let take = (rows - produced).min(65536);
+            let values: Vec<i64> = (produced..produced + take).collect();
+            envelopes.push(envelope_of(
+                schema,
+                asset_id,
+                sequence,
+                batch_of(
+                    schema,
+                    vec![StdArc::new(Int64Array::from(values)) as ArrayRef],
+                ),
+            ));
+            produced += take;
+            sequence += 1;
+        }
+        envelopes
+    }
+
+    fn profile_column<'a>(
+        result: &'a crate::profile::ProfileResult,
+        name: &str,
+    ) -> &'a crate::profile::ColumnProfile {
+        result
+            .profile
+            .columns
+            .iter()
+            .find(|column| column.name == name)
+            .unwrap_or_else(|| panic!("column {name} missing"))
+    }
+
+    // -- 1. request validation + defaults ---------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p01_request_validation_and_default_resolution() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let connection = connection();
+        let source = asset(connection.id());
+        // Missing deadline is a typed validation error before execution.
+        let error = ProfileRequest::new(
+            connection.clone(),
+            source.clone(),
+            ProfileColumns::All,
+            None,
+            None,
+            stillflow_core::RequestContext::default(),
+        )
+        .expect_err("missing deadline must fail");
+        assert!(matches!(error, EngineError::InvalidPlan(_)));
+        // top_k bounds.
+        for bad in [0usize, 101] {
+            let error = ProfileRequest::new(
+                connection.clone(),
+                source.clone(),
+                ProfileColumns::All,
+                Some(bad),
+                None,
+                deadline_context(),
+            )
+            .unwrap_err();
+            assert!(matches!(error, EngineError::BoundExceeded(_)));
+        }
+        // histogram_buckets bounds.
+        for bad in [0usize, 65] {
+            let error = ProfileRequest::new(
+                connection.clone(),
+                source.clone(),
+                ProfileColumns::All,
+                None,
+                Some(bad),
+                deadline_context(),
+            )
+            .unwrap_err();
+            assert!(matches!(error, EngineError::BoundExceeded(_)));
+        }
+        // Duplicate explicit selection.
+        let error = ProfileRequest::new(
+            connection.clone(),
+            source.clone(),
+            ProfileColumns::Explicit(vec!["value".to_owned(), "value".to_owned()]),
+            None,
+            None,
+            deadline_context(),
+        )
+        .expect_err("duplicates must fail");
+        assert!(matches!(error, EngineError::InvalidPlan(_)));
+        // Defaults resolve to the contract values.
+        let request = ProfileRequest::new(
+            connection,
+            source,
+            ProfileColumns::All,
+            None,
+            None,
+            deadline_context(),
+        )
+        .expect("defaults");
+        assert_eq!(request.top_k, 20);
+        assert_eq!(request.histogram_buckets, 32);
+        assert_eq!(PROFILING_CONTRACT_VERSION, 1);
+        let _ = schema;
+    }
+
+    // -- 2. empty input ----------------------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p02_empty_input_zero_state_without_error() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let result = run_profile(&schema, Vec::new(), ProfileColumns::All, None, None)
+            .await
+            .expect("empty profile");
+        assert_eq!(result.profile.dataset.row_count_scanned, 0);
+        assert!(!result.profile.dataset.truncated);
+        let column = profile_column(&result, "value");
+        assert_eq!(column.null_count, 0);
+        assert_eq!(column.non_null_count, 0);
+        assert_eq!(column.unique_count, Some(0));
+        assert!(column.min_value.is_none());
+        assert!(column.max_value.is_none());
+        assert!(column.sum.is_none());
+        assert!(column.mean.is_none());
+    }
+
+    // -- 3. all-null columns ------------------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p03_all_null_columns_count_nulls_with_present_metrics() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema =
+            LogicalSchema::new(vec![named_field(0x51, "n", LogicalType::Int64)]).expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Int64Array::from(vec![None::<i64>; 4])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let column = profile_column(&result, "n");
+        assert_eq!(column.null_count, 4);
+        assert_eq!(column.non_null_count, 0);
+        assert_eq!(column.unique_count, Some(0));
+        assert!(column.min_value.is_none());
+        assert!(!column.distinct_overflow);
+    }
+
+    // -- 4/5. scalar type families + unsupported explicit status ------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p04_p05_type_families_and_unsupported_status() {
+        let _guard = exclusive_test_lock().lock().await;
+        // Boolean / float / date / text families profile correctly.
+        let schema = LogicalSchema::new(vec![
+            named_field(0x61, "flag", LogicalType::Boolean),
+            named_field(0x62, "amount", LogicalType::Float64),
+            named_field(0x63, "day", LogicalType::Date32),
+            named_field(0x64, "label", LogicalType::Utf8),
+        ])
+        .expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![
+                    StdArc::new(BooleanArray::from(vec![Some(true), Some(false), None]))
+                        as ArrayRef,
+                    StdArc::new(Float64Array::from(vec![Some(1.5), None, Some(2.5)])) as ArrayRef,
+                    StdArc::new(Date32Array::from(vec![Some(10), Some(20), Some(30)])) as ArrayRef,
+                    StdArc::new(StringArray::from(vec![Some("x"), Some("y"), None])) as ArrayRef,
+                ],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let flag = profile_column(&result, "flag");
+        assert_eq!(flag.true_count, Some(1));
+        assert_eq!(flag.false_count, Some(1));
+        assert_eq!(flag.null_count, 1);
+        let amount = profile_column(&result, "amount");
+        assert!(matches!(
+            amount.sum,
+            Some(crate::profile::ProfileSum::Float(_))
+        ));
+        let day = profile_column(&result, "day");
+        assert!(matches!(
+            day.min_value,
+            Some(crate::profile::ProfileExtreme::DateDays(10))
+        ));
+        let label = profile_column(&result, "label");
+        assert_eq!(label.empty_count, Some(0));
+
+        // Unsupported families stay present with the explicit skip status.
+        let schema = LogicalSchema::new(vec![
+            named_field(
+                0x65,
+                "paused_a",
+                LogicalType::Timestamp {
+                    unit: TimeUnit::Second,
+                    timezone: None,
+                },
+            ),
+            named_field(
+                0x66,
+                "paused_b",
+                LogicalType::Timestamp {
+                    unit: TimeUnit::Second,
+                    timezone: None,
+                },
+            ),
+        ])
+        .expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![
+                    StdArc::new(TimestampSecondArray::from(vec![0, 1])) as ArrayRef,
+                    StdArc::new(TimestampSecondArray::from(vec![2, 3])) as ArrayRef,
+                ],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let paused_a = profile_column(&result, "paused_a");
+        assert_eq!(
+            paused_a.status,
+            crate::profile::ProfileColumnStatus::SkippedUnsupportedType
+        );
+        assert_eq!(paused_a.null_count, 0);
+        assert_eq!(paused_a.non_null_count, 2);
+        let paused_b = profile_column(&result, "paused_b");
+        assert_eq!(
+            paused_b.status,
+            crate::profile::ProfileColumnStatus::SkippedUnsupportedType
+        );
+    }
+
+    // -- 6. null vs empty Utf8 ----------------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p06_null_and_empty_utf8_are_distinct() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema =
+            LogicalSchema::new(vec![named_field(0x67, "s", LogicalType::Utf8)]).expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![
+                    StdArc::new(StringArray::from(vec![None, Some(""), Some(""), Some("x")]))
+                        as ArrayRef,
+                ],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let column = profile_column(&result, "s");
+        assert_eq!(column.null_count, 1);
+        assert_eq!(column.empty_count, Some(2));
+        assert_eq!(column.non_null_count, 3);
+        assert_eq!(column.unique_count, Some(2));
+    }
+
+    // -- 7/8. distinct + full-row overflow boundaries ------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p07_p08_distinct_and_full_row_overflow_boundaries() {
+        let _guard = exclusive_test_lock().lock().await;
+        use crate::{
+            PROFILE_MAX_DISTINCT_ENTRIES_PER_COLUMN, PROFILE_MAX_FULL_ROW_DISTINCT_ENTRIES,
+        };
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let source = asset(connection().id());
+        // Exactly at the per-column boundary: present, no overflow.
+        let count = PROFILE_MAX_DISTINCT_ENTRIES_PER_COLUMN as i64;
+        let envelopes = chunked_int_envelopes(&schema, source.id, 0, count);
+        let result = run_profile(&schema, envelopes, ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let column = profile_column(&result, "value");
+        assert_eq!(
+            column.unique_count,
+            Some(PROFILE_MAX_DISTINCT_ENTRIES_PER_COLUMN as u64)
+        );
+        assert!(!column.distinct_overflow);
+
+        // One past the boundary: absent metrics + flag, run still succeeds.
+        let envelopes = chunked_int_envelopes(&schema, source.id, 0, count + 1);
+        let result = run_profile(&schema, envelopes, ProfileColumns::All, None, None)
+            .await
+            .expect("overflow must not fail the run");
+        let column = profile_column(&result, "value");
+        assert!(column.distinct_overflow);
+        assert!(column.unique_count.is_none());
+        assert!(column.top_values.is_none());
+
+        // Full-row overflow: distinct/duplicate absent with the flag.
+        let rows = PROFILE_MAX_FULL_ROW_DISTINCT_ENTRIES as i64 + 1;
+        let envelopes = chunked_int_envelopes(&schema, source.id, 0, rows);
+        let result = run_profile(&schema, envelopes, ProfileColumns::All, None, None)
+            .await
+            .expect("full-row overflow must not fail the run");
+        assert!(result.profile.dataset.full_row_distinct_overflow);
+        assert!(result.profile.dataset.distinct_row_count.is_none());
+        assert!(result.profile.dataset.duplicate_row_count.is_none());
+    }
+
+    // -- 9. top-K ordering, ties, retention cap ------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p09_top_k_ordering_ties_and_retention_cap() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema =
+            LogicalSchema::new(vec![named_field(0x68, "s", LogicalType::Utf8)]).expect("schema");
+        let source = asset(connection().id());
+        let long = "L".repeat(300); // exceeds the 256-byte retention cap
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(StringArray::from(vec![
+                    Some("b"),
+                    Some("b"),
+                    Some("a"),
+                    Some("a"),
+                    Some("c"),
+                    Some(long.as_str()),
+                    Some(long.as_str()),
+                ])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, Some(2), None)
+            .await
+            .expect("profile");
+        let column = profile_column(&result, "s");
+        let top = column.top_values.as_ref().expect("top values");
+        assert_eq!(top.len(), 2);
+        // Count descending, ties by value ascending byte order.
+        assert_eq!(
+            top[0],
+            crate::profile::ProfileTopValue::Text {
+                value: "a".to_owned(),
+                count: 2
+            }
+        );
+        assert_eq!(
+            top[1],
+            crate::profile::ProfileTopValue::Text {
+                value: "b".to_owned(),
+                count: 2
+            }
+        );
+        // Long values participate in distinct/length metrics but never in top-K.
+        assert_eq!(column.unique_count, Some(4));
+        assert_eq!(
+            column
+                .length
+                .as_ref()
+                .expect("length stats")
+                .long_value_count,
+            2
+        );
+    }
+
+    // -- 10. integer histogram ----------------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p10_integer_histogram_endpoints_and_degenerate() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Int64Array::from((1..=100).collect::<Vec<_>>())) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, Some(10))
+            .await
+            .expect("profile");
+        let column = profile_column(&result, "value");
+        let histogram = column.histogram.as_ref().expect("histogram");
+        // span = 99; bucket(v) = ((v-1)*10) div 99 partitions 1..=100 into
+        // ten uniform buckets of ten; v = max = 100 maps to bucket 9 both by
+        // the formula and by the min clause.
+        assert_eq!(
+            histogram.counts,
+            vec![10, 10, 10, 10, 10, 10, 10, 10, 10, 10]
+        );
+        // Degenerate single-point range: span = 0 sends everything to bucket 0.
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Int64Array::from(vec![7, 7, 7])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, Some(8))
+            .await
+            .expect("profile");
+        let histogram = profile_column(&result, "value")
+            .histogram
+            .as_ref()
+            .expect("histogram");
+        assert_eq!(histogram.counts, vec![3, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    // -- 11. float histogram variants ----------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p11_float_histogram_normal_degenerate_infinite_width_non_finite() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema =
+            LogicalSchema::new(vec![named_field(0x69, "f", LogicalType::Float64)]).expect("schema");
+        let source = asset(connection().id());
+        // Normal: [0..8] with 4 buckets → width 2.
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Float64Array::from(vec![0.0, 1.9, 2.0, 7.9, 8.0])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, Some(4))
+            .await
+            .expect("profile");
+        let histogram = profile_column(&result, "f")
+            .histogram
+            .as_ref()
+            .expect("histogram");
+        assert_eq!(histogram.counts, vec![2, 1, 0, 2]);
+        assert!(histogram.float_domain);
+
+        // Degenerate: width 0 → all values to bucket 0.
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Float64Array::from(vec![3.0, 3.0])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, Some(4))
+            .await
+            .expect("profile");
+        let histogram = profile_column(&result, "f")
+            .histogram
+            .as_ref()
+            .expect("histogram");
+        assert_eq!(histogram.counts, vec![2, 0, 0, 0]);
+
+        // Infinite width + non-finite exclusion.
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Float64Array::from(vec![
+                    Some(-1e308),
+                    Some(1.0),
+                    Some(1e308),
+                    Some(f64::NAN),
+                    Some(f64::NEG_INFINITY),
+                    Some(f64::INFINITY),
+                ])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, Some(4))
+            .await
+            .expect("profile");
+        let column = profile_column(&result, "f");
+        let histogram = column.histogram.as_ref().expect("histogram");
+        // Infinite-width branch: only v == max lands in the last bucket.
+        assert_eq!(histogram.counts, vec![2, 0, 0, 1]);
+        assert_eq!(column.non_finite_count, Some(3));
+        assert!(column.min_value.is_some());
+    }
+
+    // -- 12. float sum/mean partition invariance (adversarial) ---------------
+
+    async fn build_float_profile(
+        schema: &LogicalSchema,
+        source: &SourceAsset,
+        chunks: &[&[f64]],
+    ) -> (Vec<u8>, String) {
+        let envelopes = chunks
+            .iter()
+            .enumerate()
+            .map(|(seq, chunk)| {
+                envelope_of(
+                    schema,
+                    source.id,
+                    seq as u64,
+                    batch_of(
+                        schema,
+                        vec![StdArc::new(Float64Array::from(chunk.to_vec())) as ArrayRef],
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let (engine, _) = engine_with(schema.clone(), envelopes, true).await;
+        let request = profile_request(
+            schema,
+            ProfileColumns::All,
+            None,
+            Some(4),
+            deadline_context(),
+        );
+        let result = engine.profile(request).await.expect("profile");
+        (result.canonical_body, result.canonical_digest)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p12_float_sum_mean_partition_invariance_adversarial() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema =
+            LogicalSchema::new(vec![named_field(0x6a, "f", LogicalType::Float64)]).expect("schema");
+        let source = asset(connection().id());
+        let values = vec![
+            1e16,
+            1.0,
+            -1e16,
+            1.0,
+            3.0,
+            -1.0,
+            1e-16,
+            -1e-16,
+            f64::MAX,
+            f64::MIN,
+        ];
+        let (single_bytes, single_digest) = build_float_profile(&schema, &source, &[&values]).await;
+        let (split_bytes, split_digest) = build_float_profile(
+            &schema,
+            &source,
+            &[&values[..3], &values[3..7], &values[7..]],
+        )
+        .await;
+        assert_eq!(
+            single_bytes, split_bytes,
+            "canonical bytes must be partition-invariant"
+        );
+        assert_eq!(single_digest, split_digest);
+    }
+
+    // -- 13. Utf8 code points vs bytes; Binary bytes -------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p13_utf8_code_point_length_vs_binary_byte_length() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![
+            named_field(0x6b, "s", LogicalType::Utf8),
+            named_field(0x6c, "b", LogicalType::Binary),
+        ])
+        .expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![
+                    // "é" = 1 code point / 2 UTF-8 bytes; "日x" = 2 / 4.
+                    StdArc::new(StringArray::from(vec!["é", "日x"])) as ArrayRef,
+                    StdArc::new(BinaryArray::from(vec![
+                        b"ab".as_slice(),
+                        b"\x00\x01\x02".as_slice(),
+                    ])) as ArrayRef,
+                ],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let text = profile_column(&result, "s")
+            .length
+            .as_ref()
+            .expect("length");
+        assert_eq!(text.sum_of_lengths, 3, "utf8 length counts code points");
+        let binary = profile_column(&result, "b")
+            .length
+            .as_ref()
+            .expect("length");
+        assert_eq!(binary.sum_of_lengths, 5, "binary length counts bytes");
+    }
+
+    // -- 14. fixed length-histogram boundaries -------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p14_length_histogram_fixed_boundaries() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema =
+            LogicalSchema::new(vec![named_field(0x6d, "b", LogicalType::Binary)]).expect("schema");
+        let source = asset(connection().id());
+        // Lengths 0, 1, 3, 9, 300 → buckets 0, 1, 3 (bound 4), 5 (bound 16),
+        // 10 (bound 512) per the fixed ADR-003 §6.3 edge table.
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(BinaryArray::from(vec![
+                    b"".as_slice(),
+                    b"x".as_slice(),
+                    b"xyz".as_slice(),
+                    b"123456789".as_slice(),
+                    &[7u8; 300],
+                ])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let histogram = &profile_column(&result, "b")
+            .length
+            .as_ref()
+            .expect("length")
+            .histogram;
+        let mut expected = vec![0u64; 14];
+        expected[0] = 1;
+        expected[1] = 1;
+        expected[3] = 1;
+        expected[5] = 1;
+        expected[10] = 1;
+        assert_eq!(*histogram, expected);
+    }
+
+    // -- 15. row-limit truncation ---------------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p15_row_limit_truncation_is_disclosed() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let source = asset(connection().id());
+        let rows = PROFILE_MAX_ROWS as i64 + 1;
+        let envelopes = chunked_int_envelopes(&schema, source.id, 0, rows);
+        let result = run_profile(&schema, envelopes, ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        assert!(result.profile.dataset.truncated);
+        assert_eq!(
+            result.profile.dataset.row_count_scanned,
+            PROFILE_MAX_ROWS as u64
+        );
+    }
+
+    // -- 16. byte-limit truncation ---------------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p16_byte_limit_truncation_is_disclosed() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema =
+            LogicalSchema::new(vec![named_field(0x6e, "b", LogicalType::Binary)]).expect("schema");
+        let source = asset(connection().id());
+        // Repeating 600-byte values keep the exact per-value state tiny while
+        // payload bytes accumulate, so the SCAN-BYTE ceiling binds before the
+        // row cap or the state budget (13 envelopes × 37.5 MiB > 512 MiB).
+        let pattern: Vec<u8> = (0..600).map(|index| (index % 251) as u8).collect();
+        let alt: Vec<u8> = (0..600).map(|index| (index % 241) as u8).collect();
+        let mut envelopes = Vec::new();
+        for sequence in 0..14u64 {
+            let values: Vec<&[u8]> = (0..65536)
+                .map(|row| {
+                    if (row + sequence as usize) % 2 == 0 {
+                        pattern.as_slice()
+                    } else {
+                        alt.as_slice()
+                    }
+                })
+                .collect();
+            envelopes.push(envelope_of(
+                &schema,
+                source.id,
+                sequence,
+                batch_of(
+                    &schema,
+                    vec![StdArc::new(BinaryArray::from(values)) as ArrayRef],
+                ),
+            ));
+        }
+        let result = run_profile(&schema, envelopes, ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        assert!(
+            result.profile.dataset.truncated,
+            "byte ceiling must truncate"
+        );
+        assert!(result.profile.dataset.row_count_scanned < PROFILE_MAX_ROWS as u64);
+        assert!(result.profile.dataset.scanned_bytes <= PROFILE_MAX_SCAN_BYTES as u64);
+    }
+
+    // -- 17. batch partition invariance ---------------------------------------
+
+    async fn build_int_profile(
+        schema: &LogicalSchema,
+        source: &SourceAsset,
+        chunks: &[&[i64]],
+    ) -> (Vec<u8>, String) {
+        let envelopes = chunks
+            .iter()
+            .enumerate()
+            .map(|(seq, chunk)| {
+                envelope_of(
+                    schema,
+                    source.id,
+                    seq as u64,
+                    batch_of(
+                        schema,
+                        vec![StdArc::new(Int64Array::from(chunk.to_vec())) as ArrayRef],
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let (engine, _) = engine_with(schema.clone(), envelopes, true).await;
+        let request = profile_request(
+            schema,
+            ProfileColumns::All,
+            None,
+            Some(8),
+            deadline_context(),
+        );
+        let result = engine.profile(request).await.expect("profile");
+        (result.canonical_body, result.canonical_digest)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p17_batch_partition_invariance_identical_canonical_bytes() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let source = asset(connection().id());
+        let rows: Vec<i64> = (0..500).collect();
+        let (single_bytes, single_digest) = build_int_profile(&schema, &source, &[&rows]).await;
+        let (split_bytes, split_digest) = build_int_profile(
+            &schema,
+            &source,
+            &[&rows[..137], &rows[137..401], &rows[401..]],
+        )
+        .await;
+        assert_eq!(single_bytes, split_bytes);
+        assert_eq!(single_digest, split_digest);
+    }
+
+    // -- 18. wide schema: 256 accepted, 257 rejected --------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p18_wide_schema_256_accepted_257_rejected() {
+        let _guard = exclusive_test_lock().lock().await;
+        let build_schema = |count: usize| {
+            let fields: Vec<LogicalField> = (0..count)
+                .map(|index| {
+                    LogicalField::new(
+                        ColumnId::from_uuid(Uuid::from_u128(0x7000 + index as u128)),
+                        format!("c{index}"),
+                        LogicalType::Int64,
+                        false,
+                    )
+                    .expect("field")
+                })
+                .collect();
+            LogicalSchema::new(fields).expect("schema")
+        };
+        let schema = build_schema(256);
+        let source = asset(connection().id());
+        let columns: Vec<ArrayRef> = (0..256)
+            .map(|_| StdArc::new(Int64Array::from(vec![1, 2])) as ArrayRef)
+            .collect();
+        let envelope = envelope_of(&schema, source.id, 0, batch_of(&schema, columns));
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("256 columns must be accepted");
+        assert_eq!(result.profile.dataset.column_count_profiled, 256);
+
+        let schema = build_schema(257);
+        let error = run_profile(&schema, Vec::new(), ProfileColumns::All, None, None)
+            .await
+            .expect_err("257 columns must be rejected");
+        assert!(matches!(error, EngineError::BoundExceeded(_)));
+    }
+
+    // -- 19. long strings / binary values --------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p19_long_strings_and_binary_round_trip_metrics() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![
+            named_field(0x71, "s", LogicalType::Utf8),
+            named_field(0x72, "b", LogicalType::Binary),
+        ])
+        .expect("schema");
+        let source = asset(connection().id());
+        let long_text = "w".repeat(1000);
+        let long_bytes: Vec<u8> = (0..1000).map(|index| (index % 251) as u8).collect();
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![
+                    StdArc::new(StringArray::from(vec![long_text.as_str(), "tiny"])) as ArrayRef,
+                    StdArc::new(BinaryArray::from(vec![
+                        long_bytes.as_slice(),
+                        b"tiny".as_slice(),
+                    ])) as ArrayRef,
+                ],
+            ),
+        );
+        let result = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let text_length = profile_column(&result, "s")
+            .length
+            .as_ref()
+            .expect("length");
+        assert_eq!(text_length.max_length, Some(1000));
+        assert_eq!(text_length.long_value_count, 1);
+        let binary_length = profile_column(&result, "b")
+            .length
+            .as_ref()
+            .expect("length");
+        assert_eq!(binary_length.max_length, Some(1000));
+        assert_eq!(binary_length.long_value_count, 1);
+    }
+
+    // -- 20. high-cardinality state remains bounded -----------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p20_high_cardinality_state_remains_bounded() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let source = asset(connection().id());
+        // 90k distinct values: under the entry cap, so the state stays
+        // present and complete without approaching the byte budget.
+        let count = 90_000i64;
+        let envelopes = chunked_int_envelopes(&schema, source.id, 0, count);
+        let result = run_profile(&schema, envelopes, ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        let column = profile_column(&result, "value");
+        assert_eq!(column.unique_count, Some(count as u64));
+        assert!(!column.distinct_overflow);
+    }
+
+    // -- 21. cancellation / deadline abort with no result -----------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p21_cancellation_and_deadline_abort_with_no_result() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let connection = connection();
+        let source = asset(connection.id());
+        // Cancelled before the call: typed failure, no result object.
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let request = ProfileRequest::new(
+            connection.clone(),
+            source.clone(),
+            ProfileColumns::All,
+            None,
+            None,
+            stillflow_core::RequestContext::with_cancellation_and_deadline(
+                token,
+                tokio::time::Instant::now() + std::time::Duration::from_secs(300),
+            ),
+        )
+        .expect("valid request");
+        let error = engine.profile(request).await.expect_err("cancelled");
+        assert!(matches!(error, EngineError::Cancelled));
+
+        // Expired deadline: typed failure.
+        let request = ProfileRequest::new(
+            connection.clone(),
+            source.clone(),
+            ProfileColumns::All,
+            None,
+            None,
+            stillflow_core::RequestContext::with_deadline(tokio::time::Instant::now()),
+        )
+        .expect("valid request");
+        let error = engine.profile(request).await.expect_err("expired deadline");
+        assert!(matches!(error, EngineError::Timeout));
+
+        // A run interrupted mid-stream publishes nothing (the future is
+        // dropped while the connector stream never completes).
+        let (engine, _) = engine_with_pending(schema.clone(), true).await;
+        let request = ProfileRequest::new(
+            connection,
+            source,
+            ProfileColumns::All,
+            None,
+            None,
+            deadline_context(),
+        )
+        .expect("valid request");
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            engine.profile(request),
+        )
+        .await;
+        assert!(outcome.is_err(), "the pending stream must hit the timeout");
+    }
+
+    // -- 22. existing Engine concurrency gate is reused --------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p22_profile_reuses_the_engine_run_gate() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let permits: Vec<_> = (0..crate::MAX_ENGINE_CONCURRENT_RUNS)
+            .map(|_| engine.try_hold_run_gate().expect("hold a permit"))
+            .collect();
+        assert_eq!(permits.len(), 4);
+        let request = ProfileRequest::new(
+            connection,
+            source,
+            ProfileColumns::All,
+            None,
+            None,
+            deadline_context(),
+        )
+        .expect("valid request");
+        let error = engine.profile(request).await.expect_err("gate must refuse");
+        assert!(matches!(error, EngineError::Busy));
+    }
+
+    // -- 23. canonical JSON golden bytes + digest --------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p23_canonical_json_golden_bytes_and_digest() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Int64Array::from(vec![1, 2, 3])) as ArrayRef],
+            ),
+        );
+        let result = run_profile(
+            &schema,
+            vec![envelope],
+            ProfileColumns::All,
+            Some(2),
+            Some(4),
+        )
+        .await
+        .expect("profile");
+        let body = String::from_utf8(result.canonical_body.clone()).expect("utf8");
+        // Hand-written golden: sorted keys, pinned encodings, no run id.
+        // Integer histograms carry the exact counts only (their edges are
+        // min_value/max_value); integer mean is the reduced rational.
+        let expected = "{\"artifact_body_version\":1,\"artifact_type\":\"profile_report\",\"columns\":[{\"histogram\":[1,0,1,1],\"max_value\":3,\"mean\":{\"denominator\":1,\"numerator\":2},\"min_value\":1,\"name\":\"value\",\"non_null_count\":3,\"null_count\":0,\"status\":\"profiled\",\"sum\":6,\"type\":\"int64\",\"unique_count\":3}],\"dataset\":{\"column_count_profiled\":1,\"distinct_row_count\":3,\"duplicate_row_count\":0,\"full_row_distinct_overflow\":false,\"row_count_scanned\":3,\"truncated\":false},\"profiling_contract_version\":1}";
+        assert_eq!(body, expected, "canonical body must match the golden bytes");
+        let mut hasher = Sha256::new();
+        hasher.update(result.canonical_body.as_slice());
+        let digest = hasher.finalize();
+        let expected_digest: String = digest.iter().fold(String::new(), |mut out, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{byte:02x}");
+            out
+        });
+        assert_eq!(result.canonical_digest, expected_digest);
+    }
+
+    // -- 24. run-id exclusion from digest -----------------------------------------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p24_run_id_is_excluded_from_the_canonical_body_and_digest() {
+        let _guard = exclusive_test_lock().lock().await;
+        let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
+            .expect("schema");
+        let source = asset(connection().id());
+        let envelope = envelope_of(
+            &schema,
+            source.id,
+            0,
+            batch_of(
+                &schema,
+                vec![StdArc::new(Int64Array::from(vec![1, 2])) as ArrayRef],
+            ),
+        );
+        let first = run_profile(
+            &schema,
+            vec![envelope.clone()],
+            ProfileColumns::All,
+            None,
+            None,
+        )
+        .await
+        .expect("profile");
+        let second = run_profile(&schema, vec![envelope], ProfileColumns::All, None, None)
+            .await
+            .expect("profile");
+        assert_ne!(first.run_id, second.run_id, "runs must differ in run id");
+        assert_eq!(first.canonical_body, second.canonical_body);
+        assert_eq!(first.canonical_digest, second.canonical_digest);
+        assert!(!String::from_utf8_lossy(&first.canonical_body).contains(&first.run_id.to_string()));
+    }
+
+    // -- 25. E4 regression canary (full suite covered by the run gate) -----------
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn p25_e4_verification_path_remains_green_after_profiling() {
+        let _guard = exclusive_test_lock().lock().await;
+        // Canary: the E4 materialize path still rejects Validate rules beside
+        // the profiler; the full V01–V31 suite runs in the same crate.
+        let (schema, value) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let (engine, _) = engine_with(schema.clone(), Vec::new(), true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = scan_materialize_plan_with_projection(
+            source.id,
+            vec![value],
+            Some(PlanNodeKind::ApplyRules {
+                rules: vec![Rule::Validate {
+                    predicate: crate::tests::verification_evidence::gt(value, 0),
+                    severity: ValidationSeverity::Error,
+                    message: "v".to_owned(),
+                }],
+            }),
+        );
+        let error = engine
+            .materialize(ExecutionRequest {
+                plan,
+                connection: connection.clone(),
+                asset: source.clone(),
+                schema_override: Some(schema),
+                identities: identities(),
+                context: long_context(),
+                batch_size: 64,
+                store: &store,
+            })
+            .await
+            .expect_err("E4 E2 path must keep refusing Validate");
+        assert!(matches!(
+            error,
+            EngineError::UnsupportedRule {
+                kind: "validate",
+                ..
+            }
+        ));
     }
 }
