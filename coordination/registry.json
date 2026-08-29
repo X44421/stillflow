@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 250,
+  "revision": 249,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3131,8 +3131,40 @@
       "result_head": "9119cf216cfeb218f8afe91d21440a2d066fef21",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33243997359",
       "completion_note": "READY_FOR_E4_S2_FINAL_ACCEPTANCE - rebase onto main@31e5e397145afcc23957456f16bc72514b4a8c93 complete: range-diff 2=2 identical patches (91c08a0->34c50cf port, f9529ce->de172b5 evidence), zero semantic drift, no storage source copied, #91 untouched, non-mechanical conflicts none. D2 wiring: single production seam in materialize_verification_inner binds the draft with with_rejected_source_schema(prepared.scan_output.clone()) - the frozen logical Scan-output schema, never materialized; bundles without rejected artifacts unaffected; storage fail-closed not bypassed; storage API untouched. Three ignored repros un-ignored and green: D1 null-payload digest repro, V21 deep value fidelity (corrected the V21 predicate to float equality - NaN compares greater-than in Polars so the old gt(0) accepted the NaN row; assertions not weakened), drop-column-then-reject composition. Full V01-V31 suite green on new base: engine 159 pass 0 fail 0 ignored; O0 A1/A2 composition, E2 rejection parity, preview unchanged. Gates: fmt --all --check, clippy --workspace --all-targets --all-features -D warnings (only pre-existing connector-local-tabular cfg(unix) unused-var, A/B on clean main), git diff --check; workspace --all-features run: engine 159/0, storage 68 pass + 4 pre-existing Windows lock failures (A/B clean main), workbook 1 pre-existing Windows path failure (A/B), object-store real_s3 environmental (needs S3 credentials, untouched crate). Exact-head CI 33243997359 success 7/7. diff 31e5e39..HEAD contains no PR #177 storage source. Scope: stillflow-engine + Cargo.lock only. Not Ready, not merged; successor E4-S2-FINAL-ACCEPT."
+    },
+    {
+      "id": "E4-S2-FINAL-ACCEPT",
+      "title": "Independent final acceptance of the E4-S2 rebind (issue #171 / PR #175)",
+      "status": "queued",
+      "mode": "review",
+      "owner": null,
+      "target_issue": 171,
+      "target_pr": 175,
+      "target_branch": "agent/e4-s2-final-rebind-verification",
+      "expected_base": "31e5e397145afcc23957456f16bc72514b4a8c93",
+      "expected_head": "9119cf216cfeb218f8afe91d21440a2d066fef21",
+      "locks": [],
+      "acceptance_keys": [
+        "final:rebase-range-diff-reproduced",
+        "final:d2-binding-verified-scan-output",
+        "final:v01-v31-matrix-reproduced",
+        "final:o0-regression-reproduced",
+        "final:no-storage-source-in-engine-diff",
+        "final:zero-ignored-verification-tests",
+        "final:ci-green-exact-head"
+      ],
+      "depends_on": [
+        "E4-S2-REBIND-R2"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-29T08:52:57Z",
+      "queued_by": "maintainer:frozen-topology-2026-08-29",
+      "queue_reason": "Independent final acceptance gate for the E4-S2 rebind; APPROVE FOR MERGE unlocks the E4-S2 merge (issue #171 closure), after which the main functional chain proceeds (Q-R1 Profile Runtime -> Q-R2 -> X-R1 Export Runtime -> E5-C0 -> Golden E2E).",
+      "notes": "Read-only exact-head review of PR #175 at 9119cf216cfeb218f8afe91d21440a2d066fef21 (base main@31e5e397145afcc23957456f16bc72514b4a8c93, CI run 33243997359). Reproduce: range-diff equivalence vs f9529ce; the D2 with_rejected_source_schema(prepared.scan_output) binding; the full V01-V31 evidence suite with zero ignored verification tests (159 engine tests); O0 A1/A2 composition and E2 parity; no PR #177 storage source inside the engine diff; #91 untouched. Publish APPROVE_E4_S2_FINAL or REQUEST_CHANGES bound to the full head. Acceptor does not merge."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T08:52:02Z"
+  "updated_at": "2026-08-29T08:52:57Z"
 }
