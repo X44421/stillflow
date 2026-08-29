@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 255,
+  "revision": 256,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
@@ -3206,7 +3206,7 @@
     {
       "id": "E4-G1-CLOSURE-HYGIENE",
       "title": "E4-G1 closure and hygiene: close #176/#171/#80, retire PR #91 as historical, refresh board to main@533f75b",
-      "status": "running",
+      "status": "done",
       "mode": "maintenance",
       "owner": "ox-alpha-e4g1-w1",
       "target_issue": 171,
@@ -3233,22 +3233,18 @@
         "g1:91-closed-unmerged-historical",
         "g1:board-and-registry-current"
       ],
-      "lease_expires_at": "2026-08-29T11:58:23Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-29T09:58:23Z",
-      "updated_at": "2026-08-29T09:58:23Z",
+      "updated_at": "2026-08-29T10:04:31Z",
       "queued_by": "maintainer:frozen-topology-2026-08-29",
       "queue_reason": "E4 chain complete on main@533f75b (storage fix #177 + verification materialization #175 + V01-V31 evidence): close the canonical issues, retire PR #91 as historical evidence, and refresh the canonical board before Q-R1 dispatch.",
-      "notes": "Coordination/GitHub hygiene ONLY: no Rust/Cargo/test/workflow edits, no merge, Q-R1 must not start. Verify E4 facts first (PR #175 merge commit 533f75b, parents 31e5e39+9119cf2, APPROVE_E4_S2_FINAL_ACCEPTANCE comment 5461488979, CI 33243997359 success, #177 an ancestor, #91 d0ea2a3 never merged); stop on any inconsistency. Then: completion receipts on #176/#171/#80 and close as completed; PR #91 superseded-historical comment + close UNMERGED (no force-push, no branch changes, no branch deletion unless registry hygiene explicitly requires); refresh registry/board to canonical main@533f75badbb46f75ceb453dcf2f5e54b1384caaa with E4-S2 CLOSED/PRODUCTION, D1/D2 remediation CLOSED, engine writer none, engine and merge locks free, next = Q-R1. Terminal verdicts: CLOSED_E4_G1_ON_MAIN_533F75B | E4_G1_HYGIENE_BLOCKED."
+      "notes": "Coordination/GitHub hygiene ONLY: no Rust/Cargo/test/workflow edits, no merge, Q-R1 must not start. Verify E4 facts first (PR #175 merge commit 533f75b, parents 31e5e39+9119cf2, APPROVE_E4_S2_FINAL_ACCEPTANCE comment 5461488979, CI 33243997359 success, #177 an ancestor, #91 d0ea2a3 never merged); stop on any inconsistency. Then: completion receipts on #176/#171/#80 and close as completed; PR #91 superseded-historical comment + close UNMERGED (no force-push, no branch changes, no branch deletion unless registry hygiene explicitly requires); refresh registry/board to canonical main@533f75badbb46f75ceb453dcf2f5e54b1384caaa with E4-S2 CLOSED/PRODUCTION, D1/D2 remediation CLOSED, engine writer none, engine and merge locks free, next = Q-R1. Terminal verdicts: CLOSED_E4_G1_ON_MAIN_533F75B | E4_G1_HYGIENE_BLOCKED.",
+      "completed_at": "2026-08-29T10:04:31Z",
+      "result_head": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
+      "ci_url": null,
+      "completion_note": "CLOSED_E4_G1_ON_MAIN_533F75B - E4 facts mechanically verified (PR #175 MERGED @ 533f75b, parents 31e5e39+9119cf2, APPROVE_E4_S2_FINAL_ACCEPTANCE comment 5461488979, CI 33243997359 success, #177 ancestor of main, #91 d0ea2a3 never merged). #176 closed completed (receipt comment 5461678143; D1/D2 resolved via PR #177 @ 31e5e39). #171 closed completed (receipt 5461678441; final head 9119cf2; merge 533f75b). #80 closed completed (receipt 5461678704; PR #91 = historical evidence, PR #175 = production vehicle). PR #91 closed UNMERGED with superseded comment 5461682141; head unchanged d0ea2a3; no force-push, no branch changes. Canonical board refreshed: issue #81 CURRENT-EXECUTION-BOARD block replaced to main@533f75badbb46f75ceb453dcf2f5e54b1384caaa - E4-S2 CLOSED/PRODUCTION, D1/D2 remediation CLOSED, engine writer none, engine and merge locks free, no stale E4 Draft active, next = Q-R1 Profile Runtime; historical sections untouched. github:issue-ledger-state released."
     }
   ],
-  "locks": {
-    "github:issue-ledger-state": {
-      "task_id": "E4-G1-CLOSURE-HYGIENE",
-      "owner": "ox-alpha-e4g1-w1",
-      "expected_head": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
-      "acquired_at": "2026-08-29T09:58:23Z",
-      "lease_expires_at": "2026-08-29T11:58:23Z"
-    }
-  },
-  "updated_at": "2026-08-29T09:58:23Z"
+  "locks": {},
+  "updated_at": "2026-08-29T10:04:31Z"
 }
