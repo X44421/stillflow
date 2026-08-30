@@ -32,6 +32,18 @@ pub enum StorageError {
     NotFound(Uuid),
     #[error("snapshot {0} already exists")]
     AlreadyExists(Uuid),
+    #[error("export {0} destination already exists")]
+    ExportDestinationExists(Uuid),
+    #[error("export {0} staging already exists")]
+    ExportStagingExists(Uuid),
+    #[error("export {resource} limit {maximum} exceeded by {actual}")]
+    ExportLimitExceeded {
+        resource: &'static str,
+        actual: u64,
+        maximum: u64,
+    },
+    #[error("export manifest for {0} is not committed")]
+    ExportNotCommitted(Uuid),
     #[error("storage is busy: {0}")]
     Busy(&'static str),
     #[error("input sequence {actual} does not match expected sequence {expected}")]

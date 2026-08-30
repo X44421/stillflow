@@ -8,6 +8,7 @@ pub mod bundle;
 pub mod dedup;
 mod digest;
 mod error;
+pub mod export;
 mod manifest;
 mod store;
 
@@ -30,6 +31,10 @@ pub use dedup::{
 };
 pub use digest::{ContentDigest, DIGEST_BUFFER_BYTES};
 pub use error::{IntegrityFailure, StorageError};
+pub use export::{
+    compute_export_set_digest, ExportManifest, ExportManifestFile, ExportPlan, ExportProvenance,
+    ExportWriter, StagedExportFile,
+};
 pub use manifest::{
     GarbageCollectionReport, RecoveryReport, SnapshotDraft, SnapshotManifest, SnapshotPartition,
     StorageLimits, MAX_ACTIVE_PUBLISHERS, MAX_ACTIVE_READERS, MAX_INPUT_ENVELOPES,
@@ -38,12 +43,13 @@ pub use manifest::{
 };
 pub use store::{SnapshotBatchReader, SnapshotStore, SnapshotWriter};
 
+pub(crate) use digest::digest_file;
 pub(crate) use manifest::build_snapshot;
 #[cfg(test)]
 pub(crate) use store::acquire_maintenance;
 pub(crate) use store::{
-    abort_bundle_publication, acquire_activity, create_exact_directory, ensure_private_directory,
-    format_timestamp, insert_visible_snapshot, integrity_error, load_manifest_inner,
-    open_connection, partitions_root, read_partition, staging_root, sync_directory,
-    write_envelope_parquet, ActivityGuard, ActivityKind, StoreInner,
+    abort_bundle_publication, acquire_activity, create_exact_directory, ensure_managed_directory,
+    ensure_private_directory, format_timestamp, insert_visible_snapshot, integrity_error,
+    load_manifest_inner, open_connection, parse_timestamp, partitions_root, read_partition,
+    staging_root, sync_directory, write_envelope_parquet, ActivityGuard, ActivityKind, StoreInner,
 };
