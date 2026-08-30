@@ -250,6 +250,9 @@ fn storage_category(error: &StorageError) -> ErrorCategory {
         | StorageError::AlreadyExists(_)
         | StorageError::InvalidTimestampOrder(_)
         | StorageError::InvalidManifest(_)
+        | StorageError::ExportDestinationExists(_)
+        | StorageError::ExportStagingExists(_)
+        | StorageError::ExportNotCommitted(_)
         | StorageError::Snapshot(_) => ErrorCategory::InvalidConfiguration,
         StorageError::Sequence { .. }
         | StorageError::LineageMismatch { .. }
@@ -261,7 +264,8 @@ fn storage_category(error: &StorageError) -> ErrorCategory {
         | StorageError::ArtifactByteLimitExceeded { .. }
         | StorageError::ArtifactPartitionLimitExceeded { .. }
         | StorageError::DedupKeyLimitExceeded { .. }
-        | StorageError::DedupIndexLimitExceeded { .. } => ErrorCategory::InvalidData,
+        | StorageError::DedupIndexLimitExceeded { .. }
+        | StorageError::ExportLimitExceeded { .. } => ErrorCategory::InvalidData,
         StorageError::ArithmeticOverflow(_)
         | StorageError::Integrity { .. }
         | StorageError::Io { .. }
