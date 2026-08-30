@@ -2090,7 +2090,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         // A legacy version-one database migrates forward to version two and
         // gains the bundle tables (contract 10.4 persistence).
@@ -2142,11 +2142,15 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         for table in [
             "bundle_publications",
             "verification_bundles",
             "artifact_manifests",
+            "export_publications",
+            "export_journal",
+            "export_manifests",
+            "export_tombstones",
         ] {
             let present: i64 = connection
                 .query_row(
@@ -2163,19 +2167,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 3;")
+            .execute_batch("PRAGMA user_version = 4;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(3))
+            Err(StorageError::UnsupportedStorageVersion(4))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]
