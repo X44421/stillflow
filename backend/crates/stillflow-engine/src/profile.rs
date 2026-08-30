@@ -1053,14 +1053,6 @@ fn charge(state_bytes: &mut usize, bytes: usize) -> Result<(), EngineError> {
 impl ColumnRuntime {
     fn observe(&mut self, batch: &RecordBatch, column_index: usize) -> Result<(), EngineError> {
         let array = batch.column(column_index);
-        if std::env::var_os("PROFILE_DEBUG").is_some() {
-            eprintln!(
-                "[prof-debug] col={} dtype={:?} nulls={}",
-                column_index,
-                array.data_type(),
-                array.null_count()
-            );
-        }
         self.null_count += array.null_count() as u64;
         match &mut self.state {
             ColumnState::Skipped => Ok(()),
@@ -1461,12 +1453,13 @@ impl FullRowState {
 
 /// Builds the E4 canonical key value directly from an Arrow array, reusing
 /// the tested `encode_component` (null sentinel, NaN grouping, -0.0
-/// normalization) without any Polars conversion.
-fn arrow_key_value(
-    array: &std::sync::Arc<dyn arrow_array::Array>,
+/// normalization) without any Polars conversion. The returned value borrows
+/// `array`; the caller must encode it before that borrow ends.
+fn arrow_key_value<'a>(
+    array: &'a std::sync::Arc<dyn arrow_array::Array>,
     row: usize,
     logical: &LogicalType,
-) -> Result<KeyValue<'static>, EngineError> {
+) -> Result<KeyValue<'a>, EngineError> {
     let mismatch = || EngineError::Internal("profile key component type mismatch");
     if array.is_null(row) {
         return Ok(KeyValue::Null);
@@ -1503,15 +1496,13 @@ fn arrow_key_value(
                 .value(row)
                 .to_owned(),
         ),
-        (DataType::Binary, LogicalType::Binary) => KeyValue::Binary(Box::leak(
+        (DataType::Binary, LogicalType::Binary) => KeyValue::Binary(
             array
                 .as_any()
                 .downcast_ref::<BinaryArray>()
                 .ok_or_else(mismatch)?
-                .value(row)
-                .to_vec()
-                .into_boxed_slice(),
-        )),
+                .value(row),
+        ),
         (DataType::Date32, LogicalType::Date32) => primitive!(Date32Array, Date32, |v: i32| v),
         (DataType::Timestamp(arrow_unit, _), LogicalType::Timestamp { unit, .. }) => {
             let epoch = match arrow_unit {
