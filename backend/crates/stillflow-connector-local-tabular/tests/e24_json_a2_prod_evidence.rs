@@ -79,7 +79,7 @@ fn write_scalar(row: usize, index: usize) -> String {
             }
         }
         .to_string(),
-        _ => format!("v{}x{}", row % 9_973, index),
+        _ => format!("\"v{}x{}\"", row % 9_973, index),
     }
 }
 
