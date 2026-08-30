@@ -14,6 +14,7 @@ mod predict;
 mod preflight;
 pub(crate) mod preview;
 mod profile;
+mod quality;
 mod remainder;
 mod types;
 mod typing;
@@ -36,6 +37,15 @@ pub use engine::ExecutionEngine;
 pub use error::EngineError;
 pub use preflight::PreparedPlan;
 pub use profile::{ProfileColumns, ProfileRequest, ProfileResult};
+pub use quality::{
+    AiIdentity, FindingCategory, FindingEvidence, FindingOrigin, FindingProvenance,
+    HistogramBucketEvidence, HistogramEvidence, MetricEvidence, QualityFinding, QualityReport,
+    QualityRequest, QualityResult, QualityScore, RowRangeEvidence, ValueDigestEvidence,
+    VerificationAssociationState, QUALITY_MAX_AI_PROPOSALS, QUALITY_MAX_EVIDENCE_REFS_PER_FINDING,
+    QUALITY_MAX_FINDINGS, QUALITY_MAX_IDENTITY_BYTES, QUALITY_MAX_PLAN_FINGERPRINT_BYTES,
+    QUALITY_MAX_PROVENANCE_REF_BYTES, QUALITY_STATE_BYTE_BUDGET,
+    QUALITY_STATE_FIXED_OVERHEAD_BYTES,
+};
 pub use verification::{
     VerificationIdentities, VerificationRequest, MAX_DEDUP_KEY_COLUMNS,
     MAX_VALIDATION_FINDINGS_PER_ROW, MAX_VALIDATION_MESSAGE_BYTES,
@@ -47,6 +57,8 @@ pub const ENGINE_CONTRACT_VERSION: u16 = 1;
 
 // Q-R1 frozen profiling constants (ADR-003 section 3.1)
 pub const PROFILING_CONTRACT_VERSION: u16 = 1;
+pub const DETECTOR_CONTRACT_VERSION: u16 = 1;
+pub const QUALITY_SCORE_VERSION: u16 = 1;
 pub const PROFILE_MAX_ROWS: usize = 1_048_576;
 pub const PROFILE_MAX_SCAN_BYTES: usize = 536_870_912;
 pub const PROFILE_MAX_COLUMNS: usize = 256;

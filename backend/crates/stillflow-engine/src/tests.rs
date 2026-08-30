@@ -5478,7 +5478,7 @@ mod verification {
 
     // V01/V06/V27: severity routing, one-payload guarantee, summary counts.
     #[tokio::test(flavor = "current_thread")]
-    async fn v01_validate_routing_warning_keeps_error_rejects_null_fails() {
+    pub(crate) async fn v01_validate_routing_warning_keeps_error_rejects_null_fails() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, id) = int_schema();
         let connection = connection();
@@ -5566,7 +5566,7 @@ mod verification {
     // V02: empty source publishes accepted + two zero-row reports; rejected
     // stays absent even under Some(id) authorization.
     #[tokio::test(flavor = "current_thread")]
-    async fn v02_empty_source_zero_rejection_protocol() {
+    pub(crate) async fn v02_empty_source_zero_rejection_protocol() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, _id) = int_schema();
         let connection = connection();
@@ -5601,7 +5601,7 @@ mod verification {
     // V02b: None authorization + terminal rejection fails InvalidPlan and
     // publishes nothing (contract 10.5).
     #[tokio::test(flavor = "current_thread")]
-    async fn v02b_unauthorized_rejection_fails_closed() {
+    pub(crate) async fn v02b_unauthorized_rejection_fails_closed() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, _id) = int_schema();
         let connection = connection();
@@ -5636,7 +5636,7 @@ mod verification {
 
     // V23: E2 materialize keeps rejecting Validate rules.
     #[tokio::test(flavor = "current_thread")]
-    async fn v23_materialize_still_rejects_validate() {
+    pub(crate) async fn v23_materialize_still_rejects_validate() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, _id) = int_schema();
         let connection = connection();
@@ -5666,6 +5666,57 @@ mod verification {
             }
         ));
         drop(_guard);
+    }
+
+    /// Builds one real published `VerificationBundle` for Q-R2 association
+    /// tests (issue #181 item 14): a warning-only rule keeps every row, so
+    /// the bundle publishes accepted + validation + dedup reports with no
+    /// rejected artifact. The bundle's membership run id is
+    /// `Uuid::from_u128(base)`.
+    pub(crate) async fn quality_association_bundle(
+        base: u128,
+    ) -> stillflow_storage::VerificationBundle {
+        let _guard = exclusive_test_lock().lock().await;
+        let (schema, id) = int_schema();
+        let connection = connection();
+        let source = asset(connection.id());
+        let env = int_batch(&schema, source.id, 3);
+        let (engine, _) = engine_with(schema.clone(), vec![env], true).await;
+        let dir = tempfile::TempDir::new().expect("temp");
+        let store = SnapshotStore::open(dir.path(), StorageLimits::default()).expect("store");
+        let plan = ver_plan(
+            source.id,
+            vec![schema.fields[0].id],
+            &[],
+            Some((
+                Expr::Binary {
+                    left: Box::new(Expr::Column(id)),
+                    operator: stillflow_core::BinaryOperator::GreaterThan,
+                    right: Box::new(Expr::Literal(ScalarValue::Int64(i64::MAX))),
+                },
+                stillflow_plan::ValidationSeverity::Warning,
+                "never fires",
+            )),
+            None,
+        );
+        let digest = canonical_digest(&plan);
+        let ids = ver_ids(base);
+        let mut request = verify_request(
+            (&engine, &store),
+            &connection,
+            &source,
+            schema.clone(),
+            plan,
+            ids,
+            None,
+        );
+        request.identities.canonical_plan_digest = digest;
+        let bundle = engine
+            .materialize_verification(request)
+            .await
+            .expect("bundle");
+        drop(_guard);
+        bundle
     }
 }
 
@@ -6006,7 +6057,7 @@ mod verification_evidence {
     // -- V03: cross-batch global dedup first-seen -------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v03_cross_batch_dedup_first_seen_spans_three_envelopes() {
+    pub(crate) async fn v03_cross_batch_dedup_first_seen_spans_three_envelopes() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, key, _payload) = int_pair_schema();
         let source = asset(connection().id());
@@ -6114,7 +6165,7 @@ mod verification_evidence {
     // -- V04: connector partition invariance ------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v04_two_partitionings_produce_identical_artifacts() {
+    pub(crate) async fn v04_two_partitionings_produce_identical_artifacts() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, key, _payload) = int_pair_schema();
         let keys: [i64; 9] = [7, 1, 2, 3, 4, 5, 7, 8, 9];
@@ -6190,7 +6241,7 @@ mod verification_evidence {
     // -- V05: null, NaN, -0.0/+0.0 key equality ---------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v05_float_key_nan_null_and_zero_grouping() {
+    pub(crate) async fn v05_float_key_nan_null_and_zero_grouping() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Float64);
         let source = asset(connection().id());
@@ -6264,7 +6315,7 @@ mod verification_evidence {
     // -- V06: multiple Validate hits, one-payload, first-Error termination --
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v06_warning_then_error_emits_both_and_terminates_later_rules() {
+    pub(crate) async fn v06_warning_then_error_emits_both_and_terminates_later_rules() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Int64);
         let source = asset(connection().id());
@@ -6361,7 +6412,7 @@ mod verification_evidence {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v06b_per_row_finding_cap_fails_closed_without_a_bundle() {
+    pub(crate) async fn v06b_per_row_finding_cap_fails_closed_without_a_bundle() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Int64);
         let connection = connection();
@@ -6404,7 +6455,7 @@ mod verification_evidence {
     // -- V07: warning rows never enter the rejected artifact --------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v07_warning_only_run_keeps_rows_and_publishes_no_rejected_artifact() {
+    pub(crate) async fn v07_warning_only_run_keeps_rows_and_publishes_no_rejected_artifact() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Int64);
         let source = asset(connection().id());
@@ -6491,7 +6542,7 @@ mod verification_evidence {
     // -- V08: duplicates enter the rejected artifact and dedup report ------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v08_duplicates_get_payloads_and_findings_but_no_key_bytes() {
+    pub(crate) async fn v08_duplicates_get_payloads_and_findings_but_no_key_bytes() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, key, _payload) = int_pair_schema();
         let connection = connection();
@@ -6585,7 +6636,7 @@ mod verification_evidence {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v09_cancellation_and_deadline_leave_no_visible_bundle() {
+    pub(crate) async fn v09_cancellation_and_deadline_leave_no_visible_bundle() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Int64);
         let connection = connection();
@@ -6685,7 +6736,7 @@ mod verification_evidence {
     // -- V15: the secret sentinel never escapes error surfaces ------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v15_secret_sentinel_stays_inside_the_payload() {
+    pub(crate) async fn v15_secret_sentinel_stays_inside_the_payload() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Utf8);
         let connection = connection();
@@ -6797,7 +6848,7 @@ mod verification_evidence {
     // -- V16: retry determinism -------------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v16_identical_retry_produces_identical_artifacts() {
+    pub(crate) async fn v16_identical_retry_produces_identical_artifacts() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, key, _payload) = int_pair_schema();
         let connection = connection();
@@ -6855,7 +6906,7 @@ mod verification_evidence {
     // -- V17/V18: key-type coverage ---------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v17_utf8_and_binary_key_equality_is_exact_bytes() {
+    pub(crate) async fn v17_utf8_and_binary_key_equality_is_exact_bytes() {
         let _guard = exclusive_test_lock().lock().await;
         // Utf8: empty, null and grapheme-distinct text never normalize.
         let (schema, value) = single_schema("value", LogicalType::Utf8);
@@ -6948,7 +6999,7 @@ mod verification_evidence {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v18_timestamp_key_units_and_paused_boundaries() {
+    pub(crate) async fn v18_timestamp_key_units_and_paused_boundaries() {
         let _guard = exclusive_test_lock().lock().await;
         // Same-type same-epoch duplicates group for every supported unit.
         let runs: [(&str, TimeUnit, std::sync::Arc<dyn arrow_array::Array>); 3] = [
@@ -7055,7 +7106,7 @@ mod verification_evidence {
     /// the V21 dedicated evidence.
     #[tokio::test(flavor = "current_thread")]
 
-    async fn v21_rejected_rows_preserve_scan_schema_and_original_values() {
+    pub(crate) async fn v21_rejected_rows_preserve_scan_schema_and_original_values() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Float64);
         let source = asset(connection().id());
@@ -7158,7 +7209,7 @@ mod verification_evidence {
     // -- V28: dedup insert typed first ordinal ----------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v28_duplicate_finding_references_first_seen_even_after_its_rejection() {
+    pub(crate) async fn v28_duplicate_finding_references_first_seen_even_after_its_rejection() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, key, _payload) = int_pair_schema();
         let connection = connection();
@@ -7244,7 +7295,7 @@ mod verification_evidence {
     // -- V29: report resource math ----------------------------------------
 
     #[test]
-    fn v29_report_ceiling_identities_hold() {
+    pub(crate) fn v29_report_ceiling_identities_hold() {
         assert_eq!(
             MAX_REPORT_ROWS,
             u64::from(MAX_REPORT_PARTITIONS) * REPORT_PACK_ROWS as u64
@@ -7261,7 +7312,7 @@ mod verification_evidence {
     // -- V31: FilterRows preserves Scan-output ordinals -------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v31_filter_rows_keep_original_ordinals_with_stable_gaps() {
+    pub(crate) async fn v31_filter_rows_keep_original_ordinals_with_stable_gaps() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, key, _payload) = int_pair_schema();
         let connection = connection();
@@ -7622,7 +7673,7 @@ mod verification_evidence {
     // -- V22: validation message safety and length -------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn v22_message_contract_rejects_empty_oversized_and_secret_like() {
+    pub(crate) async fn v22_message_contract_rejects_empty_oversized_and_secret_like() {
         let _guard = exclusive_test_lock().lock().await;
         let (schema, value) = single_schema("value", LogicalType::Int64);
         let connection = connection();
@@ -7818,7 +7869,7 @@ mod profile_evidence {
     // -- 1. request validation + defaults ---------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p01_request_validation_and_default_resolution() {
+    pub(crate) async fn p01_request_validation_and_default_resolution() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -7891,7 +7942,7 @@ mod profile_evidence {
     // -- 2. empty input ----------------------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p02_empty_input_zero_state_without_error() {
+    pub(crate) async fn p02_empty_input_zero_state_without_error() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -7913,7 +7964,7 @@ mod profile_evidence {
     // -- 3. all-null columns ------------------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p03_all_null_columns_count_nulls_with_present_metrics() {
+    pub(crate) async fn p03_all_null_columns_count_nulls_with_present_metrics() {
         let _guard = exclusive_test_lock().lock().await;
         let schema =
             LogicalSchema::new(vec![named_field(0x51, "n", LogicalType::Int64)]).expect("schema");
@@ -7941,7 +7992,7 @@ mod profile_evidence {
     // -- 4/5. scalar type families + unsupported explicit status ------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p04_p05_type_families_and_unsupported_status() {
+    pub(crate) async fn p04_p05_type_families_and_unsupported_status() {
         let _guard = exclusive_test_lock().lock().await;
         // Boolean / float / date / text families profile correctly.
         let schema = LogicalSchema::new(vec![
@@ -8040,7 +8091,7 @@ mod profile_evidence {
     // -- 6. null vs empty Utf8 ----------------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p06_null_and_empty_utf8_are_distinct() {
+    pub(crate) async fn p06_null_and_empty_utf8_are_distinct() {
         let _guard = exclusive_test_lock().lock().await;
         let schema =
             LogicalSchema::new(vec![named_field(0x67, "s", LogicalType::Utf8)]).expect("schema");
@@ -8070,7 +8121,7 @@ mod profile_evidence {
     // -- 7/8. distinct + full-row overflow boundaries ------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p07_p08_distinct_and_full_row_overflow_boundaries() {
+    pub(crate) async fn p07_p08_distinct_and_full_row_overflow_boundaries() {
         let _guard = exclusive_test_lock().lock().await;
         use crate::{
             PROFILE_MAX_DISTINCT_ENTRIES_PER_COLUMN, PROFILE_MAX_FULL_ROW_DISTINCT_ENTRIES,
@@ -8115,7 +8166,7 @@ mod profile_evidence {
     // -- 9. top-K ordering, ties, retention cap ------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p09_top_k_ordering_ties_and_retention_cap() {
+    pub(crate) async fn p09_top_k_ordering_ties_and_retention_cap() {
         let _guard = exclusive_test_lock().lock().await;
         let schema =
             LogicalSchema::new(vec![named_field(0x68, "s", LogicalType::Utf8)]).expect("schema");
@@ -8174,7 +8225,7 @@ mod profile_evidence {
     // -- 10. integer histogram ----------------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p10_integer_histogram_endpoints_and_degenerate() {
+    pub(crate) async fn p10_integer_histogram_endpoints_and_degenerate() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8223,7 +8274,7 @@ mod profile_evidence {
     // -- 11. float histogram variants ----------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p11_float_histogram_normal_degenerate_infinite_width_non_finite() {
+    pub(crate) async fn p11_float_histogram_normal_degenerate_infinite_width_non_finite() {
         let _guard = exclusive_test_lock().lock().await;
         let schema =
             LogicalSchema::new(vec![named_field(0x69, "f", LogicalType::Float64)]).expect("schema");
@@ -8330,7 +8381,7 @@ mod profile_evidence {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p12_float_sum_mean_partition_invariance_adversarial() {
+    pub(crate) async fn p12_float_sum_mean_partition_invariance_adversarial() {
         let _guard = exclusive_test_lock().lock().await;
         let schema =
             LogicalSchema::new(vec![named_field(0x6a, "f", LogicalType::Float64)]).expect("schema");
@@ -8364,7 +8415,7 @@ mod profile_evidence {
     // -- 13. Utf8 code points vs bytes; Binary bytes -------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p13_utf8_code_point_length_vs_binary_byte_length() {
+    pub(crate) async fn p13_utf8_code_point_length_vs_binary_byte_length() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![
             named_field(0x6b, "s", LogicalType::Utf8),
@@ -8406,7 +8457,7 @@ mod profile_evidence {
     // -- 14. fixed length-histogram boundaries -------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p14_length_histogram_fixed_boundaries() {
+    pub(crate) async fn p14_length_histogram_fixed_boundaries() {
         let _guard = exclusive_test_lock().lock().await;
         let schema =
             LogicalSchema::new(vec![named_field(0x6d, "b", LogicalType::Binary)]).expect("schema");
@@ -8448,7 +8499,7 @@ mod profile_evidence {
     // -- 15. row-limit truncation ---------------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p15_row_limit_truncation_is_disclosed() {
+    pub(crate) async fn p15_row_limit_truncation_is_disclosed() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8468,7 +8519,7 @@ mod profile_evidence {
     // -- 16. byte-limit truncation ---------------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p16_byte_limit_truncation_is_disclosed() {
+    pub(crate) async fn p16_byte_limit_truncation_is_disclosed() {
         let _guard = exclusive_test_lock().lock().await;
         let schema =
             LogicalSchema::new(vec![named_field(0x6e, "b", LogicalType::Binary)]).expect("schema");
@@ -8544,8 +8595,43 @@ mod profile_evidence {
         (result.canonical_body, result.canonical_digest)
     }
 
+    /// Q-R2 support (issue #181 item 13): profiles the same logical rows
+    /// under the given batch partitioning and returns the full typed
+    /// `ProfileResult`, so the findings pipeline can consume both
+    /// partitionings of one dataset.
+    pub(crate) async fn build_int_profile_result(
+        schema: &LogicalSchema,
+        source: &SourceAsset,
+        chunks: &[&[i64]],
+    ) -> crate::profile::ProfileResult {
+        let envelopes = chunks
+            .iter()
+            .enumerate()
+            .map(|(seq, chunk)| {
+                envelope_of(
+                    schema,
+                    source.id,
+                    seq as u64,
+                    batch_of(
+                        schema,
+                        vec![StdArc::new(Int64Array::from(chunk.to_vec())) as ArrayRef],
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let (engine, _) = engine_with(schema.clone(), envelopes, true).await;
+        let request = profile_request(
+            schema,
+            ProfileColumns::All,
+            None,
+            Some(8),
+            deadline_context(),
+        );
+        engine.profile(request).await.expect("profile")
+    }
+
     #[tokio::test(flavor = "current_thread")]
-    async fn p17_batch_partition_invariance_identical_canonical_bytes() {
+    pub(crate) async fn p17_batch_partition_invariance_identical_canonical_bytes() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8565,7 +8651,7 @@ mod profile_evidence {
     // -- 18. wide schema: 256 accepted, 257 rejected --------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p18_wide_schema_256_accepted_257_rejected() {
+    pub(crate) async fn p18_wide_schema_256_accepted_257_rejected() {
         let _guard = exclusive_test_lock().lock().await;
         let build_schema = |count: usize| {
             let fields: Vec<LogicalField> = (0..count)
@@ -8602,7 +8688,7 @@ mod profile_evidence {
     // -- 19. long strings / binary values --------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p19_long_strings_and_binary_round_trip_metrics() {
+    pub(crate) async fn p19_long_strings_and_binary_round_trip_metrics() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![
             named_field(0x71, "s", LogicalType::Utf8),
@@ -8647,7 +8733,7 @@ mod profile_evidence {
     // -- 20. high-cardinality state remains bounded -----------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p20_high_cardinality_state_remains_bounded() {
+    pub(crate) async fn p20_high_cardinality_state_remains_bounded() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8667,7 +8753,7 @@ mod profile_evidence {
     // -- 21. cancellation / deadline abort with no result -----------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p21_cancellation_and_deadline_abort_with_no_result() {
+    pub(crate) async fn p21_cancellation_and_deadline_abort_with_no_result() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8728,7 +8814,7 @@ mod profile_evidence {
     // -- 22. existing Engine concurrency gate is reused --------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p22_profile_reuses_the_engine_run_gate() {
+    pub(crate) async fn p22_profile_reuses_the_engine_run_gate() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8755,7 +8841,7 @@ mod profile_evidence {
     // -- 23. canonical JSON golden bytes + digest --------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p23_canonical_json_golden_bytes_and_digest() {
+    pub(crate) async fn p23_canonical_json_golden_bytes_and_digest() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8798,7 +8884,7 @@ mod profile_evidence {
     // -- 24. run-id exclusion from digest -----------------------------------------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p24_run_id_is_excluded_from_the_canonical_body_and_digest() {
+    pub(crate) async fn p24_run_id_is_excluded_from_the_canonical_body_and_digest() {
         let _guard = exclusive_test_lock().lock().await;
         let schema = LogicalSchema::new(vec![named_field(0x50, "value", LogicalType::Int64)])
             .expect("schema");
@@ -8833,7 +8919,7 @@ mod profile_evidence {
     // -- 25. E4 regression canary (full suite covered by the run gate) -----------
 
     #[tokio::test(flavor = "current_thread")]
-    async fn p25_e4_verification_path_remains_green_after_profiling() {
+    pub(crate) async fn p25_e4_verification_path_remains_green_after_profiling() {
         let _guard = exclusive_test_lock().lock().await;
         // Canary: the E4 materialize path still rejects Validate rules beside
         // the profiler; the full V01–V31 suite runs in the same crate.
@@ -8875,4 +8961,79 @@ mod profile_evidence {
             }
         ));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Q-R2 dedicated-evidence support (issue #181). These wrappers expose the
+// Q-R1/E4 harness to the quality tests without widening any production
+// surface; everything below is compiled only under cfg(test).
+// ---------------------------------------------------------------------------
+
+/// Profiles the same logical int rows under the given batch partitioning.
+pub(crate) async fn quality_partition_profile(chunks: &[&[i64]]) -> crate::profile::ProfileResult {
+    let (schema, _) = int_schema();
+    let source = asset(connection().id());
+    profile_evidence::build_int_profile_result(&schema, &source, chunks).await
+}
+
+/// Builds one real published verification bundle for the Q-R2 association
+/// tests; its membership run id is `Uuid::from_u128(base)`.
+pub(crate) async fn quality_association_bundle_for_quality(
+    base: u128,
+) -> stillflow_storage::VerificationBundle {
+    verification::quality_association_bundle(base).await
+}
+
+/// Q-R2 q18 support (issue #181 item 18): runs the entire Q-R1 profiler
+/// suite (p01–p25) and E4 verification suite (V01–V31) in-process so the
+/// Q-R2 regression row is dedicated evidence rather than transitive
+/// coverage. Each listed test is a self-contained `#[tokio::test]` body and
+/// keeps its own lock/runtime discipline.
+pub(crate) fn run_qr1_e4_regression_suite() {
+    // E4 verification suite (V01–V31).
+    verification::v01_validate_routing_warning_keeps_error_rejects_null_fails();
+    verification::v02_empty_source_zero_rejection_protocol();
+    verification::v02b_unauthorized_rejection_fails_closed();
+    verification::v23_materialize_still_rejects_validate();
+    verification_evidence::v03_cross_batch_dedup_first_seen_spans_three_envelopes();
+    verification_evidence::v04_two_partitionings_produce_identical_artifacts();
+    verification_evidence::v05_float_key_nan_null_and_zero_grouping();
+    verification_evidence::v06_warning_then_error_emits_both_and_terminates_later_rules();
+    verification_evidence::v06b_per_row_finding_cap_fails_closed_without_a_bundle();
+    verification_evidence::v07_warning_only_run_keeps_rows_and_publishes_no_rejected_artifact();
+    verification_evidence::v08_duplicates_get_payloads_and_findings_but_no_key_bytes();
+    verification_evidence::v09_cancellation_and_deadline_leave_no_visible_bundle();
+    verification_evidence::v15_secret_sentinel_stays_inside_the_payload();
+    verification_evidence::v16_identical_retry_produces_identical_artifacts();
+    verification_evidence::v17_utf8_and_binary_key_equality_is_exact_bytes();
+    verification_evidence::v18_timestamp_key_units_and_paused_boundaries();
+    verification_evidence::v21_rejected_rows_preserve_scan_schema_and_original_values();
+    verification_evidence::v22_message_contract_rejects_empty_oversized_and_secret_like();
+    verification_evidence::v28_duplicate_finding_references_first_seen_even_after_its_rejection();
+    verification_evidence::v29_report_ceiling_identities_hold();
+    verification_evidence::v31_filter_rows_keep_original_ordinals_with_stable_gaps();
+    // Q-R1 profiler suite (p01–p25; p04_p05 and p07_p08 are combined rows).
+    profile_evidence::p01_request_validation_and_default_resolution();
+    profile_evidence::p02_empty_input_zero_state_without_error();
+    profile_evidence::p03_all_null_columns_count_nulls_with_present_metrics();
+    profile_evidence::p04_p05_type_families_and_unsupported_status();
+    profile_evidence::p06_null_and_empty_utf8_are_distinct();
+    profile_evidence::p07_p08_distinct_and_full_row_overflow_boundaries();
+    profile_evidence::p09_top_k_ordering_ties_and_retention_cap();
+    profile_evidence::p10_integer_histogram_endpoints_and_degenerate();
+    profile_evidence::p11_float_histogram_normal_degenerate_infinite_width_non_finite();
+    profile_evidence::p12_float_sum_mean_partition_invariance_adversarial();
+    profile_evidence::p13_utf8_code_point_length_vs_binary_byte_length();
+    profile_evidence::p14_length_histogram_fixed_boundaries();
+    profile_evidence::p15_row_limit_truncation_is_disclosed();
+    profile_evidence::p16_byte_limit_truncation_is_disclosed();
+    profile_evidence::p17_batch_partition_invariance_identical_canonical_bytes();
+    profile_evidence::p18_wide_schema_256_accepted_257_rejected();
+    profile_evidence::p19_long_strings_and_binary_round_trip_metrics();
+    profile_evidence::p20_high_cardinality_state_remains_bounded();
+    profile_evidence::p21_cancellation_and_deadline_abort_with_no_result();
+    profile_evidence::p22_profile_reuses_the_engine_run_gate();
+    profile_evidence::p23_canonical_json_golden_bytes_and_digest();
+    profile_evidence::p24_run_id_is_excluded_from_the_canonical_body_and_digest();
+    profile_evidence::p25_e4_verification_path_remains_green_after_profiling();
 }
