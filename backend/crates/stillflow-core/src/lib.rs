@@ -9,6 +9,7 @@ pub mod batch;
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod export;
 pub mod expression;
 pub mod logical;
 pub mod request;
@@ -37,6 +38,14 @@ pub use error::{
     ErrorCategory, SanitizedErrorSummary,
 };
 pub use events::{ConnectorKind, IngestionEvent, ObjectKind, RelationshipKind};
+pub use export::{
+    validate_export_component, ExportDestination, ExportError, ExportFormat, ExportInputIdentity,
+    ExportPolicy, ExportResult, ExportResultFile, ExportShape, EXPORT_DEFAULT_DEADLINE_SECONDS,
+    EXPORT_ENCODER_VERSION, EXPORT_FORMAT_CONTRACT_VERSION, EXPORT_JSONL_FLOAT_ENCODER,
+    EXPORT_MANIFEST_VERSION, EXPORT_TEXT_FLOAT_ENCODER, MAX_ACTIVE_EXPORT_PUBLISHERS,
+    MAX_EXPORT_OUTPUT_BYTES, MAX_EXPORT_PARTITIONS, MAX_EXPORT_PATH_DEPTH, MAX_EXPORT_ROWS,
+    MAX_EXPORT_SINGLE_FILE_BYTES, MAX_EXPORT_TEMP_BYTES,
+};
 pub use expression::{BinaryOperator, Expr, FiniteF64, ScalarValue, SourceFilter, UnaryOperator};
 pub use logical::{
     ColumnId, LogicalError, LogicalField, LogicalSchema, LogicalType, TimeUnit,
