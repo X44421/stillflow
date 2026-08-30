@@ -293,9 +293,7 @@ impl AiProposalInput {
                 "AI proposal model/effect identity is outside the authorized bound",
             ));
         }
-        if evidence_refs.is_empty()
-            || evidence_refs.len() > QUALITY_MAX_EVIDENCE_REFS_PER_FINDING
-        {
+        if evidence_refs.is_empty() || evidence_refs.len() > QUALITY_MAX_EVIDENCE_REFS_PER_FINDING {
             return Err(EngineError::BoundExceeded(
                 "AI proposal evidence count is outside the authorized bound",
             ));
@@ -593,7 +591,10 @@ fn metric_path_allowed(path: &str) -> bool {
     )
 }
 
-fn validate_evidence(profile: &DatasetProfile, evidence: &FindingEvidence) -> Result<(), EngineError> {
+fn validate_evidence(
+    profile: &DatasetProfile,
+    evidence: &FindingEvidence,
+) -> Result<(), EngineError> {
     match evidence {
         FindingEvidence::Metric(metric) => {
             if !metric_path_allowed(&metric.metric_path) {
@@ -670,12 +671,9 @@ fn validate_evidence(profile: &DatasetProfile, evidence: &FindingEvidence) -> Re
                 .ok_or(EngineError::InvalidPlan(
                     "HistogramEvidence column_ref is unknown",
                 ))?;
-            let actual = column
-                .histogram
-                .as_ref()
-                .ok_or(EngineError::InvalidPlan(
-                    "HistogramEvidence column has no histogram",
-                ))?;
+            let actual = column.histogram.as_ref().ok_or(EngineError::InvalidPlan(
+                "HistogramEvidence column has no histogram",
+            ))?;
             let mut previous = None;
             for bucket in &histogram.buckets {
                 if bucket.bucket_index >= actual.counts.len()
@@ -780,8 +778,7 @@ fn quality_score(profile: &DatasetProfile) -> QualityScore {
     };
     let mut penalty_numerator = 0u128;
     if columns > 0 {
-        penalty_numerator =
-            penalty_numerator.saturating_add(40u128.saturating_mul(total_null));
+        penalty_numerator = penalty_numerator.saturating_add(40u128.saturating_mul(total_null));
     }
     if let Some(duplicates) = profile.dataset.duplicate_row_count {
         let duplicate_term = if columns > 0 {
@@ -794,8 +791,7 @@ fn quality_score(profile: &DatasetProfile) -> QualityScore {
         penalty_numerator = penalty_numerator.saturating_add(duplicate_term);
     }
     if profile.dataset.truncated {
-        penalty_numerator =
-            penalty_numerator.saturating_add(10u128.saturating_mul(denominator));
+        penalty_numerator = penalty_numerator.saturating_add(10u128.saturating_mul(denominator));
     }
     let score_numerator = 100u128
         .saturating_mul(denominator)
@@ -852,12 +848,12 @@ fn validate_evidence_placeholder(evidence: &FindingEvidence) -> Result<(), Engin
         FindingEvidence::Metric(metric) if metric.metric_path.is_empty() => {
             Err(EngineError::InvalidPlan("empty metric_path"))
         }
-        FindingEvidence::ValueDigest(value) if value.column_ref.is_empty() => {
-            Err(EngineError::InvalidPlan("empty ValueDigestEvidence column_ref"))
-        }
-        FindingEvidence::Histogram(value) if value.column_ref.is_empty() => {
-            Err(EngineError::InvalidPlan("empty HistogramEvidence column_ref"))
-        }
+        FindingEvidence::ValueDigest(value) if value.column_ref.is_empty() => Err(
+            EngineError::InvalidPlan("empty ValueDigestEvidence column_ref"),
+        ),
+        FindingEvidence::Histogram(value) if value.column_ref.is_empty() => Err(
+            EngineError::InvalidPlan("empty HistogramEvidence column_ref"),
+        ),
         _ => Ok(()),
     }
 }
@@ -1104,7 +1100,9 @@ fn run_detectors(
                         .iter()
                         .copied()
                         .enumerate()
-                        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)))
+                        .max_by(|left, right| {
+                            left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0))
+                        })
                     else {
                         continue;
                     };
@@ -1337,10 +1335,7 @@ fn canonical_finding(finding: &QualityFinding) -> CVal {
             "finding_id".to_owned(),
             CVal::Str(finding.finding_id.clone()),
         ),
-        (
-            "message".to_owned(),
-            CVal::Str(finding.message.clone()),
-        ),
+        ("message".to_owned(), CVal::Str(finding.message.clone())),
         (
             "origin".to_owned(),
             CVal::Str(finding.origin.as_str().to_owned()),
@@ -1362,9 +1357,7 @@ fn canonical_evidence(evidence: &FindingEvidence) -> CVal {
                     CVal::Str(metric.metric_path.clone()),
                 ),
             ];
-            if let (Some(numerator), Some(denominator)) =
-                (metric.numerator, metric.denominator)
-            {
+            if let (Some(numerator), Some(denominator)) = (metric.numerator, metric.denominator) {
                 entries.push((
                     "rational".to_owned(),
                     CVal::Obj(vec![
@@ -1376,10 +1369,7 @@ fn canonical_evidence(evidence: &FindingEvidence) -> CVal {
             CVal::Obj(entries)
         }
         FindingEvidence::ValueDigest(value) => CVal::Obj(vec![
-            (
-                "column_ref".to_owned(),
-                CVal::Str(value.column_ref.clone()),
-            ),
+            ("column_ref".to_owned(), CVal::Str(value.column_ref.clone())),
             ("count".to_owned(), CVal::Int(value.count as i128)),
             (
                 "digests".to_owned(),
@@ -1392,10 +1382,7 @@ fn canonical_evidence(evidence: &FindingEvidence) -> CVal {
         ]),
         FindingEvidence::RowRange(range) => CVal::Obj(vec![
             ("end".to_owned(), CVal::Int(range.end as i128)),
-            (
-                "kind".to_owned(),
-                CVal::Str("RowRangeEvidence".to_owned()),
-            ),
+            ("kind".to_owned(), CVal::Str("RowRangeEvidence".to_owned())),
             ("start".to_owned(), CVal::Int(range.start as i128)),
         ]),
         FindingEvidence::Histogram(histogram) => CVal::Obj(vec![
@@ -1421,10 +1408,7 @@ fn canonical_evidence(evidence: &FindingEvidence) -> CVal {
                 "column_ref".to_owned(),
                 CVal::Str(histogram.column_ref.clone()),
             ),
-            (
-                "kind".to_owned(),
-                CVal::Str("HistogramEvidence".to_owned()),
-            ),
+            ("kind".to_owned(), CVal::Str("HistogramEvidence".to_owned())),
         ]),
     }
 }
@@ -1513,9 +1497,7 @@ mod tests {
     use stillflow_connectors::ConnectorRegistry;
     use tokio::time::Instant;
 
-    use crate::profile::{
-        DatasetMetrics, ProfileHistogram, ProfileLengthStats,
-    };
+    use crate::profile::{DatasetMetrics, ProfileHistogram, ProfileLengthStats};
 
     fn context() -> RequestContext {
         RequestContext::with_deadline(Instant::now() + Duration::from_secs(60))
@@ -1691,7 +1673,9 @@ mod tests {
         version[0].version = DETECTOR_CONTRACT_VERSION + 1;
         assert!(matches!(
             validate_registry(&version),
-            Err(EngineError::InvalidPlan("unknown DETECTOR_CONTRACT_VERSION"))
+            Err(EngineError::InvalidPlan(
+                "unknown DETECTOR_CONTRACT_VERSION"
+            ))
         ));
     }
 
@@ -1862,8 +1846,8 @@ mod tests {
         )
         .expect("proposal");
         let engine = ExecutionEngine::new(ConnectorRegistry::new());
-        let mut request =
-            QualityRequest::new(profile, context(), provenance(Uuid::from_u128(7))).expect("request");
+        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(7)))
+            .expect("request");
         request.ai_proposals.push(proposal);
         let result = engine.quality(request).await.expect("quality");
         let ai = result
@@ -1904,11 +1888,7 @@ mod tests {
         let baseline = run_quality(profile.clone(), Uuid::from_u128(8))
             .await
             .expect("baseline");
-        let top = profile.profile.columns[0]
-            .top_values
-            .as_ref()
-            .expect("top")[0]
-            .clone();
+        let top = profile.profile.columns[0].top_values.as_ref().expect("top")[0].clone();
         let proposal = AiProposalInput::new(
             "ai.score-independent",
             FindingCategory::Text,
@@ -1924,8 +1904,8 @@ mod tests {
         )
         .expect("proposal");
         let engine = ExecutionEngine::new(ConnectorRegistry::new());
-        let mut request =
-            QualityRequest::new(profile, context(), provenance(Uuid::from_u128(9))).expect("request");
+        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(9)))
+            .expect("request");
         request.ai_proposals.push(proposal);
         let with_ai = engine.quality(request).await.expect("quality");
         assert_eq!(baseline.report.score, with_ai.report.score);
@@ -1961,13 +1941,24 @@ mod tests {
 
     #[test]
     fn q10_missing_evidence_and_truncation_semantics() {
-        let empty = profile_result(0, vec![text_column("t", 0, 0, Some(0), None, 0)], Some(0), false, 0);
+        let empty = profile_result(
+            0,
+            vec![text_column("t", 0, 0, Some(0), None, 0)],
+            Some(0),
+            false,
+            0,
+        );
         let score = quality_score(&empty.profile);
         assert_eq!(score.value, None);
         assert_eq!(score.reason.as_deref(), Some("no_rows"));
 
-        let missing_dup =
-            profile_result(10, vec![text_column("t", 10, 0, Some(5), None, 0)], None, false, 10);
+        let missing_dup = profile_result(
+            10,
+            vec![text_column("t", 10, 0, Some(5), None, 0)],
+            None,
+            false,
+            10,
+        );
         let score = quality_score(&missing_dup.profile);
         assert_eq!(score.value, Some(100));
         assert!(!score.completeness);
@@ -2036,7 +2027,9 @@ mod tests {
         let right = profile_result(10, columns, Some(1), false, 500);
         assert_eq!(left.canonical_digest, right.canonical_digest);
         let left = run_quality(left, Uuid::from_u128(13)).await.expect("left");
-        let right = run_quality(right, Uuid::from_u128(13)).await.expect("right");
+        let right = run_quality(right, Uuid::from_u128(13))
+            .await
+            .expect("right");
         assert_eq!(left.canonical_body, right.canonical_body);
         assert_eq!(left.canonical_digest, right.canonical_digest);
     }
@@ -2059,8 +2052,8 @@ mod tests {
         );
 
         let engine = ExecutionEngine::new(ConnectorRegistry::new());
-        let mut request =
-            QualityRequest::new(profile, context(), provenance(Uuid::from_u128(14))).expect("request");
+        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(14)))
+            .expect("request");
         let association = VerificationAssociation {
             verification_bundle_id: Uuid::from_u128(99),
             validation_present: true,
@@ -2078,14 +2071,7 @@ mod tests {
     async fn q15_high_cardinality_profile_is_bounded_and_budget_overflow_fails_typed() {
         let columns = (0..PROFILE_MAX_COLUMNS)
             .map(|index| {
-                let mut column = text_column(
-                    &format!("c{index}"),
-                    100_001,
-                    0,
-                    None,
-                    None,
-                    0,
-                );
+                let mut column = text_column(&format!("c{index}"), 100_001, 0, None, None, 0);
                 column.distinct_overflow = true;
                 column
             })
@@ -2131,12 +2117,9 @@ mod tests {
         ));
 
         let deadline_context = RequestContext::with_deadline(Instant::now());
-        let expired = QualityRequest::new(
-            profile,
-            deadline_context,
-            provenance(Uuid::from_u128(16)),
-        )
-        .expect("request");
+        let expired =
+            QualityRequest::new(profile, deadline_context, provenance(Uuid::from_u128(16)))
+                .expect("request");
         assert!(matches!(
             engine.quality(expired).await,
             Err(EngineError::Timeout)
@@ -2157,9 +2140,12 @@ mod tests {
         for _ in 0..crate::MAX_ENGINE_CONCURRENT_RUNS {
             permits.push(engine.try_hold_run_gate().expect("permit"));
         }
-        let request =
-            QualityRequest::new(profile, context(), provenance(Uuid::from_u128(17))).expect("request");
-        assert!(matches!(engine.quality(request).await, Err(EngineError::Busy)));
+        let request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(17)))
+            .expect("request");
+        assert!(matches!(
+            engine.quality(request).await,
+            Err(EngineError::Busy)
+        ));
         drop(permits);
     }
 
