@@ -264,6 +264,9 @@ impl AiProposalInput {
     /// Accepts only an already-produced ADR-002 §8 effect result. This is
     /// crate-private until the typed XR-A1 effect/worker boundary exists, so
     /// ordinary callers cannot inject AI output directly into Q-R2.
+    // v1 charters no AI caller: the typed boundary entry exists so the
+    // origin law is structurally enforceable; the evidence tests exercise it.
+    #[allow(dead_code)]
     pub fn from_effect_boundary(
         finding_id: impl Into<String>,
         category: FindingCategory,
