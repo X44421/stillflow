@@ -1992,12 +1992,13 @@ mod tests {
             .await
             .expect("quality");
         let body = String::from_utf8(result.canonical_body.clone()).expect("utf8");
-        let expected = format!(
-            "{{\"artifact_body_version\":1,\"artifact_type\":\"quality_report\",\"completeness\":true,\"findings\":[],\"missing_components\":[],\"profile_report_digest\":\"{}\",\"profiling_contract_version\":1,\"quality_score\":100,\"quality_score_version\":1}}",
-            result.report.profile_report_digest
-        );
+        let expected = "{\"artifact_body_version\":1,\"artifact_type\":\"quality_report\",\"completeness\":true,\"findings\":[],\"missing_components\":[],\"profile_report_digest\":\"abe48782c77348eaadb6a09e72b27050dc6af6ba11a595feb5bdb9688e564ec4\",\"profiling_contract_version\":1,\"quality_score\":100,\"quality_score_version\":1}";
+        assert_eq!(result.report.profile_report_digest, "abe48782c77348eaadb6a09e72b27050dc6af6ba11a595feb5bdb9688e564ec4");
         assert_eq!(body, expected);
-        assert_eq!(result.canonical_digest, sha256_hex(expected.as_bytes()));
+        assert_eq!(
+            result.canonical_digest,
+            "72aaea8275a857ce86e2cabe128f5e0849de817df1c164479cd65693b7bbf319"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2018,6 +2019,10 @@ mod tests {
         assert_ne!(left.run_id, right.run_id);
         assert_eq!(left.canonical_body, right.canonical_body);
         assert_eq!(left.canonical_digest, right.canonical_digest);
+        let body = String::from_utf8(left.canonical_body).expect("utf8");
+        assert!(!body.contains("run_id"));
+        assert!(!body.contains("wall_clock"));
+        assert!(!body.contains("timestamp"));
     }
 
     #[tokio::test(flavor = "current_thread")]
