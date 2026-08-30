@@ -22,6 +22,12 @@ mod preview;
 mod read;
 mod schema;
 
+// E24-JSON-A2 direct projected NDJSON writer (issue #158). Private, never
+// enabled by default; default enablement is blocked on the #151 temporal
+// upstream boundary. See the module docs in `direct_projected.rs`.
+#[cfg(feature = "json-direct-projected-writer")]
+mod direct_projected;
+
 /// Polars-backed local tabular connector.
 #[derive(Debug, Default)]
 pub struct LocalTabularConnector;

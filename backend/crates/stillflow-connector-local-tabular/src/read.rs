@@ -10,6 +10,9 @@ use polars::prelude::{
     ParallelStrategy, ParquetReader, SerReader,
 };
 use serde::de::{DeserializeSeed, Error as DeError, MapAccess, SeqAccess, Visitor};
+// `Map`/`Value` back the generic projected-object path (the default production
+// path) and the `validate_json_value` oracle that the E24-JSON-A2 direct
+// projected writer reuses for its canonicalization fallback.
 use serde_json::{Map, Value};
 use stillflow_connectors::RawBatchStream;
 use stillflow_core::{
@@ -635,24 +638,44 @@ impl PreparedReader {
                 }
                 let mut encoded = Vec::new();
                 let mut count = 0_usize;
+                // E24-JSON-A2 direct projected writer (private feature, issue
+                // #158): the assembler owns only per-batch scratch (escaped key
+                // prefixes, projected-name slots, per-row slot states) and dies
+                // at the end of this frame; nothing accumulates across rows or
+                // batches beyond the shared `encoded` target below.
+                #[cfg(feature = "json-direct-projected-writer")]
+                let mut assembler =
+                    crate::direct_projected::ProjectedRowAssembler::new(&self.projection.names)?;
                 while count < rows {
                     self.context.ensure_active()?;
                     let Some(raw) = reader.next_raw_object(&self.context)? else {
                         break;
                     };
-                    let object = parse_projected_object(
+                    #[cfg(not(feature = "json-direct-projected-writer"))]
+                    {
+                        let object = parse_projected_object(
+                            &raw,
+                            &self.full_schema,
+                            &self.projection.names,
+                            reader.row_number(),
+                        )?;
+                        serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(
+                            |_| {
+                                source_error(
+                                    ErrorCategory::Internal,
+                                    false,
+                                    "projected JSON row could not be encoded for Polars",
+                                )
+                            },
+                        )?;
+                    }
+                    #[cfg(feature = "json-direct-projected-writer")]
+                    assembler.encode_row(
                         &raw,
                         &self.full_schema,
-                        &self.projection.names,
                         reader.row_number(),
+                        &mut encoded,
                     )?;
-                    serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(|_| {
-                        source_error(
-                            ErrorCategory::Internal,
-                            false,
-                            "projected JSON row could not be encoded for Polars",
-                        )
-                    })?;
                     encoded.push(b'\n');
                     count += 1;
                 }
@@ -802,11 +825,16 @@ fn reorder_frame(frame: DataFrame, names: &[String]) -> ConnectorResult<DataFram
         .map_err(polars_data_error)
 }
 
+// Generic projected-object path: the exact default production path, retained
+// verbatim. The E24-JSON-A2 direct projected writer replaces only this
+// selected-field Value/Map intermediate.
+#[cfg(not(feature = "json-direct-projected-writer"))]
 struct ProjectedObjectSeed<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
     type Value = Map<String, Value>;
 
@@ -821,11 +849,13 @@ impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
     }
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 struct ProjectedObjectVisitor<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
     type Value = Map<String, Value>;
 
@@ -853,7 +883,10 @@ impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
                 validate_json_value(&value, field).map_err(A::Error::custom)?;
                 output.insert(name, value);
             } else {
-                access.next_value_seed(ValidateFieldSeed { field })?;
+                access.next_value_seed(ValidateFieldSeed {
+                    field,
+                    duplicates: None,
+                })?;
             }
         }
         for field in &self.schema.fields {
@@ -865,11 +898,25 @@ impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
     }
 }
 
-struct ValidateFieldSeed<'a> {
-    field: &'a LogicalField,
+/// How repeated keys inside nested objects are treated while streaming one
+/// typed value.
+///
+/// The generic selected path parses values into `serde_json::Value` (with
+/// `preserve_order`), whose map silently collapses a repeated key: the value
+/// replaces the original entry in place (last value wins). The typed streaming
+/// path must therefore distinguish its two callers: every non-selected field
+/// rejects repeated nested keys outright (`None`), while selected-value
+/// validation (the direct projected writer's second parse) accepts them with
+/// last-value-wins and flags the fact through the referenced cell so the
+/// caller can canonicalize the captured bytes before assembly (`Some`).
+pub(crate) type DuplicateKeys<'a> = Option<&'a mut bool>;
+
+pub(crate) struct ValidateFieldSeed<'a, 'd> {
+    pub(crate) field: &'a LogicalField,
+    pub(crate) duplicates: DuplicateKeys<'d>,
 }
 
-impl<'de> DeserializeSeed<'de> for ValidateFieldSeed<'_> {
+impl<'de> DeserializeSeed<'de> for ValidateFieldSeed<'_, '_> {
     type Value = ();
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -879,15 +926,17 @@ impl<'de> DeserializeSeed<'de> for ValidateFieldSeed<'_> {
         deserializer.deserialize_any(LogicalValueVisitor {
             data_type: &self.field.data_type,
             nullable: self.field.nullable,
+            duplicates: self.duplicates,
         })
     }
 }
 
-struct ValidateTypeSeed<'a> {
-    data_type: &'a LogicalType,
+pub(crate) struct ValidateTypeSeed<'a, 'd> {
+    pub(crate) data_type: &'a LogicalType,
+    pub(crate) duplicates: DuplicateKeys<'d>,
 }
 
-impl<'de> DeserializeSeed<'de> for ValidateTypeSeed<'_> {
+impl<'de> DeserializeSeed<'de> for ValidateTypeSeed<'_, '_> {
     type Value = ();
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -897,6 +946,7 @@ impl<'de> DeserializeSeed<'de> for ValidateTypeSeed<'_> {
         deserializer.deserialize_any(LogicalValueVisitor {
             data_type: self.data_type,
             nullable: true,
+            duplicates: self.duplicates,
         })
     }
 }
@@ -904,6 +954,7 @@ impl<'de> DeserializeSeed<'de> for ValidateTypeSeed<'_> {
 struct LogicalValueVisitor<'a> {
     data_type: &'a LogicalType,
     nullable: bool,
+    duplicates: DuplicateKeys<'a>,
 }
 
 impl LogicalValueVisitor<'_> {
@@ -1018,7 +1069,7 @@ impl<'de> Visitor<'de> for LogicalValueVisitor<'_> {
         self.visit_str(&value)
     }
 
-    fn visit_seq<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+    fn visit_seq<A>(mut self, mut access: A) -> Result<Self::Value, A::Error>
     where
         A: SeqAccess<'de>,
     {
@@ -1026,13 +1077,16 @@ impl<'de> Visitor<'de> for LogicalValueVisitor<'_> {
             return Err(A::Error::custom("array has an incompatible logical type"));
         };
         while access
-            .next_element_seed(ValidateTypeSeed { data_type: element })?
+            .next_element_seed(ValidateTypeSeed {
+                data_type: element,
+                duplicates: self.duplicates.as_deref_mut(),
+            })?
             .is_some()
         {}
         Ok(())
     }
 
-    fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+    fn visit_map<A>(mut self, mut access: A) -> Result<Self::Value, A::Error>
     where
         A: MapAccess<'de>,
     {
@@ -1045,9 +1099,17 @@ impl<'de> Visitor<'de> for LogicalValueVisitor<'_> {
                 return Err(A::Error::custom("nested object contains an unknown field"));
             };
             if !seen.insert(name) {
-                return Err(A::Error::custom("nested object contains a duplicate field"));
+                match &mut self.duplicates {
+                    Some(flag) => **flag = true,
+                    None => {
+                        return Err(A::Error::custom("nested object contains a duplicate field"));
+                    }
+                }
             }
-            access.next_value_seed(ValidateFieldSeed { field })?;
+            access.next_value_seed(ValidateFieldSeed {
+                field,
+                duplicates: self.duplicates.as_deref_mut(),
+            })?;
         }
         if fields
             .iter()
@@ -1061,6 +1123,7 @@ impl<'de> Visitor<'de> for LogicalValueVisitor<'_> {
     }
 }
 
+#[cfg(not(feature = "json-direct-projected-writer"))]
 fn parse_projected_object(
     raw: &[u8],
     schema: &LogicalSchema,
@@ -1110,7 +1173,7 @@ fn parse_projected_object(
     Ok(ordered)
 }
 
-fn validate_json_value(value: &Value, field: &LogicalField) -> Result<(), &'static str> {
+pub(crate) fn validate_json_value(value: &Value, field: &LogicalField) -> Result<(), &'static str> {
     if value.is_null() {
         return if field.nullable || matches!(field.data_type, LogicalType::Null) {
             Ok(())
@@ -1204,7 +1267,7 @@ fn polars_data_error(error: polars::error::PolarsError) -> ConnectorError {
     )
 }
 
-fn source_error_with_row(
+pub(crate) fn source_error_with_row(
     category: ErrorCategory,
     message: &'static str,
     row: usize,
@@ -1218,6 +1281,10 @@ fn source_error_with_row(
     )
 }
 
-fn source_error(category: ErrorCategory, retryable: bool, message: &'static str) -> ConnectorError {
+pub(crate) fn source_error(
+    category: ErrorCategory,
+    retryable: bool,
+    message: &'static str,
+) -> ConnectorError {
     ConnectorError::with_category(category, retryable, message, Vec::new(), BTreeMap::new())
 }

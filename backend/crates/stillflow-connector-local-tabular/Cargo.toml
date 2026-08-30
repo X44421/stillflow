@@ -44,3 +44,15 @@ tokio-util.workspace = true
 # test-binary dump side channel only. No dependency and no behavior change.
 [features]
 io-metrics = []
+# Private E24-JSON-A2 direct projected writer path (issue #158, continuing the
+# accepted #148 experiment). Never enabled by default and never enabled through
+# production configuration. Capability-only: enabling it turns on serde_json's
+# `raw_value` capability so selected JSON values are captured as borrowed raw
+# slices instead of a generic `serde_json::Value` tree. With the feature off,
+# the crate builds and behaves exactly as before; no dependency or version
+# changes (features are not recorded in Cargo.lock). Default enablement is
+# blocked on the #151 temporal upstream boundary (`TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM`):
+# this path retains the shared Polars JsonReader unchanged and adds no
+# timestamp compensation, so it must not become the default until the affected
+# timestamp surface is routed around, fail-closed, or fixed upstream.
+json-direct-projected-writer = ["serde_json/raw_value"]
