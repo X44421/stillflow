@@ -17,7 +17,8 @@ use crate::profile::{
 use crate::verification::{encode_component, KeyBytes, KeyValue};
 use crate::{
     ExecutionEngine, DETECTOR_CONTRACT_VERSION, MAX_OPERATOR_STATE_BYTES, PROFILE_MAX_COLUMNS,
-    PROFILING_CONTRACT_VERSION, QUALITY_SCORE_VERSION,
+    PROFILE_MAX_HISTOGRAM_BUCKETS, PROFILE_MAX_TOP_K, PROFILING_CONTRACT_VERSION,
+    QUALITY_SCORE_VERSION,
 };
 
 /// Q-R2 retained-state ceiling. It is a deterministic sub-budget of the
@@ -26,6 +27,10 @@ use crate::{
 pub const QUALITY_STATE_BYTE_BUDGET: usize = MAX_OPERATOR_STATE_BYTES / 2;
 pub const QUALITY_MAX_AI_PROPOSALS: usize = PROFILE_MAX_COLUMNS;
 pub const QUALITY_MAX_FINDINGS: usize = PROFILE_MAX_COLUMNS * 3 + 16;
+pub const QUALITY_MAX_EVIDENCE_REFS_PER_FINDING: usize = 8;
+pub const QUALITY_MAX_IDENTITY_BYTES: usize = 256;
+pub const QUALITY_MAX_PROVENANCE_REF_BYTES: usize = 1024;
+pub const QUALITY_MAX_PLAN_FINGERPRINT_BYTES: usize = 256;
 
 const AI_PROPOSAL_DETECTOR_ID: &str = "ai-proposal";
 
@@ -119,9 +124,20 @@ impl FindingProvenance {
     }
 
     fn validate_base(&self) -> Result<(), EngineError> {
-        if self.target_reference.is_empty() {
-            return Err(EngineError::InvalidPlan(
-                "quality provenance target reference is empty",
+        if self.target_reference.is_empty()
+            || self.target_reference.len() > QUALITY_MAX_PROVENANCE_REF_BYTES
+        {
+            return Err(EngineError::BoundExceeded(
+                "quality provenance target reference is outside the authorized bound",
+            ));
+        }
+        if self
+            .plan_fingerprint
+            .as_ref()
+            .is_some_and(|value| value.len() > QUALITY_MAX_PLAN_FINGERPRINT_BYTES)
+        {
+            return Err(EngineError::BoundExceeded(
+                "quality provenance plan fingerprint is outside the authorized bound",
             ));
         }
         if !is_lower_sha256(&self.resolved_request_digest) {
@@ -268,14 +284,20 @@ impl AiProposalInput {
                 "AI proposal message is outside the authorized bound",
             ));
         }
-        if model_identity.is_empty() || effect_identity.is_empty() {
-            return Err(EngineError::InvalidPlan(
-                "AI proposal requires model/effect identity",
+        if model_identity.is_empty()
+            || effect_identity.is_empty()
+            || model_identity.len() > QUALITY_MAX_IDENTITY_BYTES
+            || effect_identity.len() > QUALITY_MAX_IDENTITY_BYTES
+        {
+            return Err(EngineError::BoundExceeded(
+                "AI proposal model/effect identity is outside the authorized bound",
             ));
         }
-        if evidence_refs.is_empty() {
-            return Err(EngineError::InvalidPlan(
-                "AI proposal finding requires report evidence",
+        if evidence_refs.is_empty()
+            || evidence_refs.len() > QUALITY_MAX_EVIDENCE_REFS_PER_FINDING
+        {
+            return Err(EngineError::BoundExceeded(
+                "AI proposal evidence count is outside the authorized bound",
             ));
         }
         Ok(Self {
@@ -589,6 +611,7 @@ fn validate_evidence(profile: &DatasetProfile, evidence: &FindingEvidence) -> Re
         }
         FindingEvidence::ValueDigest(value) => {
             if value.digests.is_empty()
+                || value.digests.len() > PROFILE_MAX_TOP_K
                 || value.digests.windows(2).any(|pair| pair[0] > pair[1])
                 || value.digests.iter().any(|digest| !is_lower_sha256(digest))
             {
@@ -633,7 +656,9 @@ fn validate_evidence(profile: &DatasetProfile, evidence: &FindingEvidence) -> Re
             }
         }
         FindingEvidence::Histogram(histogram) => {
-            if histogram.buckets.is_empty() {
+            if histogram.buckets.is_empty()
+                || histogram.buckets.len() > PROFILE_MAX_HISTOGRAM_BUCKETS
+            {
                 return Err(EngineError::InvalidPlan(
                     "HistogramEvidence requires at least one bucket",
                 ));
