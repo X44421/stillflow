@@ -39,11 +39,10 @@ pub use preflight::PreparedPlan;
 pub use profile::{ProfileColumns, ProfileRequest, ProfileResult};
 pub use quality::{
     AiIdentity, AiProposalInput, FindingCategory, FindingEvidence, FindingOrigin,
-    FindingProvenance, HistogramBucketEvidence, HistogramEvidence, MetricEvidence,
-    QualityFinding, QualityReport, QualityRequest, QualityResult, QualityScore,
-    RowRangeEvidence, ValueDigestEvidence, VerificationAssociation,
-    VerificationAssociationState, QUALITY_MAX_AI_PROPOSALS,
-    QUALITY_MAX_EVIDENCE_REFS_PER_FINDING, QUALITY_MAX_FINDINGS,
+    FindingProvenance, HistogramBucketEvidence, HistogramEvidence, MetricEvidence, QualityFinding,
+    QualityReport, QualityRequest, QualityResult, QualityScore, RowRangeEvidence,
+    ValueDigestEvidence, VerificationAssociation, VerificationAssociationState,
+    QUALITY_MAX_AI_PROPOSALS, QUALITY_MAX_EVIDENCE_REFS_PER_FINDING, QUALITY_MAX_FINDINGS,
     QUALITY_MAX_IDENTITY_BYTES, QUALITY_MAX_PLAN_FINGERPRINT_BYTES,
     QUALITY_MAX_PROVENANCE_REF_BYTES, QUALITY_STATE_BYTE_BUDGET,
 };
