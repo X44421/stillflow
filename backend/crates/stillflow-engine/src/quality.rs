@@ -1993,7 +1993,10 @@ mod tests {
             .expect("quality");
         let body = String::from_utf8(result.canonical_body.clone()).expect("utf8");
         let expected = "{\"artifact_body_version\":1,\"artifact_type\":\"quality_report\",\"completeness\":true,\"findings\":[],\"missing_components\":[],\"profile_report_digest\":\"abe48782c77348eaadb6a09e72b27050dc6af6ba11a595feb5bdb9688e564ec4\",\"profiling_contract_version\":1,\"quality_score\":100,\"quality_score_version\":1}";
-        assert_eq!(result.report.profile_report_digest, "abe48782c77348eaadb6a09e72b27050dc6af6ba11a595feb5bdb9688e564ec4");
+        assert_eq!(
+            result.report.profile_report_digest,
+            "abe48782c77348eaadb6a09e72b27050dc6af6ba11a595feb5bdb9688e564ec4"
+        );
         assert_eq!(body, expected);
         assert_eq!(
             result.canonical_digest,
