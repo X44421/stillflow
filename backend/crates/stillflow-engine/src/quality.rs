@@ -264,7 +264,7 @@ impl AiProposalInput {
     /// Accepts only an already-produced ADR-002 §8 effect result. This is
     /// crate-private until the typed XR-A1 effect/worker boundary exists, so
     /// ordinary callers cannot inject AI output directly into Q-R2.
-    pub(crate) fn from_effect_boundary(
+    pub fn from_effect_boundary(
         finding_id: impl Into<String>,
         category: FindingCategory,
         severity: FindingSeverity,
