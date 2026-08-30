@@ -10,6 +10,7 @@ publish.workspace = true
 arrow-array = { workspace = true, features = ["ffi"] }
 arrow-cast.workspace = true
 arrow-data = "59"
+arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, features = ["ffi"] }
 arrow-select.workspace = true
 async-trait.workspace = true
@@ -42,5 +43,11 @@ tokio-util.workspace = true
 # Private measurement-only feature for the E24-B2BASE ingestion baseline.
 # Never enabled by default; adds logical-byte/parser-invocation counters and a
 # test-binary dump side channel only. No dependency and no behavior change.
+#
+# `json-arrow-direct` is the E24-B2JSON-A0 experiment switch. Off by default;
+# compiles the optional `arrow-json` 59 decoder. Runtime env
+# `STILLFLOW_JSON_ARROW_DIRECT=1` selects the direct path; otherwise the
+# accepted legacy Polars JSON path remains on the same head.
 [features]
 io-metrics = []
+json-arrow-direct = ["dep:arrow-json"]

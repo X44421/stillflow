@@ -17,6 +17,9 @@ use stillflow_core::{
     LogicalField, LogicalSchema, LogicalType, RequestContext, SourceAsset,
 };
 
+#[cfg(feature = "json-arrow-direct")]
+use arrow_array::RecordBatch;
+
 use crate::bridge::dataframe_to_record_batch;
 use crate::config::LocalTabularConfig;
 use crate::format::TabularFormat;
@@ -53,6 +56,7 @@ pub(crate) mod io_metrics {
     static CSV_ROWS_VALIDATED: AtomicU64 = AtomicU64::new(0);
     static JSON_FRAMED_ROWS: AtomicU64 = AtomicU64::new(0);
     static JSON_POLARS_DECODE_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
+    static JSON_ARROW_FLUSHES: AtomicU64 = AtomicU64::new(0);
     static PARQUET_READER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
     static PARQUET_BATCH_FINISHES: AtomicU64 = AtomicU64::new(0);
 
@@ -94,6 +98,10 @@ pub(crate) mod io_metrics {
 
     pub(crate) fn add_json_polars_decode_invocation() {
         JSON_POLARS_DECODE_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_json_arrow_flush() {
+        JSON_ARROW_FLUSHES.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(crate) fn add_parquet_reader_construction() {
@@ -158,6 +166,7 @@ pub(crate) mod io_metrics {
             "csv_rows_validated",
             "json_framed_rows",
             "json_polars_decode_invocations",
+            "json_arrow_flushes",
             "parquet_reader_constructions",
             "parquet_batch_finishes",
         ]
@@ -175,6 +184,7 @@ pub(crate) mod io_metrics {
             CSV_ROWS_VALIDATED.load(Ordering::Relaxed),
             JSON_FRAMED_ROWS.load(Ordering::Relaxed),
             JSON_POLARS_DECODE_INVOCATIONS.load(Ordering::Relaxed),
+            JSON_ARROW_FLUSHES.load(Ordering::Relaxed),
             PARQUET_READER_CONSTRUCTIONS.load(Ordering::Relaxed),
             PARQUET_BATCH_FINISHES.load(Ordering::Relaxed),
         ]
@@ -207,6 +217,8 @@ pub(crate) struct PreparedReader {
     projection: Projection,
     kind: ReaderKind,
     pending: VecDeque<DataFrame>,
+    #[cfg(feature = "json-arrow-direct")]
+    pending_arrow: VecDeque<RecordBatch>,
     batch_size: usize,
     max_rows: Option<usize>,
     rows_emitted: usize,
@@ -446,6 +458,8 @@ pub(crate) fn prepare_reader(
         projection,
         kind,
         pending: VecDeque::new(),
+        #[cfg(feature = "json-arrow-direct")]
+        pending_arrow: VecDeque::new(),
         batch_size,
         max_rows,
         rows_emitted: 0,
@@ -471,15 +485,38 @@ impl PreparedReader {
 
     pub(crate) async fn next_envelope(&mut self) -> ConnectorResult<Option<BatchEnvelope>> {
         self.context.ensure_active()?;
-        let Some(frame) = self.next_output_frame().await? else {
-            return Ok(None);
+        let batch = {
+            #[cfg(feature = "json-arrow-direct")]
+            {
+                if crate::json_arrow::direct_enabled() {
+                    match self.next_output_arrow_batch().await? {
+                        Some(batch) => batch,
+                        None => return Ok(None),
+                    }
+                } else {
+                    match self.next_output_frame().await? {
+                        Some(frame) => dataframe_to_record_batch(
+                            frame,
+                            self.envelope_factory.schema(),
+                            self.envelope_factory.arrow_schema(),
+                        )?,
+                        None => return Ok(None),
+                    }
+                }
+            }
+            #[cfg(not(feature = "json-arrow-direct"))]
+            {
+                match self.next_output_frame().await? {
+                    Some(frame) => dataframe_to_record_batch(
+                        frame,
+                        self.envelope_factory.schema(),
+                        self.envelope_factory.arrow_schema(),
+                    )?,
+                    None => return Ok(None),
+                }
+            }
         };
         self.context.ensure_active()?;
-        let batch = dataframe_to_record_batch(
-            frame,
-            self.envelope_factory.schema(),
-            self.envelope_factory.arrow_schema(),
-        )?;
         let envelope = self
             .envelope_factory
             .try_build(self.sequence, batch)
@@ -548,6 +585,50 @@ impl PreparedReader {
             }
         }
         Ok(output)
+    }
+
+    #[cfg(feature = "json-arrow-direct")]
+    async fn next_output_arrow_batch(&mut self) -> ConnectorResult<Option<RecordBatch>> {
+        let remaining = self
+            .max_rows
+            .map(|limit| limit.saturating_sub(self.rows_emitted))
+            .unwrap_or(usize::MAX);
+        if remaining == 0 {
+            return Ok(None);
+        }
+        let target = self.batch_size.min(remaining);
+        let mut output: Option<RecordBatch> = None;
+        let mut output_rows = 0_usize;
+        let schema = Arc::clone(self.envelope_factory.arrow_schema());
+
+        while output_rows < target {
+            self.context.ensure_active()?;
+            if self.pending_arrow.is_empty() {
+                self.fill_pending().await?;
+            }
+            let Some(mut batch) = self.pending_arrow.pop_front() else {
+                break;
+            };
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let take = (target - output_rows).min(batch.num_rows());
+            if take < batch.num_rows() {
+                let rest = crate::json_arrow::slice(&batch, take, batch.num_rows() - take);
+                let head = crate::json_arrow::slice(&batch, 0, take);
+                self.pending_arrow.push_front(rest);
+                batch = head;
+            }
+            output_rows += batch.num_rows();
+            output = Some(match output {
+                Some(existing) => crate::json_arrow::concat(Arc::clone(&schema), existing, batch)?,
+                None => batch,
+            });
+        }
+        match output {
+            Some(batch) => Ok(Some(crate::json_arrow::align_schema(batch, schema)?)),
+            None => Ok(None),
+        }
     }
 
     async fn fill_pending(&mut self) -> ConnectorResult<()> {
@@ -631,6 +712,56 @@ impl PreparedReader {
                     .unwrap_or(usize::MAX);
                 let rows = INTERNAL_ROWS.min(remaining).min(self.batch_size);
                 if rows == 0 {
+                    return Ok(());
+                }
+                #[cfg(feature = "json-arrow-direct")]
+                if crate::json_arrow::direct_enabled() {
+                    let mut decoder = if self.projection.names.is_empty() {
+                        None
+                    } else {
+                        Some(crate::json_arrow::decoder(
+                            Arc::clone(self.envelope_factory.arrow_schema()),
+                            rows,
+                        )?)
+                    };
+                    let mut count = 0_usize;
+                    while count < rows {
+                        self.context.ensure_active()?;
+                        let Some(raw) = reader.next_raw_object(&self.context)? else {
+                            break;
+                        };
+                        let object = parse_projected_object(
+                            &raw,
+                            &self.full_schema,
+                            &self.projection.names,
+                            reader.row_number(),
+                        )?;
+                        if let Some(decoder) = decoder.as_mut() {
+                            crate::json_arrow::serialize_object(decoder, object)?;
+                        }
+                        count += 1;
+                    }
+                    if count > 0 {
+                        #[cfg(feature = "io-metrics")]
+                        io_metrics::add_json_framed_rows(count as u64);
+                        let batch = if let Some(decoder) = decoder.as_mut() {
+                            crate::json_arrow::flush(decoder)?.ok_or_else(|| {
+                                source_error(
+                                    ErrorCategory::Internal,
+                                    false,
+                                    "direct JSON decoder flushed no rows after accepted objects",
+                                )
+                            })?
+                        } else {
+                            crate::json_arrow::empty_batch(
+                                Arc::clone(self.envelope_factory.arrow_schema()),
+                                count,
+                            )?
+                        };
+                        #[cfg(feature = "io-metrics")]
+                        io_metrics::add_json_arrow_flush();
+                        self.pending_arrow.push_back(batch);
+                    }
                     return Ok(());
                 }
                 let mut encoded = Vec::new();
