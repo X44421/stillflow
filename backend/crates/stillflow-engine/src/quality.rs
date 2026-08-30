@@ -261,7 +261,10 @@ pub struct AiProposalInput {
 }
 
 impl AiProposalInput {
-    pub fn new(
+    /// Accepts only an already-produced ADR-002 §8 effect result. This is
+    /// crate-private until the typed XR-A1 effect/worker boundary exists, so
+    /// ordinary callers cannot inject AI output directly into Q-R2.
+    pub(crate) fn from_effect_boundary(
         finding_id: impl Into<String>,
         category: FindingCategory,
         severity: FindingSeverity,
@@ -360,7 +363,7 @@ pub struct QualityRequest {
     pub context: RequestContext,
     pub provenance: FindingProvenance,
     pub verification_association: Option<VerificationAssociation>,
-    pub ai_proposals: Vec<AiProposalInput>,
+    ai_proposals: Vec<AiProposalInput>,
 }
 
 impl QualityRequest {
@@ -1835,7 +1838,7 @@ mod tests {
             .expect("digest")],
             count: 8,
         });
-        let proposal = AiProposalInput::new(
+        let proposal = AiProposalInput::from_effect_boundary(
             "ai.1",
             FindingCategory::Text,
             FindingSeverity::Info,
@@ -1889,7 +1892,7 @@ mod tests {
             .await
             .expect("baseline");
         let top = profile.profile.columns[0].top_values.as_ref().expect("top")[0].clone();
-        let proposal = AiProposalInput::new(
+        let proposal = AiProposalInput::from_effect_boundary(
             "ai.score-independent",
             FindingCategory::Text,
             FindingSeverity::Error,
