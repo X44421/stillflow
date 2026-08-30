@@ -38,7 +38,7 @@ pub use error::EngineError;
 pub use preflight::PreparedPlan;
 pub use profile::{ProfileColumns, ProfileRequest, ProfileResult};
 pub use quality::{
-    AiIdentity, AiProposalInput, FindingCategory, FindingEvidence, FindingOrigin,
+    AiIdentity, FindingCategory, FindingEvidence, FindingOrigin,
     FindingProvenance, HistogramBucketEvidence, HistogramEvidence, MetricEvidence, QualityFinding,
     QualityReport, QualityRequest, QualityResult, QualityScore, RowRangeEvidence,
     ValueDigestEvidence, VerificationAssociation, VerificationAssociationState,
