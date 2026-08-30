@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use sha2::{Digest as _, Sha256};
 use stillflow_core::{FindingSeverity, LogicalType, RequestContext};
+use stillflow_storage::VerificationBundle;
 use uuid::Uuid;
 
 use crate::error::{map_context_error, EngineError};
@@ -17,15 +18,39 @@ use crate::profile::{
 use crate::verification::{encode_component, KeyBytes, KeyValue};
 use crate::{
     ExecutionEngine, DETECTOR_CONTRACT_VERSION, MAX_OPERATOR_STATE_BYTES, PROFILE_MAX_COLUMNS,
-    PROFILE_MAX_HISTOGRAM_BUCKETS, PROFILE_MAX_TOP_K, PROFILING_CONTRACT_VERSION,
-    QUALITY_SCORE_VERSION,
+    PROFILE_MAX_HISTOGRAM_BUCKETS, PROFILE_MAX_RETAINED_VALUE_BYTES, PROFILE_MAX_TOP_K,
+    PROFILING_CONTRACT_VERSION, QUALITY_SCORE_VERSION,
 };
 
 /// Q-R2 retained-state ceiling. It is a deterministic sub-budget of the
-/// existing Engine operator-state allowance, and every retained finding,
-/// evidence string/digest, and AI proposal is charged before retention.
+/// existing Engine operator-state allowance. Every retained allocation is
+/// charged before retention: the fixed structural overhead below at budget
+/// creation, each finding/evidence/provenance/id-set copy through
+/// [`retained_finding_bytes`], the AI proposal input vector on arrival, and a
+/// pre-bound for the canonical body before encoding.
 pub const QUALITY_STATE_BYTE_BUDGET: usize = MAX_OPERATOR_STATE_BYTES / 2;
+
+/// Derivable fixed retained-state overhead charged up front (bytes): the
+/// findings vector and two finding-id `BTreeSet` node reserves, the sorted
+/// detector-spec vector, the per-column scan temporary pointer table, and the
+/// transient evidence/digest assembly scratch (each emitted evidence is
+/// measured from its already-materialized parts before the finding itself is
+/// allocated; finding-id formatting and digest encoding stay inside this
+/// scratch allowance). Everything variable is charged on top before it is
+/// retained, so the review can derive
+/// `QUALITY_STATE_FIXED_OVERHEAD_BYTES + Σ retained finding bytes + the
+/// canonical pre-bound ≤ QUALITY_STATE_BYTE_BUDGET` as a hard upper bound
+/// enforced by typed failure.
+pub const QUALITY_STATE_FIXED_OVERHEAD_BYTES: usize = QUALITY_MAX_FINDINGS * 64
+    + PROFILE_MAX_COLUMNS * 8
+    + QUALITY_MAX_EVIDENCE_REFS_PER_FINDING * (64 + 2 * PROFILE_MAX_RETAINED_VALUE_BYTES)
+    + 7 * 64
+    + 1024;
 pub const QUALITY_MAX_AI_PROPOSALS: usize = PROFILE_MAX_COLUMNS;
+
+// The fixed structural overhead must always stay inside the retained-state
+// budget so that budget creation cannot fail for structural reasons.
+const _: () = assert!(QUALITY_STATE_FIXED_OVERHEAD_BYTES < QUALITY_STATE_BYTE_BUDGET);
 pub const QUALITY_MAX_FINDINGS: usize = PROFILE_MAX_COLUMNS * 3 + 16;
 pub const QUALITY_MAX_EVIDENCE_REFS_PER_FINDING: usize = 8;
 pub const QUALITY_MAX_IDENTITY_BYTES: usize = 256;
@@ -337,16 +362,15 @@ pub struct QualityReport {
     pub score: QualityScore,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerificationAssociation {
-    pub verification_bundle_id: Uuid,
-    pub validation_present: bool,
-    pub dedup_present: bool,
-}
-
+/// Envelope-level composition with the run's existing E4 verification
+/// outputs (issue #181 item 14; ADR-003 §7.4 envelope law). `Present`
+/// carries the run's actual published `VerificationBundle` after the engine
+/// has verified that the bundle's membership run matches the quality run —
+/// the association is never a caller-echoed claim. It is not a §7.3 evidence
+/// kind and never enters the canonical body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerificationAssociationState {
-    Present(VerificationAssociation),
+    Present(VerificationBundle),
     Absent,
 }
 
@@ -365,7 +389,10 @@ pub struct QualityRequest {
     pub profile: ProfileResult,
     pub context: RequestContext,
     pub provenance: FindingProvenance,
-    pub verification_association: Option<VerificationAssociation>,
+    /// The run's already-published E4 verification bundle, when one exists.
+    /// `None` is the disclosed absence; `Some` is verified against the run
+    /// before the association is reported.
+    pub verification: Option<VerificationBundle>,
     ai_proposals: Vec<AiProposalInput>,
 }
 
@@ -384,7 +411,7 @@ impl QualityRequest {
             profile,
             context,
             provenance,
-            verification_association: None,
+            verification: None,
             ai_proposals: Vec::new(),
         })
     }
@@ -504,8 +531,13 @@ struct QualityBudget {
 }
 
 impl QualityBudget {
-    fn new() -> Self {
-        Self { used: 0 }
+    /// Charges [`QUALITY_STATE_FIXED_OVERHEAD_BYTES`] up front; creation
+    /// fails typed when the fixed structural overhead alone exceeds the
+    /// budget.
+    fn new() -> Result<Self, EngineError> {
+        let mut budget = Self { used: 0 };
+        budget.charge(QUALITY_STATE_FIXED_OVERHEAD_BYTES)?;
+        Ok(budget)
     }
 
     fn charge(&mut self, bytes: usize) -> Result<(), EngineError> {
@@ -519,30 +551,40 @@ impl QualityBudget {
     }
 }
 
-fn finding_bytes(finding: &QualityFinding) -> usize {
-    let mut total = finding.finding_id.len()
-        + finding.detector_id.len()
-        + finding.message.len()
-        + finding.provenance.target_reference.len()
-        + finding.provenance.resolved_request_digest.len()
-        + finding
-            .provenance
-            .plan_fingerprint
-            .as_ref()
-            .map_or(0, String::len);
-    for evidence in &finding.evidence_refs {
-        total = total.saturating_add(match evidence {
-            FindingEvidence::Metric(metric) => metric.metric_path.len() + 48,
-            FindingEvidence::ValueDigest(value) => {
-                value.column_ref.len() + value.digests.iter().map(String::len).sum::<usize>() + 32
-            }
-            FindingEvidence::RowRange(_) => 32,
-            FindingEvidence::Histogram(histogram) => {
-                histogram.column_ref.len() + histogram.buckets.len() * 32
-            }
-        });
+fn evidence_bytes(evidence: &FindingEvidence) -> usize {
+    match evidence {
+        FindingEvidence::Metric(metric) => metric.metric_path.len() + 48,
+        FindingEvidence::ValueDigest(value) => {
+            value.column_ref.len() + value.digests.iter().map(String::len).sum::<usize>() + 32
+        }
+        FindingEvidence::RowRange(_) => 32,
+        FindingEvidence::Histogram(histogram) => {
+            histogram.column_ref.len() + histogram.buckets.len() * 32
+        }
     }
-    if let Some(ai) = &finding.provenance.ai_identity {
+}
+
+/// Retained bytes of one finding: the record itself (id, message, evidence,
+/// provenance copies, AI identity) plus the finding-id copy kept in the
+/// report-wide dedup `BTreeSet`. Measured from borrowed parts and charged
+/// before the finding is materialized and retained.
+fn retained_finding_bytes<'a>(
+    finding_id: &str,
+    message: &str,
+    evidence_refs: impl IntoIterator<Item = &'a FindingEvidence>,
+    provenance: &FindingProvenance,
+    ai_identity: Option<&AiIdentity>,
+) -> usize {
+    // The id is retained twice: once in the finding, once in the dedup set.
+    let mut total = finding_id.len().saturating_mul(2) + message.len();
+    for evidence in evidence_refs {
+        total = total.saturating_add(evidence_bytes(evidence));
+    }
+    total = total
+        .saturating_add(provenance.target_reference.len())
+        .saturating_add(provenance.resolved_request_digest.len())
+        .saturating_add(provenance.plan_fingerprint.as_ref().map_or(0, String::len));
+    if let Some(ai) = ai_identity {
         total = total
             .saturating_add(ai.model_identity.len())
             .saturating_add(ai.effect_identity.len());
@@ -585,16 +627,20 @@ fn validate_profile_result(profile: &ProfileResult) -> Result<(), EngineError> {
     Ok(())
 }
 
-fn metric_path_allowed(path: &str) -> bool {
-    matches!(
-        path,
-        "dataset.row_count_scanned"
-            | "dataset.column_count_profiled"
-            | "dataset.duplicate_row_count"
-            | "columns.null_count"
-            | "columns.unique_count"
-            | "columns.length_stats.long_value_count"
-    )
+/// Exact dataset-level member names of the `profile_report.v1` canonical
+/// body (ADR-003 §9: `metric_path` is a dot-separated sequence of exact
+/// canonical-body member names; v1 defines no indexed, bracketed, or
+/// wildcard segments). The `columns` member is an array, so per-column
+/// observations are cited through the `column_ref` evidence kinds
+/// (`ValueDigestEvidence`/`HistogramEvidence`), never through `metric_path`.
+const METRIC_PATH_ROW_COUNT_SCANNED: &str = "dataset.row_count_scanned";
+const METRIC_PATH_COLUMN_COUNT_PROFILED: &str = "dataset.column_count_profiled";
+const METRIC_PATH_DUPLICATE_ROW_COUNT: &str = "dataset.duplicate_row_count";
+
+fn top_value_count(value: &ProfileTopValue) -> u64 {
+    match value {
+        ProfileTopValue::Text { count, .. } | ProfileTopValue::Bytes { count, .. } => *count,
+    }
 }
 
 fn validate_evidence(
@@ -603,12 +649,46 @@ fn validate_evidence(
 ) -> Result<(), EngineError> {
     match evidence {
         FindingEvidence::Metric(metric) => {
-            if !metric_path_allowed(&metric.metric_path) {
-                return Err(EngineError::InvalidPlan("unknown quality metric_path"));
+            let resolves = match metric.metric_path.as_str() {
+                METRIC_PATH_ROW_COUNT_SCANNED | METRIC_PATH_COLUMN_COUNT_PROFILED => true,
+                // An optional canonical member: the citation resolves only
+                // when the member is present in the body.
+                METRIC_PATH_DUPLICATE_ROW_COUNT => profile.dataset.duplicate_row_count.is_some(),
+                _ => return Err(EngineError::InvalidPlan("unknown quality metric_path")),
+            };
+            if !resolves {
+                return Err(EngineError::InvalidPlan(
+                    "metric_path does not resolve in the profile canonical body",
+                ));
             }
             match (metric.numerator, metric.denominator) {
                 (None, None) => {}
-                (Some(_), Some(denominator)) if denominator > 0 => {}
+                (Some(numerator), Some(denominator)) if denominator > 0 => {
+                    // The only v1 rational derivation: null presence
+                    // T_null / (S·C) over profiled columns, recomputed from
+                    // the canonical body and compared exactly.
+                    if metric.metric_path != METRIC_PATH_ROW_COUNT_SCANNED {
+                        return Err(EngineError::InvalidPlan(
+                            "metric rational evidence is not defined for this metric path",
+                        ));
+                    }
+                    let contributing: Vec<&ColumnProfile> = profile
+                        .columns
+                        .iter()
+                        .filter(|column| column.status == ProfileColumnStatus::Profiled)
+                        .collect();
+                    let total_null: u128 = contributing
+                        .iter()
+                        .map(|column| column.null_count as u128)
+                        .sum();
+                    let base = (profile.dataset.row_count_scanned as u128)
+                        .saturating_mul(contributing.len() as u128);
+                    if base == 0 || (numerator, denominator) != rational_pair(total_null, base) {
+                        return Err(EngineError::InvalidPlan(
+                            "metric rational evidence is not recomputable from profile",
+                        ));
+                    }
+                }
                 _ => {
                     return Err(EngineError::InvalidPlan(
                         "metric rational evidence is incomplete",
@@ -638,21 +718,29 @@ fn validate_evidence(
                     "ValueDigestEvidence count exceeds column evidence",
                 ));
             }
-            let mut available = Vec::new();
+            let mut available: Vec<(String, u64)> = Vec::new();
             if let Some(top_values) = &column.top_values {
                 for top in top_values {
-                    available.push(digest_top_value(top)?);
+                    available.push((digest_top_value(top)?, top_value_count(top)));
                 }
             }
-            available.sort();
-            if value
-                .digests
-                .iter()
-                .any(|digest| available.binary_search(digest).is_err())
-            {
-                return Err(EngineError::InvalidPlan(
-                    "ValueDigestEvidence is not recomputable from profile",
-                ));
+            available.sort_by(|left, right| left.0.cmp(&right.0));
+            for digest in &value.digests {
+                match available.binary_search_by(|entry| entry.0.as_str().cmp(digest)) {
+                    // The observed count must equal the cited top value's
+                    // own count, not merely stay under the column bound.
+                    Ok(index) if available[index].1 != value.count => {
+                        return Err(EngineError::InvalidPlan(
+                            "ValueDigestEvidence count does not match the cited top value",
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        return Err(EngineError::InvalidPlan(
+                            "ValueDigestEvidence is not recomputable from profile",
+                        ));
+                    }
+                }
             }
         }
         FindingEvidence::RowRange(range) => {
@@ -677,13 +765,20 @@ fn validate_evidence(
                 .ok_or(EngineError::InvalidPlan(
                     "HistogramEvidence column_ref is unknown",
                 ))?;
-            let actual = column.histogram.as_ref().ok_or(EngineError::InvalidPlan(
-                "HistogramEvidence column has no histogram",
-            ))?;
+            // Utf8/Binary columns resolve against the retained length
+            // histogram (§6.3); numeric columns against the §6.1 histogram.
+            let actual: &[u64] = if let Some(length) = &column.length {
+                &length.histogram
+            } else {
+                let numeric = column.histogram.as_ref().ok_or(EngineError::InvalidPlan(
+                    "HistogramEvidence column has no histogram",
+                ))?;
+                &numeric.counts
+            };
             let mut previous = None;
             for bucket in &histogram.buckets {
-                if bucket.bucket_index >= actual.counts.len()
-                    || actual.counts[bucket.bucket_index] != bucket.count
+                if bucket.bucket_index >= actual.len()
+                    || actual[bucket.bucket_index] != bucket.count
                 {
                     return Err(EngineError::InvalidPlan(
                         "HistogramEvidence is not recomputable from profile",
@@ -826,7 +921,6 @@ fn round_half_even(numerator: u128, denominator: u128) -> u128 {
 fn push_finding(
     findings: &mut Vec<QualityFinding>,
     ids: &mut BTreeSet<String>,
-    budget: &mut QualityBudget,
     finding: QualityFinding,
 ) -> Result<(), EngineError> {
     if findings.len() >= QUALITY_MAX_FINDINGS {
@@ -842,7 +936,6 @@ fn push_finding(
     for evidence in &finding.evidence_refs {
         validate_evidence_placeholder(evidence)?;
     }
-    budget.charge(finding_bytes(&finding))?;
     findings.push(finding);
     Ok(())
 }
@@ -884,6 +977,35 @@ fn deterministic_finding(
     }
 }
 
+/// First length-histogram bucket whose lengths exceed the retained-value
+/// boundary: the frozen §6.3 bounds place 256 (`PROFILE_MAX_RETAINED_VALUE_BYTES`)
+/// at index 9, so buckets `10..` count exactly the retained lengths above
+/// the boundary (pinned by the Q-R1 length-histogram boundary test).
+const LENGTH_HISTOGRAM_FIRST_LONG_BUCKET: usize = 10;
+
+// Deterministic test-only checkpoint hook (same pattern as the storage
+// crate's prepared-window hook): invoked after each detector/encoder
+// checkpoint so tests can cancel or expire the deadline mid-run. Always
+// empty in production builds.
+#[cfg(test)]
+thread_local! {
+    static CHECKPOINT_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn quality_test_checkpoint() {
+    CHECKPOINT_HOOK.with(|slot| {
+        let hook = slot.borrow_mut().take();
+        if let Some(hook) = hook {
+            hook();
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn quality_test_checkpoint() {}
+
 fn run_detectors(
     profile: &DatasetProfile,
     provenance: &FindingProvenance,
@@ -898,22 +1020,30 @@ fn run_detectors(
 
     for spec in specs {
         context.ensure_active().map_err(map_context_error)?;
+        quality_test_checkpoint();
         match spec.kind {
             DetectorKind::SchemaMaxColumns => {
                 if profile.dataset.column_count_profiled == PROFILE_MAX_COLUMNS {
                     let evidence = FindingEvidence::Metric(MetricEvidence {
-                        metric_path: "dataset.column_count_profiled".to_owned(),
+                        metric_path: METRIC_PATH_COLUMN_COUNT_PROFILED.to_owned(),
                         numerator: None,
                         denominator: None,
                     });
                     validate_evidence(profile, &evidence)?;
+                    let finding_id = "schema.max-columns".to_owned();
+                    budget.charge(retained_finding_bytes(
+                        &finding_id,
+                        "Profiled schema reached the v1 column ceiling.",
+                        std::slice::from_ref(&evidence),
+                        provenance,
+                        None,
+                    ))?;
                     push_finding(
                         &mut findings,
                         &mut ids,
-                        budget,
                         deterministic_finding(
                             spec,
-                            "schema.max-columns".to_owned(),
+                            finding_id,
                             "Profiled schema reached the v1 column ceiling.",
                             vec![evidence],
                             provenance,
@@ -931,23 +1061,30 @@ fn run_detectors(
                     .iter()
                     .map(|column| column.null_count as u128)
                     .sum();
-                let denominator = (profile.dataset.row_count_scanned as u128)
+                let base = (profile.dataset.row_count_scanned as u128)
                     .saturating_mul(contributing.len() as u128);
-                if total_null > 0 && denominator > 0 {
-                    let (numerator, denominator) = rational_pair(total_null, denominator);
+                if total_null > 0 && base > 0 {
+                    let (numerator, denominator) = rational_pair(total_null, base);
                     let evidence = FindingEvidence::Metric(MetricEvidence {
-                        metric_path: "columns.null_count".to_owned(),
+                        metric_path: METRIC_PATH_ROW_COUNT_SCANNED.to_owned(),
                         numerator: Some(numerator),
                         denominator: Some(denominator),
                     });
                     validate_evidence(profile, &evidence)?;
+                    let finding_id = "schema.null-observations".to_owned();
+                    budget.charge(retained_finding_bytes(
+                        &finding_id,
+                        "Null observations are present in the profiled scan scope.",
+                        std::slice::from_ref(&evidence),
+                        provenance,
+                        None,
+                    ))?;
                     push_finding(
                         &mut findings,
                         &mut ids,
-                        budget,
                         deterministic_finding(
                             spec,
-                            "schema.null-observations".to_owned(),
+                            finding_id,
                             "Null observations are present in the profiled scan scope.",
                             vec![evidence],
                             provenance,
@@ -964,22 +1101,33 @@ fn run_detectors(
                     let Some(unique) = column.unique_count else {
                         continue;
                     };
+                    let Some(top_values) = &column.top_values else {
+                        continue;
+                    };
+                    let Some(first) = top_values.first() else {
+                        continue;
+                    };
                     if unique.saturating_mul(10) <= column.non_null_count {
-                        let (numerator, denominator) =
-                            rational_pair(unique as u128, column.non_null_count as u128);
-                        let evidence = FindingEvidence::Metric(MetricEvidence {
-                            metric_path: "columns.unique_count".to_owned(),
-                            numerator: Some(numerator),
-                            denominator: Some(denominator),
+                        let evidence = FindingEvidence::ValueDigest(ValueDigestEvidence {
+                            column_ref: column.name.clone(),
+                            digests: vec![digest_top_value(first)?],
+                            count: top_value_count(first),
                         });
                         validate_evidence(profile, &evidence)?;
+                        let finding_id = format!("text.low-uniqueness.{index}");
+                        budget.charge(retained_finding_bytes(
+                            &finding_id,
+                            "A text column has low exact uniqueness within the scan scope.",
+                            std::slice::from_ref(&evidence),
+                            provenance,
+                            None,
+                        ))?;
                         push_finding(
                             &mut findings,
                             &mut ids,
-                            budget,
                             deterministic_finding(
                                 spec,
-                                format!("text.low-uniqueness.{index}"),
+                                finding_id,
                                 "A text column has low exact uniqueness within the scan scope.",
                                 vec![evidence],
                                 provenance,
@@ -997,26 +1145,39 @@ fn run_detectors(
                     let Some(length) = &column.length else {
                         continue;
                     };
-                    if length.long_value_count == 0 || column.non_null_count == 0 {
+                    // Long retained lengths are exactly the nonzero buckets
+                    // at and above LENGTH_HISTOGRAM_FIRST_LONG_BUCKET; the
+                    // evidence cites precisely those buckets.
+                    let buckets: Vec<HistogramBucketEvidence> = (LENGTH_HISTOGRAM_FIRST_LONG_BUCKET
+                        ..length.histogram.len())
+                        .filter(|bucket_index| length.histogram[*bucket_index] > 0)
+                        .map(|bucket_index| HistogramBucketEvidence {
+                            bucket_index,
+                            count: length.histogram[bucket_index],
+                        })
+                        .collect();
+                    if buckets.is_empty() {
                         continue;
                     }
-                    let (numerator, denominator) = rational_pair(
-                        length.long_value_count as u128,
-                        column.non_null_count as u128,
-                    );
-                    let evidence = FindingEvidence::Metric(MetricEvidence {
-                        metric_path: "columns.length_stats.long_value_count".to_owned(),
-                        numerator: Some(numerator),
-                        denominator: Some(denominator),
+                    let evidence = FindingEvidence::Histogram(HistogramEvidence {
+                        column_ref: column.name.clone(),
+                        buckets,
                     });
                     validate_evidence(profile, &evidence)?;
+                    let finding_id = format!("text.long-values.{index}");
+                    budget.charge(retained_finding_bytes(
+                        &finding_id,
+                        "A text column contains values above the retained-value boundary.",
+                        std::slice::from_ref(&evidence),
+                        provenance,
+                        None,
+                    ))?;
                     push_finding(
                         &mut findings,
                         &mut ids,
-                        budget,
                         deterministic_finding(
                             spec,
-                            format!("text.long-values.{index}"),
+                            finding_id,
                             "A text column contains values above the retained-value boundary.",
                             vec![evidence],
                             provenance,
@@ -1036,27 +1197,30 @@ fn run_detectors(
                     let Some(first) = top_values.first() else {
                         continue;
                     };
-                    let count = match first {
-                        ProfileTopValue::Text { count, .. }
-                        | ProfileTopValue::Bytes { count, .. } => *count,
-                    };
+                    let count = top_value_count(first);
                     if count.saturating_mul(2) < column.non_null_count {
                         continue;
                     }
-                    let digest = digest_top_value(first)?;
                     let evidence = FindingEvidence::ValueDigest(ValueDigestEvidence {
                         column_ref: column.name.clone(),
-                        digests: vec![digest],
+                        digests: vec![digest_top_value(first)?],
                         count,
                     });
                     validate_evidence(profile, &evidence)?;
+                    let finding_id = format!("text.top-concentration.{index}");
+                    budget.charge(retained_finding_bytes(
+                        &finding_id,
+                        "A text column is dominated by one retained top value.",
+                        std::slice::from_ref(&evidence),
+                        provenance,
+                        None,
+                    ))?;
                     push_finding(
                         &mut findings,
                         &mut ids,
-                        budget,
                         deterministic_finding(
                             spec,
-                            format!("text.top-concentration.{index}"),
+                            finding_id,
                             "A text column is dominated by one retained top value.",
                             vec![evidence],
                             provenance,
@@ -1067,7 +1231,7 @@ fn run_detectors(
             DetectorKind::DuplicateRows => {
                 if profile.dataset.duplicate_row_count.unwrap_or(0) > 0 {
                     let metric = FindingEvidence::Metric(MetricEvidence {
-                        metric_path: "dataset.duplicate_row_count".to_owned(),
+                        metric_path: METRIC_PATH_DUPLICATE_ROW_COUNT.to_owned(),
                         numerator: None,
                         denominator: None,
                     });
@@ -1077,13 +1241,20 @@ fn run_detectors(
                     });
                     validate_evidence(profile, &metric)?;
                     validate_evidence(profile, &range)?;
+                    let finding_id = "duplicate.rows-present".to_owned();
+                    budget.charge(retained_finding_bytes(
+                        &finding_id,
+                        "Exact duplicate rows are present in the profiled scan scope.",
+                        [&metric, &range],
+                        provenance,
+                        None,
+                    ))?;
                     push_finding(
                         &mut findings,
                         &mut ids,
-                        budget,
                         deterministic_finding(
                             spec,
-                            "duplicate.rows-present".to_owned(),
+                            finding_id,
                             "Exact duplicate rows are present in the profiled scan scope.",
                             vec![metric, range],
                             provenance,
@@ -1123,13 +1294,20 @@ fn run_detectors(
                         }],
                     });
                     validate_evidence(profile, &evidence)?;
+                    let finding_id = format!("distribution.dominant-bucket.{index}");
+                    budget.charge(retained_finding_bytes(
+                        &finding_id,
+                        "A numeric distribution is concentrated in one histogram bucket.",
+                        std::slice::from_ref(&evidence),
+                        provenance,
+                        None,
+                    ))?;
                     push_finding(
                         &mut findings,
                         &mut ids,
-                        budget,
                         deterministic_finding(
                             spec,
-                            format!("distribution.dominant-bucket.{index}"),
+                            finding_id,
                             "A numeric distribution is concentrated in one histogram bucket.",
                             vec![evidence],
                             provenance,
@@ -1155,6 +1333,21 @@ fn add_ai_proposals(
             "AI proposal count exceeds the fixed Q-R2 bound",
         ));
     }
+    // The request-side proposal vector is retained until each proposal is
+    // materialized; charge its bytes on arrival so the peak of retained
+    // input plus accumulated findings stays inside the budget.
+    let input_bytes: usize = proposals
+        .iter()
+        .map(|proposal| {
+            let evidence: usize = proposal.evidence_refs.iter().map(evidence_bytes).sum();
+            proposal.finding_id.len()
+                + proposal.message.len()
+                + proposal.identity.model_identity.len()
+                + proposal.identity.effect_identity.len()
+                + evidence
+        })
+        .sum();
+    budget.charge(input_bytes)?;
     let mut ids: BTreeSet<String> = findings
         .iter()
         .map(|finding| finding.finding_id.clone())
@@ -1164,6 +1357,15 @@ fn add_ai_proposals(
         for evidence in &proposal.evidence_refs {
             validate_evidence(profile, evidence)?;
         }
+        // Charge before the finding (message/provenance/identity copies) is
+        // materialized and retained.
+        budget.charge(retained_finding_bytes(
+            &proposal.finding_id,
+            &proposal.message,
+            &proposal.evidence_refs,
+            provenance,
+            Some(&proposal.identity),
+        ))?;
         let finding = QualityFinding {
             finding_id: proposal.finding_id,
             category: proposal.category,
@@ -1175,7 +1377,7 @@ fn add_ai_proposals(
             evidence_refs: proposal.evidence_refs,
             provenance: provenance.for_ai(proposal.identity),
         };
-        push_finding(findings, &mut ids, budget, finding)?;
+        push_finding(findings, &mut ids, finding)?;
     }
     Ok(())
 }
@@ -1198,8 +1400,17 @@ impl ExecutionEngine {
         validate_profile_result(&request.profile)?;
         request.provenance.validate_base()?;
         validate_registry(&DETECTORS_V1)?;
+        // Fail closed before any finding work: a verification association
+        // must belong to the run that publishes this report.
+        if let Some(bundle) = &request.verification {
+            if bundle.membership().run_id() != request.provenance.run_id {
+                return Err(EngineError::InvalidPlan(
+                    "verification bundle is not bound to the quality run",
+                ));
+            }
+        }
 
-        let mut budget = QualityBudget::new();
+        let mut budget = QualityBudget::new()?;
         let score = quality_score(&request.profile.profile);
         let mut findings = run_detectors(
             &request.profile.profile,
@@ -1217,6 +1428,25 @@ impl ExecutionEngine {
         )?;
         findings.sort_by(|left, right| left.finding_id.cmp(&right.finding_id));
         request.context.ensure_active().map_err(map_context_error)?;
+        quality_test_checkpoint();
+
+        // The canonical encoding materializes the full body plus its
+        // intermediate CVal tree; charge a derived pre-bound (twice the
+        // retained finding bytes plus fixed scaffolding) before encoding so
+        // the allocation cannot precede the budget check.
+        let findings_bytes: usize = findings
+            .iter()
+            .map(|finding| {
+                retained_finding_bytes(
+                    &finding.finding_id,
+                    &finding.message,
+                    &finding.evidence_refs,
+                    &finding.provenance,
+                    finding.provenance.ai_identity.as_ref(),
+                )
+            })
+            .sum();
+        budget.charge(findings_bytes.saturating_mul(2).saturating_add(1024))?;
 
         let report = QualityReport {
             artifact_type: "quality_report",
@@ -1228,8 +1458,8 @@ impl ExecutionEngine {
         };
         let canonical_body = report.canonical_body();
         let canonical_digest = sha256_hex(&canonical_body);
-        let verification_association = match request.verification_association {
-            Some(value) => VerificationAssociationState::Present(value),
+        let verification_association = match request.verification {
+            Some(bundle) => VerificationAssociationState::Present(bundle),
             None => VerificationAssociationState::Absent,
         };
         Ok(QualityResult {
@@ -1546,10 +1776,16 @@ mod tests {
             length: Some(ProfileLengthStats {
                 sum_of_lengths: rows as u128,
                 min_length: Some(1),
-                max_length: Some(if long_values > 0 { 300 } else { 1 }),
+                max_length: Some(if long_values > 0 { 8192 } else { 1 }),
                 avg_length: None,
                 long_value_count: long_values,
-                histogram: vec![0; 14],
+                histogram: {
+                    let mut histogram = vec![0; 14];
+                    // Lengths above 4096 fall in the last bucket and are
+                    // long by bytes in the same rows.
+                    histogram[13] = long_values;
+                    histogram
+                },
             }),
             histogram: None,
             top_values,
@@ -1748,35 +1984,324 @@ mod tests {
         assert_eq!(finding.severity(), FindingSeverity::Warning);
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn q04_detector_trigger_boundaries_below_equal_above() {
+        fn detector_fired(result: &QualityResult, detector_id: &str) -> bool {
+            result
+                .report
+                .findings
+                .iter()
+                .any(|finding| finding.detector_id() == detector_id)
+        }
+        async fn fires(profile: ProfileResult, detector_id: &str) -> bool {
+            detector_fired(
+                &run_quality(profile, Uuid::from_u128(0x40))
+                    .await
+                    .expect("quality"),
+                detector_id,
+            )
+        }
+
+        // duplicate.rows-present: fires on any positive exact duplicate count.
+        assert!(
+            !fires(
+                profile_result(
+                    10,
+                    vec![text_column("t", 10, 0, Some(10), None, 0)],
+                    Some(0),
+                    false,
+                    10
+                ),
+                "duplicate.rows-present",
+            )
+            .await
+        );
+        assert!(
+            fires(
+                profile_result(
+                    10,
+                    vec![text_column("t", 10, 0, Some(10), None, 0)],
+                    Some(1),
+                    false,
+                    10
+                ),
+                "duplicate.rows-present",
+            )
+            .await
+        );
+
+        // schema.null-observations: fires on the first null observation.
+        assert!(
+            !fires(
+                profile_result(
+                    10,
+                    vec![text_column("t", 10, 0, Some(10), None, 0)],
+                    Some(0),
+                    false,
+                    10
+                ),
+                "schema.null-observations",
+            )
+            .await
+        );
+        assert!(
+            fires(
+                profile_result(
+                    10,
+                    vec![text_column("t", 10, 1, Some(9), None, 0)],
+                    Some(0),
+                    false,
+                    10
+                ),
+                "schema.null-observations",
+            )
+            .await
+        );
+
+        // text.top-concentration: threshold is top1·2 ≥ non_null_count; the
+        // exact boundary fires, one below does not.
+        assert!(
+            !fires(
+                profile_result(
+                    10,
+                    vec![text_column(
+                        "t",
+                        10,
+                        0,
+                        Some(5),
+                        Some(vec![ProfileTopValue::Text {
+                            value: "x".to_owned(),
+                            count: 4
+                        }]),
+                        0,
+                    )],
+                    Some(0),
+                    false,
+                    10,
+                ),
+                "text.top-concentration",
+            )
+            .await
+        );
+        assert!(
+            fires(
+                profile_result(
+                    10,
+                    vec![text_column(
+                        "t",
+                        10,
+                        0,
+                        Some(5),
+                        Some(vec![ProfileTopValue::Text {
+                            value: "x".to_owned(),
+                            count: 5
+                        }]),
+                        0,
+                    )],
+                    Some(0),
+                    false,
+                    10,
+                ),
+                "text.top-concentration",
+            )
+            .await
+        );
+
+        // text.low-uniqueness: threshold is unique·10 ≤ non_null_count; the
+        // exact boundary fires, one above does not.
+        assert!(
+            !fires(
+                profile_result(
+                    10,
+                    vec![text_column(
+                        "t",
+                        10,
+                        0,
+                        Some(2),
+                        Some(vec![ProfileTopValue::Text {
+                            value: "x".to_owned(),
+                            count: 10
+                        }]),
+                        0,
+                    )],
+                    Some(0),
+                    false,
+                    10,
+                ),
+                "text.low-uniqueness",
+            )
+            .await
+        );
+        assert!(
+            fires(
+                profile_result(
+                    10,
+                    vec![text_column(
+                        "t",
+                        10,
+                        0,
+                        Some(1),
+                        Some(vec![ProfileTopValue::Text {
+                            value: "x".to_owned(),
+                            count: 10
+                        }]),
+                        0,
+                    )],
+                    Some(0),
+                    false,
+                    10,
+                ),
+                "text.low-uniqueness",
+            )
+            .await
+        );
+
+        // text.long-values: fires on the first retained length above the
+        // boundary (bucket evidence must exist).
+        assert!(
+            !fires(
+                profile_result(
+                    10,
+                    vec![text_column("t", 10, 0, Some(10), None, 0)],
+                    Some(0),
+                    false,
+                    10
+                ),
+                "text.long-values",
+            )
+            .await
+        );
+        assert!(
+            fires(
+                profile_result(
+                    10,
+                    vec![text_column("t", 10, 0, Some(10), None, 1)],
+                    Some(0),
+                    false,
+                    10
+                ),
+                "text.long-values",
+            )
+            .await
+        );
+
+        // distribution.dominant-bucket: threshold is max·10 ≥ total·9; the
+        // exact boundary fires, one below does not.
+        assert!(
+            !fires(
+                profile_result(
+                    10,
+                    vec![numeric_column("n", 10, vec![8, 2])],
+                    Some(0),
+                    false,
+                    10
+                ),
+                "distribution.dominant-bucket",
+            )
+            .await
+        );
+        assert!(
+            fires(
+                profile_result(
+                    10,
+                    vec![numeric_column("n", 10, vec![9, 1])],
+                    Some(0),
+                    false,
+                    10
+                ),
+                "distribution.dominant-bucket",
+            )
+            .await
+        );
+
+        // schema.max-columns: fires exactly at the v1 column ceiling.
+        let below: Vec<ColumnProfile> = (0..PROFILE_MAX_COLUMNS - 1)
+            .map(|index| text_column(&format!("c{index}"), 10, 0, Some(10), None, 0))
+            .collect();
+        assert!(
+            !fires(
+                profile_result(10, below, Some(0), false, 10),
+                "schema.max-columns",
+            )
+            .await
+        );
+        let at: Vec<ColumnProfile> = (0..PROFILE_MAX_COLUMNS)
+            .map(|index| text_column(&format!("c{index}"), 10, 0, Some(10), None, 0))
+            .collect();
+        assert!(
+            fires(
+                profile_result(10, at, Some(0), false, 10),
+                "schema.max-columns",
+            )
+            .await
+        );
+    }
+
     #[test]
-    fn q05_all_four_evidence_kinds_are_recomputable_from_report() {
-        let top = ProfileTopValue::Text {
+    fn q05_evidence_recomputable_positives_and_unverifiable_claim_rejections() {
+        let top_x = ProfileTopValue::Text {
             value: "x".to_owned(),
             count: 8,
+        };
+        let top_y = ProfileTopValue::Text {
+            value: "y".to_owned(),
+            count: 2,
         };
         let profile = profile_result(
             10,
             vec![
-                text_column("t", 10, 0, Some(2), Some(vec![top.clone()]), 0),
+                text_column(
+                    "t",
+                    10,
+                    1,
+                    Some(2),
+                    Some(vec![top_x.clone(), top_y.clone()]),
+                    0,
+                ),
                 numeric_column("n", 10, vec![9, 1]),
             ],
             Some(2),
             false,
             100,
         );
-        let digest = digest_top_value(&top).expect("digest");
-        let evidence = [
+        let digest_x = digest_top_value(&top_x).expect("digest");
+        let digest_y = digest_top_value(&top_y).expect("digest");
+        let foreign_digest = digest_top_value(&ProfileTopValue::Text {
+            value: "not-a-top-value".to_owned(),
+            count: 1,
+        })
+        .expect("digest");
+
+        // Positives: each §7.3 kind resolves against the profile canonical
+        // body and recomputes exactly.
+        let positive = [
+            // Metric, bare: the member resolves (duplicates present).
             FindingEvidence::Metric(MetricEvidence {
                 metric_path: "dataset.duplicate_row_count".to_owned(),
                 numerator: None,
                 denominator: None,
             }),
+            // Metric, bare: always-resolving member.
+            FindingEvidence::Metric(MetricEvidence {
+                metric_path: "dataset.column_count_profiled".to_owned(),
+                numerator: None,
+                denominator: None,
+            }),
+            // Metric, rational: T_null / (S·C) = 1 / (10·2) in lowest terms.
+            FindingEvidence::Metric(MetricEvidence {
+                metric_path: "dataset.row_count_scanned".to_owned(),
+                numerator: Some(1),
+                denominator: Some(20),
+            }),
+            // ValueDigest: digest membership plus the exact cited count.
             FindingEvidence::ValueDigest(ValueDigestEvidence {
                 column_ref: "t".to_owned(),
-                digests: vec![digest],
+                digests: vec![digest_x.clone()],
                 count: 8,
             }),
+            // RowRange: inside the scan scope.
             FindingEvidence::RowRange(RowRangeEvidence { start: 0, end: 10 }),
+            // Histogram: numeric histogram resolution.
             FindingEvidence::Histogram(HistogramEvidence {
                 column_ref: "n".to_owned(),
                 buckets: vec![HistogramBucketEvidence {
@@ -1784,10 +2309,209 @@ mod tests {
                     count: 9,
                 }],
             }),
+            // Histogram: length-histogram resolution for a Utf8 column.
+            FindingEvidence::Histogram(HistogramEvidence {
+                column_ref: "t".to_owned(),
+                buckets: vec![HistogramBucketEvidence {
+                    bucket_index: 2,
+                    count: 0,
+                }],
+            }),
         ];
-        for item in &evidence {
+        for item in &positive {
             validate_evidence(&profile.profile, item).expect("recomputable");
         }
+
+        // Negatives: generic per-column strings are not exact canonical-body
+        // member names (v1 forbids indexed/wildcard segments).
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Metric(MetricEvidence {
+                    metric_path: "columns.null_count".to_owned(),
+                    numerator: Some(1),
+                    denominator: Some(20),
+                }),
+            ),
+            Err(EngineError::InvalidPlan("unknown quality metric_path"))
+        ));
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Metric(MetricEvidence {
+                    metric_path: "dataset.nonexistent".to_owned(),
+                    numerator: None,
+                    denominator: None,
+                }),
+            ),
+            Err(EngineError::InvalidPlan("unknown quality metric_path"))
+        ));
+        // The duplicate member is optional: a citation without duplicates
+        // does not resolve.
+        let absent_duplicates = profile_result(
+            10,
+            vec![text_column("t", 10, 0, Some(5), None, 0)],
+            None,
+            false,
+            10,
+        );
+        assert!(matches!(
+            validate_evidence(
+                &absent_duplicates.profile,
+                &FindingEvidence::Metric(MetricEvidence {
+                    metric_path: "dataset.duplicate_row_count".to_owned(),
+                    numerator: None,
+                    denominator: None,
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "metric_path does not resolve in the profile canonical body"
+            ))
+        ));
+        // Rationals are defined only on the scan-scope member and must equal
+        // the recomputed derivation exactly.
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Metric(MetricEvidence {
+                    metric_path: "dataset.duplicate_row_count".to_owned(),
+                    numerator: Some(2),
+                    denominator: Some(10),
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "metric rational evidence is not defined for this metric path"
+            ))
+        ));
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Metric(MetricEvidence {
+                    metric_path: "dataset.row_count_scanned".to_owned(),
+                    numerator: Some(1),
+                    denominator: Some(3),
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "metric rational evidence is not recomputable from profile"
+            ))
+        ));
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Metric(MetricEvidence {
+                    metric_path: "dataset.row_count_scanned".to_owned(),
+                    numerator: Some(1),
+                    denominator: None,
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "metric rational evidence is incomplete"
+            ))
+        ));
+        // ValueDigest: the count must equal the cited top value's count.
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::ValueDigest(ValueDigestEvidence {
+                    column_ref: "t".to_owned(),
+                    digests: vec![digest_x.clone()],
+                    count: 7,
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "ValueDigestEvidence count does not match the cited top value"
+            ))
+        ));
+        // ValueDigest: digests outside the column's retained top values are
+        // not recomputable.
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::ValueDigest(ValueDigestEvidence {
+                    column_ref: "t".to_owned(),
+                    digests: vec![foreign_digest],
+                    count: 1,
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "ValueDigestEvidence is not recomputable from profile"
+            ))
+        ));
+        // ValueDigest: the digest list stays sorted.
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::ValueDigest(ValueDigestEvidence {
+                    column_ref: "t".to_owned(),
+                    digests: {
+                        let mut pair = vec![digest_x.clone(), digest_y.clone()];
+                        pair.sort_by(|left, right| right.cmp(left));
+                        pair
+                    },
+                    count: 8,
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "ValueDigestEvidence digest list is invalid"
+            ))
+        ));
+        // Histogram: bucket counts must match the resolved histogram.
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Histogram(HistogramEvidence {
+                    column_ref: "n".to_owned(),
+                    buckets: vec![HistogramBucketEvidence {
+                        bucket_index: 0,
+                        count: 8,
+                    }],
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "HistogramEvidence is not recomputable from profile"
+            ))
+        ));
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Histogram(HistogramEvidence {
+                    column_ref: "t".to_owned(),
+                    buckets: vec![HistogramBucketEvidence {
+                        bucket_index: 13,
+                        count: 1,
+                    }],
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "HistogramEvidence is not recomputable from profile"
+            ))
+        ));
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::Histogram(HistogramEvidence {
+                    column_ref: "n".to_owned(),
+                    buckets: vec![HistogramBucketEvidence {
+                        bucket_index: 5,
+                        count: 9,
+                    }],
+                }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "HistogramEvidence is not recomputable from profile"
+            ))
+        ));
+        // RowRange: outside the scan scope.
+        assert!(matches!(
+            validate_evidence(
+                &profile.profile,
+                &FindingEvidence::RowRange(RowRangeEvidence { start: 0, end: 11 }),
+            ),
+            Err(EngineError::InvalidPlan(
+                "RowRangeEvidence is outside the scan scope"
+            ))
+        ));
     }
 
     #[test]
@@ -2011,6 +2735,56 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn q11_findings_golden_pins_evidence_enum_rational_and_string_encoding() {
+        // One report firing every v1 evidence kind: bare Metric, derived
+        // Metric rational, ValueDigest, RowRange, and both Histogram
+        // resolutions (numeric and length).
+        let profile = profile_result(
+            10,
+            vec![
+                text_column(
+                    "t",
+                    10,
+                    1,
+                    Some(2),
+                    Some(vec![ProfileTopValue::Text {
+                        value: "x".to_owned(),
+                        count: 8,
+                    }]),
+                    0,
+                ),
+                text_column(
+                    "u",
+                    10,
+                    0,
+                    Some(1),
+                    Some(vec![ProfileTopValue::Text {
+                        value: "u".to_owned(),
+                        count: 10,
+                    }]),
+                    0,
+                ),
+                text_column("w", 10, 0, Some(10), None, 1),
+                numeric_column("n", 10, vec![9, 1]),
+            ],
+            Some(2),
+            false,
+            100,
+        );
+        let result = run_quality(profile, Uuid::from_u128(11))
+            .await
+            .expect("quality");
+        assert_eq!(result.report.findings.len(), 7);
+        let body = String::from_utf8(result.canonical_body.clone()).expect("utf8");
+        let expected = "{\"artifact_body_version\":1,\"artifact_type\":\"quality_report\",\"completeness\":true,\"findings\":[{\"category\":\"Distribution\",\"detector_contract_version\":1,\"detector_id\":\"distribution.dominant-bucket\",\"evidence_refs\":[{\"buckets\":[{\"bucket_index\":0,\"count\":9}],\"column_ref\":\"n\",\"kind\":\"HistogramEvidence\"}],\"finding_id\":\"distribution.dominant-bucket.3\",\"message\":\"A numeric distribution is concentrated in one histogram bucket.\",\"origin\":\"Deterministic\",\"severity\":\"Info\"},{\"category\":\"Duplicate\",\"detector_contract_version\":1,\"detector_id\":\"duplicate.rows-present\",\"evidence_refs\":[{\"kind\":\"MetricEvidence\",\"metric_path\":\"dataset.duplicate_row_count\"},{\"end\":10,\"kind\":\"RowRangeEvidence\",\"start\":0}],\"finding_id\":\"duplicate.rows-present\",\"message\":\"Exact duplicate rows are present in the profiled scan scope.\",\"origin\":\"Deterministic\",\"severity\":\"Warning\"},{\"category\":\"Schema\",\"detector_contract_version\":1,\"detector_id\":\"schema.null-observations\",\"evidence_refs\":[{\"kind\":\"MetricEvidence\",\"metric_path\":\"dataset.row_count_scanned\",\"rational\":{\"denominator\":40,\"numerator\":1}}],\"finding_id\":\"schema.null-observations\",\"message\":\"Null observations are present in the profiled scan scope.\",\"origin\":\"Deterministic\",\"severity\":\"Warning\"},{\"category\":\"Text\",\"detector_contract_version\":1,\"detector_id\":\"text.long-values\",\"evidence_refs\":[{\"buckets\":[{\"bucket_index\":13,\"count\":1}],\"column_ref\":\"w\",\"kind\":\"HistogramEvidence\"}],\"finding_id\":\"text.long-values.2\",\"message\":\"A text column contains values above the retained-value boundary.\",\"origin\":\"Deterministic\",\"severity\":\"Warning\"},{\"category\":\"Text\",\"detector_contract_version\":1,\"detector_id\":\"text.low-uniqueness\",\"evidence_refs\":[{\"column_ref\":\"u\",\"count\":10,\"digests\":[\"247c73c15a6f92af3aea3e767b4c6d4d8acc72bb176a599c25684aa38e1f7e38\"],\"kind\":\"ValueDigestEvidence\"}],\"finding_id\":\"text.low-uniqueness.1\",\"message\":\"A text column has low exact uniqueness within the scan scope.\",\"origin\":\"Deterministic\",\"severity\":\"Info\"},{\"category\":\"Text\",\"detector_contract_version\":1,\"detector_id\":\"text.top-concentration\",\"evidence_refs\":[{\"column_ref\":\"t\",\"count\":8,\"digests\":[\"b477842808b4d284a3742fa3663c8f96f0648da539125b3f3affd47e5e5442d5\"],\"kind\":\"ValueDigestEvidence\"}],\"finding_id\":\"text.top-concentration.0\",\"message\":\"A text column is dominated by one retained top value.\",\"origin\":\"Deterministic\",\"severity\":\"Info\"},{\"category\":\"Text\",\"detector_contract_version\":1,\"detector_id\":\"text.top-concentration\",\"evidence_refs\":[{\"column_ref\":\"u\",\"count\":10,\"digests\":[\"247c73c15a6f92af3aea3e767b4c6d4d8acc72bb176a599c25684aa38e1f7e38\"],\"kind\":\"ValueDigestEvidence\"}],\"finding_id\":\"text.top-concentration.1\",\"message\":\"A text column is dominated by one retained top value.\",\"origin\":\"Deterministic\",\"severity\":\"Info\"}],\"missing_components\":[],\"profile_report_digest\":\"7e03b1d08f526776831a2b0dd84c8dd248e140673ab67695922e91bc85bfcf2c\",\"profiling_contract_version\":1,\"quality_score\":93,\"quality_score_version\":1}";
+        assert_eq!(body, expected);
+        assert_eq!(
+            result.canonical_digest,
+            "7b10cef1412a5c2df60c21f77a9ccadec778331d62fe0780b9f56453821f2b53"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn q12_run_id_is_excluded_from_canonical_body_and_digest() {
         let profile = profile_result(
             1,
@@ -2035,21 +2809,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn q13_partition_packaging_does_not_change_quality_output() {
-        let columns = vec![numeric_column("n", 10, vec![9, 1])];
-        let left = profile_result(10, columns.clone(), Some(1), false, 100);
-        let right = profile_result(10, columns, Some(1), false, 500);
-        assert_eq!(left.canonical_digest, right.canonical_digest);
-        let left = run_quality(left, Uuid::from_u128(13)).await.expect("left");
-        let right = run_quality(right, Uuid::from_u128(13))
+    async fn q13_partition_invariance_across_real_batch_partitions() {
+        // Profile the same logical rows through the real profiler under two
+        // batch partitionings, then run the findings pipeline on both
+        // ProfileResults (issue #181 item 13).
+        let _guard = crate::tests::exclusive_test_lock().lock().await;
+        let rows: Vec<i64> = (0..250).chain(0..250).collect();
+        let single = crate::tests::quality_partition_profile(&[&rows]).await;
+        let split =
+            crate::tests::quality_partition_profile(&[&rows[..137], &rows[137..401], &rows[401..]])
+                .await;
+        assert_eq!(single.canonical_digest, split.canonical_digest);
+
+        let left = run_quality(single, Uuid::from_u128(13))
+            .await
+            .expect("left");
+        let right = run_quality(split, Uuid::from_u128(13))
             .await
             .expect("right");
         assert_eq!(left.canonical_body, right.canonical_body);
         assert_eq!(left.canonical_digest, right.canonical_digest);
+        assert_eq!(left.report.score, right.report.score);
+        // The invariance is non-vacuous: duplicate observations produce a
+        // deterministic finding under both partitionings.
+        assert!(left
+            .report
+            .findings
+            .iter()
+            .any(|finding| finding.detector_id() == "duplicate.rows-present"));
+        assert_eq!(left.report.findings.len(), right.report.findings.len());
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn q14_verification_association_present_or_explicitly_absent() {
+    async fn q14_verification_association_binds_the_runs_published_bundle() {
         let profile = profile_result(
             1,
             vec![text_column("t", 1, 0, Some(1), None, 0)],
@@ -2057,6 +2849,7 @@ mod tests {
             false,
             1,
         );
+        // Disclosed absence when the run has no verification outputs.
         let absent = run_quality(profile.clone(), Uuid::from_u128(14))
             .await
             .expect("absent");
@@ -2065,24 +2858,53 @@ mod tests {
             VerificationAssociationState::Absent
         );
 
+        // Presence carries the run's real published VerificationBundle,
+        // verified against the quality run's identifier.
+        let bundle = crate::tests::quality_association_bundle_for_quality(0x1400).await;
+        let run_id = bundle.membership().run_id();
         let engine = ExecutionEngine::new(ConnectorRegistry::new());
-        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(14)))
-            .expect("request");
-        let association = VerificationAssociation {
-            verification_bundle_id: Uuid::from_u128(99),
-            validation_present: true,
-            dedup_present: true,
-        };
-        request.verification_association = Some(association.clone());
+        let mut request =
+            QualityRequest::new(profile.clone(), context(), provenance(run_id)).expect("request");
+        request.verification = Some(bundle.clone());
         let present = engine.quality(request).await.expect("present");
-        assert_eq!(
-            present.verification_association,
-            VerificationAssociationState::Present(association)
-        );
+        match &present.verification_association {
+            VerificationAssociationState::Present(associated) => {
+                assert_eq!(
+                    associated.membership().bundle_id(),
+                    bundle.membership().bundle_id()
+                );
+                assert_eq!(
+                    associated.membership().run_id(),
+                    bundle.membership().run_id()
+                );
+                assert_eq!(
+                    associated.membership().validation_report_artifact_id(),
+                    bundle.membership().validation_report_artifact_id()
+                );
+                assert_eq!(
+                    associated.membership().deduplication_report_artifact_id(),
+                    bundle.membership().deduplication_report_artifact_id()
+                );
+            }
+            VerificationAssociationState::Absent => panic!("expected present association"),
+        }
+
+        // A bundle published by another run is rejected, never echoed.
+        let mut mismatched =
+            QualityRequest::new(profile, context(), provenance(Uuid::from_u128(0xBAD)))
+                .expect("request");
+        mismatched.verification = Some(bundle);
+        assert!(matches!(
+            engine.quality(mismatched).await,
+            Err(EngineError::InvalidPlan(
+                "verification bundle is not bound to the quality run"
+            ))
+        ));
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn q15_high_cardinality_profile_is_bounded_and_budget_overflow_fails_typed() {
+    async fn q15_high_cardinality_is_bounded_and_retained_state_overflows_the_real_path() {
+        // Part 1: a maximal high-cardinality profile stays bounded.
         let columns = (0..PROFILE_MAX_COLUMNS)
             .map(|index| {
                 let mut column = text_column(&format!("c{index}"), 100_001, 0, None, None, 0);
@@ -2091,14 +2913,70 @@ mod tests {
             })
             .collect();
         let profile = profile_result(100_001, columns, None, false, 1000);
-        let result = run_quality(profile, Uuid::from_u128(15))
+        // The derivable fixed overhead is a strict subset of the budget;
+        // this is a compile-time law, so it is asserted where the constants
+        // are declared.
+        let bounded = run_quality(profile, Uuid::from_u128(15))
             .await
             .expect("bounded");
-        assert!(result.report.findings.len() <= QUALITY_MAX_FINDINGS);
+        assert!(bounded.report.findings.len() <= QUALITY_MAX_FINDINGS);
 
-        let mut budget = QualityBudget::new();
+        // Part 2 (issue #181 item 15): real retained state — accumulated
+        // findings with evidence, AI identity, and messages — drives the
+        // engine path across the bound and fails with the existing typed
+        // resource-limit error. No direct budget pokes.
+        let values: Vec<String> = (0..PROFILE_MAX_TOP_K)
+            .map(|index| format!("s{index:0>3}"))
+            .collect();
+        let tops: Vec<ProfileTopValue> = values
+            .iter()
+            .map(|value| ProfileTopValue::Text {
+                value: value.clone(),
+                count: 1,
+            })
+            .collect();
+        let mut digests: Vec<String> = tops
+            .iter()
+            .map(digest_top_value)
+            .collect::<Result<_, _>>()
+            .expect("digests");
+        digests.sort();
+        let profile = profile_result(
+            PROFILE_MAX_TOP_K as u64,
+            vec![text_column(
+                "t",
+                PROFILE_MAX_TOP_K as u64,
+                0,
+                Some(PROFILE_MAX_TOP_K as u64),
+                Some(tops),
+                0,
+            )],
+            None,
+            false,
+            PROFILE_MAX_TOP_K as u64,
+        );
+        let engine = ExecutionEngine::new(ConnectorRegistry::new());
+        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(15)))
+            .expect("request");
+        for index in 0..QUALITY_MAX_AI_PROPOSALS {
+            let proposal = AiProposalInput::from_effect_boundary(
+                format!("ai.overflow.{index:0>4}"),
+                FindingCategory::Text,
+                FindingSeverity::Info,
+                "x".repeat(PROFILE_MAX_RETAINED_VALUE_BYTES),
+                vec![FindingEvidence::ValueDigest(ValueDigestEvidence {
+                    column_ref: "t".to_owned(),
+                    digests: digests.clone(),
+                    count: 1,
+                })],
+                "model-q15",
+                "effect-q15",
+            )
+            .expect("proposal");
+            request.ai_proposals.push(proposal);
+        }
         assert!(matches!(
-            budget.charge(QUALITY_STATE_BYTE_BUDGET + 1),
+            engine.quality(request).await,
             Err(EngineError::BoundExceeded(
                 "quality retained state exceeds Engine operator-state budget"
             ))
@@ -2106,7 +2984,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn q16_cancel_and_deadline_abort_without_result() {
+    async fn q16_cancel_and_deadline_abort_at_detector_checkpoints_without_result() {
         let profile = profile_result(
             1,
             vec![text_column("t", 1, 0, Some(1), None, 0)],
@@ -2116,6 +2994,7 @@ mod tests {
         );
         let engine = ExecutionEngine::new(ConnectorRegistry::new());
 
+        // Pre-cancelled and already-expired contexts abort at entry.
         let cancelled_context =
             RequestContext::with_deadline(Instant::now() + Duration::from_secs(60));
         cancelled_context.cancellation().cancel();
@@ -2131,11 +3010,62 @@ mod tests {
         ));
 
         let deadline_context = RequestContext::with_deadline(Instant::now());
-        let expired =
-            QualityRequest::new(profile, deadline_context, provenance(Uuid::from_u128(16)))
-                .expect("request");
+        let expired = QualityRequest::new(
+            profile.clone(),
+            deadline_context,
+            provenance(Uuid::from_u128(16)),
+        )
+        .expect("request");
         assert!(matches!(
             engine.quality(expired).await,
+            Err(EngineError::Timeout)
+        ));
+
+        // Cancellation arriving between detector checkpoints aborts the run
+        // mid-flight: the hook fires at the first detector checkpoint (after
+        // its own active check), and the next checkpoint observes the token.
+        let token = tokio_util::sync::CancellationToken::new();
+        let hook_token = token.clone();
+        CHECKPOINT_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || hook_token.cancel()));
+        });
+        let midrun_context = RequestContext::with_cancellation_and_deadline(
+            token,
+            Instant::now() + Duration::from_secs(60),
+        );
+        let midrun = QualityRequest::new(
+            profile.clone(),
+            midrun_context,
+            provenance(Uuid::from_u128(16)),
+        )
+        .expect("request");
+        assert!(matches!(
+            engine.quality(midrun).await,
+            Err(EngineError::Cancelled)
+        ));
+
+        // A deadline expiring between detector checkpoints aborts the run
+        // mid-flight with the typed timeout.
+        let deadline = Instant::now() + Duration::from_millis(150);
+        let hook_deadline = deadline;
+        CHECKPOINT_HOOK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                let target = hook_deadline.into_std();
+                let now = std::time::Instant::now();
+                if now < target {
+                    std::thread::sleep(target - now);
+                }
+            }));
+        });
+        let midrun_deadline_context = RequestContext::with_deadline(deadline);
+        let midrun_deadline = QualityRequest::new(
+            profile,
+            midrun_deadline_context,
+            provenance(Uuid::from_u128(16)),
+        )
+        .expect("request");
+        assert!(matches!(
+            engine.quality(midrun_deadline).await,
             Err(EngineError::Timeout)
         ));
     }
@@ -2163,25 +3093,39 @@ mod tests {
         drop(permits);
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn q18_qr1_profile_contract_and_digest_are_fail_closed_unchanged() {
-        let mut profile = profile_result(
-            1,
-            vec![text_column("t", 1, 0, Some(1), None, 0)],
-            Some(0),
-            false,
-            1,
-        );
-        run_quality(profile.clone(), Uuid::from_u128(18))
-            .await
-            .expect("valid profile");
-        profile.profile.profiling_contract_version += 1;
-        let error = run_quality(profile, Uuid::from_u128(18))
-            .await
-            .expect_err("unknown profile version");
-        assert!(matches!(
-            error,
-            EngineError::InvalidPlan("unknown profile report or profiling contract version")
-        ));
+    #[test]
+    fn q18_qr1_p01_p25_and_e4_v01_v31_suites_green_and_consumption_fails_closed() {
+        // Dedicated regression evidence (issue #181 item 18): the Q-R1
+        // profiler suite (p01–p25) and the E4 verification suite (V01–V31)
+        // run inside this test on this exact head, rather than being claimed
+        // transitively from the rest of the engine binary.
+        crate::tests::run_qr1_e4_regression_suite();
+
+        // The Q-R2 consumption path still fails closed on an unknown or
+        // newer profile contract version.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let mut profile = profile_result(
+                1,
+                vec![text_column("t", 1, 0, Some(1), None, 0)],
+                Some(0),
+                false,
+                1,
+            );
+            run_quality(profile.clone(), Uuid::from_u128(18))
+                .await
+                .expect("valid profile");
+            profile.profile.profiling_contract_version += 1;
+            let error = run_quality(profile, Uuid::from_u128(18))
+                .await
+                .expect_err("unknown profile version");
+            assert!(matches!(
+                error,
+                EngineError::InvalidPlan("unknown profile report or profiling contract version")
+            ));
+        });
     }
 }
