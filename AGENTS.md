@@ -104,6 +104,64 @@ npm run build
 For contract or architecture-only changes, also verify links, issue numbers,
 dependency arrows, and that every acceptance criterion is objectively testable.
 
+## Mandatory completion synchronization
+
+Every task must finish with a coordination-state synchronization pass.
+Implementation, tests, review fixes, acceptance, or merge work alone do not
+make a task complete. A task is complete only when every authoritative
+coordination surface affected by that task matches live repository reality.
+
+Before returning a terminal success verdict:
+
+1. Re-fetch the live repository state and verify the exact final branch/head SHA.
+2. Verify the relevant CI/test results for that exact head.
+3. Update the canonical task Issue with a delivery, acceptance, merge, or completion receipt as applicable.
+4. Update the PR body/status when final head, evidence, scope, or terminal state changed.
+5. Update the canonical Current Execution Board / roadmap ledger when the task changed `main`, task state, dependencies, active writer/lock ownership, or the next dispatchable task.
+6. Update repository-owned current-state checklist documentation when the task made its current-state section stale.
+7. Release or close every task-owned registry row, writer claim, and coordination lock.
+8. Close the canonical Issue only when its acceptance contract is fully satisfied.
+9. Re-read the updated coordination surfaces and verify that they agree with live GitHub state.
+
+The following surfaces must not disagree at task completion when they are
+applicable to the task:
+
+- live GitHub repository state;
+- canonical Issue;
+- PR state/body;
+- Current Execution Board / roadmap ledger;
+- repository-owned current-state checklist;
+- task registry / writer / lock state.
+
+If they disagree, perform coordination-only reconciliation before reporting
+the task as complete. Do not leave synchronization for the maintainer unless
+the task explicitly forbids modifying that coordination surface.
+
+### Merge completion gate
+
+After any merge, also:
+
+- re-fetch `main` and record the exact merge commit;
+- verify the accepted exact head is the intended merge parent/head;
+- verify post-merge CI when available;
+- update the canonical Issue and execution board;
+- refresh stale current-main references;
+- release merge/task locks and close completed dispatch records.
+
+### Terminal states
+
+Use one of these completion classes:
+
+- `TASK_COMPLETE` — technical work and required coordination synchronization are complete;
+- `TASK_COMPLETE_COORDINATION_PENDING` — technical work is complete but one or more required coordination surfaces could not be synchronized;
+- `TASK_BLOCKED` — the task cannot complete under its current authorization or prerequisites.
+
+`No coordination update = no DONE.`
+
+A final completion response must report, when applicable: final task state,
+exact head/merge SHA, CI/test result, Issue state, PR state, ledger/board
+state, registry/lock state, and remaining blockers (`none` when there are none).
+
 ## Completion report
 
 Every implementation handoff must list:
