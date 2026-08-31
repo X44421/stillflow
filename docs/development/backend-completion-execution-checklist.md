@@ -1,11 +1,30 @@
 # StillFlow Backend Completion Execution Checklist
 
 - Canonical roadmap ledger: Epic #81
-- Reconciliation delivery: Issue #82 (B0-R0), branch
-  `agent/issue-082-backend-roadmap-reconciliation`
+- Original reconciliation: Issue #82 (B0-R0), branch
+  `agent/issue-082-backend-roadmap-reconciliation` (historical snapshot)
 - Client roadmap: [X44421/openship#1](https://github.com/X44421/openship/issues/1)
-- Current main: `main@f16666e59896e2d8bae3b79e188b8f567bb8c534`
-  (PR #74 / E4-S1 merged 2026-08-22)
+- Current main: `main@6dcec4fa35d3c46abe3c0c4abe8138263493d27c`
+  (PR #186 / E24-JSON-A2-PROD merged 2026-08-31; PR #185 / X-R1 merged
+  immediately before it)
+- Latest state refresh: 2026-08-31 UTC, re-read from GitHub after the
+  exact-head merges:
+  - PR #179 / Q-R1: accepted head `3b305b3c9204c55a30344e80c6672f9c688948bc`,
+    merge commit `4d399f621ff0ed071c68e180fc0cba4e8df7665b`.
+  - PR #182 / Q-R2: accepted head `e557d5f1540ce356101a2b276b30f25b261ca4b6`,
+    merge commit `9c039752d5f98584573e623ff3a986be8525383b`.
+  - PR #185 / X-R1: accepted head `3555ac7ec4a7a80bd2093559b2ed4215fa69faf4`,
+    merge commit `6d29948a948e8921677d0f14bc86d2d40007e25c`.
+  - PR #186 / E24 productionization: accepted head
+    `2e74f58d5fcd8939328d62e5b87fdb78bbee779e`, merge commit
+    `6dcec4fa35d3c46abe3c0c4abe8138263493d27c`.
+  - Issues #184 and #158 are `CLOSED / completed`; #151 remains `OPEN` and
+    authoritative for the retained Polars timestamp boundary.
+  - No current writer from this delivery round is assigned to `engine`,
+    `storage`, `core`, `connector`, or `merge:main`; coordination registry
+    freshness and historical lock rows must be checked separately.
+- Next mainline after X-R1: E5-C0 unified control-plane contract; Golden E2E
+  remains downstream of the Runtime/Job/API control-plane prerequisites.
 - Historical baselines (superseded; never cite as current): planning base
   `main@85502cbebb1fab461fe42d30fe019ad20613aa7c`; previous ledger baseline
   `main@473c65b`
@@ -220,6 +239,29 @@ snapshot above; that snapshot is kept verbatim for traceability.
 
 All other rows of the B0-R0 snapshot remain accurate at this re-read.
 
+### 4.2 Current-state re-read after Q-R1, Q-R2, X-R1, and E24 merges (2026-08-31)
+
+The earlier snapshots remain in this document for traceability. The following
+is the current dispatch baseline, re-read from GitHub after the exact-head
+merges and the post-merge main CI run.
+
+| Area | Item | Accepted head / merge SHA | Current state | Next gate |
+| --- | --- | --- | --- | --- |
+| Main | `main` | `6dcec4fa35d3c46abe3c0c4abe8138263493d27c` | PR #186 merged; post-merge push CI run `33363994777` is successful | All new branches start here |
+| Q-R1 | PR #179 / Issue #178 | accepted `3b305b3c9204c55a30344e80c6672f9c688948bc`; merge `4d399f621ff0ed071c68e180fc0cba4e8df7665b` | Merged; Issue #178 `CLOSED / completed` | Q-R2 completed |
+| Q-R2 | PR #182 / Issue #181 | accepted `e557d5f1540ce356101a2b276b30f25b261ca4b6`; merge `9c039752d5f98584573e623ff3a986be8525383b` | Merged; Issue #181 `CLOSED / completed` | Q track remains available for later Drift/API work |
+| X-R1 | PR #185 / Issue #184 | accepted `3555ac7ec4a7a80bd2093559b2ed4215fa69faf4`; merge `6d29948a948e8921677d0f14bc86d2d40007e25c` | Merged exact-head; Issue #184 `CLOSED / completed` | X-A1 after the control-plane prerequisites |
+| E24 productionization | PR #186 / Issue #158 | accepted `2e74f58d5fcd8939328d62e5b87fdb78bbee779e`; merge `6dcec4fa35d3c46abe3c0c4abe8138263493d27c` | Merged exact-head; Issue #158 `CLOSED / completed`; feature remains private/default-off | Separate enablement only after its temporal boundary is resolved |
+| Temporal boundary | Issue #151 | — | `OPEN`; `TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM` remains authoritative | No local timestamp compensation |
+| Coordination | writers and locks | — | No current writer from this delivery round on `engine`, `storage`, `core`, `connector`, or `merge:main` | Reconcile the coordination registry before a new dispatch |
+| Mainline | next functional task | — | E5-C0 unified control-plane contract is next after X-R1; Golden E2E remains downstream | E5-C0 contract freeze |
+
+The remote coordination registry has no `running` or `claimed` task rows in
+its latest available snapshot, but that snapshot is stale (`source_main_sha`
+`04966586192f8750a02790da988db71a28d82074`, updated 2026-08-29) and retains
+historical locks on terminal tasks. Those rows are not active writers, but the
+registry must be refreshed before the next implementation dispatch.
+
 ## 5. Execution status vocabulary
 
 Each task uses exactly one status:
@@ -357,8 +399,10 @@ containing its approved contract.
 
 ### B0-R0 — Rebuild the authoritative backend checklist on current main
 
-- [ ] Status: `in_progress` — canonical Issue #82; this Draft PR is the
-  delivery. Docs-only; base `main@f16666e59896e2d8bae3b79e188b8f567bb8c534`.
+- [ ] Status: `review` — canonical Issue #82; this docs-only state refresh is
+  based on current `main@6dcec4fa35d3c46abe3c0c4abe8138263493d27c`. The
+  historical B0-R0 implementation remains recorded above; this refresh adds
+  no product-code changes.
 - **Dependencies:** none beyond the exact base.
 - **Deliverables:** this document, rewritten to mirror Epic #81: updated
   ledger (#57, #59, #74, #77, #78 merged facts), old E4-S2/E4-R1 topology
