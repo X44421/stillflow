@@ -331,7 +331,8 @@ impl<'de> Visitor<'de> for DirectProjectedObjectVisitor<'_, '_> {
                     // columns).
                     let needs_canonicalization = canonicalize
                         || (subtree && captured.get().as_bytes().iter().any(|&byte| byte < 0x20))
-                        || has_wide_integer_literal(captured.get());
+                        || (type_can_contain_number_tokens(&field.data_type)
+                            && has_wide_integer_literal(captured.get()));
                     if needs_canonicalization {
                         *target = canonical_captured_value(captured.get(), field)
                             .map_err(A::Error::custom)?;
@@ -412,6 +413,29 @@ fn validate_selected_raw_value(
             Err("value has an incompatible logical type")
         }
     }
+}
+
+/// Whether the type tree of a selected field can contain JSON number tokens.
+///
+/// The wide-integer scan below only matters where a number token can reach the
+/// assembled row: numeric scalars and composites. A `Utf8` (or temporal,
+/// boolean, binary, null) field's value is a single string-like token — a
+/// digit run inside it is just text, the retained Polars JsonReader decodes it
+/// as a string, and the generic path's re-encoding differs from the raw bytes
+/// only in escape spellings that decode identically. Known non-number types
+/// are listed explicitly; the conservative default (`true`) keeps unknown
+/// future types scanned, so a newly added numeric type can never silently skip
+/// the check.
+fn type_can_contain_number_tokens(data_type: &LogicalType) -> bool {
+    !matches!(
+        data_type,
+        LogicalType::Utf8
+            | LogicalType::Binary
+            | LogicalType::Boolean
+            | LogicalType::Date32
+            | LogicalType::Timestamp { .. }
+            | LogicalType::Null
+    )
 }
 
 /// Conservative detector for integer literals whose magnitude cannot survive
