@@ -1112,10 +1112,16 @@ fn account_export_staging(inner: &Arc<StoreInner>, bytes: u64) -> Result<(), Sto
     let previous = inner
         .export_staging_bytes
         .fetch_add(bytes, Ordering::SeqCst);
-    let total = previous
-        .checked_add(bytes)
-        .ok_or(StorageError::ArithmeticOverflow("export staging bytes"))?;
+    let total = previous.checked_add(bytes).ok_or_else(|| {
+        inner
+            .export_staging_bytes
+            .fetch_sub(bytes, Ordering::SeqCst);
+        StorageError::ArithmeticOverflow("export staging bytes")
+    })?;
     if total > MAX_EXPORT_TEMP_BYTES {
+        inner
+            .export_staging_bytes
+            .fetch_sub(bytes, Ordering::SeqCst);
         return Err(StorageError::ExportLimitExceeded {
             resource: "export staging bytes",
             actual: total,
@@ -3085,8 +3091,8 @@ mod tests {
         );
 
         // Crossing the ceiling fails typed at the flush boundary and never
-        // under-counts: the rejected delta stays conservatively accounted
-        // (fail-closed; the definitive budget resets with the store).
+        // under-counts: the rejected delta is rolled back, leaving the live
+        // budget exactly as it was before the rejected write.
         let mut staged = writer.create_staged_file().expect("second staged file");
         staged
             .write_bytes(&vec![
@@ -3103,12 +3109,14 @@ mod tests {
         ));
         drop(staged);
         drop(writer);
+        // The rejected delta is rolled back on failure, so the budget is
+        // exactly where it was before the rejected write — no leaked count.
         assert_eq!(
             export_store
                 .inner
                 .export_staging_bytes
                 .load(Ordering::SeqCst),
-            MAX_EXPORT_TEMP_BYTES + headroom
+            MAX_EXPORT_TEMP_BYTES - headroom
         );
     }
 
