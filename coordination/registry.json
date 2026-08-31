@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 260,
+  "revision": 261,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "04966586192f8750a02790da988db71a28d82074",
+  "source_main_sha": "23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -347,9 +347,7 @@
       "target_pr": null,
       "target_branch": null,
       "expected_head": null,
-      "locks": [
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "e23:single-benchmarked-hotspot"
       ],
@@ -374,10 +372,7 @@
       "target_pr": 91,
       "target_branch": "agent/issue-080-e4-verification-materialization",
       "expected_head": "d0ea2a3bce548a6cdc311dea4387e29e35e440ab",
-      "locks": [
-        "branch:agent/issue-080-e4-verification-materialization",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "e4s2:exact-dedup-index"
       ],
@@ -407,11 +402,7 @@
       "target_branch": "main",
       "result_branch": "agent/issue-085-backend-feedback-loop",
       "expected_head": "ea54a526bf1ad1d7b3a1e962e237172a7c32ed0a",
-      "locks": [
-        "branch:agent/issue-085-backend-feedback-loop",
-        "workflow:ci",
-        "devx:backend-feedback"
-      ],
+      "locks": [],
       "paths": [
         "bacon.toml",
         "docs/development/backend-feedback-loop.md",
@@ -498,10 +489,7 @@
       "result_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "main_ci_url": "https://github.com/X44421/stillflow/actions/runs/32627094649",
       "acceptance_evidence_url": "https://github.com/X44421/stillflow/pull/53#issuecomment-5384935921",
-      "locks": [
-        "branch:agent/issue-052-node-preview-runtime",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "t53rebind:rebase-onto-9c368cee",
         "t53rebind:fresh-dual-toolchain-ci",
@@ -534,9 +522,7 @@
       "expected_main": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "rebind_result_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32629393791",
-      "locks": [
-        "branch:agent/issue-082-backend-roadmap-reconciliation"
-      ],
+      "locks": [],
       "paths": [
         "docs/development/backend-completion-execution-checklist.md"
       ],
@@ -568,9 +554,7 @@
       "expected_head": "c0e828031f0141fa89e6b525b4314ebabd5f4f4e",
       "result_head": "3604536ed6ef18fc889617be088043906a3521e8",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/32630256436",
-      "locks": [
-        "branch:agent/issue-094-execution-backend-coupling-inventory"
-      ],
+      "locks": [],
       "paths": [
         "docs/issues/execution-backend-coupling-inventory.md"
       ],
@@ -698,9 +682,7 @@
       "target_branch": "agent/issue-075-backend-optimization-inventory",
       "result_branch": "main",
       "expected_head": "ceeaa1e113ce335a804c016dd9404c4937a01105",
-      "locks": [
-        "main:merge"
-      ],
+      "locks": [],
       "paths": [
         "docs/issues/backend-code-simplification-performance-inventory.md"
       ],
@@ -732,9 +714,7 @@
       "target_branch": "agent/issue-082-backend-roadmap-reconciliation",
       "result_branch": "main",
       "expected_head": "e5524be4dd9f3948e048b58f49e5e7f7ec59555b",
-      "locks": [
-        "main:merge"
-      ],
+      "locks": [],
       "paths": [
         "docs/development/backend-completion-execution-checklist.md"
       ],
@@ -765,9 +745,7 @@
       "target_pr": 95,
       "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
       "expected_head": "3604536ed6ef18fc889617be088043906a3521e8",
-      "locks": [
-        "branch:agent/issue-094-execution-backend-coupling-inventory"
-      ],
+      "locks": [],
       "paths": [
         "docs/issues/execution-backend-coupling-inventory.md"
       ],
@@ -831,9 +809,7 @@
       "target_branch": "agent/issue-094-execution-backend-coupling-inventory",
       "result_branch": "main",
       "expected_head": "8273702dabf90732d66fe362b5c56cdebf93fb06",
-      "locks": [
-        "main:merge"
-      ],
+      "locks": [],
       "paths": [
         "docs/issues/execution-backend-coupling-inventory.md"
       ],
@@ -864,9 +840,7 @@
       "target_branch": "agent/issue-097-xr-c0-runtime-abstraction-contract",
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-097-xr-c0-runtime-abstraction-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md"
       ],
@@ -902,9 +876,7 @@
       "target_pr": null,
       "target_branch": null,
       "expected_head": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
-      "locks": [
-        "github:issue-ledger-state"
-      ],
+      "locks": [],
       "issue_targets": [
         81,
         79,
@@ -978,10 +950,7 @@
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": null,
       "e4_reference_head": "d0ea2a3bce548a6cdc311dea4387e29e35e440ab",
-      "locks": [
-        "branch:agent/issue-099-e24-b2-ingestion-baseline",
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
         "backend/crates/stillflow-connector-local-tabular/src/read.rs",
@@ -1067,9 +1036,7 @@
       "result_branch": "main",
       "expected_base": "636cd7db443bed45e7adcf1596785670cfc3ff1c",
       "expected_head": "3493f22409b7ceae6bd55c71579d783fa931d2e6",
-      "locks": [
-        "main:merge"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
         "backend/crates/stillflow-connector-local-tabular/src/read.rs",
@@ -1107,9 +1074,7 @@
       "result_branch": "main",
       "expected_base": "c663df6cba6e65640d73e076951016d25805f144",
       "expected_head": "7bd1966218ec9a0df2130736ee4cc863d09d5b27",
-      "locks": [
-        "main:merge"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-002-deterministic-runtime-and-physical-executors.md"
       ],
@@ -1142,9 +1107,7 @@
       "target_pr": null,
       "target_branch": null,
       "expected_head": "04966586192f8750a02790da988db71a28d82074",
-      "locks": [
-        "github:issue-ledger-state"
-      ],
+      "locks": [],
       "issue_targets": [
         81
       ],
@@ -1176,10 +1139,7 @@
       "target_branch": "agent/issue-101-e24-b2json-direct-arrow",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-101-e24-b2json-direct-arrow",
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "docs/issues/e24-b2json-a0-direct-arrow-json-prototype.md",
         "backend/Cargo.toml",
@@ -1267,9 +1227,7 @@
       "target_branch": "agent/issue-104-x-c0-export-contract",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-104-x-c0-export-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-004-export-and-output-artifacts.md"
       ],
@@ -1307,10 +1265,7 @@
       "target_branch": "agent/e24-json-l1-indexed-lookup",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/e24-json-l1-indexed-lookup",
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
         "backend/crates/stillflow-connector-local-tabular/src/read.rs",
@@ -1354,10 +1309,7 @@
       "target_branch": "agent/e24-json-p0-phase-attribution",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/e24-json-p0-phase-attribution",
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/src/read.rs",
         "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_attribution.rs",
@@ -1399,10 +1351,7 @@
       "target_branch": "agent/e24-json-p1-sampled-attribution",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/e24-json-p1-sampled-attribution",
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/src/read.rs",
         "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_sampled_attribution.rs",
@@ -1447,10 +1396,7 @@
       "target_branch": "agent/e24-json-p2-interleaved-attribution",
       "expected_base": "1a6da5944e0e508c44c00fe1f408faf438b333df",
       "expected_head": null,
-      "locks": [
-        "branch:agent/e24-json-p2-interleaved-attribution",
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/tests/read_json_phase_sampled_attribution.rs",
         "docs/issues/e24-json-p2-interleaved-attribution.md"
@@ -1492,9 +1438,7 @@
       "target_branch": null,
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [],
       "acceptance_keys": [
         "e24-json-p3:exact-main-default-json-path",
@@ -1532,9 +1476,7 @@
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
       "expected_base": "a3cc49a8538b85d4641709ac8a36ea9b51ae93f4",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-103-q-c0-profiling-finding-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-003-profiling-quality-and-findings.md"
       ],
@@ -1569,9 +1511,7 @@
       "target_branch": null,
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [],
       "acceptance_keys": [
         "e24-json-p4:exact-main-default-json-path",
@@ -1646,10 +1586,7 @@
       "target_branch": "agent/e24-json-p5-selected-utf8-fused",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/e24-json-p5-selected-utf8-fused",
-        "crate:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/Cargo.toml",
         "backend/crates/stillflow-connector-local-tabular/src/read.rs",
@@ -1692,9 +1629,7 @@
       "target_branch": "agent/issue-104-x-c0-export-contract",
       "expected_base": "9ce1b7b7ea3207b63b8972a90d18c484e020134e",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-104-x-c0-export-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-004-export-and-output-artifacts.md"
       ],
@@ -1764,10 +1699,7 @@
       "target_branch": "agent/o0-b2-a2-incremental-schema",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a2-incremental-schema",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/preflight.rs",
         "backend/crates/stillflow-engine/Cargo.toml"
@@ -1918,10 +1850,7 @@
       "target_branch": "agent/o0-b2-a1-schema-lookup-index",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a1-schema-lookup-index",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/preflight.rs",
         "backend/crates/stillflow-engine/src/typing.rs",
@@ -1962,10 +1891,7 @@
       "target_branch": "agent/o0-b1-a1-lowering-cache",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b1-a1-lowering-cache",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/lower.rs",
         "backend/crates/stillflow-engine/Cargo.toml"
@@ -2007,10 +1933,7 @@
       "target_branch": "agent/e24-json-a2-direct-projected-writer",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/e24-json-a2-direct-projected-writer",
-        "connector:stillflow-connector-local-tabular"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-connector-local-tabular/src/read.rs",
         "backend/crates/stillflow-connector-local-tabular/Cargo.toml"
@@ -2127,10 +2050,7 @@
       "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a1-prod-schema-lookup-index",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/preflight.rs",
         "backend/crates/stillflow-engine/src/typing.rs",
@@ -2248,10 +2168,7 @@
       "target_branch": "agent/o0-b2-a1-prod-schema-lookup-index",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a1-prod-schema-lookup-index",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/lookup.rs"
       ],
@@ -2335,10 +2252,7 @@
       "target_branch": "agent/o0-b2-a2-prod-incremental-schema",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a2-prod-incremental-schema",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/preflight.rs",
         "backend/crates/stillflow-engine/src/incremental.rs"
@@ -2381,9 +2295,7 @@
       "target_branch": "agent/o0-b2-a2-prod-incremental-schema",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a2-prod-incremental-schema"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/**"
       ],
@@ -2463,10 +2375,7 @@
       "target_branch": "agent/o0-b2-a1-a2-factorial-attribution",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a1-a2-factorial-attribution",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/lib.rs",
         "backend/crates/stillflow-engine/src/lookup.rs",
@@ -2553,10 +2462,7 @@
       "target_branch": "agent/o0-b2-a1-a2-final-integration",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": null,
-      "locks": [
-        "branch:agent/o0-b2-a1-a2-final-integration",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/src/lib.rs",
         "backend/crates/stillflow-engine/src/lookup.rs",
@@ -2645,10 +2551,7 @@
       "target_branch": "agent/o0-b2-a1-a2-final-integration",
       "expected_base": "04966586192f8750a02790da988db71a28d82074",
       "expected_head": "37b5a5ad2fd2b5994bc2d8c42d44bc6a6b8128af",
-      "locks": [
-        "merge:main",
-        "pr:167"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/**"
       ],
@@ -2688,9 +2591,7 @@
       "target_branch": null,
       "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
       "expected_head": null,
-      "locks": [
-        "github:issue-ledger-state"
-      ],
+      "locks": [],
       "paths": [],
       "acceptance_keys": [
         "posto0:ledger-refreshed",
@@ -2762,9 +2663,7 @@
       "target_branch": "agent/issue-103-q-c0-profiling-finding-contract",
       "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
       "expected_head": "daf148d3ad41c2c0d49f2fbf416366444fada256",
-      "locks": [
-        "branch:agent/issue-103-q-c0-profiling-finding-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-003-profiling-quality-and-findings.md"
       ],
@@ -2799,9 +2698,7 @@
       "target_branch": "agent/issue-104-x-c0-export-contract",
       "expected_base": "81e817adec9f344416b01d7d28a84c5f17e55e57",
       "expected_head": "b721f0b21b2751e87b49d5a76a12e47a16a1b686",
-      "locks": [
-        "branch:agent/issue-104-x-c0-export-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/architecture/adr-004-export-and-output-artifacts.md"
       ],
@@ -2910,10 +2807,7 @@
       "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
       "expected_base": "25c110d8fbffa37515a539c652de11d09c512a39",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-176-e4s1-canonical-fidelity-fix",
-        "storage:stillflow-storage"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-storage/**"
       ],
@@ -2984,10 +2878,7 @@
       "target_branch": "agent/issue-176-e4s1-canonical-fidelity-fix",
       "expected_base": "25c110d8fbffa37515a539c652de11d09c512a39",
       "starting_head": "f135abd5b9e19cec9e810726129b5fdf254848b0",
-      "locks": [
-        "branch:agent/issue-176-e4s1-canonical-fidelity-fix",
-        "storage:stillflow-storage"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-storage/**"
       ],
@@ -3067,9 +2958,7 @@
       "result_branch": "main",
       "expected_base": "25c110d8fbffa37515a539c652de11d09c512a39",
       "expected_head": "f91dc8495be89e68aed7ecb72201164b1d8b2e96",
-      "locks": [
-        "merge:main"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "e4s1merge:sha-guarded-merge",
         "e4s1merge:merge-commit-not-squash",
@@ -3103,10 +2992,7 @@
       "expected_base": "31e5e397145afcc23957456f16bc72514b4a8c93",
       "starting_head": "f9529ce044e916d6dbcffce81bdfc99c405605d9",
       "expected_head": null,
-      "locks": [
-        "branch:agent/e4-s2-final-rebind-verification",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/**",
         "backend/Cargo.lock"
@@ -3183,9 +3069,7 @@
       "result_branch": "main",
       "expected_base": "31e5e397145afcc23957456f16bc72514b4a8c93",
       "expected_head": "9119cf216cfeb218f8afe91d21440a2d066fef21",
-      "locks": [
-        "merge:main"
-      ],
+      "locks": [],
       "acceptance_keys": [
         "e4s2merge:sha-guarded-merge",
         "e4s2merge:merge-commit-not-squash",
@@ -3213,9 +3097,7 @@
       "mode": "maintenance",
       "owner": "ox-alpha-e4g1-w1",
       "target_issue": 171,
-      "locks": [
-        "github:issue-ledger-state"
-      ],
+      "locks": [],
       "issue_targets": [
         176,
         171,
@@ -3258,10 +3140,7 @@
       "target_branch": "agent/issue-178-q-r1-profile-runtime",
       "expected_base": "533f75badbb46f75ceb453dcf2f5e54b1384caaa",
       "expected_head": null,
-      "locks": [
-        "branch:agent/issue-178-q-r1-profile-runtime",
-        "engine:stillflow-engine"
-      ],
+      "locks": [],
       "paths": [
         "backend/crates/stillflow-engine/**",
         "backend/Cargo.lock"
@@ -3295,5 +3174,5 @@
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-29T12:03:39Z"
+  "updated_at": "2026-08-31T07:42:12Z"
 }
