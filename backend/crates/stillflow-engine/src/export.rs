@@ -1063,6 +1063,28 @@ mod tests {
         }
         writer.commit().expect("commit")
     }
+    /// Publishes a snapshot of exactly `total_rows` rows as full
+    /// `MAX_BATCH_ROWS` envelopes (one partition per envelope), which is the
+    /// densest legal snapshot shape for boundary tests.
+    fn publish_rows(
+        temp: &TempDir,
+        snapshot_id: Uuid,
+        source_asset_id: Uuid,
+        schema: Arc<LogicalSchema>,
+        total_rows: u64,
+    ) -> stillflow_storage::SnapshotManifest {
+        let per_batch = stillflow_core::MAX_BATCH_ROWS as u64;
+        let mut partitions = Vec::new();
+        let mut remaining = total_rows;
+        let mut value = 0_i64;
+        while remaining > 0 {
+            let take = usize::try_from(remaining.min(per_batch)).expect("rows fit usize");
+            partitions.push(vec![value; take]);
+            remaining -= take as u64;
+            value += 1;
+        }
+        publish(temp, snapshot_id, source_asset_id, schema, partitions)
+    }
     #[allow(clippy::too_many_arguments)]
     fn export_request(
         export_id: Uuid,
@@ -1836,6 +1858,128 @@ mod tests {
 
     #[test]
     fn no_api_job_surface_introduced() {
-        assert_eq!(1, 1);
+        // Compile-time guard: the api crate must keep existing, and its root
+        // must never reference an export/job surface symbol. Routes are not
+        // implemented yet, so lib.rs is the whole api source today; extend
+        // this guard when more api files appear.
+        let api_lib = include_str!("../../stillflow-api/src/lib.rs");
+        for surface in [
+            "run_export",
+            "ExportRequest",
+            "ExportArtifact",
+            "ExportFormat",
+            "ExportPolicy",
+        ] {
+            assert!(
+                !api_lib.contains(surface),
+                "stillflow-api must not reference export surface symbol {surface}"
+            );
+        }
+    }
+
+    #[test]
+    fn bounds_rows_partitions_deadline() {
+        use stillflow_core::export::{MAX_EXPORT_PARTITIONS, MAX_EXPORT_ROWS};
+
+        assert_eq!(MAX_EXPORT_ROWS, 10_000_000);
+        assert_eq!(MAX_EXPORT_PARTITIONS, 1_024);
+        assert_eq!(
+            crate::ENGINE_MAX_DEADLINE,
+            Duration::from_secs(30 * 60),
+            "engine deadline cap is ADR-004 §8"
+        );
+
+        let temp = TempDir::new().expect("temp dir");
+        let schema = simple_schema();
+        let source = Uuid::from_u128(4);
+        let created_at = at(1_700_100_000);
+        let root = destination_root(&temp);
+
+        // An already-expired deadline fails typed before any store access:
+        // the snapshot id does not exist, so only the deadline can fire.
+        let expired = RequestContext::with_deadline(Instant::now() - Duration::from_secs(1));
+        let req = export_request(
+            Uuid::from_u128(700),
+            Uuid::from_u128(999),
+            &root,
+            &["reports", "deadline.csv"],
+            ExportFormat::Csv,
+            ExportShape::SingleFile,
+            expired,
+            created_at,
+        );
+        match run_export(&store(&temp), req) {
+            Err(EngineError::Timeout) => {}
+            other => panic!("expected Timeout before any I/O, got {other:?}"),
+        }
+
+        // Row bound: 10_000_001 valid rows fail before the first output byte.
+        let snap = Uuid::from_u128(701);
+        publish_rows(
+            &temp,
+            snap,
+            source,
+            Arc::clone(&schema),
+            MAX_EXPORT_ROWS + 1,
+        );
+        let req = export_request(
+            Uuid::from_u128(702),
+            snap,
+            &root,
+            &["reports", "rows.csv"],
+            ExportFormat::Csv,
+            ExportShape::SingleFile,
+            RequestContext::new(),
+            created_at,
+        );
+        match run_export(&store(&temp), req) {
+            Err(EngineError::BoundExceeded(message)) => {
+                assert!(message.contains("row bound"), "unexpected bound: {message}");
+            }
+            other => panic!("expected row BoundExceeded, got {other:?}"),
+        }
+        assert!(!artifact_path(&root, &["reports", "rows.csv"]).exists());
+
+        // The exact cap is accepted: 10_000_000 rows export cleanly.
+        let snap = Uuid::from_u128(703);
+        publish_rows(&temp, snap, source, Arc::clone(&schema), MAX_EXPORT_ROWS);
+        let req = export_request(
+            Uuid::from_u128(704),
+            snap,
+            &root,
+            &["reports", "rows_exact.csv"],
+            ExportFormat::Csv,
+            ExportShape::SingleFile,
+            RequestContext::new(),
+            created_at,
+        );
+        let result = run_export(&store(&temp), req).expect("exact row cap exports");
+        assert_eq!(result.files().len(), 1);
+        assert!(artifact_path(&root, &["reports", "rows_exact.csv"]).exists());
+
+        // Partition bound: a 1_025-partition partitioned set fails in the
+        // phase-1 verification battery, before encoding any byte.
+        let snap = Uuid::from_u128(705);
+        let partitions: Vec<Vec<i64>> = (0..=i64::from(MAX_EXPORT_PARTITIONS))
+            .map(|i| vec![i])
+            .collect();
+        publish(&temp, snap, source, Arc::clone(&schema), partitions);
+        let req = export_request(
+            Uuid::from_u128(706),
+            snap,
+            &root,
+            &["reports", "parts_over"],
+            ExportFormat::Csv,
+            ExportShape::PartitionedSet,
+            RequestContext::new(),
+            created_at,
+        );
+        match run_export(&store(&temp), req) {
+            Err(EngineError::BoundExceeded(message)) => {
+                assert!(message.contains("partition"), "unexpected bound: {message}");
+            }
+            other => panic!("expected partition BoundExceeded, got {other:?}"),
+        }
+        assert!(!artifact_path(&root, &["reports", "parts_over"]).exists());
     }
 }
