@@ -326,6 +326,7 @@ fn read_counter_snapshot(path: &Path) -> BTreeMap<String, u64> {
     map
 }
 
+#[allow(clippy::too_many_arguments)]
 fn print_case(
     format: &str,
     cols: usize,
