@@ -426,6 +426,7 @@ fn validate_selected_raw_value(
 /// are listed explicitly; the conservative default (`true`) keeps unknown
 /// future types scanned, so a newly added numeric type can never silently skip
 /// the check.
+#[allow(clippy::match_like_matches_macro)]
 fn type_can_contain_number_tokens(data_type: &LogicalType) -> bool {
     !matches!(
         data_type,
