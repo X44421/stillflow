@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{BufReader, Cursor};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+#[cfg(feature = "io-metrics")]
+use std::time::Instant;
 
 use futures::stream;
 use polars::io::mmap::MmapBytesReader;
@@ -55,6 +57,49 @@ pub(crate) mod io_metrics {
     static JSON_POLARS_DECODE_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
     static PARQUET_READER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
     static PARQUET_BATCH_FINISHES: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_FRAME_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_PROJECT_VALIDATE_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_REENCODE_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_POLARS_DECODE_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_REORDER_NS: AtomicU64 = AtomicU64::new(0);
+
+    const JSON_PHASE_TIMING_ENV: &str = "STILLFLOW_JSON_PHASE_TIMING";
+
+    pub(crate) fn json_phase_timing_enabled() -> bool {
+        match std::env::var(JSON_PHASE_TIMING_ENV) {
+            Ok(value) => {
+                value == "1"
+                    || value.eq_ignore_ascii_case("true")
+                    || value.eq_ignore_ascii_case("on")
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn add_elapsed_ns(target: &AtomicU64, start: std::time::Instant) {
+        let nanos = start.elapsed().as_nanos();
+        target.fetch_add(u64::try_from(nanos).unwrap_or(u64::MAX), Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_json_phase_frame_ns(start: std::time::Instant) {
+        add_elapsed_ns(&JSON_PHASE_FRAME_NS, start);
+    }
+
+    pub(crate) fn add_json_phase_project_validate_ns(start: std::time::Instant) {
+        add_elapsed_ns(&JSON_PHASE_PROJECT_VALIDATE_NS, start);
+    }
+
+    pub(crate) fn add_json_phase_reencode_ns(start: std::time::Instant) {
+        add_elapsed_ns(&JSON_PHASE_REENCODE_NS, start);
+    }
+
+    pub(crate) fn add_json_phase_polars_decode_ns(start: std::time::Instant) {
+        add_elapsed_ns(&JSON_PHASE_POLARS_DECODE_NS, start);
+    }
+
+    pub(crate) fn add_json_phase_reorder_ns(start: std::time::Instant) {
+        add_elapsed_ns(&JSON_PHASE_REORDER_NS, start);
+    }
 
     pub(crate) fn add_validator_read_bytes(n: u64) {
         VALIDATOR_READ_BYTES.fetch_add(n, Ordering::Relaxed);
@@ -160,6 +205,11 @@ pub(crate) mod io_metrics {
             "json_polars_decode_invocations",
             "parquet_reader_constructions",
             "parquet_batch_finishes",
+            "json_phase_frame_ns",
+            "json_phase_project_validate_ns",
+            "json_phase_reencode_ns",
+            "json_phase_polars_decode_ns",
+            "json_phase_reorder_ns",
         ]
     }
 
@@ -177,6 +227,11 @@ pub(crate) mod io_metrics {
             JSON_POLARS_DECODE_INVOCATIONS.load(Ordering::Relaxed),
             PARQUET_READER_CONSTRUCTIONS.load(Ordering::Relaxed),
             PARQUET_BATCH_FINISHES.load(Ordering::Relaxed),
+            JSON_PHASE_FRAME_NS.load(Ordering::Relaxed),
+            JSON_PHASE_PROJECT_VALIDATE_NS.load(Ordering::Relaxed),
+            JSON_PHASE_REENCODE_NS.load(Ordering::Relaxed),
+            JSON_PHASE_POLARS_DECODE_NS.load(Ordering::Relaxed),
+            JSON_PHASE_REORDER_NS.load(Ordering::Relaxed),
         ]
     }
 
@@ -633,19 +688,35 @@ impl PreparedReader {
                 if rows == 0 {
                     return Ok(());
                 }
+                #[cfg(feature = "io-metrics")]
+                let phase_timing = io_metrics::json_phase_timing_enabled();
                 let mut encoded = Vec::new();
                 let mut count = 0_usize;
                 while count < rows {
                     self.context.ensure_active()?;
+                    #[cfg(feature = "io-metrics")]
+                    let frame_start = phase_timing.then(Instant::now);
                     let Some(raw) = reader.next_raw_object(&self.context)? else {
                         break;
                     };
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = frame_start {
+                        io_metrics::add_json_phase_frame_ns(start);
+                    }
+                    #[cfg(feature = "io-metrics")]
+                    let validate_start = phase_timing.then(Instant::now);
                     let object = parse_projected_object(
                         &raw,
                         &self.full_schema,
                         &self.projection.names,
                         reader.row_number(),
                     )?;
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = validate_start {
+                        io_metrics::add_json_phase_project_validate_ns(start);
+                    }
+                    #[cfg(feature = "io-metrics")]
+                    let reencode_start = phase_timing.then(Instant::now);
                     serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(|_| {
                         source_error(
                             ErrorCategory::Internal,
@@ -654,6 +725,10 @@ impl PreparedReader {
                         )
                     })?;
                     encoded.push(b'\n');
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = reencode_start {
+                        io_metrics::add_json_phase_reencode_ns(start);
+                    }
                     count += 1;
                 }
                 if count > 0 {
@@ -668,6 +743,8 @@ impl PreparedReader {
                         return Ok(());
                     }
                     let schema = polars_schema_from_logical(&self.projection.schema)?;
+                    #[cfg(feature = "io-metrics")]
+                    let decode_start = phase_timing.then(Instant::now);
                     let frame = JsonReader::new(Cursor::new(encoded))
                         .with_json_format(JsonFormat::JsonLines)
                         .with_schema(schema)
@@ -681,8 +758,18 @@ impl PreparedReader {
                         .with_ignore_errors(false)
                         .finish()
                         .map_err(polars_data_error)?;
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = decode_start {
+                        io_metrics::add_json_phase_polars_decode_ns(start);
+                    }
+                    #[cfg(feature = "io-metrics")]
+                    let reorder_start = phase_timing.then(Instant::now);
                     self.pending
                         .push_back(reorder_frame(frame, &self.projection.names)?);
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = reorder_start {
+                        io_metrics::add_json_phase_reorder_ns(start);
+                    }
                 }
             }
         }
