@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{BufReader, Cursor};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+#[cfg(feature = "io-metrics")]
+use std::time::Instant;
 
 use futures::stream;
 use polars::io::mmap::MmapBytesReader;
@@ -55,6 +57,47 @@ pub(crate) mod io_metrics {
     static JSON_POLARS_DECODE_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
     static PARQUET_READER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
     static PARQUET_BATCH_FINISHES: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_SAMPLED_ROWS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_SAMPLED_FRAME_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_SAMPLED_PROJECT_VALIDATE_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_SAMPLED_REENCODE_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_POLARS_DECODE_NS: AtomicU64 = AtomicU64::new(0);
+    static JSON_PHASE_REORDER_NS: AtomicU64 = AtomicU64::new(0);
+
+    const JSON_PHASE_SAMPLE_ENV: &str = "STILLFLOW_JSON_PHASE_SAMPLE";
+    pub(crate) const JSON_PHASE_SAMPLE_STRIDE: usize = 64;
+
+    pub(crate) fn json_phase_sample_enabled() -> bool {
+        match std::env::var(JSON_PHASE_SAMPLE_ENV) {
+            Ok(value) => {
+                value == "1"
+                    || value.eq_ignore_ascii_case("true")
+                    || value.eq_ignore_ascii_case("on")
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub(crate) fn elapsed_ns(start: std::time::Instant) -> u64 {
+        u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
+    }
+
+    pub(crate) fn publish_json_phase_sample_batch(
+        sampled_rows: u64,
+        sampled_frame_ns: u64,
+        sampled_project_validate_ns: u64,
+        sampled_reencode_ns: u64,
+        polars_decode_ns: u64,
+        reorder_ns: u64,
+    ) {
+        JSON_PHASE_SAMPLED_ROWS.fetch_add(sampled_rows, Ordering::Relaxed);
+        JSON_PHASE_SAMPLED_FRAME_NS.fetch_add(sampled_frame_ns, Ordering::Relaxed);
+        JSON_PHASE_SAMPLED_PROJECT_VALIDATE_NS
+            .fetch_add(sampled_project_validate_ns, Ordering::Relaxed);
+        JSON_PHASE_SAMPLED_REENCODE_NS.fetch_add(sampled_reencode_ns, Ordering::Relaxed);
+        JSON_PHASE_POLARS_DECODE_NS.fetch_add(polars_decode_ns, Ordering::Relaxed);
+        JSON_PHASE_REORDER_NS.fetch_add(reorder_ns, Ordering::Relaxed);
+    }
 
     pub(crate) fn add_validator_read_bytes(n: u64) {
         VALIDATOR_READ_BYTES.fetch_add(n, Ordering::Relaxed);
@@ -160,6 +203,12 @@ pub(crate) mod io_metrics {
             "json_polars_decode_invocations",
             "parquet_reader_constructions",
             "parquet_batch_finishes",
+            "json_phase_sampled_rows",
+            "json_phase_sampled_frame_ns",
+            "json_phase_sampled_project_validate_ns",
+            "json_phase_sampled_reencode_ns",
+            "json_phase_polars_decode_ns",
+            "json_phase_reorder_ns",
         ]
     }
 
@@ -177,6 +226,12 @@ pub(crate) mod io_metrics {
             JSON_POLARS_DECODE_INVOCATIONS.load(Ordering::Relaxed),
             PARQUET_READER_CONSTRUCTIONS.load(Ordering::Relaxed),
             PARQUET_BATCH_FINISHES.load(Ordering::Relaxed),
+            JSON_PHASE_SAMPLED_ROWS.load(Ordering::Relaxed),
+            JSON_PHASE_SAMPLED_FRAME_NS.load(Ordering::Relaxed),
+            JSON_PHASE_SAMPLED_PROJECT_VALIDATE_NS.load(Ordering::Relaxed),
+            JSON_PHASE_SAMPLED_REENCODE_NS.load(Ordering::Relaxed),
+            JSON_PHASE_POLARS_DECODE_NS.load(Ordering::Relaxed),
+            JSON_PHASE_REORDER_NS.load(Ordering::Relaxed),
         ]
     }
 
@@ -633,19 +688,48 @@ impl PreparedReader {
                 if rows == 0 {
                     return Ok(());
                 }
+                #[cfg(feature = "io-metrics")]
+                let sample_timing = io_metrics::json_phase_sample_enabled();
                 let mut encoded = Vec::new();
                 let mut count = 0_usize;
+                #[cfg(feature = "io-metrics")]
+                let mut sampled_rows = 0_u64;
+                #[cfg(feature = "io-metrics")]
+                let mut sampled_frame_ns = 0_u64;
+                #[cfg(feature = "io-metrics")]
+                let mut sampled_project_validate_ns = 0_u64;
+                #[cfg(feature = "io-metrics")]
+                let mut sampled_reencode_ns = 0_u64;
                 while count < rows {
                     self.context.ensure_active()?;
+                    #[cfg(feature = "io-metrics")]
+                    let sample = sample_timing
+                        && (self.rows_emitted + count) % io_metrics::JSON_PHASE_SAMPLE_STRIDE == 0;
+                    #[cfg(feature = "io-metrics")]
+                    let frame_start = sample.then(Instant::now);
                     let Some(raw) = reader.next_raw_object(&self.context)? else {
                         break;
                     };
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = frame_start {
+                        sampled_frame_ns =
+                            sampled_frame_ns.saturating_add(io_metrics::elapsed_ns(start));
+                    }
+                    #[cfg(feature = "io-metrics")]
+                    let validate_start = sample.then(Instant::now);
                     let object = parse_projected_object(
                         &raw,
                         &self.full_schema,
                         &self.projection.names,
                         reader.row_number(),
                     )?;
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = validate_start {
+                        sampled_project_validate_ns = sampled_project_validate_ns
+                            .saturating_add(io_metrics::elapsed_ns(start));
+                    }
+                    #[cfg(feature = "io-metrics")]
+                    let reencode_start = sample.then(Instant::now);
                     serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(|_| {
                         source_error(
                             ErrorCategory::Internal,
@@ -654,6 +738,15 @@ impl PreparedReader {
                         )
                     })?;
                     encoded.push(b'\n');
+                    #[cfg(feature = "io-metrics")]
+                    if let Some(start) = reencode_start {
+                        sampled_reencode_ns =
+                            sampled_reencode_ns.saturating_add(io_metrics::elapsed_ns(start));
+                    }
+                    #[cfg(feature = "io-metrics")]
+                    if sample {
+                        sampled_rows = sampled_rows.saturating_add(1);
+                    }
                     count += 1;
                 }
                 if count > 0 {
@@ -664,10 +757,23 @@ impl PreparedReader {
                         io_metrics::add_json_polars_decode_invocation();
                     }
                     if self.projection.names.is_empty() {
+                        #[cfg(feature = "io-metrics")]
+                        if sample_timing {
+                            io_metrics::publish_json_phase_sample_batch(
+                                sampled_rows,
+                                sampled_frame_ns,
+                                sampled_project_validate_ns,
+                                sampled_reencode_ns,
+                                0,
+                                0,
+                            );
+                        }
                         self.pending.push_back(empty_frame_with_height(count)?);
                         return Ok(());
                     }
                     let schema = polars_schema_from_logical(&self.projection.schema)?;
+                    #[cfg(feature = "io-metrics")]
+                    let decode_start = sample_timing.then(Instant::now);
                     let frame = JsonReader::new(Cursor::new(encoded))
                         .with_json_format(JsonFormat::JsonLines)
                         .with_schema(schema)
@@ -681,8 +787,23 @@ impl PreparedReader {
                         .with_ignore_errors(false)
                         .finish()
                         .map_err(polars_data_error)?;
+                    #[cfg(feature = "io-metrics")]
+                    let polars_decode_ns = decode_start.map(io_metrics::elapsed_ns).unwrap_or(0);
+                    #[cfg(feature = "io-metrics")]
+                    let reorder_start = sample_timing.then(Instant::now);
                     self.pending
                         .push_back(reorder_frame(frame, &self.projection.names)?);
+                    #[cfg(feature = "io-metrics")]
+                    if sample_timing {
+                        io_metrics::publish_json_phase_sample_batch(
+                            sampled_rows,
+                            sampled_frame_ns,
+                            sampled_project_validate_ns,
+                            sampled_reencode_ns,
+                            polars_decode_ns,
+                            reorder_start.map(io_metrics::elapsed_ns).unwrap_or(0),
+                        );
+                    }
                 }
             }
         }
