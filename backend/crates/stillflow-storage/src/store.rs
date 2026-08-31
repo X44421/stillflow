@@ -52,12 +52,16 @@ pub(crate) struct StoreInner {
     pub(crate) limits: StorageLimits,
     _root_lock: File,
     pub(crate) activity: Mutex<ActivityState>,
+    /// Live export staging bytes across concurrent exports for this store
+    /// root (ADR-004 §5 `MAX_EXPORT_TEMP_BYTES`).
+    pub(crate) export_staging_bytes: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct ActivityState {
     readers: u16,
     publishers: u16,
+    export_publishers: u16,
     maintenance: bool,
 }
 
@@ -65,6 +69,7 @@ pub(crate) struct ActivityState {
 pub(crate) enum ActivityKind {
     Reader,
     Publisher,
+    ExportPublisher,
 }
 
 pub(crate) struct ActivityGuard {
@@ -82,7 +87,10 @@ impl Drop for ActivityGuard {
             match self.kind {
                 ActivityKind::Reader if state.readers > 0 => state.readers -= 1,
                 ActivityKind::Publisher if state.publishers > 0 => state.publishers -= 1,
-                ActivityKind::Reader | ActivityKind::Publisher => {}
+                ActivityKind::ExportPublisher if state.export_publishers > 0 => {
+                    state.export_publishers -= 1;
+                }
+                ActivityKind::Reader | ActivityKind::Publisher | ActivityKind::ExportPublisher => {}
             }
         }
         self.active = false;
@@ -130,6 +138,7 @@ impl SnapshotStore {
             limits,
             _root_lock: root_lock,
             activity: Mutex::new(ActivityState::default()),
+            export_staging_bytes: std::sync::atomic::AtomicU64::new(0),
         });
         let mut connection = open_connection(&inner)?;
         migrate(&mut connection)?;
@@ -295,6 +304,7 @@ impl SnapshotStore {
 
         recover_bundles(&self.inner, &cutoff, max_candidates, &mut report)?;
         scan_orphan_staging(&self.inner, max_candidates, &mut report)?;
+        crate::export::recover_export_residue(&self.inner, &cutoff, max_candidates, &mut report)?;
         crate::dedup::recover_dedup_candidates(&self.inner, max_candidates, &mut report)?;
         Ok(report)
     }
@@ -345,7 +355,32 @@ impl SnapshotStore {
             }
         }
 
+        crate::export::collect_export_garbage(&self.inner, &cutoff, max_candidates, &mut report)?;
         Ok(report)
+    }
+
+    /// Loads the committed Export Manifest of one visible export (ADR-004
+    /// §7). Tombstoned, never-committed, and unknown exports fail typed; the
+    /// manifest is revalidated against its own file list on every load so the
+    /// digest bookkeeping stays mechanically recomputable.
+    pub fn load_export_manifest(
+        &self,
+        export_id: Uuid,
+    ) -> Result<crate::export::ExportManifest, StorageError> {
+        let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
+        crate::export::load_export_manifest_inner(&self.inner, export_id)
+    }
+
+    /// Tombstones one committed export: the manifest stops being visible to
+    /// ordinary reads while its bytes stay recoverable until an explicit
+    /// retention cutoff collects them (ADR-004 §7 tombstone-first deletion).
+    pub fn tombstone_export(
+        &self,
+        export_id: Uuid,
+        tombstoned_at: DateTime<Utc>,
+    ) -> Result<(), StorageError> {
+        let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
+        crate::export::tombstone_export_inner(&self.inner, export_id, &tombstoned_at)
     }
 }
 
@@ -561,6 +596,7 @@ fn prepare_root(root: &Path) -> Result<PathBuf, StorageError> {
         .map_err(|error| StorageError::io("canonicalize managed root", &error))?;
     ensure_managed_directory(&root.join("staging"), "prepare staging root")?;
     ensure_managed_directory(&root.join("partitions"), "prepare partitions root")?;
+    ensure_managed_directory(&root.join("export-staging"), "prepare export staging root")?;
     ensure_private_directory(&root.join("temp"))?;
     Ok(root)
 }
@@ -586,7 +622,10 @@ pub(crate) fn ensure_private_directory(path: &Path) -> Result<(), StorageError> 
     }
 }
 
-fn ensure_managed_directory(path: &Path, operation: &'static str) -> Result<(), StorageError> {
+pub(crate) fn ensure_managed_directory(
+    path: &Path,
+    operation: &'static str,
+) -> Result<(), StorageError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => Err(
             StorageError::InvalidConfiguration("managed entry must be a non-symlink directory"),
@@ -625,6 +664,10 @@ pub(crate) fn create_exact_directory(
 
 pub(crate) fn staging_root(inner: &StoreInner) -> PathBuf {
     inner.root.join("staging")
+}
+
+pub(crate) fn export_staging_root(inner: &StoreInner) -> PathBuf {
+    inner.root.join("export-staging")
 }
 
 pub(crate) fn partitions_root(inner: &StoreInner) -> PathBuf {
@@ -680,12 +723,69 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
     match version {
         0 => {
             migrate_to_version_one(connection)?;
-            migrate_to_version_two(connection)
+            migrate_to_version_two(connection)?;
+            migrate_to_version_three(connection)
         }
-        1 => migrate_to_version_two(connection),
-        2 => Ok(()),
+        1 => {
+            migrate_to_version_two(connection)?;
+            migrate_to_version_three(connection)
+        }
+        2 => migrate_to_version_three(connection),
+        3 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
+}
+
+/// Version three adds the export publication journal, export manifest,
+/// export tombstone, and per-file export journal tables. Existing snapshot
+/// and bundle rows are untouched (ADR-004 §7 persistence plane).
+fn migrate_to_version_three(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version three"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE export_publications (
+                 export_id TEXT PRIMARY KEY NOT NULL,
+                 snapshot_id TEXT NOT NULL,
+                 destination_root TEXT NOT NULL,
+                 destination_relative TEXT NOT NULL,
+                 started_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE export_journal (
+                 export_id TEXT NOT NULL,
+                 destination_root TEXT NOT NULL,
+                 destination_relative TEXT NOT NULL,
+                 journaled_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE INDEX export_journal_export_index
+             ON export_journal(export_id);
+
+             CREATE TABLE export_manifests (
+                 export_id TEXT PRIMARY KEY NOT NULL,
+                 version INTEGER NOT NULL CHECK (version = 1),
+                 manifest_json TEXT NOT NULL,
+                 committed_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE export_tombstones (
+                 export_id TEXT PRIMARY KEY NOT NULL,
+                 destination_root TEXT NOT NULL,
+                 destination_relative TEXT NOT NULL,
+                 tombstoned_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE INDEX export_tombstones_cutoff_index
+             ON export_tombstones(tombstoned_at_utc, export_id);
+
+             PRAGMA user_version = 3;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version three"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version three"))
 }
 
 /// Version two adds verification-bundle publication journal, membership, and
@@ -821,6 +921,12 @@ pub(crate) fn acquire_activity(
             }
             state.publishers += 1;
         }
+        ActivityKind::ExportPublisher => {
+            if state.export_publishers >= stillflow_core::MAX_ACTIVE_EXPORT_PUBLISHERS {
+                return Err(StorageError::Busy("active export publisher limit reached"));
+            }
+            state.export_publishers += 1;
+        }
     }
     drop(state);
     Ok(ActivityGuard {
@@ -837,7 +943,11 @@ pub(crate) fn acquire_maintenance(
         .activity
         .lock()
         .map_err(|_| StorageError::ActivityState)?;
-    if state.maintenance || state.readers != 0 || state.publishers != 0 {
+    if state.maintenance
+        || state.readers != 0
+        || state.publishers != 0
+        || state.export_publishers != 0
+    {
         return Err(StorageError::Busy("storage activity prevents maintenance"));
     }
     state.maintenance = true;
@@ -1980,7 +2090,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         // A legacy version-one database migrates forward to version two and
         // gains the bundle tables (contract 10.4 persistence).
@@ -2032,11 +2142,15 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         for table in [
             "bundle_publications",
             "verification_bundles",
             "artifact_manifests",
+            "export_publications",
+            "export_journal",
+            "export_manifests",
+            "export_tombstones",
         ] {
             let present: i64 = connection
                 .query_row(
@@ -2053,19 +2167,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 3;")
+            .execute_batch("PRAGMA user_version = 4;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(3))
+            Err(StorageError::UnsupportedStorageVersion(4))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]

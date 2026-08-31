@@ -4,6 +4,7 @@
 
 mod engine;
 mod error;
+mod export;
 #[allow(unsafe_code)]
 mod ffi;
 mod incremental;
@@ -35,6 +36,7 @@ use uuid::Uuid;
 
 pub use engine::ExecutionEngine;
 pub use error::EngineError;
+pub use export::{run_export, ExportRequest};
 pub use preflight::PreparedPlan;
 pub use profile::{ProfileColumns, ProfileRequest, ProfileResult};
 pub use quality::{

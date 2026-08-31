@@ -3254,6 +3254,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "parquet",
  "polars",
  "polars-arrow",
  "serde_json",

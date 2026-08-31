@@ -339,6 +339,12 @@ impl RecoveryReport {
     pub const fn ignored(&self) -> u32 {
         self.ignored
     }
+
+    pub(crate) fn add(&mut self, examined: u32, recovered: u32, ignored: u32) {
+        self.examined = self.examined.saturating_add(examined);
+        self.recovered = self.recovered.saturating_add(recovered);
+        self.ignored = self.ignored.saturating_add(ignored);
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -359,6 +365,12 @@ impl GarbageCollectionReport {
 
     pub const fn retained(&self) -> u32 {
         self.retained
+    }
+
+    pub(crate) fn add(&mut self, examined: u32, deleted: u32, retained: u32) {
+        self.examined = self.examined.saturating_add(examined);
+        self.deleted = self.deleted.saturating_add(deleted);
+        self.retained = self.retained.saturating_add(retained);
     }
 }
 
