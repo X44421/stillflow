@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 261,
+  "revision": 262,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9",
@@ -3171,8 +3171,46 @@
       "result_head": "20de8c177ae050b58963b97d33eb37187218027e",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33251379818",
       "completion_note": "READY_FOR_Q_R1_INDEPENDENT_ACCEPTANCE - bounded deterministic streaming profiler delivered on PR #179 at exact head 20de8c17 (base main@533f75b, two commits: e939123 core + 20de8c1 evidence). ADR-003 sections 3-6: ProfileRequest with deadline-required/frozen-bounds/duplicate-unknown-column fail-closed validation and contract defaults; per-column streaming accumulators covering every type family with explicit skipped_unsupported_type for Timestamp-Second/List/Struct/Null; exact per-value distinct state with 100k entry caps and distinct_overflow flags (no HLL/sampling); exact full-row framed keys with 100k cap and duplicate absence on overflow; integer histogram via the exact i128 formula; float histogram with the infinite-width branch evaluated before the general formula; -0.0 normalization; non-finite exclusion and counting; float sum/mean via a fixed-point superaccumulator on the 2^-1074 grid (exact, order-invariant, partition-identical - naive f64 accumulation never used); integer mean and length averages as reduced rationals; fixed length histogram; top-K for Utf8/Binary with 256-byte retention cap, count-desc/byte-lex-asc ordering; canonical profile_report.v1 body (sorted keys, pinned escaping, 16-hex uppercase floats, temporal tags) + lowercase-hex SHA-256 digest with golden fixture; run-gate/deadline/cancellation through existing engine machinery. Disclosed interpretation: scanned_bytes excluded from the canonical body as envelope packaging disclosure (partition-variant), mirroring run-id exclusion; typed result retains it. 23 evidence test fns cover all 25 contract items; engine suite 182/0/0; storage 68 pass + 4 pre-existing Windows lock failures A/B on clean main; workspace --all-features failures are pre-existing (workbook path, object-store real-S3, cfg(unix) clippy) untouched. Not Ready, not merged; successor: Q-R1 independent acceptance."
+    },
+    {
+      "id": "E5-C0",
+      "title": "Freeze unified control-plane contract",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 191,
+      "target_pr": null,
+      "target_branch": "agent/issue-191-e5-c0-control-plane-contract",
+      "expected_base": "23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9",
+      "expected_head": null,
+      "locks": [],
+      "paths": [
+        "docs/architecture"
+      ],
+      "acceptance_keys": [
+        "e5-c0:ownership-cardinality",
+        "e5-c0:refs-lineage",
+        "e5-c0:lifecycle-transitions",
+        "e5-c0:terminal-idempotency",
+        "e5-c0:event-order-redaction",
+        "e5-c0:queue-run-restart",
+        "e5-c0:artifact-read",
+        "e5-c0:preview-provenance",
+        "e5-c0:plan-digest-concurrency",
+        "e5-c0:no-runtime"
+      ],
+      "depends_on": [
+        "Q-R1-PROFILE-RUNTIME"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-08-31T07:53:40Z",
+      "queued_by": "maintainer:direct-chat",
+      "queue_reason": "Next mainline after the completed Q-R1, Q-R2, X-R1, and E24 productionization lineage. PR #188 is merged and makes coordination synchronization a repository completion gate. Dispatch is unclaimed and must bind the live main base at CLAIM time.",
+      "notes": "DISPATCHED — UNCLAIMED. Contract-only scope for the unified control plane: ownership/cardinality, lineage references, lifecycle transitions, terminal/idempotency rules, event sequence/redaction/retention, queue/run/cancel/restart reconciliation, Artifact bounded reads, Preview provenance-only semantics, and Plan canonical digest/concurrency. No implementation branch, PR, or writer lock exists at dispatch. CLAIM must re-fetch live main, create the unique branch from the exact base, register writer/path locks, and use an independent exact-head acceptance before Ready/Merge."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-31T07:42:12Z"
+  "updated_at": "2026-08-31T07:53:40Z"
 }
