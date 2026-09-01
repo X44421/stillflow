@@ -947,6 +947,7 @@ impl ControlPlaneStore {
             failure.as_ref(),
         )?;
         validate_state_event(&event, EventStreamKind::Job, job_id, job_id, None, target)?;
+        validate_job_terminal_run(&transaction, &job, from, target)?;
         let queued_at = parse_timestamp(&job.queued_at_utc, "Job queue timestamp")?;
         let minimum_event_at = job
             .started_at_utc
@@ -1378,6 +1379,11 @@ impl ControlPlaneStore {
     }
 
     pub fn append_event(&self, event: EventDraft) -> Result<EventRecord, StorageError> {
+        if event.event_type != ControlPlaneEventType::RunReconciled {
+            return Err(StorageError::InvalidDraft(
+                "lifecycle events must be appended with their state transition",
+            ));
+        }
         let _activity = self.write_activity()?;
         let mut connection = open_connection(&self.inner)?;
         let transaction = connection
@@ -1406,6 +1412,11 @@ impl ControlPlaneStore {
             .map_err(|_| StorageError::database("begin artifact reference"))?;
         ensure_run_workspace(&transaction, draft.workspace_id, draft.run_id)?;
         let run = run_raw(&transaction, draft.run_id)?;
+        if run.state != "running" {
+            return Err(StorageError::InvalidDraft(
+                "ArtifactRef staging requires a running Run",
+            ));
+        }
         let run_started_at = parse_timestamp(&run.started_at_utc, "Run start timestamp")?;
         if draft.created_at < run_started_at {
             return Err(StorageError::InvalidTimestampOrder("ArtifactRef creation"));
@@ -1457,6 +1468,12 @@ impl ControlPlaneStore {
         }
         let run_id = parse_uuid(&artifact.run_id)?;
         let job_id = run_job_id(&transaction, run_id)?;
+        let run = run_raw(&transaction, run_id)?;
+        if target == ArtifactRefState::Committed && run.state != "running" {
+            return Err(StorageError::InvalidDraft(
+                "ArtifactRef commit requires a running Run",
+            ));
+        }
         let artifact_created_at =
             parse_timestamp(&artifact.created_at_utc, "Artifact creation timestamp")?;
         if event.occurred_at < artifact_created_at {
@@ -3925,6 +3942,55 @@ fn run_job_id(transaction: &Transaction<'_>, run_id: Uuid) -> Result<Uuid, Stora
         .ok_or(StorageError::NotFound(run_id))
 }
 
+fn validate_job_terminal_run(
+    transaction: &Transaction<'_>,
+    job: &RawJob,
+    from: JobState,
+    target: JobState,
+) -> Result<(), StorageError> {
+    if !target.is_terminal() {
+        return Ok(());
+    }
+
+    let run_id = job.run_id.as_deref().map(parse_uuid).transpose()?;
+    let Some(run_id) = run_id else {
+        let valid_pre_run_terminal = matches!(
+            (from, target),
+            (JobState::Queued, JobState::Failed) | (JobState::Cancelling, JobState::Cancelled)
+        );
+        return if valid_pre_run_terminal {
+            Ok(())
+        } else {
+            Err(StorageError::InvalidDraft(
+                "terminal Job state requires its Run outcome",
+            ))
+        };
+    };
+
+    let run = run_raw(transaction, run_id)?;
+    if run.job_id != job.id
+        || run.workspace_id != job.workspace_id
+        || run.session_id != job.session_id
+    {
+        return Err(StorageError::Serialization(
+            "Job and Run relationship is inconsistent",
+        ));
+    }
+    let run_state = parse_run_state(&run.state)?;
+    let expected_run_state = match target {
+        JobState::Succeeded => RunState::Succeeded,
+        JobState::Failed => RunState::Failed,
+        JobState::Cancelled => RunState::Cancelled,
+        JobState::Queued | JobState::Running | JobState::Cancelling => return Ok(()),
+    };
+    if run_state != expected_run_state {
+        return Err(StorageError::InvalidDraft(
+            "terminal Job state must match its terminal Run state",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_inputs(inputs: &[ControlPlaneInput]) -> Result<(), StorageError> {
     for input in inputs {
         let id = match input.input {
@@ -4506,6 +4572,74 @@ mod tests {
     }
 
     #[test]
+    fn terminal_job_transition_requires_matching_run_outcome() {
+        let fixture = Fixture::new();
+        let job = match fixture
+            .store
+            .submit_job(fixture.submission(1, 10))
+            .expect("submit")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        let run_id = Uuid::from_u128(2000);
+        fixture.claim(job.id, run_id);
+
+        let error = fixture
+            .store
+            .transition_job(
+                job.id,
+                JobState::Succeeded,
+                EventDraft::new(
+                    Uuid::new_v4(),
+                    EventStreamKind::Job,
+                    job.id,
+                    job.id,
+                    None,
+                    ControlPlaneEventType::JobSucceeded,
+                    at(21),
+                    "finish",
+                    "finish",
+                    "actor:test",
+                    serde_json::json!({"state": "succeeded"}),
+                ),
+                None,
+            )
+            .expect_err("a running Run cannot have a succeeded Job");
+        assert!(matches!(
+            error,
+            StorageError::InvalidDraft("terminal Job state must match its terminal Run state")
+        ));
+        assert_eq!(
+            fixture.store.get_job(job.id).expect("Job").state,
+            JobState::Running
+        );
+
+        let error = fixture
+            .store
+            .append_event(EventDraft::new(
+                Uuid::new_v4(),
+                EventStreamKind::Job,
+                job.id,
+                job.id,
+                None,
+                ControlPlaneEventType::JobSucceeded,
+                at(21),
+                "manual",
+                "manual",
+                "actor:test",
+                serde_json::json!({"state": "succeeded"}),
+            ))
+            .expect_err("lifecycle events cannot bypass a state transition");
+        assert!(matches!(
+            error,
+            StorageError::InvalidDraft(
+                "lifecycle events must be appended with their state transition"
+            )
+        ));
+    }
+
+    #[test]
     fn terminal_cas_and_forbidden_transition_are_immutable() {
         let fixture = Fixture::new();
         let job = match fixture
@@ -4691,6 +4825,99 @@ mod tests {
             run_events[1].event_type,
             ControlPlaneEventType::ArtifactCommitted
         );
+    }
+
+    #[test]
+    fn artifact_commit_is_rejected_after_run_terminal_state() {
+        let fixture = Fixture::new();
+        let job = match fixture
+            .store
+            .submit_job(fixture.submission(1, 10))
+            .expect("submit")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        let run_id = Uuid::from_u128(2000);
+        fixture.claim(job.id, run_id);
+        let artifact_id = Uuid::from_u128(3001);
+        fixture
+            .store
+            .create_artifact_ref(ArtifactRefDraft {
+                workspace_id: fixture.workspace_id,
+                run_id,
+                artifact_id,
+                artifact_kind: ArtifactKind::AcceptedSnapshot,
+                external_ref_kind: ExternalRefKind::Snapshot,
+                external_ref_id: Uuid::from_u128(4001),
+                content_digest: [9; 32],
+                metadata: serde_json::json!({"rowCount": 1}),
+                created_at: at(21),
+            })
+            .expect("staged ArtifactRef");
+        fixture
+            .store
+            .finish_run_and_job(
+                run_id,
+                RunState::Succeeded,
+                JobState::Succeeded,
+                EventDraft::new(
+                    Uuid::new_v4(),
+                    EventStreamKind::Run,
+                    run_id,
+                    job.id,
+                    Some(run_id),
+                    ControlPlaneEventType::RunSucceeded,
+                    at(30),
+                    "finish",
+                    "finish",
+                    "actor:test",
+                    serde_json::json!({"state": "succeeded"}),
+                ),
+                EventDraft::new(
+                    Uuid::new_v4(),
+                    EventStreamKind::Job,
+                    job.id,
+                    job.id,
+                    None,
+                    ControlPlaneEventType::JobSucceeded,
+                    at(30),
+                    "finish",
+                    "finish",
+                    "actor:test",
+                    serde_json::json!({"state": "succeeded"}),
+                ),
+                None,
+            )
+            .expect("finish");
+        let error = fixture
+            .store
+            .transition_artifact_ref(
+                artifact_id,
+                ArtifactRefState::Committed,
+                EventDraft::new(
+                    Uuid::new_v4(),
+                    EventStreamKind::Run,
+                    run_id,
+                    job.id,
+                    Some(run_id),
+                    ControlPlaneEventType::ArtifactCommitted,
+                    at(31),
+                    "late-artifact",
+                    "late-artifact",
+                    "actor:test",
+                    serde_json::json!({"state": "committed"}),
+                ),
+            )
+            .expect_err("terminal Run cannot publish a staged ArtifactRef");
+        assert!(matches!(
+            error,
+            StorageError::InvalidDraft("ArtifactRef commit requires a running Run")
+        ));
+        assert!(matches!(
+            fixture.store.get_artifact_ref(artifact_id),
+            Err(StorageError::NotFound(id)) if id == artifact_id
+        ));
     }
 
     #[test]
