@@ -6,8 +6,8 @@ use std::sync::Arc;
 use futures::stream;
 use polars::io::mmap::MmapBytesReader;
 use polars::prelude::{
-    Column, CsvReadOptions, DataFrame, DataType as PolarsDataType, JsonFormat, JsonReader,
-    ParallelStrategy, ParquetReader, SerReader,
+    AnyValue, Column, CsvReadOptions, DataFrame, DataType as PolarsDataType, JsonFormat,
+    JsonReader, ParallelStrategy, ParquetReader, Schema as PolarsSchema, SerReader,
 };
 use serde::de::{DeserializeSeed, Error as DeError, MapAccess, SeqAccess, Visitor};
 // `Map`/`Value` back the generic projected-object path (the default production
@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 use stillflow_connectors::RawBatchStream;
 use stillflow_core::{
     BatchEnvelope, BatchEnvelopeFactory, ColumnId, ConnectorError, ConnectorResult, ErrorCategory,
-    LogicalField, LogicalSchema, LogicalType, RequestContext, SourceAsset,
+    LogicalField, LogicalSchema, LogicalType, RequestContext, SourceAsset, TimeUnit,
 };
 
 use crate::bridge::dataframe_to_record_batch;
@@ -691,9 +691,10 @@ impl PreparedReader {
                         return Ok(());
                     }
                     let schema = polars_schema_from_logical(&self.projection.schema)?;
-                    let frame = JsonReader::new(Cursor::new(encoded))
+                    let ingest_schema = json_ingest_schema(&self.projection.schema, &schema);
+                    let mut frame = JsonReader::new(Cursor::new(encoded))
                         .with_json_format(JsonFormat::JsonLines)
-                        .with_schema(schema)
+                        .with_schema(ingest_schema)
                         .with_batch_size(NonZeroUsize::new(count).ok_or_else(|| {
                             source_error(
                                 ErrorCategory::Internal,
@@ -704,6 +705,20 @@ impl PreparedReader {
                         .with_ignore_errors(false)
                         .finish()
                         .map_err(polars_data_error)?;
+                    for (field, (_, expected_type)) in
+                        self.projection.schema.fields.iter().zip(schema.iter())
+                    {
+                        if matches!(field.data_type, LogicalType::Timestamp { .. }) {
+                            let column = frame
+                                .column(&field.name)
+                                .map_err(polars_data_error)?
+                                .as_materialized_series();
+                            let column = cast_ingested_timestamp(column, expected_type)?;
+                            frame
+                                .replace(&field.name, column)
+                                .map_err(polars_data_error)?;
+                        }
+                    }
                     self.pending
                         .push_back(reorder_frame(frame, &self.projection.names)?);
                 }
@@ -718,6 +733,60 @@ impl Drop for PreparedReader {
     fn drop(&mut self) {
         io_metrics::dump();
     }
+}
+
+fn cast_ingested_timestamp(
+    column: &polars::prelude::Series,
+    expected_type: &PolarsDataType,
+) -> ConnectorResult<polars::prelude::Series> {
+    let PolarsDataType::Datetime(unit, _) = expected_type else {
+        return Err(polars_data_error(polars::error::PolarsError::ComputeError(
+            "timestamp restore received a non-datetime schema".into(),
+        )));
+    };
+    let values = column
+        .i64()
+        .map_err(polars_data_error)?
+        .into_iter()
+        .map(|value| {
+            value
+                .map(|value| AnyValue::Datetime(value, *unit, None))
+                .unwrap_or(AnyValue::Null)
+        })
+        .collect::<Vec<_>>();
+    polars::prelude::Series::from_any_values_and_dtype(
+        column.name().clone(),
+        &values,
+        expected_type,
+        true,
+    )
+    .map_err(polars_data_error)
+}
+
+fn json_ingest_schema(
+    logical_schema: &LogicalSchema,
+    schema: &Arc<PolarsSchema>,
+) -> Arc<PolarsSchema> {
+    if !logical_schema
+        .fields
+        .iter()
+        .any(|field| matches!(field.data_type, LogicalType::Timestamp { .. }))
+    {
+        return Arc::clone(schema);
+    }
+    Arc::new(PolarsSchema::from_iter(
+        schema
+            .iter()
+            .zip(&logical_schema.fields)
+            .map(|((name, data_type), field)| {
+                let ingest_type = if matches!(field.data_type, LogicalType::Timestamp { .. }) {
+                    PolarsDataType::Int64
+                } else {
+                    data_type.clone()
+                };
+                (name.clone(), ingest_type)
+            }),
+    ))
 }
 
 impl CsvState {
@@ -808,6 +877,84 @@ fn temporal_text_matches(value: &str, data_type: &LogicalType) -> bool {
     }
 }
 
+/// Converts validated ISO timestamp text to the integer epoch representation
+/// expected by the retained Polars JSON reader for the declared logical unit.
+/// Polars' ISO-string JSON coercion applies a scale quirk on this boundary;
+/// supplying the already-unit-scaled integer keeps the downstream reader and
+/// Arrow bridge unchanged while preserving the logical timestamp value.
+pub(crate) fn normalize_json_temporal_value(
+    value: &mut Value,
+    data_type: &LogicalType,
+) -> Result<(), &'static str> {
+    if value.is_null() {
+        return Ok(());
+    }
+    match data_type {
+        LogicalType::Timestamp { unit, timezone } => {
+            let text = value
+                .as_str()
+                .ok_or("value has an incompatible logical type")?;
+            let epoch = timestamp_epoch(text, *unit, timezone.as_deref())?;
+            *value = Value::Number(epoch.into());
+            Ok(())
+        }
+        LogicalType::List(element) => {
+            let values = value
+                .as_array_mut()
+                .ok_or("value has an incompatible logical type")?;
+            for value in values {
+                normalize_json_temporal_value(value, element)?;
+            }
+            Ok(())
+        }
+        LogicalType::Struct(fields) => {
+            let object = value
+                .as_object_mut()
+                .ok_or("value has an incompatible logical type")?;
+            for field in fields {
+                if let Some(value) = object.get_mut(&field.name) {
+                    normalize_json_temporal_value(value, &field.data_type)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn timestamp_epoch(
+    text: &str,
+    unit: TimeUnit,
+    timezone: Option<&str>,
+) -> Result<i64, &'static str> {
+    let (seconds, nanos) = if timezone.is_some() {
+        let parsed = chrono::DateTime::parse_from_rfc3339(text)
+            .map_err(|_| "value has an incompatible logical type")?;
+        (parsed.timestamp(), parsed.timestamp_subsec_nanos())
+    } else {
+        let parsed = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f")
+            .or_else(|_| chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S%.f"))
+            .map_err(|_| "value has an incompatible logical type")?;
+        let parsed = parsed.and_utc();
+        (parsed.timestamp(), parsed.timestamp_subsec_nanos())
+    };
+    let scale = match unit {
+        // Polars 0.46 has no seconds datetime unit on this reader boundary;
+        // keep the existing fail-closed contract instead of silently scaling.
+        TimeUnit::Second => return Err("timestamp second unit is unsupported"),
+        TimeUnit::Millisecond => 1_000_i128,
+        TimeUnit::Microsecond => 1_000_000_i128,
+        TimeUnit::Nanosecond => 1_000_000_000_i128,
+    };
+    let subscale = 1_000_000_000_i128 / scale;
+    let epoch = i128::from(seconds)
+        .checked_mul(scale)
+        .and_then(|value| value.checked_add(i128::from(nanos) / subscale))
+        .and_then(|value| i64::try_from(value).ok())
+        .ok_or("timestamp is outside the supported range")?;
+    Ok(epoch)
+}
+
 fn empty_frame_with_height(height: usize) -> ConnectorResult<DataFrame> {
     let marker = Column::full_null(
         "__stillflow_row_marker".into(),
@@ -879,8 +1026,10 @@ impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
                 return Err(A::Error::custom("JSON row contains a duplicate field"));
             }
             if self.selected.contains(name.as_str()) {
-                let value = access.next_value::<Value>()?;
+                let mut value = access.next_value::<Value>()?;
                 validate_json_value(&value, field).map_err(A::Error::custom)?;
+                normalize_json_temporal_value(&mut value, &field.data_type)
+                    .map_err(A::Error::custom)?;
                 output.insert(name, value);
             } else {
                 access.next_value_seed(ValidateFieldSeed {

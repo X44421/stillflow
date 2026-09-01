@@ -13,16 +13,16 @@
 //! which acts as the canonical schema-establishing sentinel; test content
 //! follows from row 2 onward, mirroring post-inspection drift in production.
 //!
-//! Temporal disclosure: the retained Polars JsonReader decodes ISO-string
-//! timestamps with the pre-existing #151 upstream scale quirk (`TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM`)
-//! in BOTH modes. These tests assert controlled accept/reject parity and row
-//! order only — never temporal correctness — and add no numeric compensation.
+//! Temporal coverage includes the production boundary fix for ISO strings:
+//! both the generic and raw-slice projected paths must emit the declared epoch
+//! unit to the retained Polars JsonReader, with no post-parse compensation.
 
 use std::sync::Arc;
 
 use arrow_array::{
     Array, BooleanArray, Date32Array, Float32Array, Float64Array, Int64Array, ListArray,
-    RecordBatch, StringArray, StructArray, TimestampMillisecondArray, UInt64Array,
+    RecordBatch, StringArray, StructArray, TimestampMicrosecondArray, TimestampMillisecondArray,
+    TimestampNanosecondArray, UInt64Array,
 };
 use std::pin::Pin;
 
@@ -830,14 +830,6 @@ async fn temporal_forms_accepted_consistently() {
         ),
         (LogicalType::Int64, false),
     ];
-    // Note: both modes feed VALUE-identical timestamp strings to the retained
-    // Polars parse, so any form accepted/rejected downstream is accepted or
-    // rejected identically. Fixture timestamps use whole-second ISO forms:
-    // fractional-second forms decode through the retained Polars JsonReader
-    // with the pre-existing #151 upstream scale quirk in BOTH modes (baseline
-    // behavior), so here they would only add an out-of-scope baseline constant
-    // to pin. This is a controlled known-upstream-bug surface, NOT a
-    // correctness proof, and no numeric compensation exists anywhere.
     let lines = [
         r#"{"d":"2024-02-29","ts":"2024-02-29T01:02:03","k":1}"#,
         r#"{"d":"2023-12-31","ts":"2023-12-31T23:59:59","k":2}"#,
@@ -849,19 +841,68 @@ async fn temporal_forms_accepted_consistently() {
         [Some("2024-02-29".into()), Some("2023-12-31".into())],
     );
     let ts = column::<TimestampMillisecondArray>(&batch, "ts");
-    // DISCLOSED BASELINE QUIRK (verified identical under feature OFF before
-    // this suite was authored): the retained Polars JsonReader decodes
-    // ISO-string timestamps into the TimestampMillisecond column with a
-    // constant x1000 scale shift (e.g. "2024-02-29T01:02:03" lands in year
-    // ~56131). This path retains that parser verbatim, so the in-scope
-    // guarantees here are: both rows decode non-null and row ORDER survives
-    // the monotonic shift; cross-mode parity of outcomes is proven by running
-    // this identical suite under feature OFF and feature ON.
-    let first = ts.value_as_datetime(0).expect("timestamp decodes");
-    let second = ts.value_as_datetime(1).expect("timestamp decodes");
+    let first = ts.value(0);
+    let second = ts.value(1);
     assert!(
         first > second,
         "input row order must survive the retained parse: {first} !> {second}"
+    );
+    assert_eq!(first, 1_709_168_523_000);
+    assert_eq!(second, 1_704_067_199_000);
+}
+
+#[tokio::test]
+async fn timestamps_use_declared_precision_and_timezone_epoch() {
+    let types = vec![
+        (
+            LogicalType::Timestamp {
+                unit: TimeUnit::Microsecond,
+                timezone: None,
+            },
+            false,
+        ),
+        (
+            LogicalType::Timestamp {
+                unit: TimeUnit::Nanosecond,
+                timezone: None,
+            },
+            false,
+        ),
+    ];
+    let lines = [
+        r#"{"us":"2024-02-29T01:02:03.123456","ns":"2024-02-29T01:02:03.123456789"}"#,
+        r#"{"us":"1969-12-31T23:59:59.999999","ns":"1969-12-31T23:59:59.999999999"}"#,
+    ];
+    let outcomes = run_case(&lines, Some(&types), Some(&[0, 1]), 4).await;
+    let batch = expect_single_ok(&outcomes, "timestamp precision");
+    assert_eq!(
+        [
+            column::<TimestampMicrosecondArray>(&batch, "us").value(0),
+            column::<TimestampMicrosecondArray>(&batch, "us").value(1),
+        ],
+        [1_709_168_523_123_456, -1]
+    );
+    assert_eq!(
+        [
+            column::<TimestampNanosecondArray>(&batch, "ns").value(0),
+            column::<TimestampNanosecondArray>(&batch, "ns").value(1),
+        ],
+        [1_709_168_523_123_456_789, -1]
+    );
+
+    let timezone_types = vec![(
+        LogicalType::Timestamp {
+            unit: TimeUnit::Millisecond,
+            timezone: Some("UTC".to_owned()),
+        },
+        false,
+    )];
+    let timezone_lines = [r#"{"ts":"2024-02-29T01:02:03.123+02:00"}"#];
+    let outcomes = run_case(&timezone_lines, Some(&timezone_types), Some(&[0]), 4).await;
+    let batch = expect_single_ok(&outcomes, "timezone timestamp");
+    assert_eq!(
+        column::<TimestampMillisecondArray>(&batch, "ts").value(0),
+        1_709_161_323_123
     );
 }
 
