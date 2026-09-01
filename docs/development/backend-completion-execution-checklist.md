@@ -35,7 +35,8 @@
 - Status: dependency/completion plan bound to Epic #81. This document does not
   mirror per-task head, CI, lock, or review state. Execution uses the repository
   risk routing: L0/L1 use GitHub only; L2/L3 add scoped coordination claims and
-  exact-head independent PR Review.
+  exact-head independent acceptance through a native PR Review or compliant
+  acceptance receipt.
 
 ## 1. Purpose
 
@@ -272,13 +273,18 @@ review, branch-lock, or merge state.
 Live authority is:
 
 - GitHub Issue: task scope/lifecycle for L1-L3;
-- GitHub PR: implementation head, CI, review, accepted commit and merge state;
+- GitHub PR: implementation head, CI, review and merge state; the accepted
+  commit is bound there when native Review is used;
+- linked Issue or PR comment: canonical exact-head acceptance receipt when the
+  receipt path is used;
 - coordination/task-registry: active L2/L3 writer/lock claims only;
 - Epic #81: roadmap dependencies/milestones only.
 
 L0 work does not require a task Issue. L1 requires an Issue but no Registry.
 Only L2/L3 require a scoped CLAIM/lock. A single-PR independent acceptance is a
-GitHub PR Review, not a separate acceptance Issue.
+GitHub PR Review by a separate reviewer, or a compliant exact-head acceptance
+receipt when no separate GitHub reviewer identity is available; it is not a
+separate acceptance Issue.
 
 ## 6. Branch, PR, review, and rebind discipline
 
@@ -287,9 +293,9 @@ Apply the repository risk level first:
 - **L0:** branch -> PR -> relevant CI -> merge. No Issue/Registry.
 - **L1:** Issue -> PR -> relevant CI -> normal PR review -> merge.
 - **L2:** Issue -> scoped CLAIM/lock -> Draft PR -> exact-head CI ->
-  independent PR Review -> merge.
+  independent PR Review or compliant acceptance receipt -> merge.
 - **L3:** frozen contract -> scoped CLAIM/lock -> Draft PR -> exact-head CI ->
-  independent PR Review -> guarded merge.
+  independent PR Review or compliant acceptance receipt -> guarded merge.
 
 General rules:
 
@@ -297,9 +303,11 @@ General rules:
 2. L1-L3 use one canonical Issue and `agent/issue-NNN-short-description`.
 3. Keep one implementation boundary per PR and revisions on the same PR.
 4. Do not create a separate acceptance Issue for a single PR.
-5. For L2/L3, the PR Review commit is the accepted exact head. Before merge,
-   verify the current head still equals the approved commit and required CI is
-   green.
+5. For L2/L3, the PR Review commit or the commit named in a compliant
+   acceptance receipt is the accepted exact head. Before merge, verify the
+   current head still equals that commit and required CI is green. A receipt
+   must disclose that it is not a native GitHub Review and satisfy the evidence
+   requirements in `AGENTS.md`.
 6. Main drift triggers rebind only for authorized-path overlap, shared
    dependency/contract changes, merge conflicts, or a changed semantic
    assumption. Unrelated drift does not force rebind/reaccept.
@@ -1174,7 +1182,8 @@ Planning integrity conditions for declaring any of the above:
 
 - L1-L3 tasks have one canonical Issue; L0 may omit one;
 - L2/L3 tasks have at most one active scoped writer claim;
-- accepted commit/head facts live in the PR review, not duplicated here;
+- accepted commit/head facts live in the native PR review or canonical
+  acceptance receipt, not duplicated here;
 - historical SHAs remain labeled historical;
 - Epic #81 and this document agree on roadmap topology/completion definitions,
   not transient head/CI/lock state.
