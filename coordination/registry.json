@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 274,
+  "revision": 275,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
@@ -47,6 +47,90 @@
       "registered_at": "2026-09-01T07:11:30Z",
       "started_at": "2026-09-01T07:11:30Z",
       "updated_at": "2026-09-01T07:11:30Z"
+    },
+    {
+      "id": "SIMP-R1",
+      "title": "Remove Quality/Verification design debt (issue #221)",
+      "risk_level": "L2",
+      "status": "running",
+      "mode": "write",
+      "owner": "agent-simp-r1-221",
+      "target_issue": 221,
+      "target_branch": "agent/issue-221-simp-r1-quality-verification-debt",
+      "expected_base": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
+      "locks": [
+        "engine:quality",
+        "engine:verification",
+        "storage:bundle"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/quality.rs",
+        "backend/crates/stillflow-engine/src/verification.rs",
+        "backend/crates/stillflow-storage/src/bundle.rs"
+      ],
+      "shared_paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": "2026-09-01T09:29:30Z",
+      "registered_at": "2026-09-01T07:59:30Z",
+      "started_at": "2026-09-01T07:59:30Z",
+      "updated_at": "2026-09-01T07:59:30Z"
+    },
+    {
+      "id": "TS-151-PROD",
+      "title": "Correct local-tabular temporal decoding (issue #151)",
+      "risk_level": "L2",
+      "status": "running",
+      "mode": "write",
+      "owner": "agent-ts-151-prod",
+      "target_issue": 151,
+      "target_branch": "agent/issue-151-ts-151-temporal-decoding",
+      "expected_base": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
+      "locks": [
+        "connector:local-tabular:temporal"
+      ],
+      "paths": [
+        "backend/crates/stillflow-connector-local-tabular/src/read.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/direct_projected.rs",
+        "backend/crates/stillflow-connector-local-tabular/src/schema.rs",
+        "backend/crates/stillflow-connector-local-tabular/tests/*"
+      ],
+      "shared_paths": [],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": "2026-09-01T09:29:30Z",
+      "registered_at": "2026-09-01T07:59:30Z",
+      "started_at": "2026-09-01T07:59:30Z",
+      "updated_at": "2026-09-01T07:59:30Z"
+    },
+    {
+      "id": "Q-D1-C0",
+      "title": "Freeze Profile History / Drift contract (issue #222)",
+      "risk_level": "L3",
+      "status": "running",
+      "mode": "write",
+      "owner": "agent-q-d1-c0-222",
+      "target_issue": 222,
+      "target_branch": "agent/issue-222-q-d1-drift-contract",
+      "expected_base": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
+      "locks": [
+        "docs:quality-drift-contract"
+      ],
+      "paths": [
+        "docs/issues/issue-222-profile-history-drift-contract.md"
+      ],
+      "shared_paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md",
+        "docs/issues/issue-191-unified-control-plane-contract.md"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": "2026-09-01T09:29:30Z",
+      "registered_at": "2026-09-01T07:59:30Z",
+      "started_at": "2026-09-01T07:59:30Z",
+      "updated_at": "2026-09-01T07:59:30Z"
     }
   ],
   "locks": {
@@ -61,7 +145,37 @@
       "owner": "agent-e5-j1-220",
       "acquired_at": "2026-09-01T07:11:30Z",
       "lease_expires_at": "2026-09-01T08:41:30Z"
+    },
+    "engine:quality": {
+      "task_id": "SIMP-R1",
+      "owner": "agent-simp-r1-221",
+      "acquired_at": "2026-09-01T07:59:30Z",
+      "lease_expires_at": "2026-09-01T09:29:30Z"
+    },
+    "engine:verification": {
+      "task_id": "SIMP-R1",
+      "owner": "agent-simp-r1-221",
+      "acquired_at": "2026-09-01T07:59:30Z",
+      "lease_expires_at": "2026-09-01T09:29:30Z"
+    },
+    "storage:bundle": {
+      "task_id": "SIMP-R1",
+      "owner": "agent-simp-r1-221",
+      "acquired_at": "2026-09-01T07:59:30Z",
+      "lease_expires_at": "2026-09-01T09:29:30Z"
+    },
+    "connector:local-tabular:temporal": {
+      "task_id": "TS-151-PROD",
+      "owner": "agent-ts-151-prod",
+      "acquired_at": "2026-09-01T07:59:30Z",
+      "lease_expires_at": "2026-09-01T09:29:30Z"
+    },
+    "docs:quality-drift-contract": {
+      "task_id": "Q-D1-C0",
+      "owner": "agent-q-d1-c0-222",
+      "acquired_at": "2026-09-01T07:59:30Z",
+      "lease_expires_at": "2026-09-01T09:29:30Z"
     }
   },
-  "updated_at": "2026-09-01T07:11:30Z"
+  "updated_at": "2026-09-01T07:59:30Z"
 }
