@@ -85,7 +85,7 @@ cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D 
 
 # Tier 3 — full local MSRV-style semantic gate
 bacon test-workspace
-cargo test --manifest-path backend/Cargo.toml --workspace
+cargo test --manifest-path backend/Cargo.toml --workspace -- --skip total_output_cap_is_accepted_at_eight_gib_and_enforced_above
 ```
 
 Every job is read-only by contract: no auto-fix flags, no lockfile updates,
@@ -114,13 +114,14 @@ Use the smallest gate that produces new information:
    for unrelated tasks. Use `--all-features` only when the task changes those
    surfaces or in a dedicated integration/release/nightly gate.
 7. **Large physical boundary tests** that depend on filesystem-scale behavior
-   should live in a dedicated slow/release lane once such a lane exists. Keep
-   routine tests focused on the boundary algorithm itself. Issue #204 changes
-   policy only; it does not move or weaken any existing Rust test.
+   live outside the routine PR/edit loop. The 8 GiB export-cap test remains
+   unchanged and is run by the dedicated `Slow boundaries` workflow; routine
+   workspace commands explicitly skip only that named physical test.
 
 The current PR CI backend matrix is therefore:
 
-- Rust 1.85.0: fmt + Clippy + full workspace tests;
+- Rust 1.85.0: fmt + Clippy + routine workspace tests (the named physical
+  8 GiB export boundary is delegated to the slow lane);
 - stable: workspace compatibility check + Clippy;
 - frontend: unchanged.
 
@@ -142,7 +143,22 @@ one shared-state surface.
 - `cargo-nextest` remains a separate future decision; DX-T2 only restores the
   standard Rust test runner's normal parallelism.
 
-## 6. Classifying failures
+## 6. Slow physical boundaries
+
+The workflow `.github/workflows/slow-boundaries.yml` owns tests whose value is
+the exact production-scale physical boundary rather than fast PR feedback.
+
+Current slow case:
+
+- `total_output_cap_is_accepted_at_eight_gib_and_enforced_above` — exercises the real 2 GiB single-file and 8 GiB aggregate
+  export limits with sparse files.
+
+It remains a real test and is not marked ignored. Routine workspace commands
+skip it by name, while the slow workflow invokes it directly on Rust 1.85.0.
+The slow workflow is manual/low-frequency and is not an ordinary PR required
+check.
+
+## 7. Classifying failures
 
 Before touching anything, classify the failure into exactly one bucket:
 
@@ -158,7 +174,7 @@ Escalation rule: anything that looks like a contract violation, a needed
 public-contract change, or a baseline regression goes back to issue/contract
 review — do not patch around it inside a DX task.
 
-## 7. Record base/head before every push
+## 8. Record base/head before every push
 
 The coordination registry verifies exact head bindings, so record:
 
@@ -173,7 +189,7 @@ Paste both SHAs into the PR/task report before pushing. Re-fetch immediately
 before the push itself; if `origin/main` moved past your recorded base,
 rebase only when authorized by the dispatch protocol — never silently.
 
-## 8. Troubleshooting watchers and stale diagnostics
+## 9. Troubleshooting watchers and stale diagnostics
 
 - **Bacon not rerunning on save**: confirm the editor saves files inside the
   repository Bacon watches (launch Bacon at the repo root). On WSL2, files
