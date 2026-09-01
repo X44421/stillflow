@@ -22,3 +22,23 @@ derogates (and any derogation must itself be justified in the task row).
 
 Enforcement: dispatchers must paste these norms (or their substance) into every
 executor/reviewer prompt alongside the task contract.
+
+
+## GOV-R1 coordination scope
+
+The Registry is an active-writer safety mechanism, not a second GitHub task
+database.
+
+- L0/L1 work does not register.
+- L2/L3 uses `taskctl register -> claim -> heartbeat -> release`.
+- Register the narrowest stable writer surface; L2 crate-wide locks require an
+  explicit reason.
+- GitHub Issue/PR owns lifecycle, head, CI, review, accepted commit, and merge
+  facts. Do not copy those facts into Registry completion history.
+- Routine Registry mutations use taskctl's non-forced compare-and-swap commit
+  directly. Do not open coordination PRs for claim/head/heartbeat/release.
+- `taskctl rebind-check` distinguishes semantic/path overlap from unrelated
+  main drift. A new main SHA alone is not a rebind reason.
+- Legacy `complete`, `bind-head`, dependency rows, and historical entries
+  remain only for tasks created before GOV-R1 and may be retired after those
+  tasks finish.
