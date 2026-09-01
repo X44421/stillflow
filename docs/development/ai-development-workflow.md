@@ -142,7 +142,7 @@ Standard repository checks:
 ```bash
 cd backend && cargo fmt --all -- --check
 cd backend && cargo clippy --workspace --all-targets -- -D warnings
-cd backend && cargo test --workspace
+cd backend && cargo test --workspace -- --skip total_output_cap_is_accepted_at_eight_gib_and_enforced_above
 npm run typecheck
 npm run build
 ```
@@ -168,6 +168,12 @@ The repository test runner uses normal Rust parallelism. Tests that share
 mutable process state must isolate that state themselves; a parallel-only
 failure is fixed at the exact fixture, not by globally forcing
 `--test-threads=1`.
+
+Routine workspace checks may explicitly skip a named physical-scale test when
+that exact test is preserved in a dedicated slow/release workflow. The current
+case is `total_output_cap_is_accepted_at_eight_gib_and_enforced_above`, which exercises the real 8 GiB export boundary and is
+run by `.github/workflows/slow-boundaries.yml`. This is evidence routing, not
+test deletion or semantic weakening.
 
 ## 8. Pull request protocol
 
