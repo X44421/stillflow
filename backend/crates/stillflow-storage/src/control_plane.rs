@@ -846,8 +846,10 @@ impl ControlPlaneStore {
     /// process restart and can be claimed normally.
     pub fn list_reconciliation_candidates(
         &self,
+        workspace_id: Uuid,
         max_candidates: usize,
     ) -> Result<Vec<ReconciliationCandidate>, StorageError> {
+        validate_id(workspace_id, "workspace")?;
         if max_candidates == 0 || max_candidates > crate::MAX_MAINTENANCE_CANDIDATES as usize {
             return Err(StorageError::InvalidDraft(
                 "reconciliation candidate limit is outside the maintenance bound",
@@ -860,17 +862,21 @@ impl ControlPlaneStore {
                 "SELECT j.id, j.run_id, j.state, r.state
                  FROM cp_jobs AS j
                  JOIN cp_runs AS r ON r.id = j.run_id
-                 WHERE j.state IN ('running', 'cancelling')
+                 WHERE j.workspace_id = ?1
+                   AND j.state IN ('running', 'cancelling')
                    AND r.state IN ('running', 'cancelling')
                  ORDER BY j.queued_at_utc ASC, j.id ASC
-                 LIMIT ?1",
+                 LIMIT ?2",
             )
             .map_err(|_| StorageError::database("prepare reconciliation candidates"))?;
         let rows = statement
             .query_map(
-                params![i64::try_from(max_candidates).map_err(|_| {
-                    StorageError::ArithmeticOverflow("reconciliation candidate limit")
-                })?],
+                params![
+                    workspace_id.to_string(),
+                    i64::try_from(max_candidates).map_err(|_| {
+                        StorageError::ArithmeticOverflow("reconciliation candidate limit")
+                    })?
+                ],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -5456,9 +5462,92 @@ mod tests {
         assert_eq!(
             fixture
                 .store
-                .list_reconciliation_candidates(10)
+                .list_reconciliation_candidates(fixture.workspace_id, 10)
                 .expect("reconciliation candidates"),
             Vec::new()
+        );
+    }
+
+    #[test]
+    fn reconciliation_candidates_are_workspace_scoped() {
+        let fixture = Fixture::new();
+        let workspace_id = Uuid::from_u128(11);
+        let session_id = Uuid::from_u128(12);
+        let plan_id = Uuid::from_u128(13);
+        let plan_version_id = Uuid::from_u128(14);
+        fixture
+            .store
+            .create_workspace(workspace_id, at(1))
+            .expect("workspace");
+        fixture
+            .store
+            .create_session(workspace_id, session_id, at(2))
+            .expect("session");
+        fixture
+            .store
+            .create_plan(workspace_id, plan_id, at(3))
+            .expect("plan");
+        let canonical_plan_bytes = b"other-workspace-plan".to_vec();
+        let plan_digest = sha256(&canonical_plan_bytes);
+        fixture
+            .store
+            .create_plan_version(PlanVersionDraft {
+                workspace_id,
+                plan_id,
+                plan_version_id,
+                version_number: 1,
+                parent_version_id: None,
+                logical_plan: serde_json::json!({"version": 1}),
+                canonical_plan_bytes,
+                canonical_plan_digest: plan_digest,
+                plan_fingerprint: [8; 32],
+                created_at: at(4),
+            })
+            .expect("PlanVersion draft");
+        fixture
+            .store
+            .publish_plan_version(plan_version_id, None, at(5))
+            .expect("publish PlanVersion");
+        let other_job = match fixture
+            .store
+            .submit_job(
+                JobSubmission::try_new(
+                    workspace_id,
+                    session_id,
+                    plan_version_id,
+                    plan_digest,
+                    Uuid::from_u128(1100),
+                    "other-workspace-job",
+                    Vec::new(),
+                    serde_json::json!({"deadlineSeconds": 900}),
+                    serde_json::json!({}),
+                    at(10),
+                    Uuid::from_u128(1101),
+                    "other-request",
+                    "other-correlation",
+                    "actor:test",
+                )
+                .expect("submission"),
+            )
+            .expect("submit other Job")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        fixture.claim(other_job.id, Uuid::from_u128(2200));
+
+        assert!(fixture
+            .store
+            .list_reconciliation_candidates(fixture.workspace_id, 10)
+            .expect("current workspace candidates")
+            .is_empty());
+        assert_eq!(
+            fixture
+                .store
+                .list_reconciliation_candidates(workspace_id, 10)
+                .expect("other workspace candidates")
+                .len(),
+            1
         );
     }
 
@@ -5477,7 +5566,7 @@ mod tests {
         fixture.claim(job.id, run_id);
         let candidates = fixture
             .store
-            .list_reconciliation_candidates(10)
+            .list_reconciliation_candidates(fixture.workspace_id, 10)
             .expect("candidates");
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].job_state, JobState::Running);

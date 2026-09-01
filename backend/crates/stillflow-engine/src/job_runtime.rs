@@ -350,7 +350,7 @@ impl JobRuntime {
         let candidates = self
             .inner
             .control_plane
-            .list_reconciliation_candidates(RECONCILIATION_LIMIT)?;
+            .list_reconciliation_candidates(self.inner.workspace_id, RECONCILIATION_LIMIT)?;
         let mut drafts = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             let job = self.inner.control_plane.get_job(candidate.job_id)?;
