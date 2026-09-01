@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 266,
+  "revision": 267,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9",
+  "source_main_sha": "132d0353e919793b4342f9cdf6bc51f93187abf9",
   "policy": {
     "terminal_statuses": [
       "done",
@@ -3175,7 +3175,7 @@
     {
       "id": "E5-C0",
       "title": "Freeze unified control-plane contract",
-      "status": "claimed",
+      "status": "done",
       "mode": "write",
       "owner": "agent-e5-c0-191",
       "target_issue": 191,
@@ -3183,9 +3183,7 @@
       "target_branch": "agent/issue-191-e5-c0-control-plane-contract",
       "expected_base": "23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9",
       "expected_head": "2a80b3af30caaaa58366f599cdb6eba1a36c8868",
-      "locks": [
-        "branch:agent/issue-191-e5-c0-control-plane-contract"
-      ],
+      "locks": [],
       "paths": [
         "docs/issues/issue-191-unified-control-plane-contract.md"
       ],
@@ -3205,14 +3203,19 @@
         "Q-R1-PROFILE-RUNTIME"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-08-31T09:37:52Z",
+      "lease_expires_at": null,
       "started_at": "2026-08-31T08:07:52Z",
-      "updated_at": "2026-09-01T01:43:40Z",
+      "updated_at": "2026-09-01T02:38:31Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Next mainline after the completed Q-R1, Q-R2, X-R1, and E24 productionization lineage. PR #188 is merged and makes coordination synchronization a repository completion gate. Dispatch is unclaimed and must bind the live main base at CLAIM time.",
-      "notes": "CLAIMED. Contract-only scope for the unified control plane: ownership/cardinality, lineage references, lifecycle transitions, terminal/idempotency rules, event sequence/redaction/retention, queue/run/cancel/restart reconciliation, Artifact bounded reads, Preview provenance-only semantics, and Plan canonical digest/concurrency. Exact claim base is main@23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9. Unique writer lock: branch:agent/issue-191-e5-c0-control-plane-contract. Draft PR #194 is rebound to exact implementation head 2a80b3af30caaaa58366f599cdb6eba1a36c8868 and adds only docs/issues/issue-191-unified-control-plane-contract.md. Follow-up correction clarifies that Preview failed is a typed non-event result and that Artifact lifecycle events use the owning Run stream. No feature code, dependency, workflow, frontend, or checklist change. Independent exact-head acceptance and all PR #188 coordination synchronization requirements remain mandatory."
+      "notes": "COMPLETED. E5-C0 contract-only scope delivered in PR #194. Entry base was main@23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9; accepted implementation head was 2a80b3af30caaaa58366f599cdb6eba1a36c8868. The accepted head merged into main as 132d0353e919793b4342f9cdf6bc51f93187abf9 with first parent 23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9 and second parent 2a80b3af30caaaa58366f599cdb6eba1a36c8868. Post-merge core CI run 33462543904 passed 7 of 7 checks; build-and-deploy failed with GitHub Pages 404 because Pages is not enabled, an environment-only failure. No feature code, dependency, workflow, frontend, or checklist change. Claim and branch writer lock are released after post-merge synchronization.",
+      "completed_at": "2026-09-01T02:38:31Z",
+      "result_head": "132d0353e919793b4342f9cdf6bc51f93187abf9",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33462543904",
+      "evidence_url": "https://github.com/X44421/stillflow/issues/191#issuecomment-5487598090",
+      "completion_note": "TASK_COMPLETE: exact-head acceptance, merge-parent verification, post-merge core CI, coordination synchronization, and claim/lock release completed."
     }
   ],
   "locks": {},
-  "updated_at": "2026-08-31T08:41:07Z"
+  "updated_at": "2026-09-01T02:38:31Z"
 }
