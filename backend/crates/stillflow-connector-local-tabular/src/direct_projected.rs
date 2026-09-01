@@ -332,7 +332,8 @@ impl<'de> Visitor<'de> for DirectProjectedObjectVisitor<'_, '_> {
                     let needs_canonicalization = canonicalize
                         || (subtree && captured.get().as_bytes().iter().any(|&byte| byte < 0x20))
                         || (type_can_contain_number_tokens(&field.data_type)
-                            && has_wide_integer_literal(captured.get()));
+                            && has_wide_integer_literal(captured.get()))
+                        || contains_timestamp(&field.data_type);
                     if needs_canonicalization {
                         *target = canonical_captured_value(captured.get(), field)
                             .map_err(A::Error::custom)?;
@@ -439,6 +440,17 @@ fn type_can_contain_number_tokens(data_type: &LogicalType) -> bool {
     )
 }
 
+fn contains_timestamp(data_type: &LogicalType) -> bool {
+    match data_type {
+        LogicalType::Timestamp { .. } => true,
+        LogicalType::List(element) => contains_timestamp(element),
+        LogicalType::Struct(fields) => fields
+            .iter()
+            .any(|field| contains_timestamp(&field.data_type)),
+        _ => false,
+    }
+}
+
 /// Conservative detector for integer literals whose magnitude cannot survive
 /// serde_json's own integer parse: any run of >= 19 consecutive ASCII digits.
 ///
@@ -504,6 +516,8 @@ fn canonical_captured_value(
         serde_json::from_str(text).map_err(|_| "value has an incompatible logical type")?;
     // The rebuilt form can never bypass validation: the generic oracle decides.
     validate_json_value(&dom, field)?;
+    let mut dom = dom;
+    crate::read::normalize_json_temporal_value(&mut dom, &field.data_type)?;
     let encoded = serde_json::to_vec(&dom).map_err(|_| "value has an incompatible logical type")?;
     Ok(ProjectedSlot::Canonical(encoded))
 }
