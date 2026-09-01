@@ -5,6 +5,7 @@
 
 pub mod artifact;
 pub mod bundle;
+pub mod control_plane;
 pub mod dedup;
 mod digest;
 mod error;
@@ -24,6 +25,13 @@ pub use bundle::{
     AcceptedSnapshotArtifact, DeduplicationReportArtifact, RejectedRowsArtifact,
     ValidationReportArtifact, VerificationBundle, VerificationBundleDraft,
     VerificationBundleMembership, VerificationBundleWriter,
+};
+pub use control_plane::{
+    ArtifactCursor, ArtifactPage, ArtifactRefDraft, ArtifactRefRecord, ControlPlaneStore,
+    DatasetRecord, EventCursor, EventDraft, EventPage, EventRecord, ExternalRefKind, FailureInfo,
+    JobCursor, JobPage, JobRecord, JobSubmission, PlanRecord, PlanVersionDraft, PlanVersionRecord,
+    RunCursor, RunPage, RunRecord, SessionRecord, SourceAssetRecord, SourceConnectionRecord,
+    SubmitOutcome, WorkspaceRecord,
 };
 pub use dedup::{
     DedupIndex, DedupInsert, MAX_DEDUP_INDEX_CACHE_KIB, MAX_DEDUP_INDEX_DISK_BYTES,
