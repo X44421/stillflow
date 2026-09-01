@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Atomic task coordination for StillFlow WSL agents.
 
-The machine source of truth lives on the never-merged
-``coordination/task-registry`` branch. Registry mutations create one Git commit
-containing both ``registry.json`` and the rendered ``TASKS.md``. Moving the
-branch ref is non-forced, so a concurrent mutation based on an older head is
-rejected instead of overwriting another agent's claim.
+Active L2/L3 writer claims live on the never-merged
+``coordination/task-registry`` branch. GitHub Issues/PRs remain authoritative
+for task lifecycle, implementation head, CI, review, and merge facts. Registry
+mutations create one compare-and-swap Git commit containing ``registry.json``
+and rendered ``TASKS.md``; no coordination PR is required for routine claim
+state.
 
 Only the Python standard library and an authenticated ``gh`` CLI are required.
 """
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+from fnmatch import fnmatch
 import json
 import os
 from pathlib import Path
@@ -35,6 +37,7 @@ TASKS_PATH = "coordination/TASKS.md"
 ALLOWED_STATUSES = {
     "blocked",
     "cancelled_duplicate",
+    "claimed",
     "dispatched",
     "done",
     "failed",
@@ -46,6 +49,16 @@ ALLOWED_STATUSES = {
 ALLOWED_MODES = {"maintenance", "review", "write", "measurement", "design"}
 TERMINAL_STATUSES = {"cancelled_duplicate", "done"}
 CLAIMABLE_STATUSES = {"dispatched", "queued"}
+ALLOWED_RISK_LEVELS = {"L2", "L3"}
+GLOBAL_REBIND_PATHS = {
+    "AGENTS.md",
+    "backend/Cargo.toml",
+    "backend/Cargo.lock",
+    "rust-toolchain.toml",
+}
+COARSE_LOCK_RE = re.compile(
+    r"^(?:storage|engine|core|connector):stillflow-[a-z0-9-]+$"
+)
 
 
 class RegistryError(RuntimeError):
@@ -118,6 +131,20 @@ def validate_registry(registry: dict[str, Any]) -> None:
             raise RegistryError(f"{task_id}: invalid status {task.get('status')!r}")
         if task.get("mode") not in ALLOWED_MODES:
             raise RegistryError(f"{task_id}: invalid mode {task.get('mode')!r}")
+        risk_level = task.get("risk_level")
+        if risk_level is not None and risk_level not in ALLOWED_RISK_LEVELS:
+            raise RegistryError(f"{task_id}: invalid risk_level {risk_level!r}")
+        if risk_level == "L2":
+            coarse = [
+                lock_key
+                for lock_key in task.get("locks", [])
+                if COARSE_LOCK_RE.fullmatch(lock_key)
+            ]
+            if coarse and not task.get("coarse_lock_reason"):
+                raise RegistryError(
+                    f"{task_id}: L2 coarse locks require coarse_lock_reason: "
+                    + ", ".join(coarse)
+                )
         if not isinstance(task.get("locks", []), list):
             raise RegistryError(f"{task_id}: locks must be an array")
         if not isinstance(task.get("depends_on", []), list):
@@ -140,17 +167,20 @@ def validate_registry(registry: dict[str, Any]) -> None:
             not isinstance(result_branch, str) or not result_branch
         ):
             raise RegistryError(f"{task_id}: result_branch must be a non-empty string")
-        if task["status"] == "running":
+        if task["status"] in {"running", "claimed"}:
             if not task.get("owner"):
-                raise RegistryError(f"{task_id}: running task needs an owner")
+                raise RegistryError(f"{task_id}: active claim needs an owner")
             if not task.get("lease_expires_at"):
-                raise RegistryError(f"{task_id}: running task needs a lease")
-            for lock_key in task.get("locks", []):
-                lock = registry["locks"].get(lock_key)
-                if not lock or lock.get("task_id") != task_id:
-                    raise RegistryError(
-                        f"{task_id}: running task does not own requested lock {lock_key}"
-                    )
+                raise RegistryError(f"{task_id}: active claim needs a lease")
+            # Pre-GOV-R1 rows may use status=claimed and keep requested locks
+            # only on the task row. New running rows must own top-level locks.
+            if task["status"] == "running":
+                for lock_key in task.get("locks", []):
+                    lock = registry["locks"].get(lock_key)
+                    if not lock or lock.get("task_id") != task_id:
+                        raise RegistryError(
+                            f"{task_id}: running task does not own requested lock {lock_key}"
+                        )
 
     for lock_key, lock in registry["locks"].items():
         if not isinstance(lock_key, str) or not lock_key:
@@ -159,8 +189,8 @@ def validate_registry(registry: dict[str, Any]) -> None:
         if task_id not in tasks:
             raise RegistryError(f"{lock_key}: unknown lock task {task_id}")
         task = tasks[task_id]
-        if task["status"] != "running":
-            raise RegistryError(f"{lock_key}: owner task {task_id} is not running")
+        if task["status"] not in {"running", "claimed"}:
+            raise RegistryError(f"{lock_key}: owner task {task_id} is not active")
         if lock.get("owner") != task.get("owner"):
             raise RegistryError(f"{lock_key}: owner differs from task {task_id}")
         if lock_key not in task.get("locks", []):
@@ -182,14 +212,21 @@ def active_lock_conflicts(
     conflicts: list[str] = []
     tasks = task_map(registry)
     for other_id, other in tasks.items():
-        if other_id == task["id"] or other["status"] != "running":
+        if other_id == task["id"] or other["status"] not in {"running", "claimed"}:
             continue
         if (
             other_id in task.get("conflicts_with", [])
             or task["id"] in other.get("conflicts_with", [])
         ):
             conflicts.append(
-                f"task conflict with {other_id} / {other.get('owner')} (running)"
+                f"task conflict with {other_id} / {other.get('owner')} "
+                f"({other['status']})"
+            )
+        overlap = sorted(set(task.get("locks", [])) & set(other.get("locks", [])))
+        if overlap:
+            conflicts.append(
+                f"lock overlap with {other_id} / {other.get('owner')}: "
+                + ", ".join(overlap)
             )
     for lock_key in task.get("locks", []):
         held = registry["locks"].get(lock_key)
@@ -209,6 +246,102 @@ def release_task_locks(registry: dict[str, Any], task_id: str) -> None:
         for key, lock in registry["locks"].items()
         if lock.get("task_id") != task_id
     }
+
+
+def register_in_memory(
+    registry: dict[str, Any],
+    task_id: str,
+    title: str,
+    risk_level: str,
+    issue: int,
+    branch: str,
+    base: str,
+    locks: list[str],
+    paths: list[str],
+    shared_paths: list[str],
+    coarse_lock_reason: str | None,
+) -> None:
+    if risk_level not in ALLOWED_RISK_LEVELS:
+        raise RegistryError("only L2/L3 tasks belong in the coordination registry")
+    if any(task.get("id") == task_id for task in registry["tasks"]):
+        raise RegistryError(f"task already registered: {task_id}")
+    if not re.fullmatch(r"[0-9a-f]{40}", base):
+        raise RegistryError("--base must be a full lowercase SHA")
+    if issue <= 0:
+        raise RegistryError("--issue must be positive")
+    if not branch:
+        raise RegistryError("--branch is required")
+    if not locks:
+        raise RegistryError("L2/L3 registration requires at least one writer lock")
+    if not paths:
+        raise RegistryError("L2/L3 registration requires at least one authorized path")
+    coarse = [lock_key for lock_key in locks if COARSE_LOCK_RE.fullmatch(lock_key)]
+    if risk_level == "L2" and coarse and not coarse_lock_reason:
+        raise RegistryError(
+            "L2 crate-wide locks require --coarse-lock-reason; prefer a surface lock"
+        )
+    now = iso(utc_now())
+    registry["tasks"].append(
+        {
+            "id": task_id,
+            "title": title,
+            "risk_level": risk_level,
+            "status": "queued",
+            "mode": "write",
+            "owner": None,
+            "target_issue": issue,
+            "target_branch": branch,
+            "expected_base": base,
+            "locks": list(dict.fromkeys(locks)),
+            "paths": list(dict.fromkeys(paths)),
+            "shared_paths": list(dict.fromkeys(shared_paths)),
+            "depends_on": [],
+            "conflicts_with": [],
+            "lease_expires_at": None,
+            "registered_at": now,
+            "updated_at": now,
+        }
+    )
+    if coarse_lock_reason:
+        registry["tasks"][-1]["coarse_lock_reason"] = coarse_lock_reason
+
+
+def release_claim_in_memory(
+    registry: dict[str, Any], task_id: str, agent: str
+) -> None:
+    task = get_task(registry, task_id)
+    if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+        raise RegistryError(f"{task_id} is not an active claim under owner {agent}")
+    dependents = [
+        other["id"]
+        for other in registry["tasks"]
+        if task_id in other.get("depends_on", [])
+    ]
+    if dependents:
+        raise RegistryError(
+            f"{task_id} is legacy dependency state for: {', '.join(dependents)}; "
+            "use legacy complete instead of release"
+        )
+    release_task_locks(registry, task_id)
+    registry["tasks"] = [
+        other for other in registry["tasks"] if other.get("id") != task_id
+    ]
+
+
+def changed_paths_requiring_rebind(
+    task: dict[str, Any], changed_files: list[str]
+) -> list[str]:
+    patterns = list(task.get("paths", [])) + list(task.get("shared_paths", []))
+    if not patterns:
+        return ["task has no declared authorized/shared paths"]
+    reasons: list[str] = []
+    for filename in changed_files:
+        if filename in GLOBAL_REBIND_PATHS:
+            reasons.append(filename)
+            continue
+        if any(fnmatch(filename, pattern) for pattern in patterns):
+            reasons.append(filename)
+    return sorted(set(reasons))
 
 
 def claim_in_memory(
@@ -257,8 +390,8 @@ def complete_in_memory(
     note: str | None,
 ) -> None:
     task = get_task(registry, task_id)
-    if task["status"] != "running" or task.get("owner") != agent:
-        raise RegistryError(f"{task_id} is not running under owner {agent}")
+    if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+        raise RegistryError(f"{task_id} is not an active claim under owner {agent}")
     if (task["mode"] == "write" or task.get("result_branch")) and not result_head:
         raise RegistryError("this task requires --result-head on completion")
     if result_head and not re.fullmatch(r"[0-9a-f]{40}", result_head):
@@ -285,75 +418,86 @@ def null_value() -> None:
 
 
 def render_markdown(registry: dict[str, Any]) -> str:
+    active = [
+        task
+        for task in registry["tasks"]
+        if task.get("status") in {"dispatched", "queued", "running", "claimed"}
+        and task.get("locks")
+    ]
+    legacy_count = len(registry["tasks"]) - len(active)
     rows = [
-        "# StillFlow coordinated task registry",
+        "# StillFlow active coordination claims",
         "",
-        "> Machine source: `coordination/registry.json`. Do not edit this file directly.",
+        "> Machine source: `coordination/registry.json`. GitHub Issues/PRs own task",
+        "> lifecycle, head, CI, review, and merge state. This registry owns only",
+        "> active L2/L3 writer/lock claims.",
         "",
         f"- Registry revision: `{registry['revision']}`",
         f"- Updated: `{registry['updated_at']}`",
-        f"- Source main: `{registry['source_main_sha']}`",
+        f"- Source main snapshot: `{registry['source_main_sha']}`",
+        f"- Legacy/inactive rows retained in JSON for migration compatibility: `{legacy_count}`",
         "",
-        "## Tasks",
+        "## Registered / active claims",
         "",
-        "| ID | Status | Mode | Owner | Target | Expected head | Dependencies | Locks |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| ID | Risk | Status | Owner | Issue | Branch | Locks |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for task in registry["tasks"]:
-        target = (
-            f"PR #{task['target_pr']}"
-            if task.get("target_pr") is not None
-            else task.get("target_branch") or "—"
-        )
-        owner = task.get("owner") or "—"
-        expected = task.get("expected_head") or "—"
-        dependencies = ", ".join(task.get("depends_on", [])) or "—"
-        locks = ", ".join(task.get("locks", [])) or "—"
-        rows.append(
-            f"| `{task['id']}` | **{task['status']}** | {task['mode']} | "
-            f"`{owner}` | {target} | `{expected}` | {dependencies} | {locks} |"
-        )
+    if active:
+        for task in active:
+            owner = task.get("owner") or "—"
+            issue = f"#{task['target_issue']}" if task.get("target_issue") else "—"
+            branch = task.get("target_branch") or "—"
+            locks = ", ".join(task.get("locks", [])) or "—"
+            rows.append(
+                f"| `{task['id']}` | {task.get('risk_level') or 'legacy'} | "
+                f"**{task['status']}** | `{owner}` | {issue} | `{branch}` | "
+                f"{locks} |"
+            )
+    else:
+        rows.append("| — | — | — | — | — | — | — |")
 
     rows.extend(
         [
             "",
             "## Active locks",
             "",
-            "| Lock | Task | Owner | Expected head | Lease expires |",
-            "| --- | --- | --- | --- | --- |",
+            "| Lock | Task | Owner | Lease expires |",
+            "| --- | --- | --- | --- |",
         ]
     )
     if registry["locks"]:
         for key, lock in sorted(registry["locks"].items()):
             rows.append(
                 f"| `{key}` | `{lock['task_id']}` | `{lock['owner']}` | "
-                f"`{lock.get('expected_head') or '—'}` | `{lock['lease_expires_at']}` |"
+                f"`{lock['lease_expires_at']}` |"
             )
     else:
-        rows.append("| — | — | — | — | — |")
+        rows.append("| — | — | — | — |")
 
     rows.extend(
         [
             "",
-            "## WSL agent protocol",
+            "## L2/L3 protocol",
             "",
             "```bash",
             "export STILLFLOW_AGENT_ID=wsl-agent-01",
-            "python3 coordination/taskctl.py doctor",
-            "python3 coordination/taskctl.py show",
+            "python3 coordination/taskctl.py register TASK_ID --risk L2 --issue N \\",
+            "  --branch agent/issue-N-short --base FULL_MAIN_SHA \\",
+            "  --lock storage:export --path 'backend/crates/stillflow-storage/src/export.rs'",
             "python3 coordination/taskctl.py claim TASK_ID",
             "python3 coordination/taskctl.py heartbeat TASK_ID",
-            "# Revalidate the target branch head before every code push.",
-            "python3 coordination/taskctl.py complete TASK_ID --result-head FULL_SHA --ci URL",
+            "python3 coordination/taskctl.py rebind-check TASK_ID",
+            "# PR/CI/review state stays in GitHub; release removes the active claim.",
+            "python3 coordination/taskctl.py release TASK_ID",
             "```",
             "",
-            "A mutation rejected as a remote conflict must be re-read and evaluated; never blind-retry.",
-            "Feature branches must never merge this coordination branch.",
+            "L0/L1 work does not register here. A CAS conflict means STOP and re-read;",
+            "never blind-retry. Legacy commands remain available only for rows created",
+            "under the pre-GOV-R1 workflow.",
             "",
         ]
     )
     return "\n".join(rows)
-
 
 def gh_json(method: str, endpoint: str, payload: dict[str, Any] | None = None) -> Any:
     command = ["gh", "api", "--method", method, endpoint]
@@ -392,6 +536,14 @@ class RemoteRegistry:
             "GET", f"repos/{self.repository}/branches/{quote(branch, safe='')}"
         )
         return payload["commit"]["sha"]
+
+    def compare_files(self, base: str, head: str) -> list[str]:
+        payload = gh_json(
+            "GET",
+            f"repos/{self.repository}/compare/{quote(base, safe='')}..."
+            f"{quote(head, safe='')}",
+        )
+        return [entry["filename"] for entry in payload.get("files", [])]
 
     def read_file(self, path: str) -> str:
         endpoint = (
@@ -513,6 +665,64 @@ def command_sync(remote: RemoteRegistry, args: argparse.Namespace) -> None:
     print(f"synced revision {registry['revision']} to {output}")
 
 
+def command_register(remote: RemoteRegistry, args: argparse.Namespace) -> None:
+    agent = require_agent(args.agent)
+
+    def mutate(registry: dict[str, Any]) -> None:
+        register_in_memory(
+            registry,
+            args.task_id,
+            args.title or args.task_id,
+            args.risk,
+            args.issue,
+            args.branch,
+            args.base,
+            args.lock,
+            args.path,
+            args.shared_path,
+            args.coarse_lock_reason,
+        )
+        registry["tasks"][-1]["registered_by"] = agent
+
+    head, _ = remote.mutate(f"coord: register active claim {args.task_id}", mutate)
+    print(f"registered {args.task_id}; coordination head {head}")
+
+
+def command_release(remote: RemoteRegistry, args: argparse.Namespace) -> None:
+    agent = require_agent(args.agent)
+
+    def mutate(registry: dict[str, Any]) -> None:
+        release_claim_in_memory(registry, args.task_id, agent)
+
+    head, _ = remote.mutate(f"coord: release active claim {args.task_id}", mutate)
+    print(f"released {args.task_id}; coordination head {head}")
+
+
+def command_rebind_check(remote: RemoteRegistry, args: argparse.Namespace) -> None:
+    registry = remote.read_registry()
+    task = get_task(registry, args.task_id)
+    base = task.get("expected_base")
+    if not base:
+        raise RegistryError(
+            f"{args.task_id} has no expected_base; legacy task requires manual review"
+        )
+    main_head = remote.target_branch_head("main")
+    if main_head == base:
+        print(f"NO_REBIND_REQUIRED main still at {base}")
+        return
+    changed = remote.compare_files(base, main_head)
+    reasons = changed_paths_requiring_rebind(task, changed)
+    if reasons:
+        raise RegistryError(
+            "REBIND_REQUIRED main drift overlaps declared semantic surface: "
+            + ", ".join(reasons)
+        )
+    print(
+        f"NO_REBIND_REQUIRED main moved {base} -> {main_head} with no "
+        "authorized/shared-path overlap"
+    )
+
+
 def command_claim(remote: RemoteRegistry, args: argparse.Namespace) -> None:
     agent = require_agent(args.agent)
     snapshot = remote.read_registry()
@@ -558,8 +768,10 @@ def command_heartbeat(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] != "running" or task.get("owner") != agent:
-            raise RegistryError(f"{args.task_id} is not running under owner {agent}")
+        if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+            raise RegistryError(
+                f"{args.task_id} is not an active claim under owner {agent}"
+            )
         now = utc_now()
         lease = iso(now + timedelta(minutes=args.lease_minutes))
         task.update({"lease_expires_at": lease, "updated_at": iso(now)})
@@ -576,8 +788,10 @@ def command_pause(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] != "running" or task.get("owner") != agent:
-            raise RegistryError(f"{args.task_id} is not running under owner {agent}")
+        if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+            raise RegistryError(
+                f"{args.task_id} is not an active claim under owner {agent}"
+            )
         release_task_locks(registry, args.task_id)
         now = iso(utc_now())
         task.update(
@@ -634,7 +848,7 @@ def command_cancel_duplicate(remote: RemoteRegistry, args: argparse.Namespace) -
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] == "running" and task.get("owner") != agent:
+        if task["status"] in {"running", "claimed"} and task.get("owner") != agent:
             raise RegistryError(f"{args.task_id} is owned by {task.get('owner')}")
         release_task_locks(registry, args.task_id)
         now = iso(utc_now())
@@ -661,8 +875,8 @@ def command_reclaim(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] != "running":
-            raise RegistryError(f"{args.task_id} is not running")
+        if task["status"] not in {"running", "claimed"}:
+            raise RegistryError(f"{args.task_id} is not an active claim")
         lease = parse_iso(task.get("lease_expires_at"))
         if not lease or lease > utc_now():
             raise RegistryError(f"{args.task_id} lease is not expired")
@@ -687,7 +901,7 @@ def command_queue(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] in {"running", "done", "cancelled_duplicate"}:
+        if task["status"] in {"running", "claimed", "done", "cancelled_duplicate"}:
             raise RegistryError(f"cannot queue {args.task_id} from {task['status']}")
         blockers = dependency_blockers(registry, task)
         if blockers:
@@ -712,8 +926,8 @@ def command_bind_head(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] == "running":
-            raise RegistryError("cannot rebind a running task")
+        if task["status"] in {"running", "claimed"}:
+            raise RegistryError("cannot rebind an active claim")
         if args.branch:
             task["target_branch"] = args.branch
         task.update(
@@ -855,9 +1069,27 @@ def command_self_test(_remote: RemoteRegistry, _args: argparse.Namespace) -> Non
     complete_in_memory(registry, "C", "agent-c", "2" * 40, None, None)
     claim_in_memory(registry, "D", "agent-d", 90)
     validate_registry(registry)
+    register_in_memory(
+        registry,
+        "E",
+        "ephemeral medium-risk claim",
+        "L2",
+        999,
+        "agent/issue-999-test",
+        "3" * 40,
+        ["storage:export"],
+        ["backend/crates/stillflow-storage/src/export.rs"],
+        [],
+        None,
+    )
+    claim_in_memory(registry, "E", "agent-e", 90)
+    release_claim_in_memory(registry, "E", "agent-e")
+    if any(task.get("id") == "E" for task in registry["tasks"]):
+        raise RegistryError("self-test failed: released active claim was retained")
+    validate_registry(registry)
     print(
-        "self-test passed: lock/task conflicts rejected, releases observed, "
-        "merge head required"
+        "self-test passed: legacy conflicts preserved; L2 register/claim/release "
+        "removes active claims"
     )
 
 
@@ -890,6 +1122,35 @@ def build_parser() -> argparse.ArgumentParser:
     sync = subparsers.add_parser("sync", help="write a local read-only cache")
     sync.add_argument("directory")
     sync.set_defaults(handler=command_sync)
+
+    register = subparsers.add_parser(
+        "register", help="register an ephemeral L2/L3 writer claim"
+    )
+    register.add_argument("task_id")
+    add_agent_argument(register)
+    register.add_argument("--risk", choices=sorted(ALLOWED_RISK_LEVELS), required=True)
+    register.add_argument("--issue", type=int, required=True)
+    register.add_argument("--branch", required=True)
+    register.add_argument("--base", required=True)
+    register.add_argument("--title")
+    register.add_argument("--lock", action="append", default=[], required=True)
+    register.add_argument("--path", action="append", default=[], required=True)
+    register.add_argument("--shared-path", action="append", default=[])
+    register.add_argument("--coarse-lock-reason")
+    register.set_defaults(handler=command_register)
+
+    release = subparsers.add_parser(
+        "release", help="release and remove an active L2/L3 claim"
+    )
+    release.add_argument("task_id")
+    add_agent_argument(release)
+    release.set_defaults(handler=command_release)
+
+    rebind = subparsers.add_parser(
+        "rebind-check", help="check whether main drift overlaps task semantics"
+    )
+    rebind.add_argument("task_id")
+    rebind.set_defaults(handler=command_rebind_check)
 
     claim = subparsers.add_parser("claim", help="atomically claim a task")
     claim.add_argument("task_id")
