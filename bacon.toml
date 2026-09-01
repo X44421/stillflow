@@ -81,7 +81,8 @@ command = [
     "--lib",
 ]
 
-# Tier 2 — full local gate: every workspace test with normal runner parallelism.
+# Tier 2 — routine full local gate. The physical 8 GiB export boundary lives
+# in the dedicated slow-boundary workflow, not the edit/PR loop.
 [jobs.test-workspace]
 command = [
     "cargo",
@@ -89,6 +90,9 @@ command = [
     "--manifest-path",
     "backend/Cargo.toml",
     "--workspace",
+    "--",
+    "--skip",
+    "total_output_cap_is_accepted_at_eight_gib_and_enforced_above",
 ]
 
 # Override bacon's built-in `test` job only to bind it to the backend workspace.
@@ -99,4 +103,7 @@ command = [
     "--manifest-path",
     "backend/Cargo.toml",
     "--workspace",
+    "--",
+    "--skip",
+    "total_output_cap_is_accepted_at_eight_gib_and_enforced_above",
 ]
