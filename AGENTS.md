@@ -57,16 +57,23 @@ dependency may point from a lower layer back to a higher layer.
 
 ## Contract and risk gates
 
-| Risk | Required flow |
-| --- | --- |
-| `risk:low` | implementation -> CI |
-| `risk:medium` | contract note -> implementation -> review -> CI |
-| `risk:high` | frozen contract -> implementation -> architecture review -> CI |
+Use the lowest risk level that matches the changed authority surface. Do not
+apply the L3 ceremony to routine work.
 
-Treat work as `risk:high` when it changes a public trait, core domain type,
-logical schema, expression/rule AST, plan serialization, Arrow stream or
-envelope, cancellation/backpressure, secret handling, persistence format, or
-three or more crates.
+| Level | Typical work | Required flow |
+| --- | --- | --- |
+| `L0` | typo, comments, docs wording, CI naming, metadata-only cleanup | branch -> PR -> relevant CI -> merge |
+| `L1` | test infrastructure, internal refactor, CI behavior, isolated private change | Issue -> PR -> relevant CI -> normal PR review -> merge |
+| `L2` | private runtime behavior, performance path, bounded implementation touching a shared writer surface | Issue -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent PR Review -> merge |
+| `L3` | public contracts, persistence/schema, execution semantics, secrets, cross-crate architecture | frozen contract -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent PR Review -> guarded merge |
+
+Only L2/L3 work may use `coordination/task-registry`. L0/L1 work must not
+create Registry rows merely to mirror GitHub state.
+
+Treat work as L3 when it changes a public trait, core domain type, logical
+schema, expression/rule AST, plan serialization, Arrow stream or envelope,
+cancellation/backpressure semantics, secret handling, persistence format, or
+three or more crates with shared authority.
 
 Breaking a merged public contract is allowed only when all of these are true:
 
@@ -81,11 +88,18 @@ is intentionally deferred to a later contract.
 
 ## Branch and PR conventions
 
-- Use `agent/issue-NNN-short-description` from the latest accepted base.
-- Prefer one issue per branch. A docs-only governance PR may group tightly coupled
-  contract issues when its body lists every issue and contains no implementation.
+- L1-L3 branches use `agent/issue-NNN-short-description`; L0 may use a short
+  descriptive branch without creating a task Issue.
+- Prefer one implementation boundary per PR. A docs-only governance PR may group
+  tightly coupled policy changes when its body lists the affected Issues.
 - Keep commits atomic and make a stacked PR's base branch explicit.
-- A medium/high-risk PR must link its contract under `docs/issues/`.
+- L3 PRs must link the frozen contract under `docs/issues/`.
+- L2/L3 independent acceptance is recorded as a GitHub **PR Review** bound to the
+  reviewed commit. Do not create a separate acceptance Issue for a single PR.
+  Separate acceptance Issues are reserved for cross-PR, release, or migration
+  gates.
+- The accepted SHA lives in the PR review/PR state. Do not duplicate it into
+  Issue comments, Registry rows, #81, and checklist documents solely as a mirror.
 - Do not rewrite or delete another contributor's changes to make a branch clean.
 
 ## Required verification
@@ -104,63 +118,87 @@ npm run build
 For contract or architecture-only changes, also verify links, issue numbers,
 dependency arrows, and that every acceptance criterion is objectively testable.
 
-## Mandatory completion synchronization
+## Coordination authority and completion
 
-Every task must finish with a coordination-state synchronization pass.
-Implementation, tests, review fixes, acceptance, or merge work alone do not
-make a task complete. A task is complete only when every authoritative
-coordination surface affected by that task matches live repository reality.
+Do not maintain duplicate copies of facts GitHub already owns.
 
-Before returning a terminal success verdict:
+Authoritative surfaces:
 
-1. Re-fetch the live repository state and verify the exact final branch/head SHA.
-2. Verify the relevant CI/test results for that exact head.
-3. Update the canonical task Issue with a delivery, acceptance, merge, or completion receipt as applicable.
-4. Update the PR body/status when final head, evidence, scope, or terminal state changed.
-5. Update the canonical Current Execution Board / roadmap ledger when the task changed `main`, task state, dependencies, active writer/lock ownership, or the next dispatchable task.
-6. Update repository-owned current-state checklist documentation when the task made its current-state section stale.
-7. Release or close every task-owned registry row, writer claim, and coordination lock.
-8. Close the canonical Issue only when its acceptance contract is fully satisfied.
-9. Re-read the updated coordination surfaces and verify that they agree with live GitHub state.
+- **GitHub Issue** — task scope/lifecycle when the risk level requires an Issue.
+- **Pull Request** — implementation head, CI, reviews, accepted commit, Ready and
+  merge state.
+- **`coordination/task-registry`** — active L2/L3 writer/lock claims only.
+- **Epic #81** — roadmap/dependency planning only; it is not a live head/CI/lock
+  dashboard.
+- **Repository checklists** — completion definitions and historical planning,
+  not per-task live status mirrors.
 
-The following surfaces must not disagree at task completion when they are
-applicable to the task:
+### Registry and locks
 
-- live GitHub repository state;
-- canonical Issue;
-- PR state/body;
-- Current Execution Board / roadmap ledger;
-- repository-owned current-state checklist;
-- task registry / writer / lock state.
+For L2/L3 work, register only the active claim needed to prevent conflicting
+writers. Use the narrowest stable surface lock, for example
+`storage:control-plane`, `storage:export`, or `engine:verification`.
+Crate-wide locks require L3 or an explicit reason.
 
-If they disagree, perform coordination-only reconciliation before reporting
-the task as complete. Do not leave synchronization for the maintainer unless
-the task explicitly forbids modifying that coordination surface.
+Registry mutations use the taskctl compare-and-swap path directly. A separate
+coordination PR is not required for claim, heartbeat, head updates, or release.
+A CAS conflict is still a hard STOP: re-read state and re-evaluate; never
+blind-retry.
 
-### Merge completion gate
+### Exact-head review
 
-After any merge, also:
+For L2/L3, the independent PR Review is the exact-head acceptance binding.
+Before merge, verify:
 
-- re-fetch `main` and record the exact merge commit;
-- verify the accepted exact head is the intended merge parent/head;
-- verify post-merge CI when available;
-- update the canonical Issue and execution board;
-- refresh stale current-main references;
-- release merge/task locks and close completed dispatch records.
+1. the PR head still equals the commit approved by the independent review;
+2. required CI for that exact head is green;
+3. no new commit was added after approval.
 
-### Terminal states
+Do not copy the same SHA through multiple ledgers as an additional safety gate.
 
-Use one of these completion classes:
+### Main drift and rebind
 
-- `TASK_COMPLETE` — technical work and required coordination synchronization are complete;
-- `TASK_COMPLETE_COORDINATION_PENDING` — technical work is complete but one or more required coordination surfaces could not be synchronized;
-- `TASK_BLOCKED` — the task cannot complete under its current authorization or prerequisites.
+A changed `main` SHA does not automatically invalidate an open branch. Rebind
+only when main drift:
 
-`No coordination update = no DONE.`
+- overlaps the task's authorized paths;
+- changes a declared shared dependency or frozen contract surface;
+- creates a merge conflict; or
+- otherwise changes a semantic assumption used by the task.
 
-A final completion response must report, when applicable: final task state,
-exact head/merge SHA, CI/test result, Issue state, PR state, ledger/board
-state, registry/lock state, and remaining blockers (`none` when there are none).
+Unrelated documentation, another isolated crate, or other non-overlapping drift
+does not require a ceremonial rebind/reaccept cycle.
+
+### Completion
+
+A task is complete when its technical acceptance is satisfied and the
+authoritative surfaces are correct. Routine completion must not create
+coordination work solely to mirror GitHub.
+
+At completion:
+
+- update/close the canonical Issue when one exists;
+- use the PR's native state for head, CI, review, and merge facts;
+- release any active Registry claim/locks;
+- update #81 only when roadmap topology/dependencies/milestone state changed;
+- update repository checklist documents only when their completion definition
+  or historical planning content changed.
+
+Do **not** require PR-body rewrites, board refreshes, checklist refreshes,
+Registry history entries, duplicate merge-SHA receipts, or post-merge CI merely
+to restate facts already recorded by GitHub.
+
+Post-merge CI is required only when branch protection/release policy requires
+it or the merge commit contains additional code/resolution not present in the
+accepted head.
+
+Terminal classes:
+
+- `TASK_COMPLETE` — technical acceptance complete; any active claim released.
+- `TASK_BLOCKED` — current authorization/prerequisites cannot complete the task.
+
+The legacy `TASK_COMPLETE_COORDINATION_PENDING` class and
+`No coordination update = no DONE` rule are retired.
 
 ## Completion report
 
