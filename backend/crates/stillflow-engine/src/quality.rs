@@ -26,8 +26,8 @@ use crate::{
 /// existing Engine operator-state allowance. Every retained allocation is
 /// charged before retention: the fixed structural overhead below at budget
 /// creation, each finding/evidence/provenance/id-set copy through
-/// [`retained_finding_bytes`], the AI proposal input vector on arrival, and a
-/// pre-bound for the canonical body before encoding.
+/// [`retained_finding_bytes`] and a pre-bound for the canonical body before
+/// encoding.
 pub const QUALITY_STATE_BYTE_BUDGET: usize = MAX_OPERATOR_STATE_BYTES / 2;
 
 /// Derivable fixed retained-state overhead charged up front (bytes): the
@@ -56,8 +56,6 @@ pub const QUALITY_MAX_EVIDENCE_REFS_PER_FINDING: usize = 8;
 pub const QUALITY_MAX_IDENTITY_BYTES: usize = 256;
 pub const QUALITY_MAX_PROVENANCE_REF_BYTES: usize = 1024;
 pub const QUALITY_MAX_PLAN_FINGERPRINT_BYTES: usize = 256;
-
-const AI_PROPOSAL_DETECTOR_ID: &str = "ai-proposal";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FindingCategory {
@@ -184,12 +182,6 @@ impl FindingProvenance {
         }
         Ok(())
     }
-
-    fn for_ai(&self, identity: AiIdentity) -> Self {
-        let mut value = self.clone();
-        value.ai_identity = Some(identity);
-        value
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -275,74 +267,6 @@ impl QualityFinding {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct AiProposalInput {
-    finding_id: String,
-    category: FindingCategory,
-    severity: FindingSeverity,
-    message: String,
-    evidence_refs: Vec<FindingEvidence>,
-    identity: AiIdentity,
-}
-
-impl AiProposalInput {
-    /// Accepts only an already-produced ADR-002 §8 effect result. This is
-    /// crate-private until the typed XR-A1 effect/worker boundary exists, so
-    /// ordinary callers cannot inject AI output directly into Q-R2.
-    // v1 charters no AI caller: the typed boundary entry exists so the
-    // origin law is structurally enforceable; the evidence tests exercise it.
-    #[allow(dead_code)]
-    pub fn from_effect_boundary(
-        finding_id: impl Into<String>,
-        category: FindingCategory,
-        severity: FindingSeverity,
-        message: impl Into<String>,
-        evidence_refs: Vec<FindingEvidence>,
-        model_identity: impl Into<String>,
-        effect_identity: impl Into<String>,
-    ) -> Result<Self, EngineError> {
-        let finding_id = finding_id.into();
-        let message = message.into();
-        let model_identity = model_identity.into();
-        let effect_identity = effect_identity.into();
-        if finding_id.is_empty() || finding_id.len() > 128 {
-            return Err(EngineError::BoundExceeded(
-                "AI proposal finding_id is outside the authorized bound",
-            ));
-        }
-        if message.is_empty() || message.len() > crate::PROFILE_MAX_RETAINED_VALUE_BYTES {
-            return Err(EngineError::BoundExceeded(
-                "AI proposal message is outside the authorized bound",
-            ));
-        }
-        if model_identity.is_empty()
-            || effect_identity.is_empty()
-            || model_identity.len() > QUALITY_MAX_IDENTITY_BYTES
-            || effect_identity.len() > QUALITY_MAX_IDENTITY_BYTES
-        {
-            return Err(EngineError::BoundExceeded(
-                "AI proposal model/effect identity is outside the authorized bound",
-            ));
-        }
-        if evidence_refs.is_empty() || evidence_refs.len() > QUALITY_MAX_EVIDENCE_REFS_PER_FINDING {
-            return Err(EngineError::BoundExceeded(
-                "AI proposal evidence count is outside the authorized bound",
-            ));
-        }
-        Ok(Self {
-            finding_id,
-            category,
-            severity,
-            message,
-            evidence_refs,
-            identity: AiIdentity {
-                model_identity,
-                effect_identity,
-            },
-        })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QualityScore {
     pub value: Option<u8>,
@@ -393,7 +317,6 @@ pub struct QualityRequest {
     /// `None` is the disclosed absence; `Some` is verified against the run
     /// before the association is reported.
     pub verification: Option<VerificationBundle>,
-    ai_proposals: Vec<AiProposalInput>,
 }
 
 impl QualityRequest {
@@ -412,7 +335,6 @@ impl QualityRequest {
             context,
             provenance,
             verification: None,
-            ai_proposals: Vec::new(),
         })
     }
 }
@@ -941,7 +863,7 @@ fn push_finding(
 }
 
 // Structural validation independent of the profile. Full reproducibility is
-// checked immediately before retention by run_detectors / AI proposal routing.
+// checked immediately before retention by run_detectors.
 fn validate_evidence_placeholder(evidence: &FindingEvidence) -> Result<(), EngineError> {
     match evidence {
         FindingEvidence::Metric(metric) if metric.metric_path.is_empty() => {
@@ -1320,68 +1242,6 @@ fn run_detectors(
     Ok(findings)
 }
 
-fn add_ai_proposals(
-    profile: &DatasetProfile,
-    provenance: &FindingProvenance,
-    context: &RequestContext,
-    proposals: Vec<AiProposalInput>,
-    findings: &mut Vec<QualityFinding>,
-    budget: &mut QualityBudget,
-) -> Result<(), EngineError> {
-    if proposals.len() > QUALITY_MAX_AI_PROPOSALS {
-        return Err(EngineError::BoundExceeded(
-            "AI proposal count exceeds the fixed Q-R2 bound",
-        ));
-    }
-    // The request-side proposal vector is retained until each proposal is
-    // materialized; charge its bytes on arrival so the peak of retained
-    // input plus accumulated findings stays inside the budget.
-    let input_bytes: usize = proposals
-        .iter()
-        .map(|proposal| {
-            let evidence: usize = proposal.evidence_refs.iter().map(evidence_bytes).sum();
-            proposal.finding_id.len()
-                + proposal.message.len()
-                + proposal.identity.model_identity.len()
-                + proposal.identity.effect_identity.len()
-                + evidence
-        })
-        .sum();
-    budget.charge(input_bytes)?;
-    let mut ids: BTreeSet<String> = findings
-        .iter()
-        .map(|finding| finding.finding_id.clone())
-        .collect();
-    for proposal in proposals {
-        context.ensure_active().map_err(map_context_error)?;
-        for evidence in &proposal.evidence_refs {
-            validate_evidence(profile, evidence)?;
-        }
-        // Charge before the finding (message/provenance/identity copies) is
-        // materialized and retained.
-        budget.charge(retained_finding_bytes(
-            &proposal.finding_id,
-            &proposal.message,
-            &proposal.evidence_refs,
-            provenance,
-            Some(&proposal.identity),
-        ))?;
-        let finding = QualityFinding {
-            finding_id: proposal.finding_id,
-            category: proposal.category,
-            severity: proposal.severity,
-            detector_id: AI_PROPOSAL_DETECTOR_ID,
-            detector_contract_version: DETECTOR_CONTRACT_VERSION,
-            origin: FindingOrigin::AiProposal,
-            message: proposal.message,
-            evidence_refs: proposal.evidence_refs,
-            provenance: provenance.for_ai(proposal.identity),
-        };
-        push_finding(findings, &mut ids, finding)?;
-    }
-    Ok(())
-}
-
 impl ExecutionEngine {
     /// Q-R2 deterministic findings + QualityReport. This consumes a completed
     /// Q-R1 ProfileResult and therefore performs no data re-scan.
@@ -1416,14 +1276,6 @@ impl ExecutionEngine {
             &request.profile.profile,
             &request.provenance,
             &request.context,
-            &mut budget,
-        )?;
-        add_ai_proposals(
-            &request.profile.profile,
-            &request.provenance,
-            &request.context,
-            request.ai_proposals,
-            &mut findings,
             &mut budget,
         )?;
         findings.sort_by(|left, right| left.finding_id.cmp(&right.finding_id));
@@ -2533,122 +2385,6 @@ mod tests {
         assert!(body.contains("ValueDigestEvidence"));
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn q07_provenance_exact_fields_and_ai_identity() {
-        let profile = profile_result(
-            10,
-            vec![text_column(
-                "t",
-                10,
-                0,
-                Some(2),
-                Some(vec![ProfileTopValue::Text {
-                    value: "x".to_owned(),
-                    count: 8,
-                }]),
-                0,
-            )],
-            Some(0),
-            false,
-            100,
-        );
-        let evidence = FindingEvidence::ValueDigest(ValueDigestEvidence {
-            column_ref: "t".to_owned(),
-            digests: vec![digest_top_value(
-                profile.profile.columns[0]
-                    .top_values
-                    .as_ref()
-                    .expect("top")
-                    .first()
-                    .expect("first"),
-            )
-            .expect("digest")],
-            count: 8,
-        });
-        let proposal = AiProposalInput::from_effect_boundary(
-            "ai.1",
-            FindingCategory::Text,
-            FindingSeverity::Info,
-            "AI proposal based on report evidence.",
-            vec![evidence],
-            "model-v1",
-            "effect-v1",
-        )
-        .expect("proposal");
-        let engine = ExecutionEngine::new(ConnectorRegistry::new());
-        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(7)))
-            .expect("request");
-        request.ai_proposals.push(proposal);
-        let result = engine.quality(request).await.expect("quality");
-        let ai = result
-            .report
-            .findings
-            .iter()
-            .find(|finding| finding.origin() == FindingOrigin::AiProposal)
-            .expect("ai");
-        assert_eq!(
-            ai.provenance().ai_identity,
-            Some(AiIdentity {
-                model_identity: "model-v1".to_owned(),
-                effect_identity: "effect-v1".to_owned()
-            })
-        );
-        assert!(result.provenance.ai_identity.is_none());
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn q08_ai_origin_is_structural_and_excluded_from_score() {
-        let profile = profile_result(
-            10,
-            vec![text_column(
-                "t",
-                10,
-                0,
-                Some(2),
-                Some(vec![ProfileTopValue::Text {
-                    value: "x".to_owned(),
-                    count: 8,
-                }]),
-                0,
-            )],
-            Some(0),
-            false,
-            100,
-        );
-        let baseline = run_quality(profile.clone(), Uuid::from_u128(8))
-            .await
-            .expect("baseline");
-        let top = profile.profile.columns[0].top_values.as_ref().expect("top")[0].clone();
-        let proposal = AiProposalInput::from_effect_boundary(
-            "ai.score-independent",
-            FindingCategory::Text,
-            FindingSeverity::Error,
-            "AI proposal remains non-authoritative.",
-            vec![FindingEvidence::ValueDigest(ValueDigestEvidence {
-                column_ref: "t".to_owned(),
-                digests: vec![digest_top_value(&top).expect("digest")],
-                count: 8,
-            })],
-            "model",
-            "effect",
-        )
-        .expect("proposal");
-        let engine = ExecutionEngine::new(ConnectorRegistry::new());
-        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(9)))
-            .expect("request");
-        request.ai_proposals.push(proposal);
-        let with_ai = engine.quality(request).await.expect("quality");
-        assert_eq!(baseline.report.score, with_ai.report.score);
-        let ai = with_ai
-            .report
-            .findings
-            .iter()
-            .find(|finding| finding.finding_id() == "ai.score-independent")
-            .expect("ai");
-        assert_eq!(ai.detector_id(), AI_PROPOSAL_DETECTOR_ID);
-        assert_eq!(ai.origin(), FindingOrigin::AiProposal);
-    }
-
     #[test]
     fn q09_quality_score_normative_vectors_v1_v2() {
         let v1_columns = (0..10)
@@ -2920,67 +2656,6 @@ mod tests {
             .await
             .expect("bounded");
         assert!(bounded.report.findings.len() <= QUALITY_MAX_FINDINGS);
-
-        // Part 2 (issue #181 item 15): real retained state — accumulated
-        // findings with evidence, AI identity, and messages — drives the
-        // engine path across the bound and fails with the existing typed
-        // resource-limit error. No direct budget pokes.
-        let values: Vec<String> = (0..PROFILE_MAX_TOP_K)
-            .map(|index| format!("s{index:0>3}"))
-            .collect();
-        let tops: Vec<ProfileTopValue> = values
-            .iter()
-            .map(|value| ProfileTopValue::Text {
-                value: value.clone(),
-                count: 1,
-            })
-            .collect();
-        let mut digests: Vec<String> = tops
-            .iter()
-            .map(digest_top_value)
-            .collect::<Result<_, _>>()
-            .expect("digests");
-        digests.sort();
-        let profile = profile_result(
-            PROFILE_MAX_TOP_K as u64,
-            vec![text_column(
-                "t",
-                PROFILE_MAX_TOP_K as u64,
-                0,
-                Some(PROFILE_MAX_TOP_K as u64),
-                Some(tops),
-                0,
-            )],
-            None,
-            false,
-            PROFILE_MAX_TOP_K as u64,
-        );
-        let engine = ExecutionEngine::new(ConnectorRegistry::new());
-        let mut request = QualityRequest::new(profile, context(), provenance(Uuid::from_u128(15)))
-            .expect("request");
-        for index in 0..QUALITY_MAX_AI_PROPOSALS {
-            let proposal = AiProposalInput::from_effect_boundary(
-                format!("ai.overflow.{index:0>4}"),
-                FindingCategory::Text,
-                FindingSeverity::Info,
-                "x".repeat(PROFILE_MAX_RETAINED_VALUE_BYTES),
-                vec![FindingEvidence::ValueDigest(ValueDigestEvidence {
-                    column_ref: "t".to_owned(),
-                    digests: digests.clone(),
-                    count: 1,
-                })],
-                "model-q15",
-                "effect-q15",
-            )
-            .expect("proposal");
-            request.ai_proposals.push(proposal);
-        }
-        assert!(matches!(
-            engine.quality(request).await,
-            Err(EngineError::BoundExceeded(
-                "quality retained state exceeds Engine operator-state budget"
-            ))
-        ));
     }
 
     #[tokio::test(flavor = "current_thread")]

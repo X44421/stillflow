@@ -95,62 +95,6 @@ pub struct VerificationRequest<'a> {
     pub store: &'a SnapshotStore,
 }
 
-/// Validates caller-injected identities before any storage I/O
-/// (contract 10.5). Pairwise distinctness is checked again by
-/// `VerificationBundleDraft::try_new`; this pre-check keeps the failure
-/// inside the Engine error vocabulary.
-pub(crate) fn validate_verification_identities(
-    identities: &VerificationIdentities,
-    source_asset_id: Uuid,
-) -> Result<(), EngineError> {
-    let mut distinct = [
-        Some(identities.run_id),
-        Some(identities.bundle_id),
-        Some(identities.bundle_artifact_id),
-        Some(identities.snapshot_id),
-        Some(identities.dataset_id),
-        Some(identities.validation_report_artifact_id),
-        identities.rejected_rows_artifact_id,
-        Some(identities.deduplication_report_artifact_id),
-        Some(identities.session_id),
-    ];
-    distinct.sort_unstable();
-    if identities.run_id.is_nil()
-        || identities.bundle_id.is_nil()
-        || identities.bundle_artifact_id.is_nil()
-        || identities.snapshot_id.is_nil()
-        || identities.dataset_id.is_nil()
-        || identities.validation_report_artifact_id.is_nil()
-        || identities
-            .rejected_rows_artifact_id
-            .is_some_and(|id: Uuid| Uuid::is_nil(&id))
-        || identities.deduplication_report_artifact_id.is_nil()
-        || identities.session_id.is_nil()
-        || source_asset_id.is_nil()
-        || identities.lineage.iter().any(Uuid::is_nil)
-    {
-        return Err(EngineError::InvalidPlan(
-            "injected verification identities must not be nil",
-        ));
-    }
-    if distinct.windows(2).any(|window| window[0] == window[1]) {
-        return Err(EngineError::InvalidPlan(
-            "run, bundle, and artifact identities must be pairwise distinct",
-        ));
-    }
-    if identities.quality_score.is_some_and(|score| score > 100) {
-        return Err(EngineError::InvalidPlan("quality score is outside 0..=100"));
-    }
-    if identities.created_at > identities.started_at
-        || identities.started_at > identities.committed_at
-    {
-        return Err(EngineError::InvalidPlan(
-            "injected timestamps must be non-decreasing created_at <= started_at <= committed_at",
-        ));
-    }
-    Ok(())
-}
-
 /// Assembles the bundle provenance draft with the verified canonical-plan
 /// digest (contract 7.2 / 10.5). Callers cannot forge engine-derived
 /// integrity fields: the digest here is the recomputed one.
@@ -2893,8 +2837,6 @@ impl ExecutionEngine {
             .as_ref()
             .map_err(|_| EngineError::Internal("logical plan fingerprint failed"))?
             .as_bytes();
-
-        validate_verification_identities(&request.identities, request.asset.id)?;
 
         let expected_fingerprint =
             stillflow_core::LogicalSchemaFingerprint::try_from_schema(&prepared.expected_connector)
