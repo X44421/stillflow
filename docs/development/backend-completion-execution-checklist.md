@@ -1,12 +1,12 @@
 # StillFlow Backend Completion Execution Checklist
 
-- Canonical roadmap ledger: Epic #81
+- Canonical roadmap: Epic #81 (roadmap/dependencies only; not a live execution-state mirror)
 - Original reconciliation: Issue #82 (B0-R0), branch
   `agent/issue-082-backend-roadmap-reconciliation` (historical snapshot)
 - Client roadmap: [X44421/openship#1](https://github.com/X44421/openship/issues/1)
-- Current main: `main@6dcec4fa35d3c46abe3c0c4abe8138263493d27c`
-  (PR #186 / E24-JSON-A2-PROD merged 2026-08-31; PR #185 / X-R1 merged
-  immediately before it)
+- Live implementation state is read from GitHub at execution time. Any SHA in
+  this document is a historical planning/evidence anchor unless explicitly
+  labeled as a frozen contract base.
 - Latest state refresh: 2026-08-31 UTC, re-read from GitHub after the
   exact-head merges:
   - PR #179 / Q-R1: accepted head `3b305b3c9204c55a30344e80c6672f9c688948bc`,
@@ -32,17 +32,18 @@
 - Scope: Phase 1 deterministic MVP; Phase 2 client-ready product backend;
   Phase 3 production backend; optional AI product layer; registered future
   capabilities
-- Status: execution plan bound to Epic #81. This document authorizes nothing
-  outside its dispatched Issues; every implementation task still runs its own
-  dispatch -> CLAIM -> exact base/head binding -> Draft PR -> independent
-  acceptance -> Ready/Merge -> DONE cycle.
+- Status: dependency/completion plan bound to Epic #81. This document does not
+  mirror per-task head, CI, lock, or review state. Execution uses the repository
+  risk routing: L0/L1 use GitHub only; L2/L3 add scoped coordination claims and
+  exact-head independent PR Review.
 
 ## 1. Purpose
 
 This document is the repository-owned, dependency-ordered checklist for
-completing the StillFlow backend. It mirrors the authoritative roadmap and
-status ledger defined by Epic #81 into the repository so that dispatch,
-review, and release gates can be executed from `main`.
+completing the StillFlow backend. It defines completion boundaries and records
+historical planning decisions. It is **not** a second live task database.
+GitHub Issues/PRs own live task and implementation facts; the coordination
+registry owns active L2/L3 writer locks only.
 
 The Phase 1 backend is complete when a caller can execute this deterministic,
 auditable lifecycle:
@@ -262,43 +263,53 @@ its latest available snapshot, but that snapshot is stale (`source_main_sha`
 historical locks on terminal tasks. Those rows are not active writers, but the
 registry must be refreshed before the next implementation dispatch.
 
-## 5. Execution status vocabulary
+## 5. Execution state and authority
 
-Each task uses exactly one status:
+This checklist uses roadmap states only: `blocked`, `ready`, `active`,
+`delivered`, and `deferred`. It must not duplicate the live PR head, CI,
+review, branch-lock, or merge state.
 
-- `blocked`: an upstream contract, inventory, or runtime has not merged.
-- `ready`: all entry conditions are satisfied and no conflicting branch is
-  active.
-- `in_progress`: the canonical Issue records a CLAIM and exactly one active
-  branch/Draft PR exists for it. Un-dispatched tasks must never carry this
-  status.
-- `review`: the declared delivery is complete and work has stopped.
-- `approved`: an explicit review/comment is bound to the current full head SHA.
-- `merged`: the approved head was merged without later commits and the branch
-  was deleted.
-- `deferred`: explicitly outside all current completion gates (Track F and the
-  optional AI layer before its entry conditions hold).
+Live authority is:
 
-Every task has exactly one canonical Issue. Duplicate trackers or duplicate
-dispatch of an active task are forbidden.
+- GitHub Issue: task scope/lifecycle for L1-L3;
+- GitHub PR: implementation head, CI, review, accepted commit and merge state;
+- coordination/task-registry: active L2/L3 writer/lock claims only;
+- Epic #81: roadmap dependencies/milestones only.
 
-## 6. Branch, PR, and review discipline
+L0 work does not require a task Issue. L1 requires an Issue but no Registry.
+Only L2/L3 require a scoped CLAIM/lock. A single-PR independent acceptance is a
+GitHub PR Review, not a separate acceptance Issue.
 
-For every task below:
+## 6. Branch, PR, review, and rebind discipline
 
-1. Confirm all dependencies are merged.
-2. Fetch the latest accepted `main` and record its full SHA.
-3. Create or reuse the canonical Issue before naming the branch.
-4. Use `agent/issue-NNN-short-description`.
-5. Open a Draft PR immediately after the first scoped commit.
-6. Keep one task and one delivery boundary per PR.
-7. Never merge, rebase, or cherry-pick an unrelated open feature PR.
-8. Do not mix Dependabot updates into product branches.
-9. Keep revisions on the existing PR; do not create replacement contract
-   branches for R1/R2/R3 reviews.
-10. Bind every approval to the exact full head SHA.
-11. After approval, add no commit before Ready/Merge.
-12. After merge and green CI, close the Issue and delete the remote branch.
+Apply the repository risk level first:
+
+- **L0:** branch -> PR -> relevant CI -> merge. No Issue/Registry.
+- **L1:** Issue -> PR -> relevant CI -> normal PR review -> merge.
+- **L2:** Issue -> scoped CLAIM/lock -> Draft PR -> exact-head CI ->
+  independent PR Review -> merge.
+- **L3:** frozen contract -> scoped CLAIM/lock -> Draft PR -> exact-head CI ->
+  independent PR Review -> guarded merge.
+
+General rules:
+
+1. Confirm semantic dependencies, not merely that `main` has a new SHA.
+2. L1-L3 use one canonical Issue and `agent/issue-NNN-short-description`.
+3. Keep one implementation boundary per PR and revisions on the same PR.
+4. Do not create a separate acceptance Issue for a single PR.
+5. For L2/L3, the PR Review commit is the accepted exact head. Before merge,
+   verify the current head still equals the approved commit and required CI is
+   green.
+6. Main drift triggers rebind only for authorized-path overlap, shared
+   dependency/contract changes, merge conflicts, or a changed semantic
+   assumption. Unrelated drift does not force rebind/reaccept.
+7. Use the narrowest stable Registry lock; crate-wide locks require L3 or an
+   explicit reason.
+8. Never merge, rebase, or cherry-pick an unrelated open feature PR.
+9. Do not mix Dependabot updates into product branches.
+10. After merge, close the Issue when applicable and release any active
+    Registry claim. GitHub already owns merge/head/CI history; do not duplicate
+    it across ledgers solely for bookkeeping.
 
 No more than three implementation/product branches should be active at once.
 Short-lived docs-only architecture or inventory work may temporarily occupy one
@@ -1159,24 +1170,27 @@ release/upgrade/rollback capability are delivered and gated by Track H.
 The AI produces only inspectable drafts and commands; every accepted
 transformation executes through the same deterministic contracts.
 
-Ledger integrity conditions for declaring any of the above:
+Planning integrity conditions for declaring any of the above:
 
-- every active task has exactly one canonical Issue, one writer, and an exact
-  base/head binding;
-- statuses agree with GitHub facts at declaration time;
+- L1-L3 tasks have one canonical Issue; L0 may omit one;
+- L2/L3 tasks have at most one active scoped writer claim;
+- accepted commit/head facts live in the PR review, not duplicated here;
 - historical SHAs remain labeled historical;
-- Epic #81 checkboxes and this document agree.
+- Epic #81 and this document agree on roadmap topology/completion definitions,
+  not transient head/CI/lock state.
 
 ## 23. Plan maintenance
 
-- Update status only in the PR that changes the underlying state, or in a
-  dedicated short-lived roadmap PR bound to the canonical Issue.
-- Record full merged SHAs, never seven-character claims, at approval and merge
-  gates; label historical SHAs as historical.
-- `in_progress` requires a recorded CLAIM on the canonical Issue; un-dispatched
-  tasks stay `blocked` or `ready`.
-- One canonical Issue per task; duplicate dispatch of an active task is
-  forbidden (E4-S2 is Issue #80 and nothing else).
+- Update this checklist only when roadmap topology, completion definitions, or
+  historical planning evidence changes. Do not refresh it for every branch
+  head, CI run, review, lock lease, or merge receipt.
+- Epic #81 is maintained on the same milestone/semantic-change cadence; it is
+  not a live execution board.
+- Full merged SHAs may be retained as historical evidence where they explain a
+  completed milestone, but approval/head state belongs to the PR.
+- L2/L3 `active` work requires one scoped Registry writer claim; L0/L1 do not.
+- One canonical Issue per L1-L3 task; duplicate dispatch of an active task is
+  forbidden.
 - Do not mark a phase complete from test counts alone.
 - If implementation needs a new public field, dependency, error category,
   resource model, or publication state outside a frozen contract, stop and
