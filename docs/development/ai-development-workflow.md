@@ -65,7 +65,7 @@ Examples: bounded private runtime behavior, performance path, or implementation
 touching a shared writer surface without changing a frozen public contract.
 
 Flow: Issue -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent
-GitHub PR Review -> merge.
+GitHub PR Review or compliant exact-head acceptance receipt -> merge.
 
 ### L3 — high
 
@@ -74,7 +74,8 @@ serialization, cancellation/backpressure semantics, persistence formats,
 secrets, or cross-crate authority changes.
 
 Flow: frozen Implementation Contract -> scoped CLAIM/lock -> Draft PR ->
-exact-head CI -> independent GitHub PR Review -> guarded merge.
+exact-head CI -> independent GitHub PR Review or compliant exact-head
+acceptance receipt -> guarded merge.
 
 Only L2/L3 belong in `coordination/task-registry`.
 
@@ -204,13 +205,20 @@ The PR body should report only information not already obvious from GitHub:
 - list remaining risks.
 
 GitHub itself is authoritative for PR head, CI status, review state, Ready, and
-merge state. Do not duplicate those facts across Issue comments, Registry rows,
-Epic #81, and repository checklists solely as bookkeeping.
+merge state. When the receipt path is used, the linked Issue or PR comment is
+authoritative for the acceptance evidence. Do not duplicate those facts across
+Registry rows, Epic #81, and repository checklists solely as bookkeeping.
 
-For L2/L3, independent acceptance is a GitHub **PR Review** bound to the
-reviewed commit. Do not create a separate acceptance Issue for one PR. Before
-merge, verify the current head still equals the approved review commit and the
-required exact-head CI is green.
+For L2/L3, independent acceptance is either a GitHub **PR Review** by a
+reviewer other than the PR author or a compliant exact-head acceptance receipt
+when no separate GitHub reviewer identity is available. Do not create a
+separate acceptance Issue for one PR. A receipt must disclose the reviewer and
+any account overlap, exact head/base, PR state, exact-head CI, independent
+checkout/worktree, scope, contract/adversarial evidence, findings/fixes, and
+that no Ready or merge action was performed. It is an auditable equivalent
+gate, not a native GitHub Review; a native Review remains preferred when
+available. Before merge, verify the current head still equals the accepted
+commit named by either form and the required exact-head CI is green.
 
 Main drift requires rebind only when it overlaps the task's authorized paths,
 declared shared dependency/contract surfaces, creates a merge conflict, or
@@ -219,7 +227,10 @@ changes a semantic assumption. A new main SHA by itself is not a rebind reason.
 Completion uses native authority:
 
 - Issue = scope/lifecycle;
-- PR = head/CI/review/merge;
+- PR = head/CI/review/merge, including the accepted commit when native Review
+  is used;
+- linked Issue or PR comment = exact-head acceptance receipt when that path is
+  used;
 - Registry = active L2/L3 writer locks only;
 - Epic #81 = roadmap/dependencies only;
 - repository checklist = completion definition/history only.

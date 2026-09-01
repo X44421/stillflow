@@ -64,8 +64,8 @@ apply the L3 ceremony to routine work.
 | --- | --- | --- |
 | `L0` | typo, comments, docs wording, CI naming, metadata-only cleanup | branch -> PR -> relevant CI -> merge |
 | `L1` | test infrastructure, internal refactor, CI behavior, isolated private change | Issue -> PR -> relevant CI -> normal PR review -> merge |
-| `L2` | private runtime behavior, performance path, bounded implementation touching a shared writer surface | Issue -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent PR Review -> merge |
-| `L3` | public contracts, persistence/schema, execution semantics, secrets, cross-crate architecture | frozen contract -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent PR Review -> guarded merge |
+| `L2` | private runtime behavior, performance path, bounded implementation touching a shared writer surface | Issue -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent PR Review or compliant acceptance receipt -> merge |
+| `L3` | public contracts, persistence/schema, execution semantics, secrets, cross-crate architecture | frozen contract -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent PR Review or compliant acceptance receipt -> guarded merge |
 
 Only L2/L3 work may use `coordination/task-registry`. L0/L1 work must not
 create Registry rows merely to mirror GitHub state.
@@ -94,12 +94,23 @@ is intentionally deferred to a later contract.
   tightly coupled policy changes when its body lists the affected Issues.
 - Keep commits atomic and make a stacked PR's base branch explicit.
 - L3 PRs must link the frozen contract under `docs/issues/`.
-- L2/L3 independent acceptance is recorded as a GitHub **PR Review** bound to the
-  reviewed commit. Do not create a separate acceptance Issue for a single PR.
-  Separate acceptance Issues are reserved for cross-PR, release, or migration
-  gates.
-- The accepted SHA lives in the PR review/PR state. Do not duplicate it into
-  Issue comments, Registry rows, #81, and checklist documents solely as a mirror.
+- L2/L3 independent acceptance is recorded as either a GitHub **PR Review** by a
+  reviewer other than the PR author, or an explicit exact-head acceptance
+  receipt when no separate GitHub reviewer identity is available. Both forms
+  must bind the acceptance to the reviewed commit. Do not create a separate
+  acceptance Issue for a single PR. Separate acceptance Issues are reserved for
+  cross-PR, release, or migration gates.
+- An acceptance receipt is an auditable equivalent gate, not a native GitHub
+  Review. It must disclose the reviewer identity and any author/reviewer
+  account overlap, exact PR head and implementation base, PR state, required
+  exact-head CI, independent checkout/worktree, changed-file scope, contract
+  and adversarial evidence, findings and fixes, and the explicit statement
+  that no Ready or merge action was performed. An implementation receipt alone
+  never qualifies as acceptance.
+- With a native Review, the accepted SHA lives in the PR review/PR state. With
+  the receipt path, the canonical acceptance receipt may live in the linked
+  Issue or PR comment. Do not duplicate either form into Registry rows, #81, or
+  checklist documents solely as a mirror.
 - Do not rewrite or delete another contributor's changes to make a branch clean.
 
 ## Required verification
@@ -125,8 +136,10 @@ Do not maintain duplicate copies of facts GitHub already owns.
 Authoritative surfaces:
 
 - **GitHub Issue** — task scope/lifecycle when the risk level requires an Issue.
-- **Pull Request** — implementation head, CI, reviews, accepted commit, Ready and
-  merge state.
+- **Pull Request** — implementation head, CI, reviews, Ready and merge state;
+  the accepted commit is bound there when native Review is used.
+- **Linked Issue or PR comment** — the canonical exact-head acceptance receipt
+  when the receipt path is used.
 - **`coordination/task-registry`** — active L2/L3 writer/lock claims only.
 - **Epic #81** — roadmap/dependency planning only; it is not a live head/CI/lock
   dashboard.
@@ -145,14 +158,19 @@ coordination PR is not required for claim, heartbeat, head updates, or release.
 A CAS conflict is still a hard STOP: re-read state and re-evaluate; never
 blind-retry.
 
-### Exact-head review
+### Exact-head acceptance
 
-For L2/L3, the independent PR Review is the exact-head acceptance binding.
+For L2/L3, the independent PR Review or the compliant acceptance receipt is the
+exact-head acceptance binding. A native PR Review remains preferred when a
+separate reviewer identity is available; it is not a prerequisite when the
+receipt requirements above are satisfied.
 Before merge, verify:
 
-1. the PR head still equals the commit approved by the independent review;
+1. the PR head still equals the commit approved by the independent review or
+   named in the acceptance receipt;
 2. required CI for that exact head is green;
-3. no new commit was added after approval.
+3. no new commit was added after approval;
+4. any receipt explicitly discloses that it is not a native GitHub Review.
 
 Do not copy the same SHA through multiple ledgers as an additional safety gate.
 
