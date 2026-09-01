@@ -78,7 +78,7 @@ The following terms are normative:
 | Profile history entry | A Dataset-owned durable reference to one committed profile artifact, its Run, resolved request/policy identity, schema identity, and lifecycle state. It does not own or copy artifact payload bytes. |
 | Profile sequence | A monotonically increasing u64 assigned per Dataset when a history entry becomes visible. It is the ordering key; wall-clock time is not an ordering key. |
 | Active entry | A history entry eligible for reads and, subject to §5, possible baseline selection. |
-| Tombstoned entry | A retained identity/reference that is excluded from new baseline selection and comparison requests but remains available as audit metadata. |
+| Tombstoned entry | A retained identity/reference that is excluded from new baseline selection and comparison requests but remains available as audit metadata. An upstream `Archived` state is normalized to this non-active state for Q-D1. |
 | Baseline | The older profile selected for one comparison. |
 | Candidate | The newer profile selected for one comparison. |
 | Comparison key | The canonical identity of a comparison request, including both profile digests and every semantic policy input. |
@@ -211,6 +211,16 @@ values match:
 - `top_k` and `histogram_buckets` resolved in the ProfileRequest;
 - the Q-D1 `threshold_policy_version` selected by the request.
 
+Quality compatibility is explicit even though drift does not consume a
+QualityScore: a ProfileHistoryEntry may carry an optional linked
+`quality_report.v1`, but Q-D1 never derives a drift result from it. If that
+linked report is present, its `QUALITY_SCORE_VERSION` must be known to the
+reader; an unknown or newer quality version is recorded as
+`INCOMPATIBLE_VERSION` rather than being interpreted. The absence of a linked
+QualityReport is valid for drift. Thus Profile/Quality version compatibility
+is fail-closed when a Quality artifact is present, while the required drift
+metric compatibility remains solely the Profile/Policy tuple above.
+
 The Dataset schema is not required to be identical: schema additions,
 removals, type changes, and nullability changes are the subject of this
 contract. An unknown, missing, or newer version fails closed with
@@ -232,8 +242,10 @@ ABSENT -> ACTIVE -> TOMBSTONED
 
 The `ACTIVE -> TOMBSTONED` transition is idempotent. There is no transition
 back to Active, no in-place replacement of an artifact, and no visible
-partially written state. A duplicate create of an existing idempotency identity
-returns the existing state.
+partially written state. Q-D1 has no separate `Archived` comparison state: an
+archived entry from an upstream lifecycle is treated as Tombstoned and returns
+`TOMBSTONED_INPUT` for a new comparison. A duplicate create of an existing
+idempotency identity returns the existing state.
 
 Tombstoning excludes an entry from new baseline selection, new comparison
 requests, and ordinary history payload reads. Its identity, sequence, digest,
