@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 276,
+  "revision": 277,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -56,7 +56,7 @@
       "id": "SIMP-R1",
       "title": "Remove Quality/Verification design debt (issue #221)",
       "risk_level": "L2",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-simp-r1-221",
       "target_issue": 221,
@@ -77,16 +77,19 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T09:29:30Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-01T07:59:30Z",
       "started_at": "2026-09-01T07:59:30Z",
-      "updated_at": "2026-09-01T07:59:30Z"
+      "updated_at": "2026-09-01T12:10:00Z",
+      "completed_at": "2026-09-01T12:10:00Z",
+      "result_head": "49bc2d45d3a5c6d578568481d452f434e887de87",
+      "completion_note": "PR #224 merged; accepted implementation head 3c2227e7fe639367342acf8cfef6ddc3df060623."
     },
     {
       "id": "TS-151-PROD",
       "title": "Correct local-tabular temporal decoding (issue #151)",
       "risk_level": "L2",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-ts-151-prod",
       "target_issue": 151,
@@ -104,16 +107,19 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T09:29:30Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-01T07:59:30Z",
       "started_at": "2026-09-01T07:59:30Z",
-      "updated_at": "2026-09-01T07:59:30Z"
+      "updated_at": "2026-09-01T12:10:00Z",
+      "completed_at": "2026-09-01T12:10:00Z",
+      "result_head": "1ae4faa410374bb7fba0b34e6b7a5d80a022415c",
+      "completion_note": "PR #225 merged; accepted implementation head 6703a21ac3858b7bea46cc27566aa81d404728c1."
     },
     {
       "id": "Q-D1-C0",
       "title": "Freeze Profile History / Drift contract (issue #222)",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-q-d1-c0-222",
       "target_issue": 222,
@@ -131,43 +137,15 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T09:29:30Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-01T07:59:30Z",
       "started_at": "2026-09-01T07:59:30Z",
-      "updated_at": "2026-09-01T07:59:30Z"
+      "updated_at": "2026-09-01T12:10:00Z",
+      "completed_at": "2026-09-01T12:10:00Z",
+      "result_head": "ad6c1220909d8a4e9f86938409144154b5ec95ad",
+      "completion_note": "PR #226 merged; accepted contract head 5f4c23758a252a1ec5c979d2bb46f3be426697fe."
     }
   ],
-  "locks": {
-    "engine:quality": {
-      "task_id": "SIMP-R1",
-      "owner": "agent-simp-r1-221",
-      "acquired_at": "2026-09-01T07:59:30Z",
-      "lease_expires_at": "2026-09-01T09:29:30Z"
-    },
-    "engine:verification": {
-      "task_id": "SIMP-R1",
-      "owner": "agent-simp-r1-221",
-      "acquired_at": "2026-09-01T07:59:30Z",
-      "lease_expires_at": "2026-09-01T09:29:30Z"
-    },
-    "storage:bundle": {
-      "task_id": "SIMP-R1",
-      "owner": "agent-simp-r1-221",
-      "acquired_at": "2026-09-01T07:59:30Z",
-      "lease_expires_at": "2026-09-01T09:29:30Z"
-    },
-    "connector:local-tabular:temporal": {
-      "task_id": "TS-151-PROD",
-      "owner": "agent-ts-151-prod",
-      "acquired_at": "2026-09-01T07:59:30Z",
-      "lease_expires_at": "2026-09-01T09:29:30Z"
-    },
-    "docs:quality-drift-contract": {
-      "task_id": "Q-D1-C0",
-      "owner": "agent-q-d1-c0-222",
-      "acquired_at": "2026-09-01T07:59:30Z",
-      "lease_expires_at": "2026-09-01T09:29:30Z"
-    }
-  },
-  "updated_at": "2026-09-01T11:59:48Z"
+  "locks": {},
+  "updated_at": "2026-09-01T12:10:00Z"
 }
