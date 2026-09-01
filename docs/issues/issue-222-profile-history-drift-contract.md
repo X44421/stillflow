@@ -523,15 +523,18 @@ The fixed comparison bounds are:
 
 | Limit | Value | Meaning |
 | --- | ---: | --- |
+| `DRIFT_MAX_PROFILES_PER_COMPARISON` | 2 | Exactly one baseline and one candidate profile may participate in one comparison. |
 | `DRIFT_MAX_COMPARE_COLUMNS` | 256 | Maximum resolved columns considered in one comparison. |
 | `DRIFT_MAX_FINDINGS_PER_REPORT` | 4096 | Maximum findings retained in one report. |
 | `DRIFT_MAX_MISSING_METRICS` | 256 | Maximum missing-metric records in one report. |
 | `DRIFT_MAX_EVIDENCE_REFS_PER_FINDING` | 8 | Maximum evidence references per finding. |
+| `DRIFT_MAX_RETAINED_EVIDENCE_BYTES_PER_FINDING` | 65,536 | Maximum encoded evidence bytes retained for one finding. |
 | `DRIFT_MAX_REPORT_BYTES` | 2,097,152 | Maximum canonical report body size. |
 | `DRIFT_MAX_REPORT_PAGE_SIZE` | 100 | Maximum findings returned by one report page. |
 
 The report is rejected atomically with `OUTPUT_LIMIT_EXCEEDED` if any bound
-would be exceeded. Finding pagination uses the stable finding order of §7.4;
+would be exceeded, including the per-finding retained-evidence byte bound.
+Finding pagination uses the stable finding order of §7.4;
 its opaque cursor is scoped to report digest and page direction. A cursor
 cannot be used to read a different report or bypass the report byte bound.
 
