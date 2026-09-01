@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 273,
+  "revision": 274,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
@@ -15,7 +15,53 @@
     "review_head_binding_authority": "github_pr_review",
     "blind_retry_after_conflict": false
   },
-  "tasks": [],
-  "locks": {},
-  "updated_at": "2026-09-01T07:05:30Z"
+  "tasks": [
+    {
+      "id": "E5-J1",
+      "title": "Bounded Job runtime (issue #220)",
+      "risk_level": "L3",
+      "status": "running",
+      "mode": "write",
+      "owner": "agent-e5-j1-220",
+      "target_issue": 220,
+      "target_branch": "agent/issue-220-e5-j1-bounded-job-runtime",
+      "expected_base": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
+      "locks": [
+        "engine:job-runtime",
+        "storage:control-plane"
+      ],
+      "paths": [
+        "backend/crates/stillflow-engine/src/job_runtime.rs",
+        "backend/crates/stillflow-engine/src/engine.rs",
+        "backend/crates/stillflow-engine/src/lib.rs",
+        "backend/crates/stillflow-engine/src/tests.rs",
+        "backend/crates/stillflow-storage/src/control_plane.rs",
+        "backend/crates/stillflow-storage/src/lib.rs"
+      ],
+      "shared_paths": [
+        "docs/issues/issue-191-unified-control-plane-contract.md"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": "2026-09-01T08:41:30Z",
+      "registered_at": "2026-09-01T07:11:30Z",
+      "started_at": "2026-09-01T07:11:30Z",
+      "updated_at": "2026-09-01T07:11:30Z"
+    }
+  ],
+  "locks": {
+    "engine:job-runtime": {
+      "task_id": "E5-J1",
+      "owner": "agent-e5-j1-220",
+      "acquired_at": "2026-09-01T07:11:30Z",
+      "lease_expires_at": "2026-09-01T08:41:30Z"
+    },
+    "storage:control-plane": {
+      "task_id": "E5-J1",
+      "owner": "agent-e5-j1-220",
+      "acquired_at": "2026-09-01T07:11:30Z",
+      "lease_expires_at": "2026-09-01T08:41:30Z"
+    }
+  },
+  "updated_at": "2026-09-01T07:11:30Z"
 }
