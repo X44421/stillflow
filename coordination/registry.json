@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 277,
+  "revision": 278,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -144,8 +144,113 @@
       "completed_at": "2026-09-01T12:10:00Z",
       "result_head": "ad6c1220909d8a4e9f86938409144154b5ec95ad",
       "completion_note": "PR #226 merged; accepted contract head 5f4c23758a252a1ec5c979d2bb46f3be426697fe."
+    },
+    {
+      "id": "E5-A1",
+      "title": "Versioned object/API boundary (issue #228)",
+      "risk_level": "L3",
+      "status": "running",
+      "mode": "write",
+      "owner": "agent-e5-a1-228",
+      "target_issue": 228,
+      "target_branch": "agent/issue-228-e5-a1-versioned-api",
+      "expected_base": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
+      "locks": [
+        "api:bootstrap",
+        "api:objects",
+        "storage:control-plane-api",
+        "storage:artifact-read"
+      ],
+      "paths": [
+        "backend/crates/stillflow-api/Cargo.toml",
+        "backend/crates/stillflow-api/src/lib.rs",
+        "backend/crates/stillflow-api/src/v1.rs",
+        "backend/crates/stillflow-api/src/object_api.rs",
+        "backend/crates/stillflow-api/src/error.rs",
+        "backend/crates/stillflow-api/src/openapi.rs",
+        "backend/crates/stillflow-api/tests/object_api.rs",
+        "backend/crates/stillflow-api/tests/openapi.rs",
+        "backend/Cargo.lock",
+        "backend/crates/stillflow-storage/src/control_plane.rs",
+        "backend/crates/stillflow-storage/src/artifact.rs",
+        "backend/crates/stillflow-storage/src/bundle.rs",
+        "backend/crates/stillflow-storage/src/store.rs"
+      ],
+      "shared_paths": [
+        "docs/issues/issue-191-unified-control-plane-contract.md"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": "2026-09-01T13:46:00Z",
+      "registered_at": "2026-09-01T12:16:00Z",
+      "started_at": "2026-09-01T12:16:00Z",
+      "updated_at": "2026-09-01T12:16:00Z"
+    },
+    {
+      "id": "E5-E1",
+      "title": "Live Event Stream (issue #229)",
+      "risk_level": "L3",
+      "status": "running",
+      "mode": "write",
+      "owner": "agent-e5-e1-229",
+      "target_issue": 229,
+      "target_branch": "agent/issue-229-e5-e1-event-stream",
+      "expected_base": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
+      "locks": [
+        "api:event-stream"
+      ],
+      "paths": [
+        "backend/crates/stillflow-api/src/event_stream.rs",
+        "backend/crates/stillflow-api/tests/event_stream.rs"
+      ],
+      "shared_paths": [
+        "backend/crates/stillflow-api/Cargo.toml",
+        "backend/crates/stillflow-api/src/lib.rs",
+        "backend/Cargo.lock",
+        "docs/issues/issue-191-unified-control-plane-contract.md"
+      ],
+      "depends_on": [
+        "E5-A1"
+      ],
+      "conflicts_with": [],
+      "lease_expires_at": "2026-09-01T13:46:00Z",
+      "registered_at": "2026-09-01T12:16:00Z",
+      "started_at": "2026-09-01T12:16:00Z",
+      "updated_at": "2026-09-01T12:16:00Z",
+      "note": "First API edit is blocked until E5-A1 publishes API_BOOTSTRAP_READY; then rebind/stack onto that exact bootstrap head. Shared bootstrap files remain read-only for E5-E1."
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-01T12:10:00Z"
+  "locks": {
+    "api:bootstrap": {
+      "task_id": "E5-A1",
+      "owner": "agent-e5-a1-228",
+      "acquired_at": "2026-09-01T12:16:00Z",
+      "lease_expires_at": "2026-09-01T13:46:00Z"
+    },
+    "api:objects": {
+      "task_id": "E5-A1",
+      "owner": "agent-e5-a1-228",
+      "acquired_at": "2026-09-01T12:16:00Z",
+      "lease_expires_at": "2026-09-01T13:46:00Z"
+    },
+    "storage:control-plane-api": {
+      "task_id": "E5-A1",
+      "owner": "agent-e5-a1-228",
+      "acquired_at": "2026-09-01T12:16:00Z",
+      "lease_expires_at": "2026-09-01T13:46:00Z"
+    },
+    "storage:artifact-read": {
+      "task_id": "E5-A1",
+      "owner": "agent-e5-a1-228",
+      "acquired_at": "2026-09-01T12:16:00Z",
+      "lease_expires_at": "2026-09-01T13:46:00Z"
+    },
+    "api:event-stream": {
+      "task_id": "E5-E1",
+      "owner": "agent-e5-e1-229",
+      "acquired_at": "2026-09-01T12:16:00Z",
+      "lease_expires_at": "2026-09-01T13:46:00Z"
+    }
+  },
+  "updated_at": "2026-09-01T12:16:00Z"
 }
