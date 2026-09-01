@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 272,
+  "revision": 273,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "05bebde339e0b8ea66ad29a3dacb95003ce63ebc",
+  "source_main_sha": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
   "policy": {
     "risk_levels": [
       "L2",
@@ -15,55 +15,7 @@
     "review_head_binding_authority": "github_pr_review",
     "blind_retry_after_conflict": false
   },
-  "tasks": [
-    {
-      "id": "E5-S1",
-      "title": "Unified control-plane persistence (issue #198)",
-      "risk_level": "L3",
-      "status": "running",
-      "mode": "write",
-      "owner": "agent-e5-s1-198",
-      "target_issue": 198,
-      "target_branch": "agent/issue-198-e5-s1-control-plane-persistence",
-      "expected_base": "132d0353e919793b4342f9cdf6bc51f93187abf9",
-      "locks": [
-        "branch:agent/issue-198-e5-s1-control-plane-persistence",
-        "storage:stillflow-storage",
-        "core:stillflow-core"
-      ],
-      "paths": [
-        "backend/crates/stillflow-core/src/**",
-        "backend/crates/stillflow-storage/src/**",
-        "backend/Cargo.lock"
-      ],
-      "shared_paths": [],
-      "depends_on": [],
-      "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T07:15:00Z",
-      "registered_at": "2026-09-01T03:06:29Z",
-      "started_at": "2026-09-01T03:06:29Z",
-      "updated_at": "2026-09-01T06:59:39Z"
-    }
-  ],
-  "locks": {
-    "branch:agent/issue-198-e5-s1-control-plane-persistence": {
-      "task_id": "E5-S1",
-      "owner": "agent-e5-s1-198",
-      "acquired_at": "2026-09-01T03:06:29Z",
-      "lease_expires_at": "2026-09-01T07:15:00Z"
-    },
-    "storage:stillflow-storage": {
-      "task_id": "E5-S1",
-      "owner": "agent-e5-s1-198",
-      "acquired_at": "2026-09-01T03:06:29Z",
-      "lease_expires_at": "2026-09-01T07:15:00Z"
-    },
-    "core:stillflow-core": {
-      "task_id": "E5-S1",
-      "owner": "agent-e5-s1-198",
-      "acquired_at": "2026-09-01T03:06:29Z",
-      "lease_expires_at": "2026-09-01T07:15:00Z"
-    }
-  },
-  "updated_at": "2026-09-01T06:59:39Z"
+  "tasks": [],
+  "locks": {},
+  "updated_at": "2026-09-01T07:05:30Z"
 }
