@@ -189,8 +189,8 @@ def validate_registry(registry: dict[str, Any]) -> None:
         if task_id not in tasks:
             raise RegistryError(f"{lock_key}: unknown lock task {task_id}")
         task = tasks[task_id]
-        if task["status"] != "running":
-            raise RegistryError(f"{lock_key}: owner task {task_id} is not running")
+        if task["status"] not in {"running", "claimed"}:
+            raise RegistryError(f"{lock_key}: owner task {task_id} is not active")
         if lock.get("owner") != task.get("owner"):
             raise RegistryError(f"{lock_key}: owner differs from task {task_id}")
         if lock_key not in task.get("locks", []):
@@ -848,7 +848,7 @@ def command_cancel_duplicate(remote: RemoteRegistry, args: argparse.Namespace) -
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] == "running" and task.get("owner") != agent:
+        if task["status"] in {"running", "claimed"} and task.get("owner") != agent:
             raise RegistryError(f"{args.task_id} is owned by {task.get('owner')}")
         release_task_locks(registry, args.task_id)
         now = iso(utc_now())
@@ -875,8 +875,8 @@ def command_reclaim(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] != "running":
-            raise RegistryError(f"{args.task_id} is not running")
+        if task["status"] not in {"running", "claimed"}:
+            raise RegistryError(f"{args.task_id} is not an active claim")
         lease = parse_iso(task.get("lease_expires_at"))
         if not lease or lease > utc_now():
             raise RegistryError(f"{args.task_id} lease is not expired")
@@ -901,7 +901,7 @@ def command_queue(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] in {"running", "done", "cancelled_duplicate"}:
+        if task["status"] in {"running", "claimed", "done", "cancelled_duplicate"}:
             raise RegistryError(f"cannot queue {args.task_id} from {task['status']}")
         blockers = dependency_blockers(registry, task)
         if blockers:
@@ -926,8 +926,8 @@ def command_bind_head(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] == "running":
-            raise RegistryError("cannot rebind a running task")
+        if task["status"] in {"running", "claimed"}:
+            raise RegistryError("cannot rebind an active claim")
         if args.branch:
             task["target_branch"] = args.branch
         task.update(
