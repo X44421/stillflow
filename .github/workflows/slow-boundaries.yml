@@ -1,0 +1,28 @@
+name: Slow boundaries
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 0"
+
+concurrency:
+  group: slow-boundaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  export-real-limits:
+    name: Export real 8 GiB boundary (Rust 1.85.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          shared-key: backend-slow-1.85.0
+      - name: Run real export output-cap boundary
+        run: cargo test -p stillflow-storage total_output_cap_is_accepted_at_eight_gib_and_enforced_above -- --nocapture

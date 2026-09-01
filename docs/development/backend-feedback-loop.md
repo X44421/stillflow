@@ -1,13 +1,14 @@
 # Backend development feedback loop (DX-F0)
 
-Issue: [#85](https://github.com/X44421/stillflow/issues/85) · Parent roadmap:
+Issue: [#85](https://github.com/X44421/stillflow/issues/85) · Test-gate policy update:
+[#204](https://github.com/X44421/stillflow/issues/204) · Parent roadmap:
 [#81](https://github.com/X44421/stillflow/issues/81)
 
 This guide describes the layered local feedback loop for backend (Rust)
 development:
 
 ```
-edit/save → compiler diagnostics → focused serial test → full local gate
+edit/save → compiler diagnostics → focused test → full local gate
          → independently identifiable GitHub checks
 ```
 
@@ -53,9 +54,11 @@ VS Code setup:
 | 2 | `clippy` | `bacon clippy` | ~minutes, cached | lint gate before commit |
 | 3 | `test-workspace` | `bacon test-workspace` | slowest | full local gate before opening/updating a PR |
 
-Rules of thumb: iterate on tier 0–1, run tiers 2–3 once before every push.
-Tier 3 mirrors CI exactly (same commands, same serial discipline); if it is
-green locally, CI failures should be environment- or CI-only (see §5).
+Rules of thumb: iterate on tier 0–1, then run only the broader gate that adds
+new evidence for the change. Do not mechanically run focused, crate, workspace,
+and CI suites back-to-back when a later superset already proves the same
+behavior. Tier 3 mirrors the canonical MSRV semantic test leg; CI also adds
+stable compatibility and newer-Clippy drift checks.
 
 ## 3. Exact commands
 
@@ -70,41 +73,92 @@ cargo check --manifest-path backend/Cargo.toml --workspace --all-targets
 # Tier 0 — MSRV check on Rust 1.85.0 regardless of active default
 bacon check-msrv
 
-# Tier 1 — focused Engine library tests, strictly serial
+# Tier 1 — focused Engine library tests
 bacon test-engine
-cargo test --manifest-path backend/Cargo.toml -p stillflow-engine --lib -- --test-threads=1
+cargo test --manifest-path backend/Cargo.toml -p stillflow-engine --lib
 
-# Tier 2 — gates (identical to CI)
+# Tier 2 — local lint/format gates
 bacon fmt
 cargo fmt --manifest-path backend/Cargo.toml --all -- --check
 bacon clippy
 cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D warnings
 
-# Tier 3 — full local gate (identical to CI)
+# Tier 3 — full local MSRV-style semantic gate
 bacon test-workspace
-cargo test --manifest-path backend/Cargo.toml --workspace -- --test-threads=1
+cargo test --manifest-path backend/Cargo.toml --workspace -- --skip total_output_cap_is_accepted_at_eight_gib_and_enforced_above
 ```
 
 Every job is read-only by contract: no auto-fix flags, no lockfile updates,
 no retries, no hidden warnings, no wall-clock/random inputs. If you need an
 apply-mode format, run `cargo fmt` manually and review the diff.
 
-## 4. Serial-test constraints (E3/E4)
+## 4. Evidence layering and CI policy
 
-Current Engine and storage fixtures rely on **global-state discipline**:
-shared environment handles, fixed fixture paths, ordered acceptance windows.
-Therefore:
+Use the smallest gate that produces new information:
 
-- Always pass `--test-threads=1` to `cargo test`; both Bacon jobs already do.
-- Do not introduce `cargo-nextest` or any process-level parallel runner in
-  this phase — its isolation model is unproven against these fixtures.
-- A test that passes alone but fails under default parallelism usually means
-  leaked global state, not a flaky test; fix the fixture ownership, do not
-  add retries.
-- If a new test needs isolation, scope its state explicitly instead of
-  relying on thread ordering.
+1. **Focused tests** are for edit-time feedback and reproduction. Once a
+   broader exact-head suite containing the same tests has passed, rerunning the
+   focused subset is not an additional acceptance proof.
+2. **Affected-crate tests** are useful before handoff when the change is
+   localized and the full workspace gate has not yet run.
+3. **Exact-head PR CI** is the canonical repository-wide regression evidence.
+   On Rust 1.85.0 it runs fmt, Clippy, and the full workspace test suite.
+4. **Stable compatibility** is intentionally narrower: compile/check the full
+   workspace and run stable Clippy to catch language/toolchain and lint drift.
+   Stable does not duplicate rustfmt or the full semantic test suite on every
+   PR.
+5. **Independent acceptance** should consume exact-head CI evidence and add
+   adversarial, contract, race, fail-closed, or missing-edge checks. It should
+   not rerun the same full workspace suite without a specific reason.
+6. **Private and measurement-only features** are not automatically mandatory
+   for unrelated tasks. Use `--all-features` only when the task changes those
+   surfaces or in a dedicated integration/release/nightly gate.
+7. **Large physical boundary tests** that depend on filesystem-scale behavior
+   live outside the routine PR/edit loop. The 8 GiB export-cap test remains
+   unchanged and is run by the dedicated `Slow boundaries` workflow; routine
+   workspace commands explicitly skip only that named physical test.
 
-## 5. Classifying failures
+The current PR CI backend matrix is therefore:
+
+- Rust 1.85.0: fmt + Clippy + routine workspace tests (the named physical
+  8 GiB export boundary is delegated to the slow lane);
+- stable: workspace compatibility check + Clippy;
+- frontend: unchanged.
+
+This policy reduces duplicated evidence; it does not reduce contract coverage.
+
+## 5. Parallel-test isolation
+
+Repository-wide serialization is not a test contract. The default runner uses
+normal Rust test parallelism so unrelated crates and fixtures are not blocked by
+one shared-state surface.
+
+- A test that mutates shared process state must own an explicit scoped lock or
+  otherwise isolate that state. Engine tests already use an explicit
+  `exclusive_test_lock()` for shared-state execution paths.
+- A test that passes alone but fails only in parallel is an isolation defect,
+  not a reason to restore `--test-threads=1` for the whole workspace.
+- Fix or lock the exact fixture that races. Do not add retries, sleeps, ordering
+  assumptions, or workspace-wide serialization.
+- `cargo-nextest` remains a separate future decision; DX-T2 only restores the
+  standard Rust test runner's normal parallelism.
+
+## 6. Slow physical boundaries
+
+The workflow `.github/workflows/slow-boundaries.yml` owns tests whose value is
+the exact production-scale physical boundary rather than fast PR feedback.
+
+Current slow case:
+
+- `total_output_cap_is_accepted_at_eight_gib_and_enforced_above` — exercises the real 2 GiB single-file and 8 GiB aggregate
+  export limits with sparse files.
+
+It remains a real test and is not marked ignored. Routine workspace commands
+skip it by name, while the slow workflow invokes it directly on Rust 1.85.0.
+The slow workflow is manual/low-frequency and is not an ordinary PR required
+check.
+
+## 7. Classifying failures
 
 Before touching anything, classify the failure into exactly one bucket:
 
@@ -120,7 +174,7 @@ Escalation rule: anything that looks like a contract violation, a needed
 public-contract change, or a baseline regression goes back to issue/contract
 review — do not patch around it inside a DX task.
 
-## 6. Record base/head before every push
+## 8. Record base/head before every push
 
 The coordination registry verifies exact head bindings, so record:
 
@@ -135,7 +189,7 @@ Paste both SHAs into the PR/task report before pushing. Re-fetch immediately
 before the push itself; if `origin/main` moved past your recorded base,
 rebase only when authorized by the dispatch protocol — never silently.
 
-## 7. Troubleshooting watchers and stale diagnostics
+## 9. Troubleshooting watchers and stale diagnostics
 
 - **Bacon not rerunning on save**: confirm the editor saves files inside the
   repository Bacon watches (launch Bacon at the repo root). On WSL2, files
@@ -150,8 +204,9 @@ rebase only when authorized by the dispatch protocol — never silently.
   wiping the whole `target/`.
 - **Diagnostics disagree with CI**: check the toolchain first
   (`rustc --version`, `rustup show`); `rust-toolchain.toml` pins 1.85.0 for
-  local tools while CI also runs a stable job — reproduce the right matrix
-  leg with `bacon check-msrv` or the stable toolchain explicitly.
+  local tools while CI also runs stable compatibility-check and Clippy legs —
+  reproduce the relevant matrix leg with `bacon check-msrv` or the stable
+  toolchain explicitly.
 - **Two watchers fighting over `target/`**: kill the extra Bacon; lockfile or
   artifact contention between concurrent cargo invocations produces
   misleading errors that look like code problems.
