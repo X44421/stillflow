@@ -1,7 +1,7 @@
 # Contract-first development workflow
 
 > Status: Accepted
-> Last updated: 2026-08-15
+> Last updated: 2026-09-01
 
 This workflow separates architectural decisions from implementation so parallel
 or automated work cannot silently invent incompatible public contracts.
@@ -88,7 +88,7 @@ and **may** is optional. Avoid acceptance criteria such as â€œworks correctly.â€
    implemented.
 3. Make the smallest coherent change that establishes one invariant.
 4. Add tests with the invariant, not in a later cleanup commit.
-5. Run the narrowest check first, then workspace-wide checks.
+5. Run the narrowest useful check first. Once an exact-head superset gate has passed, do not rerun contained subsets merely to accumulate more PASS labels.
 6. Compare the final diff with the contract line by line.
 7. Record every deviation; unapproved deviations stop the delivery.
 8. Publish an atomic commit and a draft PR with an explicit base branch.
@@ -150,6 +150,24 @@ npm run build
 When a local environment lacks a tool, mark that check **not run** and require the
 corresponding GitHub check before merge. An unavailable tool is never a passing
 result.
+
+Evidence is layered by information gain, not by the number of commands run:
+
+- focused tests are development/reproduction feedback;
+- affected-crate tests are optional pre-handoff evidence when the full gate has
+  not already superseded them;
+- exact-head PR CI is the canonical full-workspace regression proof;
+- independent acceptance consumes that CI result and adds contract/adversarial
+  evidence instead of blindly rerunning the same workspace suite;
+- `--all-features` is required only when the changed surface, a frozen
+  contract, or a dedicated integration/release/nightly gate requires it.
+  Private experimental or measurement-only features are not universal
+  per-task boilerplate.
+
+The repository test runner uses normal Rust parallelism. Tests that share
+mutable process state must isolate that state themselves; a parallel-only
+failure is fixed at the exact fixture, not by globally forcing
+`--test-threads=1`.
 
 ## 8. Pull request protocol
 
