@@ -37,6 +37,7 @@ TASKS_PATH = "coordination/TASKS.md"
 ALLOWED_STATUSES = {
     "blocked",
     "cancelled_duplicate",
+    "claimed",
     "dispatched",
     "done",
     "failed",
@@ -166,17 +167,20 @@ def validate_registry(registry: dict[str, Any]) -> None:
             not isinstance(result_branch, str) or not result_branch
         ):
             raise RegistryError(f"{task_id}: result_branch must be a non-empty string")
-        if task["status"] == "running":
+        if task["status"] in {"running", "claimed"}:
             if not task.get("owner"):
-                raise RegistryError(f"{task_id}: running task needs an owner")
+                raise RegistryError(f"{task_id}: active claim needs an owner")
             if not task.get("lease_expires_at"):
-                raise RegistryError(f"{task_id}: running task needs a lease")
-            for lock_key in task.get("locks", []):
-                lock = registry["locks"].get(lock_key)
-                if not lock or lock.get("task_id") != task_id:
-                    raise RegistryError(
-                        f"{task_id}: running task does not own requested lock {lock_key}"
-                    )
+                raise RegistryError(f"{task_id}: active claim needs a lease")
+            # Pre-GOV-R1 rows may use status=claimed and keep requested locks
+            # only on the task row. New running rows must own top-level locks.
+            if task["status"] == "running":
+                for lock_key in task.get("locks", []):
+                    lock = registry["locks"].get(lock_key)
+                    if not lock or lock.get("task_id") != task_id:
+                        raise RegistryError(
+                            f"{task_id}: running task does not own requested lock {lock_key}"
+                        )
 
     for lock_key, lock in registry["locks"].items():
         if not isinstance(lock_key, str) or not lock_key:
@@ -208,14 +212,21 @@ def active_lock_conflicts(
     conflicts: list[str] = []
     tasks = task_map(registry)
     for other_id, other in tasks.items():
-        if other_id == task["id"] or other["status"] != "running":
+        if other_id == task["id"] or other["status"] not in {"running", "claimed"}:
             continue
         if (
             other_id in task.get("conflicts_with", [])
             or task["id"] in other.get("conflicts_with", [])
         ):
             conflicts.append(
-                f"task conflict with {other_id} / {other.get('owner')} (running)"
+                f"task conflict with {other_id} / {other.get('owner')} "
+                f"({other['status']})"
+            )
+        overlap = sorted(set(task.get("locks", [])) & set(other.get("locks", [])))
+        if overlap:
+            conflicts.append(
+                f"lock overlap with {other_id} / {other.get('owner')}: "
+                + ", ".join(overlap)
             )
     for lock_key in task.get("locks", []):
         held = registry["locks"].get(lock_key)
@@ -299,8 +310,8 @@ def release_claim_in_memory(
     registry: dict[str, Any], task_id: str, agent: str
 ) -> None:
     task = get_task(registry, task_id)
-    if task["status"] != "running" or task.get("owner") != agent:
-        raise RegistryError(f"{task_id} is not running under owner {agent}")
+    if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+        raise RegistryError(f"{task_id} is not an active claim under owner {agent}")
     dependents = [
         other["id"]
         for other in registry["tasks"]
@@ -379,8 +390,8 @@ def complete_in_memory(
     note: str | None,
 ) -> None:
     task = get_task(registry, task_id)
-    if task["status"] != "running" or task.get("owner") != agent:
-        raise RegistryError(f"{task_id} is not running under owner {agent}")
+    if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+        raise RegistryError(f"{task_id} is not an active claim under owner {agent}")
     if (task["mode"] == "write" or task.get("result_branch")) and not result_head:
         raise RegistryError("this task requires --result-head on completion")
     if result_head and not re.fullmatch(r"[0-9a-f]{40}", result_head):
@@ -410,7 +421,7 @@ def render_markdown(registry: dict[str, Any]) -> str:
     active = [
         task
         for task in registry["tasks"]
-        if task.get("status") in {"dispatched", "queued", "running"}
+        if task.get("status") in {"dispatched", "queued", "running", "claimed"}
         and task.get("locks")
     ]
     legacy_count = len(registry["tasks"]) - len(active)
@@ -757,8 +768,10 @@ def command_heartbeat(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] != "running" or task.get("owner") != agent:
-            raise RegistryError(f"{args.task_id} is not running under owner {agent}")
+        if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+            raise RegistryError(
+                f"{args.task_id} is not an active claim under owner {agent}"
+            )
         now = utc_now()
         lease = iso(now + timedelta(minutes=args.lease_minutes))
         task.update({"lease_expires_at": lease, "updated_at": iso(now)})
@@ -775,8 +788,10 @@ def command_pause(remote: RemoteRegistry, args: argparse.Namespace) -> None:
 
     def mutate(registry: dict[str, Any]) -> None:
         task = get_task(registry, args.task_id)
-        if task["status"] != "running" or task.get("owner") != agent:
-            raise RegistryError(f"{args.task_id} is not running under owner {agent}")
+        if task["status"] not in {"running", "claimed"} or task.get("owner") != agent:
+            raise RegistryError(
+                f"{args.task_id} is not an active claim under owner {agent}"
+            )
         release_task_locks(registry, args.task_id)
         now = iso(utc_now())
         task.update(
