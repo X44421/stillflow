@@ -397,6 +397,10 @@ event in one transaction. A duplicate replay emits no Job/Run state event. A
 restart reconciliation emits exactly one recovery event per state that is
 changed.
 
+Artifact lifecycle events are written to the owning Run stream; they do not
+introduce a third stream kind. Preview outcomes are typed operation results,
+not Events, and therefore do not enter either lifecycle stream.
+
 ### 7.2 Event types
 
 The initial stable event type set is:
@@ -465,7 +469,7 @@ E5-C0 freezes these v1 control-plane bounds:
 | Accepted queued Jobs per Workspace | 256 non-terminal queued Jobs | New submission returns `QueueFull` with no mutation. |
 | Active engine Runs per process | 4, matching `MAX_ENGINE_CONCURRENT_RUNS` | Start returns `Busy`; the Job remains `queued` unless cancellation or a defined admission failure wins. |
 | Execution deadline | 15-minute default, 30-minute maximum | A longer request is rejected before Run start; expiration is `failed` with category `timeout`. |
-| Preview deadline | 30 seconds | Expiration is `preview.failed` with category `timeout`; no Job/Run/Artifact is created. |
+| Preview deadline | 30 seconds | Expiration returns the typed Preview operation result `failed` with category `timeout`; it is not an Event, and no Job/Run/Artifact is created. |
 | Event payload | 64 KiB encoded | Oversize or unsafe event is rejected; no partial event. |
 | Event page | 1,000 records | The caller must resume with the returned cursor. |
 | Artifact read page | 1,024 rows and 2 MiB encoded payload | The reader returns a bounded page and cursor; no whole-artifact response. |
