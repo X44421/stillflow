@@ -149,6 +149,12 @@ impl SnapshotStore {
         self.inner.limits
     }
 
+    /// Returns the E5 control-plane persistence view sharing this store's
+    /// managed-root lock and SQLite schema.
+    pub fn control_plane(&self) -> crate::ControlPlaneStore {
+        crate::ControlPlaneStore::from_snapshot_store(self)
+    }
+
     pub fn begin_snapshot(
         &self,
         draft: SnapshotDraft,
@@ -724,16 +730,216 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
         0 => {
             migrate_to_version_one(connection)?;
             migrate_to_version_two(connection)?;
-            migrate_to_version_three(connection)
+            migrate_to_version_three(connection)?;
+            migrate_to_version_four(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
-            migrate_to_version_three(connection)
+            migrate_to_version_three(connection)?;
+            migrate_to_version_four(connection)
         }
-        2 => migrate_to_version_three(connection),
-        3 => Ok(()),
+        2 => {
+            migrate_to_version_three(connection)?;
+            migrate_to_version_four(connection)
+        }
+        3 => migrate_to_version_four(connection),
+        4 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
+}
+
+/// Version four adds the durable E5 unified control-plane graph.  The tables
+/// are additive: the existing snapshot, verification-bundle, and export
+/// tables are intentionally left untouched and remain owned by their writers.
+fn migrate_to_version_four(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version four"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE cp_workspaces (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('active', 'archived')),
+                 created_at_utc TEXT NOT NULL,
+                 archived_at_utc TEXT
+             ) STRICT;
+
+             CREATE TABLE cp_sessions (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 state TEXT NOT NULL CHECK (state IN ('open', 'closing', 'closed')),
+                 created_at_utc TEXT NOT NULL,
+                 updated_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE cp_connections (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 connector_kind TEXT NOT NULL,
+                 name TEXT NOT NULL,
+                 config_json TEXT NOT NULL,
+                 credential_ref TEXT NOT NULL CHECK (credential_ref LIKE 'cred://%'),
+                 state TEXT NOT NULL CHECK (state IN ('active', 'disabled', 'retired')),
+                 created_at_utc TEXT NOT NULL,
+                 updated_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE cp_assets (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 connection_id TEXT NOT NULL REFERENCES cp_connections(id),
+                 asset_kind TEXT NOT NULL,
+                 name TEXT NOT NULL,
+                 locator_json TEXT NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('active', 'retired')),
+                 discovered_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE cp_datasets (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 session_id TEXT NOT NULL REFERENCES cp_sessions(id),
+                 source_asset_id TEXT NOT NULL REFERENCES cp_assets(id),
+                 name TEXT NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('active', 'archived')),
+                 created_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE cp_plans (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 state TEXT NOT NULL CHECK (state IN ('active', 'archived')),
+                 current_version_id TEXT,
+                 created_at_utc TEXT NOT NULL,
+                 updated_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE TABLE cp_plan_versions (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 plan_id TEXT NOT NULL REFERENCES cp_plans(id),
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 version_number INTEGER NOT NULL CHECK (version_number > 0),
+                 parent_version_id TEXT REFERENCES cp_plan_versions(id),
+                 logical_plan_json TEXT NOT NULL,
+                 canonical_plan_bytes BLOB NOT NULL,
+                 canonical_plan_digest TEXT NOT NULL CHECK (length(canonical_plan_digest) = 64),
+                 plan_fingerprint TEXT NOT NULL CHECK (length(plan_fingerprint) = 64),
+                 state TEXT NOT NULL CHECK (state IN ('draft', 'published', 'superseded', 'archived')),
+                 created_at_utc TEXT NOT NULL,
+                 published_at_utc TEXT,
+                 archived_at_utc TEXT,
+                 UNIQUE (plan_id, version_number)
+             ) STRICT;
+
+             CREATE TABLE cp_jobs (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 session_id TEXT NOT NULL REFERENCES cp_sessions(id),
+                 plan_version_id TEXT NOT NULL REFERENCES cp_plan_versions(id),
+                 canonical_plan_digest TEXT NOT NULL CHECK (length(canonical_plan_digest) = 64),
+                 input_json TEXT NOT NULL,
+                 execution_policy_json TEXT NOT NULL,
+                 output_policy_json TEXT NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'cancelling', 'succeeded', 'failed', 'cancelled')),
+                 queued_at_utc TEXT NOT NULL,
+                 started_at_utc TEXT,
+                 finished_at_utc TEXT,
+                 run_id TEXT,
+                 failure_json TEXT
+             ) STRICT;
+
+             CREATE INDEX cp_jobs_queue_index
+             ON cp_jobs(workspace_id, state, queued_at_utc, id);
+
+             CREATE INDEX cp_jobs_lifecycle_index
+             ON cp_jobs(workspace_id, state, queued_at_utc DESC, id DESC);
+
+             CREATE INDEX cp_plan_versions_concurrency_index
+             ON cp_plan_versions(plan_id, state, version_number DESC, id);
+
+             CREATE TABLE cp_runs (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 session_id TEXT NOT NULL REFERENCES cp_sessions(id),
+                 job_id TEXT NOT NULL UNIQUE REFERENCES cp_jobs(id),
+                 plan_id TEXT NOT NULL REFERENCES cp_plans(id),
+                 plan_version_id TEXT NOT NULL REFERENCES cp_plan_versions(id),
+                 canonical_plan_digest TEXT NOT NULL CHECK (length(canonical_plan_digest) = 64),
+                 plan_fingerprint TEXT NOT NULL CHECK (length(plan_fingerprint) = 64),
+                 input_json TEXT NOT NULL,
+                 engine_contract_version INTEGER NOT NULL CHECK (engine_contract_version > 0),
+                 engine_build TEXT NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('running', 'cancelling', 'succeeded', 'failed', 'cancelled')),
+                 started_at_utc TEXT NOT NULL,
+                 finished_at_utc TEXT,
+                 failure_json TEXT,
+                 snapshot_ref TEXT REFERENCES snapshots(id),
+                 bundle_ref TEXT REFERENCES verification_bundles(bundle_id)
+             ) STRICT;
+
+             CREATE INDEX cp_runs_lifecycle_index
+             ON cp_runs(workspace_id, state, started_at_utc, id);
+
+             CREATE TABLE cp_events (
+                 event_id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 session_id TEXT NOT NULL REFERENCES cp_sessions(id),
+                 stream_kind TEXT NOT NULL CHECK (stream_kind IN ('job', 'run')),
+                 stream_id TEXT NOT NULL,
+                 sequence INTEGER NOT NULL CHECK (sequence > 0),
+                 event_type TEXT NOT NULL,
+                 event_version INTEGER NOT NULL CHECK (event_version > 0),
+                 occurred_at_utc TEXT NOT NULL,
+                 job_id TEXT NOT NULL REFERENCES cp_jobs(id),
+                 run_id TEXT REFERENCES cp_runs(id),
+                 request_id TEXT NOT NULL,
+                 correlation_id TEXT NOT NULL,
+                 actor_ref TEXT NOT NULL,
+                 payload_json TEXT NOT NULL,
+                 UNIQUE (stream_kind, stream_id, sequence)
+             ) STRICT;
+
+             CREATE INDEX cp_events_stream_index
+             ON cp_events(workspace_id, stream_kind, stream_id, sequence);
+
+             CREATE TABLE cp_idempotency_keys (
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 operation TEXT NOT NULL CHECK (operation = 'job.submit'),
+                 idempotency_key TEXT NOT NULL,
+                 request_digest TEXT NOT NULL CHECK (length(request_digest) = 64),
+                 job_id TEXT NOT NULL UNIQUE REFERENCES cp_jobs(id),
+                 result_json TEXT NOT NULL,
+                 created_at_utc TEXT NOT NULL,
+                 PRIMARY KEY (workspace_id, operation, idempotency_key)
+             ) STRICT;
+
+             CREATE INDEX cp_idempotency_lookup_index
+             ON cp_idempotency_keys(workspace_id, operation, idempotency_key);
+
+             CREATE TABLE cp_artifact_refs (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 run_id TEXT NOT NULL REFERENCES cp_runs(id),
+                 artifact_kind TEXT NOT NULL,
+                 external_ref_kind TEXT NOT NULL CHECK (external_ref_kind IN ('snapshot', 'verificationBundle', 'artifact')),
+                 external_ref_id TEXT NOT NULL,
+                 content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
+                 metadata_json TEXT NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('staged', 'committed', 'tombstoned', 'failed')),
+                 created_at_utc TEXT NOT NULL,
+                 committed_at_utc TEXT,
+                 tombstoned_at_utc TEXT
+             ) STRICT;
+
+             CREATE INDEX cp_artifact_refs_run_index
+             ON cp_artifact_refs(workspace_id, run_id, state, created_at_utc, id);
+
+             PRAGMA user_version = 4;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version four"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version four"))
 }
 
 /// Version three adds the export publication journal, export manifest,
@@ -2090,10 +2296,10 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
 
-        // A legacy version-one database migrates forward to version two and
-        // gains the bundle tables (contract 10.4 persistence).
+        // A legacy version-one database migrates through the current schema
+        // and gains the bundle, export, and control-plane tables.
         let legacy = TempDir::new().expect("legacy temp directory");
         let connection =
             Connection::open(legacy.path().join("metadata.sqlite3")).expect("legacy database");
@@ -2142,7 +2348,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -2167,19 +2373,108 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 4;")
+            .execute_batch("PRAGMA user_version = 5;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(4))
+            Err(StorageError::UnsupportedStorageVersion(5))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
+        assert_eq!(version, 5);
+    }
+
+    #[test]
+    fn version_four_migration_preserves_snapshot_bundle_artifact_and_export_rows() {
+        let temp = TempDir::new().expect("temp directory");
+        let mut connection = Connection::open(temp.path().join("metadata.sqlite3"))
+            .expect("create version-three database");
+        migrate_to_version_one(&mut connection).expect("v1 schema");
+        migrate_to_version_two(&mut connection).expect("v2 schema");
+        migrate_to_version_three(&mut connection).expect("v3 schema");
+        let snapshot_id = Uuid::from_u128(1).to_string();
+        let bundle_id = Uuid::from_u128(2).to_string();
+        let run_id = Uuid::from_u128(3).to_string();
+        let artifact_id = Uuid::from_u128(4).to_string();
+        let timestamp = "2025-01-01T00:00:00.000000000Z";
+        connection
+            .execute(
+                "INSERT INTO snapshots
+                 (id, version, dataset_id, session_id, source_asset_id, schema_json,
+                  schema_fingerprint, row_count, stored_byte_count, partition_count,
+                  lineage_json, quality_score, created_at_utc, state, tombstoned_at_utc)
+                 VALUES (?1, 1, ?2, ?3, ?4, '{}', ?5, 0, 0, 0, '[]', NULL, ?6, 1, NULL)",
+                params![
+                    snapshot_id,
+                    Uuid::from_u128(5).to_string(),
+                    Uuid::from_u128(6).to_string(),
+                    Uuid::from_u128(7).to_string(),
+                    "0".repeat(64),
+                    timestamp
+                ],
+            )
+            .expect("legacy Snapshot row");
+        connection
+            .execute(
+                "INSERT INTO verification_bundles
+                 (bundle_id, version, run_id, bundle_artifact_id, accepted_snapshot_id,
+                  validation_report_artifact_id, rejected_rows_artifact_id,
+                  deduplication_report_artifact_id, membership_json, provenance_json,
+                  committed_at_utc)
+                 VALUES (?1, 1, ?2, ?3, ?4, ?5, NULL, ?6, '{}', '{}', ?7)",
+                params![
+                    bundle_id,
+                    run_id,
+                    artifact_id,
+                    snapshot_id,
+                    Uuid::from_u128(8).to_string(),
+                    Uuid::from_u128(9).to_string(),
+                    timestamp
+                ],
+            )
+            .expect("legacy Bundle row");
+        connection
+            .execute(
+                "INSERT INTO artifact_manifests
+                 (artifact_id, bundle_id, kind, manifest_json, provenance_json)
+                 VALUES (?1, ?2, 'acceptedSnapshot', '{}', '{}')",
+                params![artifact_id, bundle_id],
+            )
+            .expect("legacy Artifact row");
+        connection
+            .execute(
+                "INSERT INTO export_manifests
+                 (export_id, version, manifest_json, committed_at_utc)
+                 VALUES (?1, 1, '{}', ?2)",
+                params![Uuid::from_u128(10).to_string(), timestamp],
+            )
+            .expect("legacy Export row");
+        drop(connection);
+
+        drop(SnapshotStore::open(temp.path(), StorageLimits::default()).expect("v4 migration"));
+        let connection = Connection::open(temp.path().join("metadata.sqlite3"))
+            .expect("reopen migrated database");
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("read migrated version");
         assert_eq!(version, 4);
+        for (table, expected) in [
+            ("snapshots", 1_i64),
+            ("verification_bundles", 1_i64),
+            ("artifact_manifests", 1_i64),
+            ("export_manifests", 1_i64),
+        ] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .expect("count preserved rows");
+            assert_eq!(count, expected, "preserved rows in {table}");
+        }
     }
 
     #[test]

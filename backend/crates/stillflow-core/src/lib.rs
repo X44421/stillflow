@@ -6,6 +6,7 @@
 //! interchange protocol at its boundary.
 
 pub mod batch;
+pub mod control_plane;
 pub mod domain;
 pub mod error;
 pub mod events;
@@ -23,6 +24,12 @@ pub use batch::{
     logical_schema_from_arrow, logical_schema_to_arrow, BatchEnvelope, BatchEnvelopeFactory,
     BatchError, LogicalSchemaFingerprint, BATCH_ENVELOPE_VERSION,
     LOGICAL_SCHEMA_FINGERPRINT_ALGORITHM, MAX_BATCH_BYTES, MAX_BATCH_ROWS,
+};
+pub use control_plane::{
+    asset_input, snapshot_input, ArtifactRefState, ControlPlaneEventType, ControlPlaneInput,
+    DatasetState, EventStreamKind, JobState, PlanState, PlanVersionState, RunState, SessionState,
+    SourceAssetState, SourceConnectionState, WorkspaceState, MAX_EVENT_PAGE_SIZE,
+    MAX_EVENT_PAYLOAD_BYTES, MAX_QUEUED_JOBS_PER_WORKSPACE,
 };
 pub use domain::{
     AssetKind, AssetLocator, AssetMetadata, CandidateConfidence, CellCoordinate, CellRange,
