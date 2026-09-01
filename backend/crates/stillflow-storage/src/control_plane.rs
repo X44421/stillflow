@@ -25,7 +25,8 @@ use stillflow_core::{
 };
 
 use crate::{
-    acquire_activity, open_connection, ActivityKind, SnapshotStore, StorageError, StoreInner,
+    acquire_activity, acquire_maintenance, open_connection, ActivityKind, SnapshotStore,
+    StorageError, StoreInner,
 };
 
 const EVENT_VERSION: u16 = 1;
@@ -815,6 +816,232 @@ impl ControlPlaneStore {
         job_from_connection(&connection, job_id)
     }
 
+    /// Returns the oldest queued Job for one Workspace. The durable row is the
+    /// queue; the runtime only uses this method to wake workers and never
+    /// mirrors these rows in an in-memory scheduler.
+    pub fn next_queued_job(&self, workspace_id: Uuid) -> Result<Option<JobRecord>, StorageError> {
+        validate_id(workspace_id, "workspace")?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let row = connection
+            .query_row(
+                "SELECT id, workspace_id, session_id, plan_version_id,
+                        canonical_plan_digest, input_json, execution_policy_json,
+                        output_policy_json, state, queued_at_utc, started_at_utc,
+                        finished_at_utc, run_id, failure_json
+                 FROM cp_jobs
+                 WHERE workspace_id = ?1 AND state = 'queued'
+                 ORDER BY queued_at_utc ASC, id ASC
+                 LIMIT 1",
+                params![workspace_id.to_string()],
+                raw_job_from_row,
+            )
+            .optional()
+            .map_err(|_| StorageError::database("read next queued Job"))?;
+        row.map(job_from_raw).transpose()
+    }
+
+    /// Lists active Job/Run pairs that need restart reconciliation. Queued
+    /// Jobs are intentionally absent: a queued row remains queued after a
+    /// process restart and can be claimed normally.
+    pub fn list_reconciliation_candidates(
+        &self,
+        workspace_id: Uuid,
+        max_candidates: usize,
+    ) -> Result<Vec<ReconciliationCandidate>, StorageError> {
+        validate_id(workspace_id, "workspace")?;
+        if max_candidates == 0 || max_candidates > crate::MAX_MAINTENANCE_CANDIDATES as usize {
+            return Err(StorageError::InvalidDraft(
+                "reconciliation candidate limit is outside the maintenance bound",
+            ));
+        }
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT j.id, j.run_id, j.state, r.state
+                 FROM cp_jobs AS j
+                 JOIN cp_runs AS r ON r.id = j.run_id
+                 WHERE j.workspace_id = ?1
+                   AND j.state IN ('running', 'cancelling')
+                   AND r.state IN ('running', 'cancelling')
+                 ORDER BY j.queued_at_utc ASC, j.id ASC
+                 LIMIT ?2",
+            )
+            .map_err(|_| StorageError::database("prepare reconciliation candidates"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    workspace_id.to_string(),
+                    i64::try_from(max_candidates).map_err(|_| {
+                        StorageError::ArithmeticOverflow("reconciliation candidate limit")
+                    })?
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .map_err(|_| StorageError::database("read reconciliation candidates"))?;
+        let mut candidates = Vec::new();
+        for row in rows {
+            let (job_id, run_id, job_state, run_state) =
+                row.map_err(|_| StorageError::database("decode reconciliation candidate"))?;
+            let run_id = run_id.ok_or(StorageError::Serialization(
+                "active Job has no Run for reconciliation",
+            ))?;
+            candidates.push(ReconciliationCandidate {
+                job_id: parse_uuid(&job_id)?,
+                run_id: parse_uuid(&run_id)?,
+                job_state: parse_job_state(&job_state)?,
+                run_state: parse_run_state(&run_state)?,
+            });
+        }
+        Ok(candidates)
+    }
+
+    /// Atomically marks active Job/Run pairs as lost workers and appends the
+    /// reconciliation, Run failure, and Job failure events. The maintenance
+    /// gate prevents a claim or another recovery pass from interleaving with
+    /// this operation. Repeating the same drafts after commit is a no-op.
+    pub fn reconcile_jobs(
+        &self,
+        drafts: &[JobRecoveryDraft],
+    ) -> Result<Vec<JobRecoveryResult>, StorageError> {
+        if drafts.is_empty() {
+            return Ok(Vec::new());
+        }
+        if drafts.len() > crate::MAX_MAINTENANCE_CANDIDATES as usize {
+            return Err(StorageError::InvalidDraft(
+                "reconciliation batch exceeds the maintenance bound",
+            ));
+        }
+        let _maintenance = acquire_maintenance(&self.inner)?;
+        let mut connection = open_connection(&self.inner)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| StorageError::database("begin Job reconciliation"))?;
+        let mut results = Vec::with_capacity(drafts.len());
+        for draft in drafts {
+            validate_id(draft.job_id, "reconciliation Job")?;
+            validate_id(draft.run_id, "reconciliation Run")?;
+            if draft.failure.category != "worker_lost" {
+                return Err(StorageError::InvalidDraft(
+                    "restart reconciliation requires worker_lost failure",
+                ));
+            }
+            let job = job_raw(&transaction, draft.job_id)?;
+            let run = run_raw(&transaction, draft.run_id)?;
+            if job.run_id.as_deref() != Some(&draft.run_id.to_string())
+                || run.job_id != draft.job_id.to_string()
+                || run.workspace_id != job.workspace_id
+                || run.session_id != job.session_id
+            {
+                return Err(StorageError::Serialization(
+                    "reconciliation Job and Run relationship is inconsistent",
+                ));
+            }
+            let job_state = parse_job_state(&job.state)?;
+            let run_state = parse_run_state(&run.state)?;
+            if job_state.is_terminal() && run_state.is_terminal() {
+                results.push(JobRecoveryResult {
+                    job_id: draft.job_id,
+                    reconciled: false,
+                });
+                continue;
+            }
+            if !matches!(job_state, JobState::Running | JobState::Cancelling)
+                || !matches!(run_state, RunState::Running | RunState::Cancelling)
+            {
+                return Err(StorageError::Serialization(
+                    "active Job and Run states are inconsistent for reconciliation",
+                ));
+            }
+            let run_started_at = parse_timestamp(&run.started_at_utc, "Run start timestamp")?;
+            let job_queued_at = parse_timestamp(&job.queued_at_utc, "Job queue timestamp")?;
+            if draft.reconciled_event.stream_kind != EventStreamKind::Run
+                || draft.reconciled_event.stream_id != draft.run_id
+                || draft.reconciled_event.job_id != draft.job_id
+                || draft.reconciled_event.run_id != Some(draft.run_id)
+                || draft.reconciled_event.event_type != ControlPlaneEventType::RunReconciled
+                || draft.run_failed_event.event_type != ControlPlaneEventType::RunFailed
+                || draft.job_failed_event.event_type != ControlPlaneEventType::JobFailed
+            {
+                return Err(StorageError::InvalidDraft(
+                    "invalid restart reconciliation events",
+                ));
+            }
+            validate_event_identity(&draft.reconciled_event)?;
+            validate_state_event(
+                &draft.run_failed_event,
+                EventStreamKind::Run,
+                draft.run_id,
+                draft.job_id,
+                Some(draft.run_id),
+                RunState::Failed,
+            )?;
+            validate_state_event(
+                &draft.job_failed_event,
+                EventStreamKind::Job,
+                draft.job_id,
+                draft.job_id,
+                None,
+                JobState::Failed,
+            )?;
+            if draft.reconciled_event.occurred_at < run_started_at
+                || draft.run_failed_event.occurred_at < draft.reconciled_event.occurred_at
+                || draft.job_failed_event.occurred_at < draft.run_failed_event.occurred_at
+                || draft.job_failed_event.occurred_at < job_queued_at
+            {
+                return Err(StorageError::InvalidTimestampOrder(
+                    "restart reconciliation events",
+                ));
+            }
+            let failure_json = failure_json(Some(&draft.failure))?;
+            transition_run_state_tx(
+                &transaction,
+                draft.run_id,
+                &run.state,
+                RunState::Failed,
+                Some(timestamp(&draft.run_failed_event.occurred_at)),
+            )?;
+            transaction
+                .execute(
+                    "UPDATE cp_runs SET failure_json = ?2 WHERE id = ?1",
+                    params![draft.run_id.to_string(), failure_json.clone()],
+                )
+                .map_err(|_| StorageError::database("persist reconciled Run failure"))?;
+            transition_job_state_tx(
+                &transaction,
+                draft.job_id,
+                &job.state,
+                JobState::Failed,
+                Some(timestamp(&draft.job_failed_event.occurred_at)),
+            )?;
+            transaction
+                .execute(
+                    "UPDATE cp_jobs SET failure_json = ?2 WHERE id = ?1",
+                    params![draft.job_id.to_string(), failure_json],
+                )
+                .map_err(|_| StorageError::database("persist reconciled Job failure"))?;
+            append_event_tx(&transaction, draft.reconciled_event.clone())?;
+            append_event_tx(&transaction, draft.run_failed_event.clone())?;
+            append_event_tx(&transaction, draft.job_failed_event.clone())?;
+            results.push(JobRecoveryResult {
+                job_id: draft.job_id,
+                reconciled: true,
+            });
+        }
+        transaction
+            .commit()
+            .map_err(|_| StorageError::database("commit Job reconciliation"))?;
+        Ok(results)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn claim_job(
         &self,
@@ -1186,6 +1413,33 @@ impl ControlPlaneStore {
         job_event: EventDraft,
         failure: Option<FailureInfo>,
     ) -> Result<(RunRecord, JobRecord), StorageError> {
+        self.finish_run_and_job_with_outputs(
+            run_id, run_target, job_target, None, None, run_event, job_event, failure,
+        )
+    }
+
+    /// Commits output references and terminal Run/Job state in one SQLite
+    /// transaction. Output references are validated before either terminal
+    /// state changes, so a cancellation or other terminal CAS winner cannot
+    /// expose a partially published result.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_run_and_job_with_outputs(
+        &self,
+        run_id: Uuid,
+        run_target: RunState,
+        job_target: JobState,
+        snapshot_ref: Option<Uuid>,
+        bundle_ref: Option<Uuid>,
+        run_event: EventDraft,
+        job_event: EventDraft,
+        failure: Option<FailureInfo>,
+    ) -> Result<(RunRecord, JobRecord), StorageError> {
+        if let Some(snapshot_id) = snapshot_ref {
+            validate_id(snapshot_id, "Snapshot output reference")?;
+        }
+        if let Some(bundle_id) = bundle_ref {
+            validate_id(bundle_id, "VerificationBundle output reference")?;
+        }
         let _activity = self.write_activity()?;
         let mut connection = open_connection(&self.inner)?;
         let transaction = connection
@@ -1221,6 +1475,70 @@ impl ControlPlaneStore {
                 "terminal state was already changed or is not allowed",
             ));
         }
+        if run_target != RunState::Succeeded && (snapshot_ref.is_some() || bundle_ref.is_some()) {
+            return Err(StorageError::InvalidDraft(
+                "only a successful Run can publish output references",
+            ));
+        }
+        if let Some(snapshot_id) = snapshot_ref {
+            let state: Option<i64> = transaction
+                .query_row(
+                    "SELECT state FROM snapshots WHERE id = ?1",
+                    params![snapshot_id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| StorageError::database("check terminal Snapshot output"))?;
+            if state != Some(1) {
+                return Err(StorageError::InvalidDraft(
+                    "Snapshot output reference is not committed",
+                ));
+            }
+        }
+        if let Some(bundle_id) = bundle_ref {
+            let bundle_identity: Option<(String, String)> = transaction
+                .query_row(
+                    "SELECT run_id, accepted_snapshot_id
+                     FROM verification_bundles WHERE bundle_id = ?1",
+                    params![bundle_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|_| StorageError::database("check terminal VerificationBundle output"))?;
+            let Some((bundle_run_id, accepted_snapshot_id)) = bundle_identity else {
+                return Err(StorageError::InvalidDraft(
+                    "VerificationBundle output reference is missing or owned by another Run",
+                ));
+            };
+            if parse_uuid(&bundle_run_id)? != run_id {
+                return Err(StorageError::InvalidDraft(
+                    "VerificationBundle output reference is missing or owned by another Run",
+                ));
+            }
+            if let Some(snapshot_id) = snapshot_ref {
+                if parse_uuid(&accepted_snapshot_id)? != snapshot_id {
+                    return Err(StorageError::InvalidDraft(
+                        "Snapshot and VerificationBundle output references disagree",
+                    ));
+                }
+            }
+        }
+        if run.snapshot_ref.is_some()
+            && snapshot_ref != run.snapshot_ref.as_deref().map(parse_uuid).transpose()?
+            && snapshot_ref.is_some()
+        {
+            return Err(StorageError::InvalidDraft(
+                "Snapshot output reference is write-once",
+            ));
+        }
+        if run.bundle_ref.is_some()
+            && bundle_ref != run.bundle_ref.as_deref().map(parse_uuid).transpose()?
+            && bundle_ref.is_some()
+        {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle output reference is write-once",
+            ));
+        }
         validate_state_event(
             &run_event,
             EventStreamKind::Run,
@@ -1247,6 +1565,21 @@ impl ControlPlaneStore {
         let failure_json = failure_json(failure.as_ref())?;
         let run_finished_at = timestamp(&run_event.occurred_at);
         let job_finished_at = timestamp(&job_event.occurred_at);
+        if snapshot_ref.is_some() || bundle_ref.is_some() {
+            transaction
+                .execute(
+                    "UPDATE cp_runs SET snapshot_ref = COALESCE(?2, snapshot_ref),
+                            bundle_ref = COALESCE(?3, bundle_ref)
+                     WHERE id = ?1 AND state = ?4",
+                    params![
+                        run_id.to_string(),
+                        snapshot_ref.map(|value| value.to_string()),
+                        bundle_ref.map(|value| value.to_string()),
+                        run.state
+                    ],
+                )
+                .map_err(|_| StorageError::database("persist terminal output references"))?;
+        }
         transition_run_state_tx(
             &transaction,
             run_id,
@@ -1989,6 +2322,30 @@ pub struct JobRecord {
     pub finished_at: Option<DateTime<Utc>>,
     pub run_id: Option<Uuid>,
     pub failure: Option<FailureInfo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReconciliationCandidate {
+    pub job_id: Uuid,
+    pub run_id: Uuid,
+    pub job_state: JobState,
+    pub run_state: RunState,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobRecoveryDraft {
+    pub job_id: Uuid,
+    pub run_id: Uuid,
+    pub reconciled_event: EventDraft,
+    pub run_failed_event: EventDraft,
+    pub job_failed_event: EventDraft,
+    pub failure: FailureInfo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobRecoveryResult {
+    pub job_id: Uuid,
+    pub reconciled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -5084,5 +5441,304 @@ mod tests {
             ),
             Err(StorageError::InvalidDraft(_))
         ));
+    }
+
+    #[test]
+    fn next_queued_job_is_fifo_with_id_tie_breaker() {
+        let fixture = Fixture::new();
+        let first = fixture.submission(1, 10);
+        let second = fixture.submission(2, 10);
+        let third = fixture.submission(3, 9);
+        fixture.store.submit_job(first).expect("first Job");
+        fixture.store.submit_job(second).expect("second Job");
+        fixture.store.submit_job(third).expect("third Job");
+
+        let next = fixture
+            .store
+            .next_queued_job(fixture.workspace_id)
+            .expect("next Job")
+            .expect("queued Job");
+        assert_eq!(next.id, Uuid::from_u128(1003));
+        assert_eq!(
+            fixture
+                .store
+                .list_reconciliation_candidates(fixture.workspace_id, 10)
+                .expect("reconciliation candidates"),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn reconciliation_candidates_are_workspace_scoped() {
+        let fixture = Fixture::new();
+        let workspace_id = Uuid::from_u128(11);
+        let session_id = Uuid::from_u128(12);
+        let plan_id = Uuid::from_u128(13);
+        let plan_version_id = Uuid::from_u128(14);
+        fixture
+            .store
+            .create_workspace(workspace_id, at(1))
+            .expect("workspace");
+        fixture
+            .store
+            .create_session(workspace_id, session_id, at(2))
+            .expect("session");
+        fixture
+            .store
+            .create_plan(workspace_id, plan_id, at(3))
+            .expect("plan");
+        let canonical_plan_bytes = b"other-workspace-plan".to_vec();
+        let plan_digest = sha256(&canonical_plan_bytes);
+        fixture
+            .store
+            .create_plan_version(PlanVersionDraft {
+                workspace_id,
+                plan_id,
+                plan_version_id,
+                version_number: 1,
+                parent_version_id: None,
+                logical_plan: serde_json::json!({"version": 1}),
+                canonical_plan_bytes,
+                canonical_plan_digest: plan_digest,
+                plan_fingerprint: [8; 32],
+                created_at: at(4),
+            })
+            .expect("PlanVersion draft");
+        fixture
+            .store
+            .publish_plan_version(plan_version_id, None, at(5))
+            .expect("publish PlanVersion");
+        let other_job = match fixture
+            .store
+            .submit_job(
+                JobSubmission::try_new(
+                    workspace_id,
+                    session_id,
+                    plan_version_id,
+                    plan_digest,
+                    Uuid::from_u128(1100),
+                    "other-workspace-job",
+                    Vec::new(),
+                    serde_json::json!({"deadlineSeconds": 900}),
+                    serde_json::json!({}),
+                    at(10),
+                    Uuid::from_u128(1101),
+                    "other-request",
+                    "other-correlation",
+                    "actor:test",
+                )
+                .expect("submission"),
+            )
+            .expect("submit other Job")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        fixture.claim(other_job.id, Uuid::from_u128(2200));
+
+        assert!(fixture
+            .store
+            .list_reconciliation_candidates(fixture.workspace_id, 10)
+            .expect("current workspace candidates")
+            .is_empty());
+        assert_eq!(
+            fixture
+                .store
+                .list_reconciliation_candidates(workspace_id, 10)
+                .expect("other workspace candidates")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn restart_reconciliation_is_atomic_and_idempotent() {
+        let fixture = Fixture::new();
+        let job = match fixture
+            .store
+            .submit_job(fixture.submission(1, 10))
+            .expect("submit")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        let run_id = Uuid::from_u128(2000);
+        fixture.claim(job.id, run_id);
+        let candidates = fixture
+            .store
+            .list_reconciliation_candidates(fixture.workspace_id, 10)
+            .expect("candidates");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].job_state, JobState::Running);
+        assert_eq!(candidates[0].run_state, RunState::Running);
+
+        let failure = FailureInfo::try_new(
+            "worker_lost",
+            false,
+            "worker was lost during process restart",
+        )
+        .expect("failure");
+        let draft = JobRecoveryDraft {
+            job_id: job.id,
+            run_id,
+            reconciled_event: EventDraft::new(
+                Uuid::from_u128(5000),
+                EventStreamKind::Run,
+                run_id,
+                job.id,
+                Some(run_id),
+                ControlPlaneEventType::RunReconciled,
+                at(21),
+                "reconcile",
+                "reconcile",
+                "actor:test",
+                serde_json::json!({"reason": "worker_lost"}),
+            ),
+            run_failed_event: EventDraft::new(
+                Uuid::from_u128(5001),
+                EventStreamKind::Run,
+                run_id,
+                job.id,
+                Some(run_id),
+                ControlPlaneEventType::RunFailed,
+                at(21),
+                "reconcile",
+                "reconcile",
+                "actor:test",
+                serde_json::json!({"state": "failed"}),
+            ),
+            job_failed_event: EventDraft::new(
+                Uuid::from_u128(5002),
+                EventStreamKind::Job,
+                job.id,
+                job.id,
+                None,
+                ControlPlaneEventType::JobFailed,
+                at(21),
+                "reconcile",
+                "reconcile",
+                "actor:test",
+                serde_json::json!({"state": "failed"}),
+            ),
+            failure,
+        };
+        let result = fixture
+            .store
+            .reconcile_jobs(std::slice::from_ref(&draft))
+            .expect("reconcile");
+        assert_eq!(
+            result,
+            vec![JobRecoveryResult {
+                job_id: job.id,
+                reconciled: true
+            }]
+        );
+        assert_eq!(
+            fixture.store.get_job(job.id).expect("Job").state,
+            JobState::Failed
+        );
+        assert_eq!(
+            fixture.store.get_run(run_id).expect("Run").state,
+            RunState::Failed
+        );
+
+        let replay = fixture
+            .store
+            .reconcile_jobs(std::slice::from_ref(&draft))
+            .expect("idempotent reconcile");
+        assert_eq!(
+            replay,
+            vec![JobRecoveryResult {
+                job_id: job.id,
+                reconciled: false
+            }]
+        );
+        assert_eq!(
+            fixture
+                .store
+                .list_events(fixture.workspace_id, EventStreamKind::Run, run_id, None, 10)
+                .expect("Run events")
+                .events
+                .len(),
+            3
+        );
+        assert_eq!(
+            fixture
+                .store
+                .list_events(fixture.workspace_id, EventStreamKind::Job, job.id, None, 10)
+                .expect("Job events")
+                .events
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn terminal_output_binding_rejects_uncommitted_output_without_state_change() {
+        let fixture = Fixture::new();
+        let job = match fixture
+            .store
+            .submit_job(fixture.submission(1, 10))
+            .expect("submit")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        let run_id = Uuid::from_u128(2000);
+        fixture.claim(job.id, run_id);
+        let snapshot_id = Uuid::from_u128(9000);
+        let error = fixture
+            .store
+            .finish_run_and_job_with_outputs(
+                run_id,
+                RunState::Succeeded,
+                JobState::Succeeded,
+                Some(snapshot_id),
+                None,
+                EventDraft::new(
+                    Uuid::from_u128(9001),
+                    EventStreamKind::Run,
+                    run_id,
+                    job.id,
+                    Some(run_id),
+                    ControlPlaneEventType::RunSucceeded,
+                    at(30),
+                    "finish",
+                    "finish",
+                    "actor:test",
+                    serde_json::json!({"state": "succeeded"}),
+                ),
+                EventDraft::new(
+                    Uuid::from_u128(9002),
+                    EventStreamKind::Job,
+                    job.id,
+                    job.id,
+                    None,
+                    ControlPlaneEventType::JobSucceeded,
+                    at(30),
+                    "finish",
+                    "finish",
+                    "actor:test",
+                    serde_json::json!({"state": "succeeded"}),
+                ),
+                None,
+            )
+            .expect_err("uncommitted Snapshot must reject");
+        assert!(matches!(error, StorageError::InvalidDraft(_)));
+        assert_eq!(
+            fixture.store.get_job(job.id).expect("Job").state,
+            JobState::Running
+        );
+        assert_eq!(
+            fixture.store.get_run(run_id).expect("Run").state,
+            RunState::Running
+        );
+        assert!(fixture
+            .store
+            .list_events(fixture.workspace_id, EventStreamKind::Run, run_id, None, 10)
+            .expect("Run events")
+            .events
+            .iter()
+            .all(|event| event.event_type != ControlPlaneEventType::RunSucceeded));
     }
 }

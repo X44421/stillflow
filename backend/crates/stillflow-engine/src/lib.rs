@@ -8,6 +8,7 @@ mod export;
 #[allow(unsafe_code)]
 mod ffi;
 mod incremental;
+mod job_runtime;
 mod lookup;
 mod lower;
 mod memory;
@@ -37,6 +38,10 @@ use uuid::Uuid;
 pub use engine::ExecutionEngine;
 pub use error::EngineError;
 pub use export::{run_export, ExportRequest};
+pub use job_runtime::{
+    JobExecutionSpec, JobRequestResolver, JobResolution, JobRuntime, JobRuntimeError,
+    JobRuntimeIdentityProvider, SystemJobRuntimeIdentityProvider, JOB_RUNTIME_WAKE_CAPACITY,
+};
 pub use preflight::PreparedPlan;
 pub use profile::{ProfileColumns, ProfileRequest, ProfileResult};
 pub use quality::{

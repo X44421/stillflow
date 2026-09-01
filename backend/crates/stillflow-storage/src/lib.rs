@@ -29,9 +29,9 @@ pub use bundle::{
 pub use control_plane::{
     ArtifactCursor, ArtifactPage, ArtifactRefDraft, ArtifactRefRecord, ControlPlaneStore,
     DatasetRecord, EventCursor, EventDraft, EventPage, EventRecord, ExternalRefKind, FailureInfo,
-    JobCursor, JobPage, JobRecord, JobSubmission, PlanRecord, PlanVersionDraft, PlanVersionRecord,
-    RunCursor, RunPage, RunRecord, SessionRecord, SourceAssetRecord, SourceConnectionRecord,
-    SubmitOutcome, WorkspaceRecord,
+    JobCursor, JobPage, JobRecord, JobRecoveryDraft, JobRecoveryResult, JobSubmission, PlanRecord,
+    PlanVersionDraft, PlanVersionRecord, ReconciliationCandidate, RunCursor, RunPage, RunRecord,
+    SessionRecord, SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, WorkspaceRecord,
 };
 pub use dedup::{
     DedupIndex, DedupInsert, MAX_DEDUP_INDEX_CACHE_KIB, MAX_DEDUP_INDEX_DISK_BYTES,
@@ -53,7 +53,6 @@ pub use store::{SnapshotBatchReader, SnapshotStore, SnapshotWriter};
 
 pub(crate) use digest::digest_file;
 pub(crate) use manifest::build_snapshot;
-#[cfg(test)]
 pub(crate) use store::acquire_maintenance;
 pub(crate) use store::{
     abort_bundle_publication, acquire_activity, create_exact_directory, ensure_managed_directory,

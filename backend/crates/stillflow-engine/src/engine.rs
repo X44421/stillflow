@@ -171,7 +171,7 @@ impl ExecutionEngine {
 
     async fn materialize_inner(
         &self,
-        request: ExecutionRequest<'_>,
+        mut request: ExecutionRequest<'_>,
     ) -> Result<(SnapshotManifest, MemoryReport), EngineError> {
         let mut context = request.context.clone();
         if context.deadline().is_none() {
@@ -180,6 +180,29 @@ impl ExecutionEngine {
                 Instant::now() + ENGINE_DEFAULT_DEADLINE,
             );
         }
+        request.context = context;
+        let permit = self.try_acquire_run_permit()?;
+        self.materialize_with_permit(request, permit).await
+    }
+
+    /// Acquires the sole Engine execution permit without starting a second
+    /// scheduler. Job runtime workers use this before dequeuing a durable Job
+    /// so Engine Busy leaves that Job queued.
+    pub(crate) fn try_acquire_run_permit(&self) -> Result<OwnedSemaphorePermit, EngineError> {
+        Arc::clone(&self.run_gate)
+            .try_acquire_owned()
+            .map_err(|_| EngineError::Busy)
+    }
+
+    /// Executes one materialization while retaining a permit acquired by the
+    /// caller. The permit is held through the full source read and Snapshot
+    /// publication, so Job runtime cannot accidentally double-count a run.
+    pub(crate) async fn materialize_with_permit(
+        &self,
+        request: ExecutionRequest<'_>,
+        permit: OwnedSemaphorePermit,
+    ) -> Result<(SnapshotManifest, MemoryReport), EngineError> {
+        let context = request.context.clone();
         context.ensure_active().map_err(map_context_error)?;
         if request.batch_size < ReadRequest::MIN_BATCH_SIZE
             || request.batch_size > ReadRequest::MAX_BATCH_SIZE
@@ -196,18 +219,12 @@ impl ExecutionEngine {
                 "request deadline exceeds ENGINE_MAX_DEADLINE",
             ));
         }
-
-        let permit = Arc::clone(&self.run_gate)
-            .try_acquire_owned()
-            .map_err(|_| EngineError::Busy)?;
         self.run_with_permit(request, context, permit).await
     }
 
     #[cfg(test)]
     pub(crate) fn try_hold_run_gate(&self) -> Result<OwnedSemaphorePermit, EngineError> {
-        Arc::clone(&self.run_gate)
-            .try_acquire_owned()
-            .map_err(|_| EngineError::Busy)
+        self.try_acquire_run_permit()
     }
 
     async fn run_with_permit(
