@@ -1,7 +1,7 @@
 # Contract-first development workflow
 
 > Status: Accepted
-> Last updated: 2026-08-15
+> Last updated: 2026-09-01
 
 This workflow separates architectural decisions from implementation so parallel
 or automated work cannot silently invent incompatible public contracts.
@@ -25,12 +25,12 @@ must be frozen before high-risk implementation begins.
 1. Fetch and identify the latest accepted `main` commit.
 2. Treat all unmerged historical branches as read-only research material.
 3. Reconstruct useful ideas in new commits; do not merge or cherry-pick history.
-4. Create `agent/issue-NNN-short-description` from the accepted base.
-5. Use one issue per implementation branch. A docs-only governance branch may
-   group tightly coupled contracts if it names each issue and changes no runtime
-   behavior.
+4. L1-L3 use one canonical Issue and `agent/issue-NNN-short-description`.
+   L0 may use a short descriptive branch without creating a task Issue.
+5. A docs-only governance branch may group tightly coupled policy changes when
+   it names the affected Issues and changes no product runtime.
 6. For stacked delivery, the second PR targets the first PR's branch until the
-   base merges. Rebase/rebuild it from `main` afterward.
+   base merges. Rebase/rebuild only when semantic/path overlap requires it.
 7. E3-C0 (Issue #50) was explicitly independent of PR #49. It is approved
    at SHA `d2809de294bb16ae8fe11f425a4f910ec2ed43cc`, merged in PR #51 as
    `main@da3d03b`, and its contract branch was deleted. PR #49 merged as
@@ -40,31 +40,47 @@ This policy makes authorship, accepted state, and rollback boundaries observable
 
 ## 3. Risk routing
 
-### Low risk
+Use the lowest level that matches the changed authority surface.
 
-Examples: comments, private refactors in one crate, test-fixture additions.
+### L0 — trivial
 
-Flow: issue -> implementation -> CI.
+Examples: typo, comments, wording, metadata-only cleanup, CI job naming.
 
-### Medium risk
+Flow: branch -> PR -> relevant CI -> merge.
 
-Examples: additive private module, new adapter behind an existing interface,
-bounded performance change.
+No task Issue or Registry row is required.
 
-Flow: contract note -> implementation -> review -> CI.
+### L1 — low
 
-### High risk
+Examples: test infrastructure, internal refactor, CI behavior, isolated private
+change.
 
-Examples: public traits or domain models, schemas, expression/rule ASTs, plan
-serialization, streams, cancellation/backpressure, persistence, secrets, or
-three or more crates.
+Flow: Issue -> PR -> relevant CI -> normal PR review -> merge.
 
-Flow: issue -> frozen Implementation Contract -> implementation -> architecture
-review -> fixes -> CI -> final contract check.
+No Registry row is required.
+
+### L2 — medium
+
+Examples: bounded private runtime behavior, performance path, or implementation
+touching a shared writer surface without changing a frozen public contract.
+
+Flow: Issue -> scoped CLAIM/lock -> Draft PR -> exact-head CI -> independent
+GitHub PR Review -> merge.
+
+### L3 — high
+
+Examples: public traits/domain models, schemas, expression/rule ASTs, plan
+serialization, cancellation/backpressure semantics, persistence formats,
+secrets, or cross-crate authority changes.
+
+Flow: frozen Implementation Contract -> scoped CLAIM/lock -> Draft PR ->
+exact-head CI -> independent GitHub PR Review -> guarded merge.
+
+Only L2/L3 belong in `coordination/task-registry`.
 
 ## 4. Contract format
 
-A high-risk contract under `docs/issues/` must contain:
+An L3 contract under `docs/issues/` must contain:
 
 - objective and risk classification;
 - authorized public changes and compatibility decision;
@@ -83,12 +99,14 @@ and **may** is optional. Avoid acceptance criteria such as “works correctly.�
 
 ## 5. Implementation loop
 
-1. Restate the base SHA, issue, contract, scope, and non-goals.
+1. Restate the risk level, scope/non-goals, and Issue/contract when the level
+   requires them. Record the branch base for L2/L3, but do not treat unrelated
+   future main drift as an automatic rebind.
 2. Inspect the actual code; do not assume an architectural document is already
    implemented.
 3. Make the smallest coherent change that establishes one invariant.
 4. Add tests with the invariant, not in a later cleanup commit.
-5. Run the narrowest check first, then workspace-wide checks.
+5. Run the narrowest useful check first. Once an exact-head superset gate has passed, do not rerun contained subsets merely to accumulate more PASS labels.
 6. Compare the final diff with the contract line by line.
 7. Record every deviation; unapproved deviations stop the delivery.
 8. Publish an atomic commit and a draft PR with an explicit base branch.
@@ -142,7 +160,7 @@ Standard repository checks:
 ```bash
 cd backend && cargo fmt --all -- --check
 cd backend && cargo clippy --workspace --all-targets -- -D warnings
-cd backend && cargo test --workspace
+cd backend && cargo test --workspace -- --skip total_output_cap_is_accepted_at_eight_gib_and_enforced_above
 npm run typecheck
 npm run build
 ```
@@ -151,20 +169,64 @@ When a local environment lacks a tool, mark that check **not run** and require t
 corresponding GitHub check before merge. An unavailable tool is never a passing
 result.
 
+Evidence is layered by information gain, not by the number of commands run:
+
+- focused tests are development/reproduction feedback;
+- affected-crate tests are optional pre-handoff evidence when the full gate has
+  not already superseded them;
+- exact-head PR CI is the canonical full-workspace regression proof;
+- independent acceptance consumes that CI result and adds contract/adversarial
+  evidence instead of blindly rerunning the same workspace suite;
+- `--all-features` is required only when the changed surface, a frozen
+  contract, or a dedicated integration/release/nightly gate requires it.
+  Private experimental or measurement-only features are not universal
+  per-task boilerplate.
+
+The repository test runner uses normal Rust parallelism. Tests that share
+mutable process state must isolate that state themselves; a parallel-only
+failure is fixed at the exact fixture, not by globally forcing
+`--test-threads=1`.
+
+Routine workspace checks may explicitly skip a named physical-scale test when
+that exact test is preserved in a dedicated slow/release workflow. The current
+case is `total_output_cap_is_accepted_at_eight_gib_and_enforced_above`, which exercises the real 8 GiB export boundary and is
+run by `.github/workflows/slow-boundaries.yml`. This is evidence routing, not
+test deletion or semantic weakening.
+
 ## 8. Pull request protocol
 
-The PR body must:
+The PR body should report only information not already obvious from GitHub:
 
-- link the issue and frozen contract;
-- name the exact base branch;
-- enumerate public and dependency changes;
-- report checks individually;
-- list `unwrap`/`expect`, TODOs, deviations, and remaining risks;
-- say whether historical branches were consulted;
-- remain draft until required CI and architecture review pass.
+- link the canonical Issue when L1-L3 requires one;
+- link the frozen contract for L3;
+- enumerate public/dependency changes and deviations;
+- report unavailable or scope-specific checks;
+- list remaining risks.
 
-Reviewers verify the diff, not the branch narrative. A later implementation PR
-must not silently relax a contract merged by an earlier docs PR.
+GitHub itself is authoritative for PR head, CI status, review state, Ready, and
+merge state. Do not duplicate those facts across Issue comments, Registry rows,
+Epic #81, and repository checklists solely as bookkeeping.
+
+For L2/L3, independent acceptance is a GitHub **PR Review** bound to the
+reviewed commit. Do not create a separate acceptance Issue for one PR. Before
+merge, verify the current head still equals the approved review commit and the
+required exact-head CI is green.
+
+Main drift requires rebind only when it overlaps the task's authorized paths,
+declared shared dependency/contract surfaces, creates a merge conflict, or
+changes a semantic assumption. A new main SHA by itself is not a rebind reason.
+
+Completion uses native authority:
+
+- Issue = scope/lifecycle;
+- PR = head/CI/review/merge;
+- Registry = active L2/L3 writer locks only;
+- Epic #81 = roadmap/dependencies only;
+- repository checklist = completion definition/history only.
+
+Release active Registry claims at completion. Do not create extra board,
+checklist, PR-body, CI, or merge-SHA synchronization work merely to copy GitHub
+facts.
 
 ## 9. Current delivery sequence
 
@@ -219,7 +281,8 @@ Stop and return to contract review if any of these occurs:
 - deterministic output depends on unordered state, current time, or random IDs;
 - raw credentials or sensitive source values could enter logs/events;
 - a required compatibility decision is ambiguous;
-- the observed repository base differs from the documented base.
+- main drift overlaps an authorized/shared semantic surface and the branch has
+  not been re-evaluated or rebound.
 
 ## 11. Completion report
 
