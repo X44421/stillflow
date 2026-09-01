@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 270,
+  "revision": 271,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "132d0353e919793b4342f9cdf6bc51f93187abf9",
@@ -3225,7 +3225,7 @@
       "target_pr": 202,
       "target_branch": "agent/issue-198-e5-s1-control-plane-persistence",
       "expected_base": "132d0353e919793b4342f9cdf6bc51f93187abf9",
-      "expected_head": "5b9b057797c2710def2011de3dbc85ba2c260f49",
+      "expected_head": "dc207170126a3be31cda22d4b5d6a3b9b14eec82",
       "locks": [
         "branch:agent/issue-198-e5-s1-control-plane-persistence",
         "storage:stillflow-storage",
@@ -3252,14 +3252,14 @@
         "E5-C0"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T05:55:04Z",
+      "lease_expires_at": "2026-09-01T07:15:00Z",
       "started_at": "2026-09-01T03:06:29Z",
-      "updated_at": "2026-09-01T04:55:04Z",
+      "updated_at": "2026-09-01T06:16:30Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "E5-C0 is CLOSED/completed on main@132d0353; E5-S1 is the next frozen E5 mainline node. Dispatch persistence only; no E5-J1 scheduler/runtime, E5-A1 API, E5-E1 transport, or Golden E2E.",
-      "notes": "CLAIMED. E5-S1 persistence-only implementation bound after re-reading live main@132d0353e919793b4342f9cdf6bc51f93187abf9 and coordination/task-registry revision 268. Owner: agent-e5-s1-198. Implementation branch/worktree: agent/issue-198-e5-s1-control-plane-persistence / /home/owl/stillflow-e5-s1. Exact entry base is main@132d0353e919793b4342f9cdf6bc51f93187abf9. Acquired only branch:agent/issue-198-e5-s1-control-plane-persistence, storage:stillflow-storage, and core:stillflow-core locks. No Engine, API, connector, frontend, scheduler, or merge lock. First scoped implementation commit is 5b9b057797c2710def2011de3dbc85ba2c260f49 on Draft PR #202. Lease renewed through 2026-09-01T05:55:04Z. Exact-head CI and independent acceptance remain required before Ready/merge; synchronize all coordination surfaces before DONE."
+      "notes": "CLAIMED / INDEPENDENT ACCEPTANCE PASS, MERGE PENDING. E5-S1 persistence-only implementation remains bound to live main@132d0353e919793b4342f9cdf6bc51f93187abf9. Owner: agent-e5-s1-198. Implementation branch/worktree: agent/issue-198-e5-s1-control-plane-persistence / /home/owl/stillflow-e5-s1. Exact entry base is main@132d0353e919793b4342f9cdf6bc51f93187abf9. Acquired only branch:agent/issue-198-e5-s1-control-plane-persistence, storage:stillflow-storage, and core:stillflow-core locks. No Engine, API, connector, frontend, scheduler, or merge lock. Original scoped implementation head was 5b9b057797c2710def2011de3dbc85ba2c260f49; in-scope remediation head is dc207170126a3be31cda22d4b5d6a3b9b14eec82 on Draft PR #202. Remediation enforces terminal Job/Run outcome coupling, prevents lifecycle-event append bypass, and prevents ArtifactRef staging/commit after Run terminality; regression tests were added in stillflow-storage. Exact-head CI run 33475103804 is 7/7 SUCCESS; independent reviewer acceptance passed on the exact remediation head with fmt, clippy, Core 94/94, Storage 12/12, and workspace regression green. Lease renewed through 2026-09-01T07:15:00Z. PR remains OPEN/Draft and merge authorization is still separate; synchronize all coordination surfaces before DONE. E5-J1, E5-A1, E5-E1, Golden E2E, and #151 remain outside this claim."
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-01T04:55:04Z"
+  "updated_at": "2026-09-01T06:16:30Z"
 }
