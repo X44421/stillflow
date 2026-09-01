@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 275,
+  "revision": 276,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "e401f49a5978c5efebaa5bb717ee630e8fdccf20",
+  "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
   "policy": {
     "risk_levels": [
       "L2",
@@ -20,7 +20,7 @@
       "id": "E5-J1",
       "title": "Bounded Job runtime (issue #220)",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-e5-j1-220",
       "target_issue": 220,
@@ -43,10 +43,14 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T08:41:30Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-01T07:11:30Z",
       "started_at": "2026-09-01T07:11:30Z",
-      "updated_at": "2026-09-01T07:11:30Z"
+      "updated_at": "2026-09-01T11:59:48Z",
+      "completed_at": "2026-09-01T11:59:48Z",
+      "result_head": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33504894714",
+      "completion_note": "PR #223 merged with accepted exact head 6743e33de2b2dcefc6f10cde8f1c09798eb50cac; post-merge CI 6/6 SUCCESS."
     },
     {
       "id": "SIMP-R1",
@@ -134,18 +138,6 @@
     }
   ],
   "locks": {
-    "engine:job-runtime": {
-      "task_id": "E5-J1",
-      "owner": "agent-e5-j1-220",
-      "acquired_at": "2026-09-01T07:11:30Z",
-      "lease_expires_at": "2026-09-01T08:41:30Z"
-    },
-    "storage:control-plane": {
-      "task_id": "E5-J1",
-      "owner": "agent-e5-j1-220",
-      "acquired_at": "2026-09-01T07:11:30Z",
-      "lease_expires_at": "2026-09-01T08:41:30Z"
-    },
     "engine:quality": {
       "task_id": "SIMP-R1",
       "owner": "agent-simp-r1-221",
@@ -177,5 +169,5 @@
       "lease_expires_at": "2026-09-01T09:29:30Z"
     }
   },
-  "updated_at": "2026-09-01T07:59:30Z"
+  "updated_at": "2026-09-01T11:59:48Z"
 }
