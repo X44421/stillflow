@@ -1,0 +1,20 @@
+name: Coordination checks
+
+on:
+  pull_request:
+    branches:
+      - coordination/task-registry
+    paths:
+      - "coordination/**"
+      - ".github/workflows/coordination.yml"
+
+jobs:
+  taskctl:
+    name: taskctl schema and self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile taskctl
+        run: python3 -m py_compile coordination/taskctl.py
+      - name: Run in-memory coordination tests
+        run: python3 coordination/taskctl.py self-test
