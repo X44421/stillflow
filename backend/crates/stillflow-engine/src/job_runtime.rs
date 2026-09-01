@@ -883,7 +883,10 @@ fn failure_for_runtime_error(error: &JobRuntimeError) -> FailureInfo {
         }
         JobRuntimeError::Storage(error) => failure_from_storage(error),
         JobRuntimeError::Invalid(message) => fallback_failure(message),
-        JobRuntimeError::ResolverTimeout => fallback_failure("Job resolver exceeded its deadline"),
+        JobRuntimeError::ResolverTimeout => {
+            FailureInfo::try_new("timeout", false, "Job resolver exceeded its deadline")
+                .unwrap_or_else(|_| fallback_failure("Job resolver exceeded its deadline"))
+        }
         JobRuntimeError::ResolverPanic | JobRuntimeError::WorkerPanic => {
             fallback_failure("Job worker panicked")
         }
@@ -975,6 +978,13 @@ mod tests {
             JOB_RUNTIME_WAKE_CAPACITY,
             MAX_ENGINE_CONCURRENT_RUNS as usize
         );
+    }
+
+    #[test]
+    fn resolver_deadline_failure_uses_timeout_category() {
+        let failure = failure_for_runtime_error(&JobRuntimeError::ResolverTimeout);
+        assert_eq!(failure.category, "timeout");
+        assert!(!failure.retryable);
     }
 
     #[tokio::test(flavor = "current_thread")]
