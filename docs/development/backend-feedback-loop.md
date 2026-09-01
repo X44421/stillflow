@@ -8,7 +8,7 @@ This guide describes the layered local feedback loop for backend (Rust)
 development:
 
 ```
-edit/save → compiler diagnostics → focused serial test → full local gate
+edit/save → compiler diagnostics → focused test → full local gate
          → independently identifiable GitHub checks
 ```
 
@@ -73,9 +73,9 @@ cargo check --manifest-path backend/Cargo.toml --workspace --all-targets
 # Tier 0 — MSRV check on Rust 1.85.0 regardless of active default
 bacon check-msrv
 
-# Tier 1 — focused Engine library tests, strictly serial
+# Tier 1 — focused Engine library tests
 bacon test-engine
-cargo test --manifest-path backend/Cargo.toml -p stillflow-engine --lib -- --test-threads=1
+cargo test --manifest-path backend/Cargo.toml -p stillflow-engine --lib
 
 # Tier 2 — local lint/format gates
 bacon fmt
@@ -85,7 +85,7 @@ cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets -- -D 
 
 # Tier 3 — full local MSRV-style semantic gate
 bacon test-workspace
-cargo test --manifest-path backend/Cargo.toml --workspace -- --test-threads=1
+cargo test --manifest-path backend/Cargo.toml --workspace
 ```
 
 Every job is read-only by contract: no auto-fix flags, no lockfile updates,
@@ -102,7 +102,7 @@ Use the smallest gate that produces new information:
 2. **Affected-crate tests** are useful before handoff when the change is
    localized and the full workspace gate has not yet run.
 3. **Exact-head PR CI** is the canonical repository-wide regression evidence.
-   On Rust 1.85.0 it runs fmt, Clippy, and the full serial workspace test suite.
+   On Rust 1.85.0 it runs fmt, Clippy, and the full workspace test suite.
 4. **Stable compatibility** is intentionally narrower: compile/check the full
    workspace and run stable Clippy to catch language/toolchain and lint drift.
    Stable does not duplicate rustfmt or the full semantic test suite on every
@@ -120,26 +120,27 @@ Use the smallest gate that produces new information:
 
 The current PR CI backend matrix is therefore:
 
-- Rust 1.85.0: fmt + Clippy + full serial workspace tests;
+- Rust 1.85.0: fmt + Clippy + full workspace tests;
 - stable: workspace compatibility check + Clippy;
 - frontend: unchanged.
 
 This policy reduces duplicated evidence; it does not reduce contract coverage.
 
-## 5. Serial-test constraints (E3/E4)
+## 5. Parallel-test isolation
 
-Current Engine and storage fixtures rely on **global-state discipline**:
-shared environment handles, fixed fixture paths, ordered acceptance windows.
-Therefore:
+Repository-wide serialization is not a test contract. The default runner uses
+normal Rust test parallelism so unrelated crates and fixtures are not blocked by
+one shared-state surface.
 
-- Always pass `--test-threads=1` to `cargo test`; both Bacon jobs already do.
-- Do not introduce `cargo-nextest` or any process-level parallel runner in
-  this phase — its isolation model is unproven against these fixtures.
-- A test that passes alone but fails under default parallelism usually means
-  leaked global state, not a flaky test; fix the fixture ownership, do not
-  add retries.
-- If a new test needs isolation, scope its state explicitly instead of
-  relying on thread ordering.
+- A test that mutates shared process state must own an explicit scoped lock or
+  otherwise isolate that state. Engine tests already use an explicit
+  `exclusive_test_lock()` for shared-state execution paths.
+- A test that passes alone but fails only in parallel is an isolation defect,
+  not a reason to restore `--test-threads=1` for the whole workspace.
+- Fix or lock the exact fixture that races. Do not add retries, sleeps, ordering
+  assumptions, or workspace-wide serialization.
+- `cargo-nextest` remains a separate future decision; DX-T2 only restores the
+  standard Rust test runner's normal parallelism.
 
 ## 6. Classifying failures
 
