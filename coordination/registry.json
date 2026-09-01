@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 265,
+  "revision": 266,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9",
@@ -3182,7 +3182,7 @@
       "target_pr": 194,
       "target_branch": "agent/issue-191-e5-c0-control-plane-contract",
       "expected_base": "23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9",
-      "expected_head": "832b194203daa53bf0d1de4e3a1b0073af6805e1",
+      "expected_head": "2a80b3af30caaaa58366f599cdb6eba1a36c8868",
       "locks": [
         "branch:agent/issue-191-e5-c0-control-plane-contract"
       ],
@@ -3207,10 +3207,10 @@
       "conflicts_with": [],
       "lease_expires_at": "2026-08-31T09:37:52Z",
       "started_at": "2026-08-31T08:07:52Z",
-      "updated_at": "2026-08-31T08:41:07Z",
+      "updated_at": "2026-09-01T01:43:40Z",
       "queued_by": "maintainer:direct-chat",
       "queue_reason": "Next mainline after the completed Q-R1, Q-R2, X-R1, and E24 productionization lineage. PR #188 is merged and makes coordination synchronization a repository completion gate. Dispatch is unclaimed and must bind the live main base at CLAIM time.",
-      "notes": "CLAIMED. Contract-only scope for the unified control plane: ownership/cardinality, lineage references, lifecycle transitions, terminal/idempotency rules, event sequence/redaction/retention, queue/run/cancel/restart reconciliation, Artifact bounded reads, Preview provenance-only semantics, and Plan canonical digest/concurrency. Exact claim base is main@23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9. Unique writer lock: branch:agent/issue-191-e5-c0-control-plane-contract. Draft PR #194 is bound to exact implementation head 832b194203daa53bf0d1de4e3a1b0073af6805e1 and adds only docs/issues/issue-191-unified-control-plane-contract.md. No feature code, dependency, workflow, frontend, or checklist change. Independent exact-head acceptance and all PR #188 coordination synchronization requirements remain mandatory."
+      "notes": "CLAIMED. Contract-only scope for the unified control plane: ownership/cardinality, lineage references, lifecycle transitions, terminal/idempotency rules, event sequence/redaction/retention, queue/run/cancel/restart reconciliation, Artifact bounded reads, Preview provenance-only semantics, and Plan canonical digest/concurrency. Exact claim base is main@23ea7a2e2b3feacd4bdfbca06c81bc33c9c65bd9. Unique writer lock: branch:agent/issue-191-e5-c0-control-plane-contract. Draft PR #194 is rebound to exact implementation head 2a80b3af30caaaa58366f599cdb6eba1a36c8868 and adds only docs/issues/issue-191-unified-control-plane-contract.md. Follow-up correction clarifies that Preview failed is a typed non-event result and that Artifact lifecycle events use the owning Run stream. No feature code, dependency, workflow, frontend, or checklist change. Independent exact-head acceptance and all PR #188 coordination synchronization requirements remain mandatory."
     }
   ],
   "locks": {},
