@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `282`
-- Updated: `2026-09-02T08:36:08Z`
+- Registry revision: `283`
+- Updated: `2026-09-02T08:36:44Z`
 - Source main snapshot: `a70b0ac57f65f448f4abd6d6112f6238fd14f92f`
 - Legacy/inactive rows retained in JSON for migration compatibility: `4`
 
@@ -15,7 +15,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `E5-A1` | L3 | **running** | `agent-e5-a1-228` | #228 | `agent/issue-228-e5-a1-versioned-api` | api:bootstrap, api:objects, storage:control-plane-api, storage:artifact-read |
 | `E5-E1` | L3 | **running** | `agent-e5-e1-229` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
-| `E5-J2-C0` | L3 | **queued** | `—` | #233 | `agent/issue-233-e5-j2-c0-job-operation-contract` | contract:job-operation |
+| `E5-J2-C0` | L3 | **running** | `agent-e5-j2-c0-233` | #233 | `agent/issue-233-e5-j2-c0-job-operation-contract` | contract:job-operation |
 
 ## Active locks
 
@@ -24,6 +24,7 @@
 | `api:bootstrap` | `E5-A1` | `agent-e5-a1-228` | `2026-09-01T13:46:00Z` |
 | `api:event-stream` | `E5-E1` | `agent-e5-e1-229` | `2026-09-01T13:46:00Z` |
 | `api:objects` | `E5-A1` | `agent-e5-a1-228` | `2026-09-01T13:46:00Z` |
+| `contract:job-operation` | `E5-J2-C0` | `agent-e5-j2-c0-233` | `2026-09-02T10:06:44Z` |
 | `storage:artifact-read` | `E5-A1` | `agent-e5-a1-228` | `2026-09-01T13:46:00Z` |
 | `storage:control-plane-api` | `E5-A1` | `agent-e5-a1-228` | `2026-09-01T13:46:00Z` |
 

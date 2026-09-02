@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 282,
+  "revision": 283,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -223,9 +223,9 @@
       "id": "E5-J2-C0",
       "title": "Typed Job Operation v1 contract (issue #233)",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-e5-j2-c0-233",
       "target_issue": 233,
       "target_branch": "agent/issue-233-e5-j2-c0-job-operation-contract",
       "expected_base": "babf89e294aaab7a8a84c432b5b52fe382b84b8d",
@@ -238,10 +238,11 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-02T10:06:44Z",
       "registered_at": "2026-09-02T08:36:08Z",
-      "updated_at": "2026-09-02T08:36:08Z",
-      "registered_by": "agent-e5-j2-c0-233"
+      "updated_at": "2026-09-02T08:36:44Z",
+      "registered_by": "agent-e5-j2-c0-233",
+      "started_at": "2026-09-02T08:36:44Z"
     }
   ],
   "locks": {
@@ -274,7 +275,14 @@
       "owner": "agent-e5-e1-229",
       "acquired_at": "2026-09-01T12:16:00Z",
       "lease_expires_at": "2026-09-01T13:46:00Z"
+    },
+    "contract:job-operation": {
+      "task_id": "E5-J2-C0",
+      "owner": "agent-e5-j2-c0-233",
+      "expected_head": null,
+      "acquired_at": "2026-09-02T08:36:44Z",
+      "lease_expires_at": "2026-09-02T10:06:44Z"
     }
   },
-  "updated_at": "2026-09-02T08:36:08Z"
+  "updated_at": "2026-09-02T08:36:44Z"
 }
