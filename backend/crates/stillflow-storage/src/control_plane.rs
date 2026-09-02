@@ -148,6 +148,41 @@ impl ControlPlaneStore {
         self.session_from_connection(&connection, session_id)
     }
 
+    /// Lists Sessions owned by one Workspace in deterministic id order.
+    /// The API layer supplies the bounded page size; this adapter never
+    /// returns more than the frozen control-plane page limit.
+    pub fn list_sessions(
+        &self,
+        workspace_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<SessionRecord>, StorageError> {
+        validate_page_limit(limit)?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id FROM cp_sessions
+                 WHERE workspace_id = ?1 ORDER BY id ASC LIMIT ?2",
+            )
+            .map_err(|_| StorageError::database("prepare Session list"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    workspace_id.to_string(),
+                    i64::try_from(limit)
+                        .map_err(|_| { StorageError::ArithmeticOverflow("Session list limit") })?
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| StorageError::database("read Session list"))?;
+        let mut sessions = Vec::with_capacity(limit);
+        for row in rows {
+            let id = parse_uuid(&row.map_err(|_| StorageError::database("decode Session list"))?)?;
+            sessions.push(self.session_from_connection(&connection, id)?);
+        }
+        Ok(sessions)
+    }
+
     pub fn transition_session(
         &self,
         session_id: Uuid,
@@ -267,6 +302,108 @@ impl ControlPlaneStore {
         self.source_connection_from_connection(&connection, connection_id)
     }
 
+    /// Updates the mutable, secret-free SourceConnection descriptor with an
+    /// optimistic timestamp CAS. State transitions remain owned by the
+    /// dedicated transition method below.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_source_connection(
+        &self,
+        connection_id: Uuid,
+        name: impl Into<String>,
+        safe_config: Value,
+        credential_ref: CredentialRef,
+        expected_updated_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+    ) -> Result<SourceConnectionRecord, StorageError> {
+        let name = name.into();
+        validate_safe_text(&name, "SourceConnection name")?;
+        validate_safe_json(&safe_config, false)?;
+        let config_json = compact_json(&safe_config, "serialize source configuration")?;
+        let credential_ref = credential_ref.as_str();
+        if !credential_ref.starts_with("cred://") || contains_secret_marker(credential_ref) {
+            return Err(StorageError::InvalidDraft(
+                "credential reference must be an opaque cred:// reference",
+            ));
+        }
+        let _activity = self.write_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let current: Option<String> = connection
+            .query_row(
+                "SELECT created_at_utc FROM cp_connections WHERE id = ?1",
+                params![connection_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StorageError::database("read SourceConnection update"))?;
+        let Some(created_at) = current else {
+            return Err(StorageError::NotFound(connection_id));
+        };
+        if timestamp(&updated_at) < created_at || updated_at < expected_updated_at {
+            return Err(StorageError::InvalidTimestampOrder(
+                "SourceConnection update",
+            ));
+        }
+        let changed = connection
+            .execute(
+                "UPDATE cp_connections
+                 SET name = ?2, config_json = ?3, credential_ref = ?4,
+                     updated_at_utc = ?5
+                 WHERE id = ?1 AND updated_at_utc = ?6",
+                params![
+                    connection_id.to_string(),
+                    name,
+                    config_json,
+                    credential_ref,
+                    timestamp(&updated_at),
+                    timestamp(&expected_updated_at)
+                ],
+            )
+            .map_err(|_| StorageError::database("persist SourceConnection update"))?;
+        if changed != 1 {
+            return Err(StorageError::Busy(
+                "SourceConnection changed while updating",
+            ));
+        }
+        self.source_connection_from_connection(&connection, connection_id)
+    }
+
+    /// Lists SourceConnections owned by one Workspace in deterministic id
+    /// order. Stored configuration is already validated as secret-free.
+    pub fn list_source_connections(
+        &self,
+        workspace_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<SourceConnectionRecord>, StorageError> {
+        validate_page_limit(limit)?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id FROM cp_connections
+                 WHERE workspace_id = ?1 ORDER BY id ASC LIMIT ?2",
+            )
+            .map_err(|_| StorageError::database("prepare SourceConnection list"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    workspace_id.to_string(),
+                    i64::try_from(limit).map_err(|_| {
+                        StorageError::ArithmeticOverflow("SourceConnection list limit")
+                    })?
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| StorageError::database("read SourceConnection list"))?;
+        let mut connections = Vec::with_capacity(limit);
+        for row in rows {
+            let id = parse_uuid(
+                &row.map_err(|_| StorageError::database("decode SourceConnection list"))?,
+            )?;
+            connections.push(self.source_connection_from_connection(&connection, id)?);
+        }
+        Ok(connections)
+    }
+
     pub fn transition_source_connection(
         &self,
         connection_id: Uuid,
@@ -364,6 +501,40 @@ impl ControlPlaneStore {
         self.source_asset_from_connection(&connection, asset_id)
     }
 
+    pub fn list_source_assets(
+        &self,
+        workspace_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<SourceAssetRecord>, StorageError> {
+        validate_page_limit(limit)?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id FROM cp_assets
+                 WHERE workspace_id = ?1 ORDER BY id ASC LIMIT ?2",
+            )
+            .map_err(|_| StorageError::database("prepare SourceAsset list"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    workspace_id.to_string(),
+                    i64::try_from(limit).map_err(|_| {
+                        StorageError::ArithmeticOverflow("SourceAsset list limit")
+                    })?
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| StorageError::database("read SourceAsset list"))?;
+        let mut assets = Vec::with_capacity(limit);
+        for row in rows {
+            let id =
+                parse_uuid(&row.map_err(|_| StorageError::database("decode SourceAsset list"))?)?;
+            assets.push(self.source_asset_from_connection(&connection, id)?);
+        }
+        Ok(assets)
+    }
+
     pub fn retire_source_asset(&self, asset_id: Uuid) -> Result<SourceAssetRecord, StorageError> {
         let _activity = self.write_activity()?;
         let connection = open_connection(&self.inner)?;
@@ -423,6 +594,38 @@ impl ControlPlaneStore {
         self.dataset_from_connection(&connection, dataset_id)
     }
 
+    pub fn list_datasets(
+        &self,
+        workspace_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<DatasetRecord>, StorageError> {
+        validate_page_limit(limit)?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id FROM cp_datasets
+                 WHERE workspace_id = ?1 ORDER BY id ASC LIMIT ?2",
+            )
+            .map_err(|_| StorageError::database("prepare Dataset list"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    workspace_id.to_string(),
+                    i64::try_from(limit)
+                        .map_err(|_| { StorageError::ArithmeticOverflow("Dataset list limit") })?
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| StorageError::database("read Dataset list"))?;
+        let mut datasets = Vec::with_capacity(limit);
+        for row in rows {
+            let id = parse_uuid(&row.map_err(|_| StorageError::database("decode Dataset list"))?)?;
+            datasets.push(self.dataset_from_connection(&connection, id)?);
+        }
+        Ok(datasets)
+    }
+
     pub fn archive_dataset(&self, dataset_id: Uuid) -> Result<DatasetRecord, StorageError> {
         let _activity = self.write_activity()?;
         let connection = open_connection(&self.inner)?;
@@ -470,6 +673,38 @@ impl ControlPlaneStore {
         let _activity = self.read_activity()?;
         let connection = open_connection(&self.inner)?;
         self.plan_from_connection(&connection, plan_id)
+    }
+
+    pub fn list_plans(
+        &self,
+        workspace_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<PlanRecord>, StorageError> {
+        validate_page_limit(limit)?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id FROM cp_plans
+                 WHERE workspace_id = ?1 ORDER BY id ASC LIMIT ?2",
+            )
+            .map_err(|_| StorageError::database("prepare Plan list"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    workspace_id.to_string(),
+                    i64::try_from(limit)
+                        .map_err(|_| { StorageError::ArithmeticOverflow("Plan list limit") })?
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| StorageError::database("read Plan list"))?;
+        let mut plans = Vec::with_capacity(limit);
+        for row in rows {
+            let id = parse_uuid(&row.map_err(|_| StorageError::database("decode Plan list"))?)?;
+            plans.push(self.plan_from_connection(&connection, id)?);
+        }
+        Ok(plans)
     }
 
     pub fn archive_plan(&self, plan_id: Uuid) -> Result<PlanRecord, StorageError> {
@@ -665,6 +900,43 @@ impl ControlPlaneStore {
         let _activity = self.read_activity()?;
         let connection = open_connection(&self.inner)?;
         self.plan_version_from_connection(&connection, plan_version_id)
+    }
+
+    pub fn list_plan_versions(
+        &self,
+        workspace_id: Uuid,
+        plan_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<PlanVersionRecord>, StorageError> {
+        validate_page_limit(limit)?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id FROM cp_plan_versions
+                 WHERE workspace_id = ?1 AND plan_id = ?2
+                 ORDER BY version_number ASC, id ASC LIMIT ?3",
+            )
+            .map_err(|_| StorageError::database("prepare PlanVersion list"))?;
+        let rows = statement
+            .query_map(
+                params![
+                    workspace_id.to_string(),
+                    plan_id.to_string(),
+                    i64::try_from(limit).map_err(|_| {
+                        StorageError::ArithmeticOverflow("PlanVersion list limit")
+                    })?
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|_| StorageError::database("read PlanVersion list"))?;
+        let mut versions = Vec::with_capacity(limit);
+        for row in rows {
+            let id =
+                parse_uuid(&row.map_err(|_| StorageError::database("decode PlanVersion list"))?)?;
+            versions.push(self.plan_version_from_connection(&connection, id)?);
+        }
+        Ok(versions)
     }
 
     pub fn submit_job(&self, submission: JobSubmission) -> Result<SubmitOutcome, StorageError> {

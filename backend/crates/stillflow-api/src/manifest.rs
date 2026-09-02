@@ -4,6 +4,7 @@
 //! derived from this manifest; it is not an independent source of truth.
 
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,8 +31,430 @@ pub struct RouteManifest {
     pub schemas: &'static [SchemaSpec],
 }
 
-pub const BOOTSTRAP_MANIFEST: RouteManifest = RouteManifest {
+const fn route(
+    operation_id: &'static str,
+    method: &'static str,
+    path: &'static str,
+    request_schema: &'static str,
+    response_schema: &'static str,
+) -> RouteSpec {
+    RouteSpec {
+        operation_id,
+        method,
+        path,
+        request_schema,
+        response_schema,
+    }
+}
+
+const fn schema(name: &'static str) -> SchemaSpec {
+    SchemaSpec { name, version: 1 }
+}
+
+pub const E5_A1_ROUTES: &[RouteSpec] = &[
+    route(
+        "handshake",
+        "POST",
+        "/v1/handshake",
+        "HandshakeRequest",
+        "HandshakeResponse",
+    ),
+    route(
+        "workspace.create",
+        "POST",
+        "/v1/workspaces",
+        "CreateWorkspaceRequest",
+        "WorkspaceView",
+    ),
+    route(
+        "workspace.archive",
+        "POST",
+        "/v1/workspaces/{workspaceId}/archive",
+        "ArchiveWorkspaceRequest",
+        "WorkspaceView",
+    ),
+    route(
+        "session.create",
+        "POST",
+        "/v1/sessions",
+        "CreateSessionRequest",
+        "SessionView",
+    ),
+    route(
+        "session.list",
+        "GET",
+        "/v1/sessions",
+        "ListRequest",
+        "ObjectList<SessionView>",
+    ),
+    route(
+        "session.read",
+        "GET",
+        "/v1/sessions/{objectId}",
+        "ObjectIdRequest",
+        "SessionView",
+    ),
+    route(
+        "session.close",
+        "POST",
+        "/v1/sessions/{sessionId}/close",
+        "CloseSessionRequest",
+        "SessionView",
+    ),
+    route(
+        "connection.test",
+        "POST",
+        "/v1/connections/test",
+        "TestSourceConnectionRequest",
+        "ConnectionStatus",
+    ),
+    route(
+        "connection.register",
+        "POST",
+        "/v1/connections",
+        "RegisterSourceConnectionRequest",
+        "SourceConnectionView",
+    ),
+    route(
+        "connection.list",
+        "GET",
+        "/v1/connections",
+        "ListRequest",
+        "ObjectList<SourceConnectionView>",
+    ),
+    route(
+        "connection.read",
+        "GET",
+        "/v1/connections/{objectId}",
+        "ObjectIdRequest",
+        "SourceConnectionView",
+    ),
+    route(
+        "connection.update",
+        "POST",
+        "/v1/connections/{connectionId}",
+        "UpdateSourceConnectionRequest",
+        "SourceConnectionView",
+    ),
+    route(
+        "connection.transition",
+        "POST",
+        "/v1/connections/{connectionId}/transition",
+        "TransitionSourceConnectionRequest",
+        "SourceConnectionView",
+    ),
+    route(
+        "connection.retire",
+        "POST",
+        "/v1/connections/{connectionId}/retire",
+        "RetireSourceConnectionRequest",
+        "SourceConnectionView",
+    ),
+    route(
+        "asset.list",
+        "GET",
+        "/v1/assets",
+        "ListRequest",
+        "ObjectList<SourceAssetView>",
+    ),
+    route(
+        "asset.discover",
+        "POST",
+        "/v1/assets/discover",
+        "DiscoverAssetsRequest",
+        "Vec<SourceAssetView>",
+    ),
+    route(
+        "asset.inspect",
+        "POST",
+        "/v1/assets/inspect",
+        "InspectAssetRequest",
+        "AssetMetadata",
+    ),
+    route(
+        "asset.preview",
+        "POST",
+        "/v1/assets/preview",
+        "PreviewAssetRequest",
+        "PreviewView",
+    ),
+    route(
+        "dataset.create",
+        "POST",
+        "/v1/datasets",
+        "CreateDatasetRequest",
+        "DatasetView",
+    ),
+    route(
+        "dataset.list",
+        "GET",
+        "/v1/datasets",
+        "ListRequest",
+        "ObjectList<DatasetView>",
+    ),
+    route(
+        "dataset.read",
+        "GET",
+        "/v1/datasets/{objectId}",
+        "ObjectIdRequest",
+        "DatasetView",
+    ),
+    route(
+        "dataset.archive",
+        "POST",
+        "/v1/datasets/{objectId}/archive",
+        "ObjectIdRequest",
+        "DatasetView",
+    ),
+    route(
+        "plan.create",
+        "POST",
+        "/v1/plans",
+        "CreatePlanRequest",
+        "PlanView",
+    ),
+    route(
+        "plan.list",
+        "GET",
+        "/v1/plans",
+        "ListRequest",
+        "ObjectList<PlanView>",
+    ),
+    route(
+        "plan.load",
+        "GET",
+        "/v1/plans/{objectId}",
+        "ObjectIdRequest",
+        "PlanView",
+    ),
+    route(
+        "plan.version.save",
+        "POST",
+        "/v1/plans/{planId}/versions",
+        "SavePlanVersionRequest",
+        "PlanVersionView",
+    ),
+    route(
+        "plan.version.list",
+        "GET",
+        "/v1/plans/{planId}/versions",
+        "ListPlanVersionsRequest",
+        "ObjectList<PlanVersionView>",
+    ),
+    route(
+        "plan.version.read",
+        "GET",
+        "/v1/plan-versions/{objectId}",
+        "ObjectIdRequest",
+        "PlanVersionView",
+    ),
+    route(
+        "plan.version.publish",
+        "POST",
+        "/v1/plan-versions/{planVersionId}/publish",
+        "PublishPlanVersionRequest",
+        "PlanVersionView",
+    ),
+    route(
+        "plan.clone",
+        "POST",
+        "/v1/plans/clone",
+        "ClonePlanRequest",
+        "PlanVersionView",
+    ),
+    route(
+        "plan.diff",
+        "POST",
+        "/v1/plans/diff",
+        "PlanDiffRequest",
+        "PlanDiffView",
+    ),
+    route(
+        "plan.validate",
+        "POST",
+        "/v1/plans/validate",
+        "ValidatePlanRequest",
+        "ValidatePlanView",
+    ),
+    route(
+        "engine.preview",
+        "POST",
+        "/v1/engine/preview",
+        "EnginePreviewRequest",
+        "EnginePreviewView",
+    ),
+    route(
+        "job.submit",
+        "POST",
+        "/v1/jobs",
+        "SubmitJobRequest",
+        "JobView",
+    ),
+    route(
+        "job.read",
+        "GET",
+        "/v1/jobs/{objectId}",
+        "ObjectIdRequest",
+        "JobView",
+    ),
+    route(
+        "job.list",
+        "GET",
+        "/v1/jobs",
+        "ListJobsRequest",
+        "JobPageView",
+    ),
+    route(
+        "job.cancel",
+        "POST",
+        "/v1/jobs/{jobId}/cancel",
+        "CancelJobRequest",
+        "JobView",
+    ),
+    route(
+        "run.read",
+        "GET",
+        "/v1/runs/{objectId}",
+        "ObjectIdRequest",
+        "RunView",
+    ),
+    route(
+        "run.list",
+        "GET",
+        "/v1/runs",
+        "ListRunsRequest",
+        "RunPageView",
+    ),
+    route(
+        "event.list",
+        "GET",
+        "/v1/events",
+        "ListEventsRequest",
+        "EventPageView",
+    ),
+    route(
+        "artifact.read",
+        "GET",
+        "/v1/artifacts/{objectId}",
+        "ObjectIdRequest",
+        "ArtifactView",
+    ),
+    route(
+        "artifact.list",
+        "GET",
+        "/v1/runs/{runId}/artifacts",
+        "ListArtifactsRequest",
+        "ArtifactPageView",
+    ),
+    route(
+        "artifact.content",
+        "GET",
+        "/v1/artifacts/content",
+        "ArtifactContentRequest",
+        "ArtifactContentPage",
+    ),
+];
+
+pub const E5_A1_SCHEMAS: &[SchemaSpec] = &[
+    schema("HandshakeRequest"),
+    schema("HandshakeResponse"),
+    schema("CreateWorkspaceRequest"),
+    schema("ArchiveWorkspaceRequest"),
+    schema("WorkspaceView"),
+    schema("CreateSessionRequest"),
+    schema("SessionView"),
+    schema("ListRequest"),
+    schema("ObjectIdRequest"),
+    schema("CloseSessionRequest"),
+    schema("RegisterSourceConnectionRequest"),
+    schema("SourceConnectionView"),
+    schema("TestSourceConnectionRequest"),
+    schema("ConnectionStatus"),
+    schema("UpdateSourceConnectionRequest"),
+    schema("TransitionSourceConnectionRequest"),
+    schema("RetireSourceConnectionRequest"),
+    schema("DiscoverAssetsRequest"),
+    schema("InspectAssetRequest"),
+    schema("AssetMetadata"),
+    schema("PreviewAssetRequest"),
+    schema("PreviewView"),
+    schema("CreateDatasetRequest"),
+    schema("DatasetView"),
+    schema("CreatePlanRequest"),
+    schema("PlanView"),
+    schema("SavePlanVersionRequest"),
+    schema("PlanVersionView"),
+    schema("ListPlanVersionsRequest"),
+    schema("PublishPlanVersionRequest"),
+    schema("ClonePlanRequest"),
+    schema("PlanDiffRequest"),
+    schema("PlanDiffView"),
+    schema("ValidatePlanRequest"),
+    schema("ValidatePlanView"),
+    schema("EnginePreviewRequest"),
+    schema("EnginePreviewView"),
+    schema("SubmitJobRequest"),
+    schema("JobView"),
+    schema("ListJobsRequest"),
+    schema("JobPageView"),
+    schema("CancelJobRequest"),
+    schema("RunView"),
+    schema("ListRunsRequest"),
+    schema("RunPageView"),
+    schema("ListEventsRequest"),
+    schema("EventPageView"),
+    schema("ArtifactView"),
+    schema("ListArtifactsRequest"),
+    schema("ArtifactPageView"),
+    schema("ArtifactContentRequest"),
+    schema("ArtifactContentPage"),
+    schema("Vec<SourceAssetView>"),
+    schema("ObjectList<SessionView>"),
+    schema("ObjectList<SourceConnectionView>"),
+    schema("ObjectList<SourceAssetView>"),
+    schema("ObjectList<DatasetView>"),
+    schema("ObjectList<PlanView>"),
+    schema("ObjectList<PlanVersionView>"),
+];
+
+pub const E5_A1_MANIFEST: RouteManifest = RouteManifest {
     api_version: 1,
-    routes: &[],
-    schemas: &[],
+    routes: E5_A1_ROUTES,
+    schemas: E5_A1_SCHEMAS,
 };
+
+pub const BOOTSTRAP_MANIFEST: RouteManifest = E5_A1_MANIFEST;
+
+/// A mechanical OpenAPI-facing representation. A future listener can wrap
+/// this value in transport-specific `info` and `servers` fields without
+/// creating a second route or schema registry.
+pub fn openapi_representation() -> Value {
+    serde_json::to_value(E5_A1_MANIFEST).expect("static API manifest serializes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_manifest_route_references_known_schemas() {
+        for route in E5_A1_ROUTES {
+            assert!(E5_A1_SCHEMAS
+                .iter()
+                .any(|item| item.name == route.request_schema));
+            assert!(E5_A1_SCHEMAS
+                .iter()
+                .any(|item| item.name == route.response_schema));
+        }
+    }
+
+    #[test]
+    fn openapi_representation_is_derived_from_manifest() {
+        let json = openapi_representation();
+        assert_eq!(json["apiVersion"], 1);
+        assert_eq!(
+            json["routes"].as_array().expect("routes").len(),
+            E5_A1_ROUTES.len()
+        );
+    }
+}

@@ -11,6 +11,7 @@ pub mod envelope;
 pub mod error;
 pub mod limits;
 pub mod manifest;
+pub mod service;
 pub mod version;
 
 #[cfg(feature = "event-stream")]
@@ -18,13 +19,18 @@ pub mod event_stream {
     include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/event_stream.rs"));
 }
 
-pub use envelope::{ApiRequest, ApiResponse, RequestMetadata, ResponseMetadata};
-pub use error::{ApiError, ApiResult};
+pub use envelope::{
+    ApiErrorBody, ApiErrorResponse, ApiRequest, ApiResponse, RequestMetadata, ResponseMetadata,
+};
+pub use error::{ApiError, ApiErrorCode, ApiResult};
 pub use limits::ApiLimits;
-pub use manifest::{RouteManifest, RouteSpec, SchemaSpec};
+pub use manifest::{
+    openapi_representation, RouteManifest, RouteSpec, SchemaSpec, BOOTSTRAP_MANIFEST,
+    E5_A1_MANIFEST, E5_A1_ROUTES, E5_A1_SCHEMAS,
+};
+pub use service::*;
 pub use version::{ApiVersion, API_V1, SUPPORTED_API_VERSIONS};
 
-/// Returns the name of this crate, as a smoke test for workspace wiring.
 pub fn crate_name() -> &'static str {
     "stillflow-api"
 }

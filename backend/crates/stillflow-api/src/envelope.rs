@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{ApiError, ApiResult, ApiVersion, API_V1};
+use crate::{ApiError, ApiErrorCode, ApiResult, ApiVersion, API_V1};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +65,37 @@ impl<T> ApiResponse<T> {
                 request_id,
             },
             body,
+        }
+    }
+}
+
+/// Stable serialized error envelope. Transport adapters may map this to a
+/// status code, but the error code/message contract remains transport-neutral.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiErrorResponse {
+    pub meta: ResponseMetadata,
+    pub error: ApiErrorBody,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiErrorBody {
+    pub code: ApiErrorCode,
+    pub message: String,
+}
+
+impl ApiErrorResponse {
+    pub fn new(request_id: Uuid, error: ApiError) -> Self {
+        Self {
+            meta: ResponseMetadata {
+                api_version: API_V1,
+                request_id,
+            },
+            error: ApiErrorBody {
+                code: error.code,
+                message: error.message,
+            },
         }
     }
 }
