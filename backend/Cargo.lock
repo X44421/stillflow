@@ -3129,8 +3129,21 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stillflow-api"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "sha2",
+ "stillflow-connectors",
  "stillflow-core",
  "stillflow-engine",
+ "stillflow-plan",
+ "stillflow-storage",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
