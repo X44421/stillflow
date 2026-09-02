@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 289,
+  "revision": 290,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -269,9 +269,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-02T12:53:52Z",
+      "lease_expires_at": "2026-09-02T14:51:28Z",
       "registered_at": "2026-09-02T10:53:32Z",
-      "updated_at": "2026-09-02T10:53:52Z",
+      "updated_at": "2026-09-02T13:21:28Z",
       "registered_by": "agent-e5-j2-235",
       "started_at": "2026-09-02T10:53:52Z"
     }
@@ -282,29 +282,29 @@
       "owner": "agent-e5-j2-235",
       "expected_head": null,
       "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T12:53:52Z"
+      "lease_expires_at": "2026-09-02T14:51:28Z"
     },
     "storage:job-operation": {
       "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
       "owner": "agent-e5-j2-235",
       "expected_head": null,
       "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T12:53:52Z"
+      "lease_expires_at": "2026-09-02T14:51:28Z"
     },
     "engine:job-runtime-dispatch": {
       "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
       "owner": "agent-e5-j2-235",
       "expected_head": null,
       "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T12:53:52Z"
+      "lease_expires_at": "2026-09-02T14:51:28Z"
     },
     "api:job-operation": {
       "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
       "owner": "agent-e5-j2-235",
       "expected_head": null,
       "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T12:53:52Z"
+      "lease_expires_at": "2026-09-02T14:51:28Z"
     }
   },
-  "updated_at": "2026-09-02T10:53:52Z"
+  "updated_at": "2026-09-02T13:21:28Z"
 }

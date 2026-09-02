@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `289`
-- Updated: `2026-09-02T10:53:52Z`
+- Registry revision: `290`
+- Updated: `2026-09-02T13:21:28Z`
 - Source main snapshot: `a70b0ac57f65f448f4abd6d6112f6238fd14f92f`
 - Legacy/inactive rows retained in JSON for migration compatibility: `4`
 
@@ -21,10 +21,10 @@
 
 | Lock | Task | Owner | Lease expires |
 | --- | --- | --- | --- |
-| `api:job-operation` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T12:53:52Z` |
-| `core:job-operation` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T12:53:52Z` |
-| `engine:job-runtime-dispatch` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T12:53:52Z` |
-| `storage:job-operation` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T12:53:52Z` |
+| `api:job-operation` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T14:51:28Z` |
+| `core:job-operation` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T14:51:28Z` |
+| `engine:job-runtime-dispatch` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T14:51:28Z` |
+| `storage:job-operation` | `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | `agent-e5-j2-235` | `2026-09-02T14:51:28Z` |
 
 ## L2/L3 protocol
 
