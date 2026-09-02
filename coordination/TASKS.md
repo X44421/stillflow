@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `286`
-- Updated: `2026-09-02T10:50:37Z`
+- Registry revision: `287`
+- Updated: `2026-09-02T10:50:58Z`
 - Source main snapshot: `a70b0ac57f65f448f4abd6d6112f6238fd14f92f`
 - Legacy/inactive rows retained in JSON for migration compatibility: `4`
 
@@ -14,13 +14,13 @@
 | ID | Risk | Status | Owner | Issue | Branch | Locks |
 | --- | --- | --- | --- | --- | --- | --- |
 | `E5-A1` | L3 | **queued** | `—` | #228 | `agent/issue-228-e5-a1-versioned-api` | api:bootstrap, api:objects, storage:control-plane-api, storage:artifact-read |
-| `E5-E1` | L3 | **running** | `agent-e5-e1-229` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
+| `E5-E1` | L3 | **queued** | `—` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
 
 ## Active locks
 
 | Lock | Task | Owner | Lease expires |
 | --- | --- | --- | --- |
-| `api:event-stream` | `E5-E1` | `agent-e5-e1-229` | `2026-09-01T13:46:00Z` |
+| — | — | — | — |
 
 ## L2/L3 protocol
 

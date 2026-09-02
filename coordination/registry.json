@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 286,
+  "revision": 287,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -192,9 +192,9 @@
       "id": "E5-E1",
       "title": "Live Event Stream (issue #229)",
       "risk_level": "L3",
-      "status": "running",
+      "status": "queued",
       "mode": "write",
-      "owner": "agent-e5-e1-229",
+      "owner": null,
       "target_issue": 229,
       "target_branch": "agent/issue-229-e5-e1-event-stream",
       "expected_base": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -215,20 +215,15 @@
         "E5-A1"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T13:46:00Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-01T12:16:00Z",
       "started_at": "2026-09-01T12:16:00Z",
-      "updated_at": "2026-09-01T12:16:00Z",
-      "note": "First API edit is blocked until E5-A1 publishes API_BOOTSTRAP_READY; then rebind/stack onto that exact bootstrap head. Shared bootstrap files remain read-only for E5-E1."
+      "updated_at": "2026-09-02T10:50:58Z",
+      "note": "First API edit is blocked until E5-A1 publishes API_BOOTSTRAP_READY; then rebind/stack onto that exact bootstrap head. Shared bootstrap files remain read-only for E5-E1.",
+      "reclaim_reason": "GitHub Issue #229 and PR #230 are closed/completed; claim lease expired; clear stale registry lock before E5-J2 #235.",
+      "reclaimed_by": "agent-e5-j2-235"
     }
   ],
-  "locks": {
-    "api:event-stream": {
-      "task_id": "E5-E1",
-      "owner": "agent-e5-e1-229",
-      "acquired_at": "2026-09-01T12:16:00Z",
-      "lease_expires_at": "2026-09-01T13:46:00Z"
-    }
-  },
-  "updated_at": "2026-09-02T10:50:37Z"
+  "locks": {},
+  "updated_at": "2026-09-02T10:50:58Z"
 }
