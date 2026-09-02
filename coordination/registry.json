@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 285,
+  "revision": 286,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -149,9 +149,9 @@
       "id": "E5-A1",
       "title": "Versioned object/API boundary (issue #228)",
       "risk_level": "L3",
-      "status": "running",
+      "status": "queued",
       "mode": "write",
-      "owner": "agent-e5-a1-228",
+      "owner": null,
       "target_issue": 228,
       "target_branch": "agent/issue-228-e5-a1-versioned-api",
       "expected_base": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -181,10 +181,12 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-01T13:46:00Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-01T12:16:00Z",
       "started_at": "2026-09-01T12:16:00Z",
-      "updated_at": "2026-09-01T12:16:00Z"
+      "updated_at": "2026-09-02T10:50:37Z",
+      "reclaim_reason": "GitHub Issue #228 and PR #231 are closed/completed; claim lease expired; clear stale registry claim before E5-J2 #235.",
+      "reclaimed_by": "agent-e5-j2-235"
     },
     {
       "id": "E5-E1",
@@ -221,30 +223,6 @@
     }
   ],
   "locks": {
-    "api:bootstrap": {
-      "task_id": "E5-A1",
-      "owner": "agent-e5-a1-228",
-      "acquired_at": "2026-09-01T12:16:00Z",
-      "lease_expires_at": "2026-09-01T13:46:00Z"
-    },
-    "api:objects": {
-      "task_id": "E5-A1",
-      "owner": "agent-e5-a1-228",
-      "acquired_at": "2026-09-01T12:16:00Z",
-      "lease_expires_at": "2026-09-01T13:46:00Z"
-    },
-    "storage:control-plane-api": {
-      "task_id": "E5-A1",
-      "owner": "agent-e5-a1-228",
-      "acquired_at": "2026-09-01T12:16:00Z",
-      "lease_expires_at": "2026-09-01T13:46:00Z"
-    },
-    "storage:artifact-read": {
-      "task_id": "E5-A1",
-      "owner": "agent-e5-a1-228",
-      "acquired_at": "2026-09-01T12:16:00Z",
-      "lease_expires_at": "2026-09-01T13:46:00Z"
-    },
     "api:event-stream": {
       "task_id": "E5-E1",
       "owner": "agent-e5-e1-229",
@@ -252,5 +230,5 @@
       "lease_expires_at": "2026-09-01T13:46:00Z"
     }
   },
-  "updated_at": "2026-09-02T09:57:37Z"
+  "updated_at": "2026-09-02T10:50:37Z"
 }
