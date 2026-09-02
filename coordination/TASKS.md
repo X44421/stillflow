@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `287`
-- Updated: `2026-09-02T10:50:58Z`
+- Registry revision: `288`
+- Updated: `2026-09-02T10:53:32Z`
 - Source main snapshot: `a70b0ac57f65f448f4abd6d6112f6238fd14f92f`
 - Legacy/inactive rows retained in JSON for migration compatibility: `4`
 
@@ -15,6 +15,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `E5-A1` | L3 | **queued** | `—` | #228 | `agent/issue-228-e5-a1-versioned-api` | api:bootstrap, api:objects, storage:control-plane-api, storage:artifact-read |
 | `E5-E1` | L3 | **queued** | `—` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
+| `E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE` | L3 | **queued** | `—` | #235 | `agent/issue-235-e5-j2-multi-operation-job-runtime` | core:job-operation, storage:job-operation, engine:job-runtime-dispatch, api:job-operation |
 
 ## Active locks
 
