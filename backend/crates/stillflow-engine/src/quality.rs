@@ -1250,9 +1250,19 @@ impl ExecutionEngine {
         let permit = Arc::clone(&self.run_gate)
             .try_acquire_owned()
             .map_err(|_| EngineError::Busy)?;
-        let result = self.quality_inner(request).await;
+        let result = self.quality_with_permit(request).await;
         drop(permit);
         result
+    }
+
+    /// Runs Q-R2 while the caller owns the single JobRuntime Engine permit.
+    /// This is intentionally just the deterministic quality phase; it never
+    /// scans the source or acquires a second run gate.
+    pub(crate) async fn quality_with_permit(
+        &self,
+        request: QualityRequest,
+    ) -> Result<QualityResult, EngineError> {
+        self.quality_inner(request).await
     }
 
     async fn quality_inner(&self, request: QualityRequest) -> Result<QualityResult, EngineError> {

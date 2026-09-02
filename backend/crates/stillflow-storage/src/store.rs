@@ -21,6 +21,10 @@ use stillflow_core::{
     LogicalSchemaFingerprint, SnapshotStats, DATASET_SNAPSHOT_VERSION, MAX_BATCH_ROWS,
 };
 
+use crate::artifact::{
+    accepted_partition_canonical_digest, accepted_snapshot_manifest_digest, canonical_batch_bytes,
+    AcceptedCanonicalPartition,
+};
 use crate::digest::digest_file;
 use crate::manifest::build_snapshot;
 use crate::{
@@ -209,6 +213,15 @@ impl SnapshotStore {
         })
     }
 
+    /// Returns the logical committed version digest used by E5 typed
+    /// Snapshot references. The digest is derived from the immutable Snapshot
+    /// descriptor and canonical logical batch bytes, never from Parquet file
+    /// compression, paths, or mutable filesystem metadata.
+    pub fn version_digest(&self, snapshot_id: Uuid) -> Result<[u8; 32], StorageError> {
+        let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
+        snapshot_version_digest_inner(&self.inner, snapshot_id)
+    }
+
     pub fn verify_snapshot(&self, snapshot_id: Uuid) -> Result<SnapshotManifest, StorageError> {
         let activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
         let manifest = load_manifest_inner(&self.inner, snapshot_id)?;
@@ -388,6 +401,43 @@ impl SnapshotStore {
         let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
         crate::export::tombstone_export_inner(&self.inner, export_id, &tombstoned_at)
     }
+}
+
+/// Computes the committed logical Snapshot version digest without opening a
+/// second activity guard. Callers either hold the reader guard themselves or
+/// are inside a control-plane transaction that already serializes the
+/// publication decision.
+pub(crate) fn snapshot_version_digest_inner(
+    inner: &StoreInner,
+    snapshot_id: Uuid,
+) -> Result<[u8; 32], StorageError> {
+    let manifest = load_manifest_inner(inner, snapshot_id)?;
+    let mut canonical_partitions = Vec::with_capacity(manifest.partitions().len());
+    for partition in manifest.partitions() {
+        let envelope = read_partition(inner, manifest.snapshot(), partition)?;
+        if envelope.row_count() as u64 != partition.row_count() {
+            return Err(StorageError::InvalidManifest(
+                "Snapshot partition row count differs from its logical batch",
+            ));
+        }
+        let canonical = canonical_batch_bytes(envelope.payload())?;
+        let stored_byte_count = u64::try_from(canonical.len())
+            .map_err(|_| StorageError::ArithmeticOverflow("Snapshot logical byte count"))?;
+        let digest = accepted_partition_canonical_digest(
+            manifest.snapshot().id(),
+            partition.sequence(),
+            partition.row_count(),
+            stored_byte_count,
+            &[canonical],
+        );
+        canonical_partitions.push(AcceptedCanonicalPartition {
+            sequence: partition.sequence(),
+            row_count: partition.row_count(),
+            stored_byte_count,
+            digest,
+        });
+    }
+    accepted_snapshot_manifest_digest(manifest.snapshot(), &canonical_partitions)
 }
 
 pub struct SnapshotWriter {
@@ -731,19 +781,26 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_one(connection)?;
             migrate_to_version_two(connection)?;
             migrate_to_version_three(connection)?;
-            migrate_to_version_four(connection)
+            migrate_to_version_four(connection)?;
+            migrate_to_version_five(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
             migrate_to_version_three(connection)?;
-            migrate_to_version_four(connection)
+            migrate_to_version_four(connection)?;
+            migrate_to_version_five(connection)
         }
         2 => {
             migrate_to_version_three(connection)?;
-            migrate_to_version_four(connection)
+            migrate_to_version_four(connection)?;
+            migrate_to_version_five(connection)
         }
-        3 => migrate_to_version_four(connection),
-        4 => Ok(()),
+        3 => {
+            migrate_to_version_four(connection)?;
+            migrate_to_version_five(connection)
+        }
+        4 => migrate_to_version_five(connection),
+        5 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
 }
@@ -940,6 +997,52 @@ fn migrate_to_version_four(connection: &mut Connection) -> Result<(), StorageErr
     transaction
         .commit()
         .map_err(|_| StorageError::database("commit storage migration version four"))
+}
+
+/// Version five adds the E5-J2 operation identity and terminal output set to
+/// the existing Job/Run rows. The nullable operation columns preserve rows
+/// created by E5-J1; those legacy rows remain readable and fail closed before
+/// a new operation-specific claim because they have no typed descriptor.
+fn migrate_to_version_five(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version five"))?;
+    transaction
+        .execute_batch(
+            "ALTER TABLE cp_jobs ADD COLUMN operation_kind TEXT;
+             ALTER TABLE cp_jobs ADD COLUMN operation_version INTEGER;
+             ALTER TABLE cp_jobs ADD COLUMN operation_descriptor_json TEXT;
+             ALTER TABLE cp_jobs ADD COLUMN operation_descriptor_digest TEXT;
+             ALTER TABLE cp_jobs ADD COLUMN request_digest TEXT;
+             ALTER TABLE cp_jobs ADD COLUMN output_refs_json TEXT NOT NULL DEFAULT '[]';
+
+             ALTER TABLE cp_runs ADD COLUMN operation_kind TEXT;
+             ALTER TABLE cp_runs ADD COLUMN operation_version INTEGER;
+             ALTER TABLE cp_runs ADD COLUMN operation_descriptor_json TEXT;
+             ALTER TABLE cp_runs ADD COLUMN operation_descriptor_digest TEXT;
+             ALTER TABLE cp_runs ADD COLUMN output_refs_json TEXT NOT NULL DEFAULT '[]';
+
+             CREATE TABLE cp_artifact_bodies (
+                 artifact_id TEXT PRIMARY KEY NOT NULL REFERENCES cp_artifact_refs(id) ON DELETE CASCADE,
+                 artifact_kind TEXT NOT NULL,
+                 artifact_version INTEGER NOT NULL CHECK (artifact_version = 1),
+                 content_digest TEXT NOT NULL CHECK (length(content_digest) = 64),
+                 body BLOB NOT NULL,
+                 provenance_json TEXT NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('staged', 'committed', 'tombstoned', 'failed')),
+                 created_at_utc TEXT NOT NULL,
+                 committed_at_utc TEXT
+             ) STRICT;
+
+             CREATE INDEX cp_artifact_bodies_state_index
+             ON cp_artifact_bodies(state, artifact_id);
+
+             PRAGMA user_version = 5;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version five"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version five"))
 }
 
 /// Version three adds the export publication journal, export manifest,
@@ -2296,7 +2399,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // A legacy version-one database migrates through the current schema
         // and gains the bundle, export, and control-plane tables.
@@ -2348,7 +2451,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -2357,6 +2460,7 @@ mod tests {
             "export_journal",
             "export_manifests",
             "export_tombstones",
+            "cp_artifact_bodies",
         ] {
             let present: i64 = connection
                 .query_row(
@@ -2373,19 +2477,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 5;")
+            .execute_batch("PRAGMA user_version = 6;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(5))
+            Err(StorageError::UnsupportedStorageVersion(6))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     }
 
     #[test]
@@ -2461,7 +2565,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         for (table, expected) in [
             ("snapshots", 1_i64),
             ("verification_bundles", 1_i64),

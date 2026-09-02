@@ -5,6 +5,7 @@
 //! It does not start workers, schedule jobs, expose HTTP, or infer lifecycle
 //! state from files.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -19,14 +20,17 @@ use uuid::Uuid;
 
 use stillflow_core::{
     ArtifactKind, ArtifactRefState, AssetKind, ConnectorKind, ControlPlaneEventType,
-    ControlPlaneInput, CredentialRef, DatasetState, EventStreamKind, InputRef, JobState, PlanState,
-    PlanVersionState, RunState, SessionState, SourceAssetState, SourceConnectionState,
-    WorkspaceState, MAX_EVENT_PAGE_SIZE, MAX_EVENT_PAYLOAD_BYTES, MAX_QUEUED_JOBS_PER_WORKSPACE,
+    ControlPlaneInput, CredentialRef, DatasetState, EventStreamKind, InputRef, JobOperation,
+    JobState, OperationDescriptorV1, OperationKind, PlanState, PlanVersionState, RunState,
+    SessionState, SnapshotRef, SourceAssetState, SourceConnectionState, WorkspaceState,
+    DATASET_SNAPSHOT_VERSION, MAX_EVENT_PAGE_SIZE, MAX_EVENT_PAYLOAD_BYTES,
+    MAX_QUEUED_JOBS_PER_WORKSPACE,
 };
 
 use crate::{
-    acquire_activity, acquire_maintenance, open_connection, ActivityKind, SnapshotStore,
-    StorageError, StoreInner,
+    acquire_activity, acquire_maintenance, open_connection, snapshot_version_digest_inner,
+    verification_bundle_version_digest_inner, ActivityKind, SnapshotStore, StorageError,
+    StoreInner,
 };
 
 const EVENT_VERSION: u16 = 1;
@@ -939,13 +943,34 @@ impl ControlPlaneStore {
         Ok(versions)
     }
 
-    pub fn submit_job(&self, submission: JobSubmission) -> Result<SubmitOutcome, StorageError> {
+    pub fn submit_job(&self, mut submission: JobSubmission) -> Result<SubmitOutcome, StorageError> {
         submission.validate()?;
         let _activity = self.write_activity()?;
         let mut connection = open_connection(&self.inner)?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StorageError::database("begin submit job"))?;
+
+        if submission.operation.is_some() {
+            ensure_plan_version_for_job(
+                &transaction,
+                submission.workspace_id,
+                submission.plan_version_id,
+                &submission.canonical_plan_digest,
+            )?;
+            let plan_id =
+                parse_uuid(&plan_version_raw(&transaction, submission.plan_version_id)?.plan_id)?;
+            if let Some(requested_plan_id) = submission.plan_id {
+                if requested_plan_id != plan_id {
+                    return Err(StorageError::InvalidDraft(
+                        "typed Job Plan identity does not match its PlanVersion",
+                    ));
+                }
+            }
+            submission.plan_id = Some(plan_id);
+            submission.request_digest = submission.compute_request_digest()?;
+            submission.validate()?;
+        }
 
         let existing: Option<(String, String)> = transaction
             .query_row(
@@ -994,6 +1019,29 @@ impl ControlPlaneStore {
             submission.plan_version_id,
             &submission.canonical_plan_digest,
         )?;
+        if let Some(operation) = submission.operation.as_ref() {
+            match &operation.descriptor {
+                OperationDescriptorV1::Materialize { source_asset, .. } => {
+                    validate_source_asset_input(
+                        &transaction,
+                        submission.workspace_id,
+                        source_asset.source_connection_id,
+                        source_asset.source_asset_id,
+                    )?;
+                }
+                OperationDescriptorV1::Verification { snapshot, .. }
+                | OperationDescriptorV1::Profile { snapshot, .. }
+                | OperationDescriptorV1::Export { snapshot, .. } => {
+                    validate_snapshot_input(
+                        &transaction,
+                        &self.inner,
+                        submission.workspace_id,
+                        submission.session_id,
+                        snapshot,
+                    )?;
+                }
+            }
+        }
         validate_submission_timestamp(
             &transaction,
             submission.session_id,
@@ -1016,6 +1064,29 @@ impl ControlPlaneStore {
             compact_json(&submission.execution_policy, "serialize execution policy")?;
         let output_policy_json =
             compact_json(&submission.output_policy, "serialize output policy")?;
+        let operation_kind = submission
+            .operation
+            .as_ref()
+            .map(|operation| operation_kind_text(operation.operation_kind).to_owned());
+        let operation_version = submission
+            .operation
+            .as_ref()
+            .map(|operation| i64::from(operation.operation_version));
+        let operation_descriptor_json = submission
+            .operation
+            .as_ref()
+            .map(|operation| compact_json(operation, "serialize JobOperation descriptor"))
+            .transpose()?;
+        let operation_descriptor_digest = submission
+            .operation
+            .as_ref()
+            .map(|operation| {
+                operation
+                    .descriptor_digest()
+                    .map(|digest| digest_hex(&digest))
+                    .map_err(|_| StorageError::Serialization("JobOperation descriptor digest"))
+            })
+            .transpose()?;
         let result_json = serde_json::json!({
             "jobId": submission.job_id,
             "state": "queued"
@@ -1025,15 +1096,24 @@ impl ControlPlaneStore {
             .execute(
                 "INSERT INTO cp_jobs
                  (id, workspace_id, session_id, plan_version_id, canonical_plan_digest,
-                  input_json, execution_policy_json, output_policy_json, state,
-                  queued_at_utc, started_at_utc, finished_at_utc, run_id, failure_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', ?9, NULL, NULL, NULL, NULL)",
+                  operation_kind, operation_version, operation_descriptor_json,
+                  operation_descriptor_digest, request_digest, input_json,
+                  execution_policy_json, output_policy_json, state,
+                  queued_at_utc, started_at_utc, finished_at_utc, run_id,
+                  failure_json, output_refs_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                         ?13, 'queued', ?14, NULL, NULL, NULL, NULL, '[]')",
                 params![
                     submission.job_id.to_string(),
                     submission.workspace_id.to_string(),
                     submission.session_id.to_string(),
                     submission.plan_version_id.to_string(),
                     digest_hex(&submission.canonical_plan_digest),
+                    operation_kind,
+                    operation_version,
+                    operation_descriptor_json,
+                    operation_descriptor_digest,
+                    digest_hex(&submission.request_digest),
                     input_json,
                     execution_policy_json,
                     output_policy_json,
@@ -1093,24 +1173,56 @@ impl ControlPlaneStore {
     /// mirrors these rows in an in-memory scheduler.
     pub fn next_queued_job(&self, workspace_id: Uuid) -> Result<Option<JobRecord>, StorageError> {
         validate_id(workspace_id, "workspace")?;
-        let _activity = self.read_activity()?;
-        let connection = open_connection(&self.inner)?;
-        let row = connection
-            .query_row(
-                "SELECT id, workspace_id, session_id, plan_version_id,
-                        canonical_plan_digest, input_json, execution_policy_json,
-                        output_policy_json, state, queued_at_utc, started_at_utc,
-                        finished_at_utc, run_id, failure_json
-                 FROM cp_jobs
-                 WHERE workspace_id = ?1 AND state = 'queued'
-                 ORDER BY queued_at_utc ASC, id ASC
-                 LIMIT 1",
-                params![workspace_id.to_string()],
-                raw_job_from_row,
-            )
-            .optional()
-            .map_err(|_| StorageError::database("read next queued Job"))?;
-        row.map(job_from_raw).transpose()
+        let _activity = self.write_activity()?;
+        let mut connection = open_connection(&self.inner)?;
+        loop {
+            let row = connection
+                .query_row(
+                    "SELECT j.id, j.workspace_id, j.session_id, j.plan_version_id,
+                            p.plan_id, j.canonical_plan_digest, j.operation_kind,
+                            j.operation_version, j.operation_descriptor_json,
+                            j.operation_descriptor_digest, j.request_digest,
+                            j.input_json, j.execution_policy_json,
+                            j.output_policy_json, j.state, j.queued_at_utc,
+                            j.started_at_utc, j.finished_at_utc, j.run_id,
+                            j.failure_json, j.output_refs_json
+                     FROM cp_jobs j
+                     JOIN cp_plan_versions p ON p.id = j.plan_version_id
+                     WHERE j.workspace_id = ?1 AND j.state = 'queued'
+                     ORDER BY j.queued_at_utc ASC, j.id ASC
+                     LIMIT 1",
+                    params![workspace_id.to_string()],
+                    raw_job_from_row,
+                )
+                .optional()
+                .map_err(|_| StorageError::database("read next queued Job"))?;
+            let Some(row) = row else {
+                return Ok(None);
+            };
+            let job_id = parse_uuid(&row.id)?;
+            let typed_operation = row.operation_kind.is_some()
+                || row.operation_version.is_some()
+                || row.operation_descriptor_json.is_some()
+                || row.operation_descriptor_digest.is_some()
+                || row.request_digest.is_some();
+            match job_from_raw(row) {
+                Ok(job) => return Ok(Some(job)),
+                Err(error)
+                    if typed_operation
+                        && matches!(
+                            error,
+                            StorageError::Serialization(_) | StorageError::InvalidDraft(_)
+                        ) =>
+                {
+                    // A queued typed row must never be retried forever when
+                    // its durable operation is unsupported or corrupt. Move
+                    // it to one durable pre-run failure and continue with
+                    // the next FIFO row in the same queue read.
+                    fail_corrupt_queued_job(&mut connection, job_id)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     /// Lists active Job/Run pairs that need restart reconciliation. Queued
@@ -1300,6 +1412,23 @@ impl ControlPlaneStore {
                     params![draft.job_id.to_string(), failure_json],
                 )
                 .map_err(|_| StorageError::database("persist reconciled Job failure"))?;
+            transaction
+                .execute(
+                    "UPDATE cp_artifact_bodies SET state = 'failed'
+                     WHERE artifact_id IN (
+                         SELECT id FROM cp_artifact_refs
+                         WHERE run_id = ?1 AND state = 'staged'
+                     )",
+                    params![draft.run_id.to_string()],
+                )
+                .map_err(|_| StorageError::database("fail reconciled artifact bodies"))?;
+            transaction
+                .execute(
+                    "UPDATE cp_artifact_refs SET state = 'failed'
+                     WHERE run_id = ?1 AND state = 'staged'",
+                    params![draft.run_id.to_string()],
+                )
+                .map_err(|_| StorageError::database("fail reconciled artifact references"))?;
             append_event_tx(&transaction, draft.reconciled_event.clone())?;
             append_event_tx(&transaction, draft.run_failed_event.clone())?;
             append_event_tx(&transaction, draft.job_failed_event.clone())?;
@@ -1347,6 +1476,50 @@ impl ControlPlaneStore {
                 "control-plane object was already claimed",
             ));
         }
+        let operation = parse_operation(
+            job.operation_kind.as_deref(),
+            job.operation_version,
+            job.operation_descriptor_json.as_deref(),
+            job.operation_descriptor_digest.as_deref(),
+        )?;
+        if let Some(operation) = operation.as_ref() {
+            let inputs: Vec<ControlPlaneInput> = serde_json::from_str(&job.input_json)
+                .map_err(|_| StorageError::Serialization("Job input references"))?;
+            validate_inputs(&inputs)?;
+            if inputs.as_slice() != [operation.input()] {
+                return Err(StorageError::Serialization(
+                    "Job input does not match its typed operation",
+                ));
+            }
+            let workspace_id = parse_uuid(&job.workspace_id)?;
+            let session_id = parse_uuid(&job.session_id)?;
+            match &operation.descriptor {
+                OperationDescriptorV1::Materialize { source_asset, .. } => {
+                    if source_asset.workspace_id != workspace_id {
+                        return Err(StorageError::InvalidDraft(
+                            "Materialize SourceAsset is outside the Job Workspace",
+                        ));
+                    }
+                    validate_source_asset_input(
+                        &transaction,
+                        workspace_id,
+                        source_asset.source_connection_id,
+                        source_asset.source_asset_id,
+                    )?;
+                }
+                OperationDescriptorV1::Verification { snapshot, .. }
+                | OperationDescriptorV1::Profile { snapshot, .. }
+                | OperationDescriptorV1::Export { snapshot, .. } => {
+                    validate_snapshot_input(
+                        &transaction,
+                        &self.inner,
+                        workspace_id,
+                        session_id,
+                        snapshot,
+                    )?;
+                }
+            }
+        }
         let queued_at = parse_timestamp(&job.queued_at_utc, "job queued timestamp")?;
         if started_at < queued_at {
             return Err(StorageError::InvalidTimestampOrder(
@@ -1377,10 +1550,14 @@ impl ControlPlaneStore {
             .execute(
                 "INSERT INTO cp_runs
                  (id, workspace_id, session_id, job_id, plan_id, plan_version_id,
-                  canonical_plan_digest, plan_fingerprint, input_json,
+                  canonical_plan_digest, plan_fingerprint, operation_kind,
+                  operation_version, operation_descriptor_json,
+                  operation_descriptor_digest, input_json,
                   engine_contract_version, engine_build,
-                  state, started_at_utc, finished_at_utc, failure_json, snapshot_ref, bundle_ref)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'running', ?12, NULL, NULL, NULL, NULL)",
+                  state, started_at_utc, finished_at_utc, failure_json,
+                  snapshot_ref, bundle_ref, output_refs_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                         ?13, ?14, ?15, 'running', ?16, NULL, NULL, NULL, NULL, '[]')",
                 params![
                     run_id.to_string(),
                     job.workspace_id.clone(),
@@ -1390,6 +1567,10 @@ impl ControlPlaneStore {
                     job.plan_version_id.clone(),
                     job.canonical_plan_digest.clone(),
                     plan_version.plan_fingerprint,
+                    job.operation_kind.clone(),
+                    job.operation_version,
+                    job.operation_descriptor_json.clone(),
+                    job.operation_descriptor_digest.clone(),
                     job.input_json.clone(),
                     i64::from(engine_contract_version),
                     engine_build,
@@ -1706,6 +1887,60 @@ impl ControlPlaneStore {
         job_event: EventDraft,
         failure: Option<FailureInfo>,
     ) -> Result<(RunRecord, JobRecord), StorageError> {
+        self.finish_run_and_job_with_terminal_outputs_inner(
+            run_id,
+            run_target,
+            job_target,
+            snapshot_ref,
+            bundle_ref,
+            None,
+            run_event,
+            job_event,
+            failure,
+        )
+    }
+
+    /// Commits the typed E5-J2 terminal output set together with the
+    /// authoritative Run and Job terminal transitions. Artifact refs staged
+    /// for this Run are promoted inside this same SQLite transaction; readers
+    /// therefore observe either the complete operation result or no result.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_run_and_job_with_terminal_outputs(
+        &self,
+        run_id: Uuid,
+        run_target: RunState,
+        job_target: JobState,
+        outputs: Vec<TerminalOutputRef>,
+        run_event: EventDraft,
+        job_event: EventDraft,
+        failure: Option<FailureInfo>,
+    ) -> Result<(RunRecord, JobRecord), StorageError> {
+        self.finish_run_and_job_with_terminal_outputs_inner(
+            run_id,
+            run_target,
+            job_target,
+            None,
+            None,
+            Some(outputs),
+            run_event,
+            job_event,
+            failure,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_run_and_job_with_terminal_outputs_inner(
+        &self,
+        run_id: Uuid,
+        run_target: RunState,
+        job_target: JobState,
+        mut snapshot_ref: Option<Uuid>,
+        mut bundle_ref: Option<Uuid>,
+        terminal_outputs: Option<Vec<TerminalOutputRef>>,
+        run_event: EventDraft,
+        job_event: EventDraft,
+        failure: Option<FailureInfo>,
+    ) -> Result<(RunRecord, JobRecord), StorageError> {
         if let Some(snapshot_id) = snapshot_ref {
             validate_id(snapshot_id, "Snapshot output reference")?;
         }
@@ -1747,6 +1982,49 @@ impl ControlPlaneStore {
                 "terminal state was already changed or is not allowed",
             ));
         }
+        let typed_outputs_json = if let Some(outputs) = terminal_outputs.as_ref() {
+            let operation = parse_operation(
+                job.operation_kind.as_deref(),
+                job.operation_version,
+                job.operation_descriptor_json.as_deref(),
+                job.operation_descriptor_digest.as_deref(),
+            )?;
+            let run_operation = parse_operation(
+                run.operation_kind.as_deref(),
+                run.operation_version,
+                run.operation_descriptor_json.as_deref(),
+                run.operation_descriptor_digest.as_deref(),
+            )?;
+            if operation.is_none() || operation != run_operation {
+                return Err(StorageError::Serialization(
+                    "typed terminal output requires matching Job and Run operation",
+                ));
+            }
+            if run_target == RunState::Succeeded {
+                let (typed_snapshot, typed_bundle) = validate_terminal_output_set(
+                    &transaction,
+                    &self.inner,
+                    run_id,
+                    job_id,
+                    parse_uuid(&job.workspace_id)?,
+                    parse_uuid(&job.session_id)?,
+                    operation.as_ref().expect("checked above"),
+                    outputs,
+                )?;
+                snapshot_ref = typed_snapshot;
+                bundle_ref = typed_bundle;
+            } else if !outputs.is_empty() {
+                return Err(StorageError::InvalidDraft(
+                    "failed or cancelled typed Job cannot publish output references",
+                ));
+            }
+            Some(compact_json(
+                outputs,
+                "serialize terminal output references",
+            )?)
+        } else {
+            None
+        };
         if run_target != RunState::Succeeded && (snapshot_ref.is_some() || bundle_ref.is_some()) {
             return Err(StorageError::InvalidDraft(
                 "only a successful Run can publish output references",
@@ -1837,7 +2115,28 @@ impl ControlPlaneStore {
         let failure_json = failure_json(failure.as_ref())?;
         let run_finished_at = timestamp(&run_event.occurred_at);
         let job_finished_at = timestamp(&job_event.occurred_at);
-        if snapshot_ref.is_some() || bundle_ref.is_some() {
+        if let Some(output_refs_json) = typed_outputs_json.as_deref() {
+            transaction
+                .execute(
+                    "UPDATE cp_runs SET output_refs_json = ?2,
+                            snapshot_ref = ?3, bundle_ref = ?4
+                     WHERE id = ?1 AND state = ?5",
+                    params![
+                        run_id.to_string(),
+                        output_refs_json,
+                        snapshot_ref.map(|value| value.to_string()),
+                        bundle_ref.map(|value| value.to_string()),
+                        run.state
+                    ],
+                )
+                .map_err(|_| StorageError::database("persist typed terminal outputs"))?;
+            transaction
+                .execute(
+                    "UPDATE cp_jobs SET output_refs_json = ?2 WHERE id = ?1 AND state = ?3",
+                    params![job_id.to_string(), output_refs_json, job.state],
+                )
+                .map_err(|_| StorageError::database("persist Job terminal outputs"))?;
+        } else if snapshot_ref.is_some() || bundle_ref.is_some() {
             transaction
                 .execute(
                     "UPDATE cp_runs SET snapshot_ref = COALESCE(?2, snapshot_ref),
@@ -1851,6 +2150,37 @@ impl ControlPlaneStore {
                     ],
                 )
                 .map_err(|_| StorageError::database("persist terminal output references"))?;
+        }
+        if typed_outputs_json.is_some() {
+            if run_target == RunState::Succeeded {
+                commit_staged_terminal_artifacts(
+                    &transaction,
+                    run_id,
+                    job_id,
+                    terminal_outputs
+                        .as_ref()
+                        .expect("typed output JSON has typed outputs"),
+                    &run_event,
+                )?;
+            } else {
+                transaction
+                    .execute(
+                        "UPDATE cp_artifact_refs SET state = 'failed'
+                         WHERE run_id = ?1 AND state = 'staged'",
+                        params![run_id.to_string()],
+                    )
+                    .map_err(|_| StorageError::database("fail unpublished terminal artifacts"))?;
+                transaction
+                    .execute(
+                        "UPDATE cp_artifact_bodies SET state = 'failed'
+                         WHERE artifact_id IN (
+                             SELECT id FROM cp_artifact_refs
+                             WHERE run_id = ?1 AND state = 'failed'
+                         ) AND state = 'staged'",
+                        params![run_id.to_string()],
+                    )
+                    .map_err(|_| StorageError::database("fail unpublished artifact bodies"))?;
+            }
         }
         transition_run_state_tx(
             &transaction,
@@ -1918,6 +2248,18 @@ impl ControlPlaneStore {
         if run.state != "running" {
             return Err(StorageError::InvalidDraft(
                 "only a running Run can bind output references",
+            ));
+        }
+        if parse_operation(
+            run.operation_kind.as_deref(),
+            run.operation_version,
+            run.operation_descriptor_json.as_deref(),
+            run.operation_descriptor_digest.as_deref(),
+        )?
+        .is_some()
+        {
+            return Err(StorageError::InvalidDraft(
+                "typed Run outputs must be published with the terminal output set",
             ));
         }
         if let Some(snapshot_id) = snapshot_ref {
@@ -2007,9 +2349,31 @@ impl ControlPlaneStore {
         &self,
         draft: ArtifactRefDraft,
     ) -> Result<ArtifactRefRecord, StorageError> {
+        self.create_artifact_ref_inner(draft, None)
+    }
+
+    /// Stages a generic JSON artifact body beside its ArtifactRef. Profile and
+    /// quality reports use this path so their canonical bytes are durable
+    /// before the terminal output transaction promotes both the body and ref.
+    pub fn create_artifact_ref_with_body(
+        &self,
+        draft: ArtifactRefDraft,
+        body: Vec<u8>,
+    ) -> Result<ArtifactRefRecord, StorageError> {
+        self.create_artifact_ref_inner(draft, Some(body))
+    }
+
+    fn create_artifact_ref_inner(
+        &self,
+        draft: ArtifactRefDraft,
+        body: Option<Vec<u8>>,
+    ) -> Result<ArtifactRefRecord, StorageError> {
         draft.validate()?;
         validate_safe_json(&draft.metadata, false)?;
         let metadata_json = compact_json(&draft.metadata, "serialize artifact metadata")?;
+        if let Some(body) = body.as_ref() {
+            validate_artifact_body(draft.artifact_kind, draft.content_digest, body)?;
+        }
         let _activity = self.write_activity()?;
         let mut connection = open_connection(&self.inner)?;
         let transaction = connection
@@ -2046,6 +2410,24 @@ impl ControlPlaneStore {
                 ],
             )
             .map_err(|error| map_constraint(error, draft.artifact_id))?;
+        if let Some(body) = body.as_ref() {
+            transaction
+                .execute(
+                    "INSERT INTO cp_artifact_bodies
+                     (artifact_id, artifact_kind, artifact_version, content_digest, body,
+                      provenance_json, state, created_at_utc, committed_at_utc)
+                     VALUES (?1, ?2, 1, ?3, ?4, ?5, 'staged', ?6, NULL)",
+                    params![
+                        draft.artifact_id.to_string(),
+                        enum_json(draft.artifact_kind)?,
+                        digest_hex(&draft.content_digest),
+                        body.as_slice(),
+                        metadata_json,
+                        timestamp(&draft.created_at)
+                    ],
+                )
+                .map_err(|error| map_constraint(error, draft.artifact_id))?;
+        }
         let record = artifact_from_transaction(&transaction, draft.artifact_id)?;
         transaction
             .commit()
@@ -2074,6 +2456,19 @@ impl ControlPlaneStore {
         let run_id = parse_uuid(&artifact.run_id)?;
         let job_id = run_job_id(&transaction, run_id)?;
         let run = run_raw(&transaction, run_id)?;
+        if target == ArtifactRefState::Committed
+            && parse_operation(
+                run.operation_kind.as_deref(),
+                run.operation_version,
+                run.operation_descriptor_json.as_deref(),
+                run.operation_descriptor_digest.as_deref(),
+            )?
+            .is_some()
+        {
+            return Err(StorageError::InvalidDraft(
+                "typed ArtifactRefs must be committed with the terminal output set",
+            ));
+        }
         if target == ArtifactRefState::Committed && run.state != "running" {
             return Err(StorageError::InvalidDraft(
                 "ArtifactRef commit requires a running Run",
@@ -2136,6 +2531,28 @@ impl ControlPlaneStore {
                 "ArtifactRef changed while transitioning",
             ));
         }
+        match target {
+            ArtifactRefState::Committed => {
+                transaction
+                    .execute(
+                        "UPDATE cp_artifact_bodies
+                         SET state = 'committed', committed_at_utc = ?2
+                         WHERE artifact_id = ?1 AND state = 'staged'",
+                        params![artifact_id.to_string(), timestamp(&event.occurred_at)],
+                    )
+                    .map_err(|_| StorageError::database("commit Artifact body transition"))?;
+            }
+            ArtifactRefState::Tombstoned => {
+                transaction
+                    .execute(
+                        "UPDATE cp_artifact_bodies SET state = 'tombstoned'
+                         WHERE artifact_id = ?1 AND state = 'committed'",
+                        params![artifact_id.to_string()],
+                    )
+                    .map_err(|_| StorageError::database("tombstone Artifact body"))?;
+            }
+            ArtifactRefState::Staged | ArtifactRefState::Failed => {}
+        }
         append_event_tx(&transaction, event)?;
         let record = artifact_from_transaction(&transaction, artifact_id)?;
         transaction
@@ -2165,6 +2582,13 @@ impl ControlPlaneStore {
                 params![artifact_id.to_string()],
             )
             .map_err(|_| StorageError::database("persist failed artifact transition"))?;
+        transaction
+            .execute(
+                "UPDATE cp_artifact_bodies SET state = 'failed'
+                 WHERE artifact_id = ?1 AND state = 'staged'",
+                params![artifact_id.to_string()],
+            )
+            .map_err(|_| StorageError::database("persist failed artifact body transition"))?;
         let record = artifact_from_transaction(&transaction, artifact_id)?;
         transaction
             .commit()
@@ -2176,6 +2600,14 @@ impl ControlPlaneStore {
         let _activity = self.read_activity()?;
         let connection = open_connection(&self.inner)?;
         readable_artifact(artifact_from_connection(&connection, artifact_id)?)
+    }
+
+    /// Reads a committed canonical JSON artifact body. Staged bodies and
+    /// bodies whose ArtifactRef is not committed are deliberately invisible.
+    pub fn get_artifact_body(&self, artifact_id: Uuid) -> Result<ArtifactBodyRecord, StorageError> {
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        artifact_body_from_connection(&connection, artifact_id)
     }
 
     pub fn list_events(
@@ -2266,13 +2698,19 @@ impl ControlPlaneStore {
         });
         let mut statement = connection
             .prepare(
-                "SELECT id, workspace_id, session_id, plan_version_id, canonical_plan_digest,
-                        input_json, execution_policy_json, output_policy_json, state,
-                        queued_at_utc, started_at_utc, finished_at_utc, run_id, failure_json
-                 FROM cp_jobs
-                 WHERE workspace_id = ?1
-                   AND (queued_at_utc > ?2 OR (queued_at_utc = ?2 AND id > ?3))
-                 ORDER BY queued_at_utc ASC, id ASC LIMIT ?4",
+                "SELECT j.id, j.workspace_id, j.session_id, j.plan_version_id,
+                        p.plan_id, j.canonical_plan_digest, j.operation_kind,
+                        j.operation_version, j.operation_descriptor_json,
+                        j.operation_descriptor_digest, j.request_digest,
+                        j.input_json, j.execution_policy_json,
+                        j.output_policy_json, j.state, j.queued_at_utc,
+                        j.started_at_utc, j.finished_at_utc, j.run_id,
+                        j.failure_json, j.output_refs_json
+                 FROM cp_jobs j
+                 JOIN cp_plan_versions p ON p.id = j.plan_version_id
+                 WHERE j.workspace_id = ?1
+                   AND (j.queued_at_utc > ?2 OR (j.queued_at_utc = ?2 AND j.id > ?3))
+                 ORDER BY j.queued_at_utc ASC, j.id ASC LIMIT ?4",
             )
             .map_err(|_| StorageError::database("prepare Job page"))?;
         let rows = statement
@@ -2328,9 +2766,12 @@ impl ControlPlaneStore {
         let mut statement = connection
             .prepare(
                 "SELECT id, workspace_id, session_id, job_id, plan_id, plan_version_id,
-                        canonical_plan_digest, plan_fingerprint, input_json,
+                        canonical_plan_digest, plan_fingerprint, operation_kind,
+                        operation_version, operation_descriptor_json,
+                        operation_descriptor_digest, input_json,
                         engine_contract_version, engine_build,
-                        state, started_at_utc, finished_at_utc, failure_json, snapshot_ref, bundle_ref
+                        state, started_at_utc, finished_at_utc, failure_json,
+                        snapshot_ref, bundle_ref, output_refs_json
                  FROM cp_runs
                  WHERE workspace_id = ?1
                    AND (started_at_utc > ?2 OR (started_at_utc = ?2 AND id > ?3))
@@ -2583,8 +3024,13 @@ pub struct JobRecord {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub session_id: Uuid,
+    pub plan_id: Uuid,
     pub plan_version_id: Uuid,
     pub canonical_plan_digest: [u8; 32],
+    /// None is retained only for rows created before the E5-J2 migration.
+    /// New submissions always carry a validated typed operation.
+    pub operation: Option<JobOperation>,
+    pub request_digest: Option<[u8; 32]>,
     pub inputs: Vec<ControlPlaneInput>,
     pub execution_policy: Value,
     pub output_policy: Value,
@@ -2594,6 +3040,7 @@ pub struct JobRecord {
     pub finished_at: Option<DateTime<Utc>>,
     pub run_id: Option<Uuid>,
     pub failure: Option<FailureInfo>,
+    pub outputs: Vec<TerminalOutputRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2630,6 +3077,8 @@ pub struct RunRecord {
     pub plan_version_id: Uuid,
     pub canonical_plan_digest: [u8; 32],
     pub plan_fingerprint: [u8; 32],
+    pub operation: Option<JobOperation>,
+    pub operation_descriptor_digest: Option<[u8; 32]>,
     pub inputs: Vec<ControlPlaneInput>,
     pub engine_contract_version: u16,
     pub engine_build: String,
@@ -2639,6 +3088,195 @@ pub struct RunRecord {
     pub failure: Option<FailureInfo>,
     pub snapshot_ref: Option<Uuid>,
     pub bundle_ref: Option<Uuid>,
+    pub outputs: Vec<TerminalOutputRef>,
+}
+
+/// The direct terminal output set attached to one authoritative Run. Nested
+/// VerificationBundle members are represented only by the bundle variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum TerminalOutputRef {
+    Snapshot {
+        workspace_id: Uuid,
+        session_id: Uuid,
+        dataset_id: Uuid,
+        snapshot_id: Uuid,
+        #[serde(with = "digest_hex_serde")]
+        version_digest: [u8; 32],
+        #[serde(with = "digest_hex_serde")]
+        schema_fingerprint: [u8; 32],
+        snapshot_version: u16,
+        committed: bool,
+    },
+    VerificationBundle {
+        workspace_id: Uuid,
+        run_id: Uuid,
+        bundle_id: Uuid,
+        bundle_version: u16,
+        #[serde(with = "digest_hex_serde")]
+        version_digest: [u8; 32],
+        accepted_snapshot: SnapshotOutputRef,
+        members: Vec<ArtifactOutputRef>,
+    },
+    Artifact {
+        workspace_id: Uuid,
+        run_id: Uuid,
+        artifact_id: Uuid,
+        artifact_kind: ArtifactKind,
+        artifact_version: u16,
+        #[serde(with = "digest_hex_serde")]
+        content_digest: [u8; 32],
+        state: ArtifactRefState,
+    },
+}
+
+/// A self-contained committed Snapshot reference used by typed terminal
+/// outputs and by the nested accepted child of a VerificationBundle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SnapshotOutputRef {
+    pub workspace_id: Uuid,
+    pub session_id: Uuid,
+    pub dataset_id: Uuid,
+    pub snapshot_id: Uuid,
+    #[serde(with = "digest_hex_serde")]
+    pub version_digest: [u8; 32],
+    #[serde(with = "digest_hex_serde")]
+    pub schema_fingerprint: [u8; 32],
+    pub snapshot_version: u16,
+    pub committed: bool,
+}
+
+/// A self-contained committed logical artifact reference. Export partitions
+/// remain nested in the committed export manifest rather than becoming extra
+/// direct Job outputs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactOutputRef {
+    pub workspace_id: Uuid,
+    pub run_id: Uuid,
+    pub artifact_id: Uuid,
+    pub artifact_kind: ArtifactKind,
+    pub artifact_version: u16,
+    #[serde(with = "digest_hex_serde")]
+    pub content_digest: [u8; 32],
+    pub state: ArtifactRefState,
+}
+
+impl TerminalOutputRef {
+    fn validate(&self) -> Result<(), StorageError> {
+        match self {
+            Self::Snapshot {
+                workspace_id,
+                session_id,
+                dataset_id,
+                snapshot_id,
+                version_digest,
+                schema_fingerprint,
+                snapshot_version,
+                committed,
+            } => {
+                validate_id(*workspace_id, "Snapshot output workspace")?;
+                validate_id(*session_id, "Snapshot output session")?;
+                validate_id(*dataset_id, "Snapshot output dataset")?;
+                validate_id(*snapshot_id, "Snapshot output reference")?;
+                if *version_digest == [0; 32]
+                    || *schema_fingerprint == [0; 32]
+                    || *snapshot_version != DATASET_SNAPSHOT_VERSION
+                    || !committed
+                {
+                    return Err(StorageError::InvalidDraft(
+                        "Snapshot output identity is not committed and complete",
+                    ));
+                }
+            }
+            Self::VerificationBundle {
+                workspace_id,
+                run_id,
+                bundle_id,
+                bundle_version,
+                version_digest,
+                accepted_snapshot,
+                members,
+            } => {
+                validate_id(*workspace_id, "VerificationBundle output workspace")?;
+                validate_id(*run_id, "VerificationBundle output Run")?;
+                validate_id(*bundle_id, "VerificationBundle output reference")?;
+                if *bundle_version == 0 || *version_digest == [0; 32] {
+                    return Err(StorageError::InvalidDraft(
+                        "VerificationBundle output identity is invalid",
+                    ));
+                }
+                accepted_snapshot.validate()?;
+                if members.len() > 3 {
+                    return Err(StorageError::InvalidDraft(
+                        "VerificationBundle member cardinality exceeds the supported bound",
+                    ));
+                }
+                for member in members {
+                    member.validate()?;
+                }
+            }
+            Self::Artifact {
+                workspace_id,
+                run_id,
+                artifact_id,
+                artifact_kind: _,
+                artifact_version,
+                content_digest,
+                state,
+            } => {
+                validate_id(*workspace_id, "Artifact output workspace")?;
+                validate_id(*run_id, "Artifact output Run")?;
+                validate_id(*artifact_id, "Artifact output reference")?;
+                if *artifact_version == 0
+                    || *content_digest == [0; 32]
+                    || *state != ArtifactRefState::Committed
+                {
+                    return Err(StorageError::InvalidDraft(
+                        "Artifact output identity is not committed and complete",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl SnapshotOutputRef {
+    fn validate(&self) -> Result<(), StorageError> {
+        validate_id(self.workspace_id, "Snapshot output workspace")?;
+        validate_id(self.session_id, "Snapshot output session")?;
+        validate_id(self.dataset_id, "Snapshot output dataset")?;
+        validate_id(self.snapshot_id, "Snapshot output reference")?;
+        if self.version_digest == [0; 32]
+            || self.schema_fingerprint == [0; 32]
+            || self.snapshot_version != DATASET_SNAPSHOT_VERSION
+            || !self.committed
+        {
+            return Err(StorageError::InvalidDraft(
+                "Snapshot output identity is not committed and complete",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ArtifactOutputRef {
+    fn validate(&self) -> Result<(), StorageError> {
+        validate_id(self.workspace_id, "Artifact output workspace")?;
+        validate_id(self.run_id, "Artifact output Run")?;
+        validate_id(self.artifact_id, "Artifact output reference")?;
+        if self.artifact_version == 0
+            || self.content_digest == [0; 32]
+            || self.state != ArtifactRefState::Committed
+        {
+            return Err(StorageError::InvalidDraft(
+                "Artifact output identity is not committed and complete",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2751,7 +3389,13 @@ impl ArtifactRefDraft {
         validate_id(self.workspace_id, "workspace")?;
         validate_id(self.run_id, "run")?;
         validate_id(self.artifact_id, "artifact")?;
-        validate_id(self.external_ref_id, "artifact external reference")
+        validate_id(self.external_ref_id, "artifact external reference")?;
+        if self.content_digest == [0; 32] {
+            return Err(StorageError::InvalidDraft(
+                "ArtifactRef content digest must not be zero",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -2810,8 +3454,13 @@ impl PlanVersionDraft {
 pub struct JobSubmission {
     pub workspace_id: Uuid,
     pub session_id: Uuid,
+    /// The exact published Plan identity is required for typed request
+    /// digests. Legacy generic submissions leave it absent and retain their
+    /// pre-E5-J2 identity encoding.
+    pub plan_id: Option<Uuid>,
     pub plan_version_id: Uuid,
     pub canonical_plan_digest: [u8; 32],
+    pub operation: Option<JobOperation>,
     pub job_id: Uuid,
     pub idempotency_key: String,
     pub inputs: Vec<ControlPlaneInput>,
@@ -2843,11 +3492,132 @@ impl JobSubmission {
         correlation_id: impl Into<String>,
         actor_ref: impl Into<String>,
     ) -> Result<Self, StorageError> {
+        Self::try_new_inner(
+            workspace_id,
+            session_id,
+            None,
+            plan_version_id,
+            canonical_plan_digest,
+            None,
+            job_id,
+            idempotency_key,
+            inputs,
+            execution_policy,
+            output_policy,
+            queued_at,
+            event_id,
+            request_id,
+            correlation_id,
+            actor_ref,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_with_operation(
+        workspace_id: Uuid,
+        session_id: Uuid,
+        plan_version_id: Uuid,
+        canonical_plan_digest: [u8; 32],
+        operation: JobOperation,
+        job_id: Uuid,
+        idempotency_key: impl Into<String>,
+        inputs: Vec<ControlPlaneInput>,
+        execution_policy: Value,
+        output_policy: Value,
+        queued_at: DateTime<Utc>,
+        event_id: Uuid,
+        request_id: impl Into<String>,
+        correlation_id: impl Into<String>,
+        actor_ref: impl Into<String>,
+    ) -> Result<Self, StorageError> {
+        Self::try_new_inner(
+            workspace_id,
+            session_id,
+            None,
+            plan_version_id,
+            canonical_plan_digest,
+            Some(operation),
+            job_id,
+            idempotency_key,
+            inputs,
+            execution_policy,
+            output_policy,
+            queued_at,
+            event_id,
+            request_id,
+            correlation_id,
+            actor_ref,
+        )
+    }
+
+    /// Builds a typed submission with the exact published Plan identity. The
+    /// existing operation-only constructor remains available for callers
+    /// that let `submit_job` resolve and bind the Plan identity atomically.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_with_operation_and_plan(
+        workspace_id: Uuid,
+        session_id: Uuid,
+        plan_id: Uuid,
+        plan_version_id: Uuid,
+        canonical_plan_digest: [u8; 32],
+        operation: JobOperation,
+        job_id: Uuid,
+        idempotency_key: impl Into<String>,
+        inputs: Vec<ControlPlaneInput>,
+        execution_policy: Value,
+        output_policy: Value,
+        queued_at: DateTime<Utc>,
+        event_id: Uuid,
+        request_id: impl Into<String>,
+        correlation_id: impl Into<String>,
+        actor_ref: impl Into<String>,
+    ) -> Result<Self, StorageError> {
+        Self::try_new_inner(
+            workspace_id,
+            session_id,
+            Some(plan_id),
+            plan_version_id,
+            canonical_plan_digest,
+            Some(operation),
+            job_id,
+            idempotency_key,
+            inputs,
+            execution_policy,
+            output_policy,
+            queued_at,
+            event_id,
+            request_id,
+            correlation_id,
+            actor_ref,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_new_inner(
+        workspace_id: Uuid,
+        session_id: Uuid,
+        plan_id: Option<Uuid>,
+        plan_version_id: Uuid,
+        canonical_plan_digest: [u8; 32],
+        operation: Option<JobOperation>,
+        job_id: Uuid,
+        idempotency_key: impl Into<String>,
+        inputs: Vec<ControlPlaneInput>,
+        execution_policy: Value,
+        output_policy: Value,
+        queued_at: DateTime<Utc>,
+        event_id: Uuid,
+        request_id: impl Into<String>,
+        correlation_id: impl Into<String>,
+        actor_ref: impl Into<String>,
+    ) -> Result<Self, StorageError> {
         let submission = Self {
             workspace_id,
             session_id,
+            plan_id,
             plan_version_id,
             canonical_plan_digest,
+            operation,
             job_id,
             idempotency_key: idempotency_key.into(),
             inputs,
@@ -2868,26 +3638,76 @@ impl JobSubmission {
     }
 
     fn compute_request_digest(&self) -> Result<[u8; 32], StorageError> {
-        let descriptor = serde_json::json!({
+        let operation_descriptor_digest = self
+            .operation
+            .as_ref()
+            .map(|operation| {
+                operation
+                    .descriptor_digest()
+                    .map(|digest| digest_hex(&digest))
+                    .map_err(|_| StorageError::Serialization("JobOperation descriptor digest"))
+            })
+            .transpose()?;
+        let mut descriptor = serde_json::json!({
             "workspaceId": self.workspace_id,
             "sessionId": self.session_id,
             "planVersionId": self.plan_version_id,
             "canonicalPlanDigest": digest_hex(&self.canonical_plan_digest),
+            "operationKind": self.operation.as_ref().map(|operation| operation_kind_text(operation.operation_kind)),
+            "operationVersion": self.operation.as_ref().map(|operation| operation.operation_version),
+            "operationDescriptorDigest": operation_descriptor_digest,
+            "operation": self.operation,
             "inputs": self.inputs,
             "executionPolicy": self.execution_policy,
             "outputPolicy": self.output_policy,
         });
-        let bytes = serde_json::to_vec(&descriptor)
-            .map_err(|_| StorageError::Serialization("serialize job submission descriptor"))?;
+        if self.operation.is_some() {
+            descriptor["planId"] = serde_json::json!(self.plan_id);
+        }
+        let bytes = canonical_json_bytes(&descriptor)?;
         Ok(sha256(&bytes))
     }
 
     fn validate(&self) -> Result<(), StorageError> {
         validate_id(self.workspace_id, "workspace")?;
         validate_id(self.session_id, "session")?;
+        if let Some(plan_id) = self.plan_id {
+            validate_id(plan_id, "Plan")?;
+        }
         validate_id(self.plan_version_id, "PlanVersion")?;
         validate_id(self.job_id, "job")?;
         validate_id(self.event_id, "event")?;
+        if let Some(operation) = &self.operation {
+            operation
+                .validate()
+                .map_err(|_| StorageError::InvalidDraft("invalid JobOperation descriptor"))?;
+            match &operation.descriptor {
+                OperationDescriptorV1::Materialize { source_asset, .. } => {
+                    if source_asset.workspace_id != self.workspace_id {
+                        return Err(StorageError::InvalidDraft(
+                            "Materialize SourceAsset is outside the Job Workspace",
+                        ));
+                    }
+                }
+                OperationDescriptorV1::Verification { snapshot, .. }
+                | OperationDescriptorV1::Profile { snapshot, .. }
+                | OperationDescriptorV1::Export { snapshot, .. } => {
+                    if snapshot.workspace_id != self.workspace_id
+                        || snapshot.session_id != self.session_id
+                    {
+                        return Err(StorageError::InvalidDraft(
+                            "Snapshot input is outside the Job Workspace or Session",
+                        ));
+                    }
+                }
+            }
+            let expected_input = operation.input();
+            if self.inputs.len() != 1 || self.inputs.first() != Some(&expected_input) {
+                return Err(StorageError::InvalidDraft(
+                    "Job inputs must equal the typed operation input",
+                ));
+            }
+        }
         if self.idempotency_key.is_empty() || self.idempotency_key.len() > 128 {
             return Err(StorageError::InvalidDraft(
                 "idempotency key must be 1 to 128 UTF-8 bytes",
@@ -2999,13 +3819,36 @@ pub struct ArtifactRefRecord {
     pub tombstoned_at: Option<DateTime<Utc>>,
 }
 
+/// A committed canonical JSON body owned by one logical ArtifactRef. The body
+/// remains invisible while either the body or its reference is staged.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtifactBodyRecord {
+    pub artifact_id: Uuid,
+    pub workspace_id: Uuid,
+    pub run_id: Uuid,
+    pub artifact_kind: ArtifactKind,
+    pub artifact_version: u16,
+    pub content_digest: [u8; 32],
+    pub body: Vec<u8>,
+    pub provenance: Value,
+    pub state: ArtifactRefState,
+    pub created_at: DateTime<Utc>,
+    pub committed_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug)]
 struct RawJob {
     id: String,
     workspace_id: String,
     session_id: String,
     plan_version_id: String,
+    plan_id: String,
     canonical_plan_digest: String,
+    operation_kind: Option<String>,
+    operation_version: Option<i64>,
+    operation_descriptor_json: Option<String>,
+    operation_descriptor_digest: Option<String>,
+    request_digest: Option<String>,
     input_json: String,
     execution_policy_json: String,
     output_policy_json: String,
@@ -3015,6 +3858,7 @@ struct RawJob {
     finished_at_utc: Option<String>,
     run_id: Option<String>,
     failure_json: Option<String>,
+    output_refs_json: String,
 }
 
 #[derive(Debug)]
@@ -3027,6 +3871,10 @@ struct RawRun {
     plan_version_id: String,
     canonical_plan_digest: String,
     plan_fingerprint: String,
+    operation_kind: Option<String>,
+    operation_version: Option<i64>,
+    operation_descriptor_json: Option<String>,
+    operation_descriptor_digest: Option<String>,
     input_json: String,
     engine_contract_version: i64,
     engine_build: String,
@@ -3036,6 +3884,7 @@ struct RawRun {
     failure_json: Option<String>,
     snapshot_ref: Option<String>,
     bundle_ref: Option<String>,
+    output_refs_json: String,
 }
 
 #[derive(Debug)]
@@ -3129,6 +3978,50 @@ fn digest_hex(value: &[u8; 32]) -> String {
     result
 }
 
+fn operation_kind_text(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Materialize => "materialize",
+        OperationKind::Verification => "verification",
+        OperationKind::Profile => "profile",
+        OperationKind::Export => "export",
+    }
+}
+
+mod digest_hex_serde {
+    use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error> {
+        let mut text = String::with_capacity(64);
+        for byte in value {
+            text.push(char::from(b"0123456789abcdef"[(byte >> 4) as usize]));
+            text.push(char::from(b"0123456789abcdef"[(byte & 0x0f) as usize]));
+        }
+        text.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[u8; 32], D::Error> {
+        let text = String::deserialize(deserializer)?;
+        if text.len() != 64 {
+            return Err(de::Error::custom("digest must be 64 hex characters"));
+        }
+        let mut value = [0; 32];
+        for (target, pair) in value.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
+            let high = hex(pair[0]).ok_or_else(|| de::Error::custom("invalid digest"))?;
+            let low = hex(pair[1]).ok_or_else(|| de::Error::custom("invalid digest"))?;
+            *target = (high << 4) | low;
+        }
+        Ok(value)
+    }
+
+    fn hex(value: u8) -> Option<u8> {
+        match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            _ => None,
+        }
+    }
+}
+
 fn parse_digest(value: &str) -> Result<[u8; 32], StorageError> {
     if value.len() != 64 {
         return Err(StorageError::Serialization(
@@ -3146,6 +4039,59 @@ fn parse_digest(value: &str) -> Result<[u8; 32], StorageError> {
 
 fn compact_json<T: Serialize>(value: &T, operation: &'static str) -> Result<String, StorageError> {
     serde_json::to_string(value).map_err(|_| StorageError::Serialization(operation))
+}
+
+fn canonical_json_bytes(value: &Value) -> Result<Vec<u8>, StorageError> {
+    let mut bytes = Vec::new();
+    write_canonical_json(value, &mut bytes)?;
+    Ok(bytes)
+}
+
+fn write_canonical_json(value: &Value, output: &mut Vec<u8>) -> Result<(), StorageError> {
+    match value {
+        Value::Null => output.extend_from_slice(b"null"),
+        Value::Bool(value) => output.extend_from_slice(if *value { b"true" } else { b"false" }),
+        Value::Number(number) => {
+            if !number.is_i64() && !number.is_u64() {
+                return Err(StorageError::Serialization(
+                    "floating point is not allowed in Job identity",
+                ));
+            }
+            output.extend_from_slice(number.to_string().as_bytes());
+        }
+        Value::String(value) => {
+            let encoded = serde_json::to_string(value)
+                .map_err(|_| StorageError::Serialization("serialize Job identity string"))?;
+            output.extend_from_slice(encoded.as_bytes());
+        }
+        Value::Array(values) => {
+            output.push(b'[');
+            for (index, item) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(b',');
+                }
+                write_canonical_json(item, output)?;
+            }
+            output.push(b']');
+        }
+        Value::Object(values) => {
+            output.push(b'{');
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_by(|left, right| left.0.cmp(right.0));
+            for (index, (key, item)) in entries.into_iter().enumerate() {
+                if index != 0 {
+                    output.push(b',');
+                }
+                let encoded = serde_json::to_string(key)
+                    .map_err(|_| StorageError::Serialization("serialize Job identity key"))?;
+                output.extend_from_slice(encoded.as_bytes());
+                output.push(b':');
+                write_canonical_json(item, output)?;
+            }
+            output.push(b'}');
+        }
+    }
+    Ok(())
 }
 
 fn enum_json<T: Serialize>(value: T) -> Result<String, StorageError> {
@@ -3843,10 +4789,17 @@ fn plan_version_from_raw(row: RawPlanVersion) -> Result<PlanVersionRecord, Stora
 fn job_raw(transaction: &Transaction<'_>, job_id: Uuid) -> Result<RawJob, StorageError> {
     transaction
         .query_row(
-            "SELECT id, workspace_id, session_id, plan_version_id, canonical_plan_digest,
-                    input_json, execution_policy_json, output_policy_json, state,
-                    queued_at_utc, started_at_utc, finished_at_utc, run_id, failure_json
-             FROM cp_jobs WHERE id = ?1",
+            "SELECT j.id, j.workspace_id, j.session_id, j.plan_version_id,
+                    p.plan_id, j.canonical_plan_digest, j.operation_kind,
+                    j.operation_version, j.operation_descriptor_json,
+                    j.operation_descriptor_digest, j.request_digest,
+                    j.input_json, j.execution_policy_json,
+                    j.output_policy_json, j.state, j.queued_at_utc,
+                    j.started_at_utc, j.finished_at_utc, j.run_id,
+                    j.failure_json, j.output_refs_json
+             FROM cp_jobs j
+             JOIN cp_plan_versions p ON p.id = j.plan_version_id
+             WHERE j.id = ?1",
             params![job_id.to_string()],
             raw_job_from_row,
         )
@@ -3858,10 +4811,17 @@ fn job_raw(transaction: &Transaction<'_>, job_id: Uuid) -> Result<RawJob, Storag
 fn job_from_connection(connection: &Connection, job_id: Uuid) -> Result<JobRecord, StorageError> {
     let row = connection
         .query_row(
-            "SELECT id, workspace_id, session_id, plan_version_id, canonical_plan_digest,
-                    input_json, execution_policy_json, output_policy_json, state,
-                    queued_at_utc, started_at_utc, finished_at_utc, run_id, failure_json
-             FROM cp_jobs WHERE id = ?1",
+            "SELECT j.id, j.workspace_id, j.session_id, j.plan_version_id,
+                    p.plan_id, j.canonical_plan_digest, j.operation_kind,
+                    j.operation_version, j.operation_descriptor_json,
+                    j.operation_descriptor_digest, j.request_digest,
+                    j.input_json, j.execution_policy_json,
+                    j.output_policy_json, j.state, j.queued_at_utc,
+                    j.started_at_utc, j.finished_at_utc, j.run_id,
+                    j.failure_json, j.output_refs_json
+             FROM cp_jobs j
+             JOIN cp_plan_versions p ON p.id = j.plan_version_id
+             WHERE j.id = ?1",
             params![job_id.to_string()],
             raw_job_from_row,
         )
@@ -3886,16 +4846,81 @@ fn job_from_raw(row: RawJob) -> Result<JobRecord, StorageError> {
     validate_safe_json(&execution_policy, false)?;
     let output_policy = parse_json(&row.output_policy_json, "Job output policy")?;
     validate_safe_json(&output_policy, false)?;
+    let operation = parse_operation(
+        row.operation_kind.as_deref(),
+        row.operation_version,
+        row.operation_descriptor_json.as_deref(),
+        row.operation_descriptor_digest.as_deref(),
+    )?;
+    if let Some(operation) = operation.as_ref() {
+        if inputs.as_slice() != [operation.input()] {
+            return Err(StorageError::Serialization(
+                "typed Job inputs do not match its operation input",
+            ));
+        }
+    }
+    let request_digest = row
+        .request_digest
+        .as_deref()
+        .map(parse_digest)
+        .transpose()?;
+    if operation.is_some() && request_digest.is_none() {
+        return Err(StorageError::Serialization(
+            "typed Job request digest is missing",
+        ));
+    }
+    if let Some(actual_digest) = request_digest {
+        let operation_descriptor_digest = operation
+            .as_ref()
+            .map(|operation| {
+                operation
+                    .descriptor_digest()
+                    .map(|digest| digest_hex(&digest))
+                    .map_err(|_| StorageError::Serialization("JobOperation descriptor digest"))
+            })
+            .transpose()?;
+        let mut request_descriptor = serde_json::json!({
+            "workspaceId": parse_uuid(&row.workspace_id)?,
+            "sessionId": parse_uuid(&row.session_id)?,
+            "planVersionId": parse_uuid(&row.plan_version_id)?,
+            "canonicalPlanDigest": digest_hex(&parse_digest(&row.canonical_plan_digest)?),
+            "operationKind": operation.as_ref().map(|operation| operation_kind_text(operation.operation_kind)),
+            "operationVersion": operation.as_ref().map(|operation| operation.operation_version),
+            "operationDescriptorDigest": operation_descriptor_digest,
+            "operation": operation,
+            "inputs": inputs,
+            "executionPolicy": execution_policy,
+            "outputPolicy": output_policy,
+        });
+        if operation.is_some() {
+            request_descriptor["planId"] = serde_json::json!(parse_uuid(&row.plan_id)?);
+        }
+        if sha256(&canonical_json_bytes(&request_descriptor)?) != actual_digest {
+            return Err(StorageError::Serialization(
+                "Job request digest does not match its durable descriptor",
+            ));
+        }
+    }
+    let outputs = parse_terminal_outputs(&row.output_refs_json)?;
+    let state = parse_job_state(&row.state)?;
+    if state != JobState::Succeeded && !outputs.is_empty() {
+        return Err(StorageError::Serialization(
+            "unsuccessful Job exposes terminal outputs",
+        ));
+    }
     Ok(JobRecord {
         id: parse_uuid(&row.id)?,
         workspace_id: parse_uuid(&row.workspace_id)?,
         session_id: parse_uuid(&row.session_id)?,
+        plan_id: parse_uuid(&row.plan_id)?,
         plan_version_id: parse_uuid(&row.plan_version_id)?,
         canonical_plan_digest: parse_digest(&row.canonical_plan_digest)?,
+        operation,
+        request_digest,
         inputs,
         execution_policy,
         output_policy,
-        state: parse_job_state(&row.state)?,
+        state,
         queued_at: parse_timestamp(&row.queued_at_utc, "Job queue timestamp")?,
         started_at: row
             .started_at_utc
@@ -3909,6 +4934,7 @@ fn job_from_raw(row: RawJob) -> Result<JobRecord, StorageError> {
             .transpose()?,
         run_id: row.run_id.as_deref().map(parse_uuid).transpose()?,
         failure: row.failure_json.as_deref().map(parse_failure).transpose()?,
+        outputs,
     })
 }
 
@@ -3916,9 +4942,12 @@ fn run_raw(transaction: &Transaction<'_>, run_id: Uuid) -> Result<RawRun, Storag
     transaction
         .query_row(
             "SELECT id, workspace_id, session_id, job_id, plan_id, plan_version_id,
-                    canonical_plan_digest, plan_fingerprint, input_json,
+                    canonical_plan_digest, plan_fingerprint, operation_kind,
+                    operation_version, operation_descriptor_json,
+                    operation_descriptor_digest, input_json,
                     engine_contract_version, engine_build,
-                    state, started_at_utc, finished_at_utc, failure_json, snapshot_ref, bundle_ref
+                    state, started_at_utc, finished_at_utc, failure_json,
+                    snapshot_ref, bundle_ref, output_refs_json
              FROM cp_runs WHERE id = ?1",
             params![run_id.to_string()],
             raw_run_from_row,
@@ -3932,9 +4961,12 @@ fn run_from_connection(connection: &Connection, run_id: Uuid) -> Result<RunRecor
     let row = connection
         .query_row(
             "SELECT id, workspace_id, session_id, job_id, plan_id, plan_version_id,
-                    canonical_plan_digest, plan_fingerprint, input_json,
+                    canonical_plan_digest, plan_fingerprint, operation_kind,
+                    operation_version, operation_descriptor_json,
+                    operation_descriptor_digest, input_json,
                     engine_contract_version, engine_build,
-                    state, started_at_utc, finished_at_utc, failure_json, snapshot_ref, bundle_ref
+                    state, started_at_utc, finished_at_utc, failure_json,
+                    snapshot_ref, bundle_ref, output_refs_json
              FROM cp_runs WHERE id = ?1",
             params![run_id.to_string()],
             raw_run_from_row,
@@ -3961,6 +4993,41 @@ fn run_from_raw(row: RawRun) -> Result<RunRecord, StorageError> {
     if engine_contract_version == 0 || row.engine_build.is_empty() {
         return Err(StorageError::Serialization("Run execution identity"));
     }
+    let operation = parse_operation(
+        row.operation_kind.as_deref(),
+        row.operation_version,
+        row.operation_descriptor_json.as_deref(),
+        row.operation_descriptor_digest.as_deref(),
+    )?;
+    let operation_descriptor_digest = operation
+        .as_ref()
+        .map(|operation| operation.descriptor_digest())
+        .transpose()
+        .map_err(|_| StorageError::Serialization("Run operation descriptor digest"))?;
+    if let Some(operation) = operation.as_ref() {
+        if inputs.as_slice() != [operation.input()] {
+            return Err(StorageError::Serialization(
+                "typed Run inputs do not match its operation input",
+            ));
+        }
+    }
+    let stored_operation_digest = row
+        .operation_descriptor_digest
+        .as_deref()
+        .map(parse_digest)
+        .transpose()?;
+    if stored_operation_digest != operation_descriptor_digest {
+        return Err(StorageError::Serialization(
+            "Run operation descriptor digest mismatch",
+        ));
+    }
+    let outputs = parse_terminal_outputs(&row.output_refs_json)?;
+    let state = parse_run_state(&row.state)?;
+    if state != RunState::Succeeded && !outputs.is_empty() {
+        return Err(StorageError::Serialization(
+            "unsuccessful Run exposes terminal outputs",
+        ));
+    }
     Ok(RunRecord {
         id: parse_uuid(&row.id)?,
         workspace_id: parse_uuid(&row.workspace_id)?,
@@ -3970,10 +5037,12 @@ fn run_from_raw(row: RawRun) -> Result<RunRecord, StorageError> {
         plan_version_id: parse_uuid(&row.plan_version_id)?,
         canonical_plan_digest: parse_digest(&row.canonical_plan_digest)?,
         plan_fingerprint: parse_digest(&row.plan_fingerprint)?,
+        operation,
+        operation_descriptor_digest: stored_operation_digest,
         inputs,
         engine_contract_version,
         engine_build: row.engine_build,
-        state: parse_run_state(&row.state)?,
+        state,
         started_at: parse_timestamp(&row.started_at_utc, "Run start timestamp")?,
         finished_at: row
             .finished_at_utc
@@ -3983,7 +5052,793 @@ fn run_from_raw(row: RawRun) -> Result<RunRecord, StorageError> {
         failure: row.failure_json.as_deref().map(parse_failure).transpose()?,
         snapshot_ref: row.snapshot_ref.as_deref().map(parse_uuid).transpose()?,
         bundle_ref: row.bundle_ref.as_deref().map(parse_uuid).transpose()?,
+        outputs,
     })
+}
+
+fn parse_operation(
+    kind: Option<&str>,
+    version: Option<i64>,
+    descriptor_json: Option<&str>,
+    descriptor_digest: Option<&str>,
+) -> Result<Option<JobOperation>, StorageError> {
+    match (kind, version, descriptor_json, descriptor_digest) {
+        (None, None, None, None) => Ok(None),
+        (Some(kind), Some(version), Some(descriptor_json), Some(descriptor_digest)) => {
+            let operation: JobOperation = serde_json::from_str(descriptor_json)
+                .map_err(|_| StorageError::Serialization("JobOperation descriptor"))?;
+            operation
+                .validate()
+                .map_err(|_| StorageError::Serialization("invalid JobOperation descriptor"))?;
+            if kind != operation_kind_text(operation.operation_kind)
+                || i64::from(operation.operation_version) != version
+            {
+                return Err(StorageError::Serialization(
+                    "JobOperation identity does not match descriptor",
+                ));
+            }
+            let expected = operation
+                .descriptor_digest()
+                .map_err(|_| StorageError::Serialization("JobOperation descriptor digest"))?;
+            if parse_digest(descriptor_digest)? != expected {
+                return Err(StorageError::Serialization(
+                    "JobOperation descriptor digest mismatch",
+                ));
+            }
+            Ok(Some(operation))
+        }
+        _ => Err(StorageError::Serialization(
+            "incomplete JobOperation persistence",
+        )),
+    }
+}
+
+fn parse_terminal_outputs(value: &str) -> Result<Vec<TerminalOutputRef>, StorageError> {
+    let outputs: Vec<TerminalOutputRef> =
+        serde_json::from_str(value).map_err(|_| StorageError::Serialization("terminal outputs"))?;
+    if outputs.len() > 4 {
+        return Err(StorageError::InvalidDraft(
+            "terminal output cardinality exceeds the supported bound",
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    for output in &outputs {
+        output.validate()?;
+        let id = match output {
+            TerminalOutputRef::Snapshot { snapshot_id, .. } => *snapshot_id,
+            TerminalOutputRef::VerificationBundle { bundle_id, .. } => *bundle_id,
+            TerminalOutputRef::Artifact { artifact_id, .. } => *artifact_id,
+        };
+        if !ids.insert(id) {
+            return Err(StorageError::InvalidDraft(
+                "terminal outputs contain duplicate identities",
+            ));
+        }
+    }
+    Ok(outputs)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_terminal_output_set(
+    transaction: &Transaction<'_>,
+    inner: &StoreInner,
+    run_id: Uuid,
+    _job_id: Uuid,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    operation: &JobOperation,
+    outputs: &[TerminalOutputRef],
+) -> Result<(Option<Uuid>, Option<Uuid>), StorageError> {
+    if outputs.len() > 4 {
+        return Err(StorageError::InvalidDraft(
+            "typed terminal output cardinality exceeds the supported bound",
+        ));
+    }
+    for output in outputs {
+        output.validate()?;
+    }
+
+    match &operation.descriptor {
+        OperationDescriptorV1::Materialize { source_asset, .. } => {
+            validate_source_asset_input(
+                transaction,
+                workspace_id,
+                source_asset.source_connection_id,
+                source_asset.source_asset_id,
+            )?;
+            if outputs.len() != 1 {
+                return Err(StorageError::InvalidDraft(
+                    "Materialize succeeds with exactly one Snapshot output",
+                ));
+            }
+            let TerminalOutputRef::Snapshot {
+                workspace_id: output_workspace_id,
+                session_id: output_session_id,
+                dataset_id: output_dataset_id,
+                snapshot_id,
+                version_digest,
+                schema_fingerprint,
+                snapshot_version,
+                committed,
+            } = &outputs[0]
+            else {
+                return Err(StorageError::InvalidDraft(
+                    "Materialize output must be a Snapshot reference",
+                ));
+            };
+            let output = SnapshotOutputRef {
+                workspace_id: *output_workspace_id,
+                session_id: *output_session_id,
+                dataset_id: *output_dataset_id,
+                snapshot_id: *snapshot_id,
+                version_digest: *version_digest,
+                schema_fingerprint: *schema_fingerprint,
+                snapshot_version: *snapshot_version,
+                committed: *committed,
+            };
+            validate_materialized_snapshot_output(
+                transaction,
+                inner,
+                workspace_id,
+                session_id,
+                source_asset.source_asset_id,
+                &output,
+            )?;
+            Ok((Some(output.snapshot_id), None))
+        }
+        OperationDescriptorV1::Verification { snapshot, .. } => {
+            validate_snapshot_input(transaction, inner, workspace_id, session_id, snapshot)?;
+            if outputs.len() != 1 {
+                return Err(StorageError::InvalidDraft(
+                    "Verification succeeds with exactly one VerificationBundle output",
+                ));
+            }
+            let TerminalOutputRef::VerificationBundle {
+                workspace_id: output_workspace_id,
+                run_id: output_run_id,
+                bundle_id,
+                bundle_version,
+                version_digest,
+                accepted_snapshot,
+                members,
+            } = &outputs[0]
+            else {
+                return Err(StorageError::InvalidDraft(
+                    "Verification output must be a VerificationBundle reference",
+                ));
+            };
+            validate_verification_bundle_output(
+                transaction,
+                inner,
+                run_id,
+                snapshot.snapshot_id,
+                workspace_id,
+                session_id,
+                *bundle_id,
+                *version_digest,
+                *output_workspace_id,
+                *output_run_id,
+                *bundle_version,
+                accepted_snapshot,
+                members,
+            )?;
+            Ok((None, Some(*bundle_id)))
+        }
+        OperationDescriptorV1::Profile { snapshot, .. } => {
+            validate_snapshot_input(transaction, inner, workspace_id, session_id, snapshot)?;
+            if outputs.len() != 2
+                || !matches!(
+                    outputs[0],
+                    TerminalOutputRef::Artifact {
+                        artifact_kind: ArtifactKind::ProfileReport,
+                        artifact_version: 1,
+                        ..
+                    }
+                )
+                || !matches!(
+                    outputs[1],
+                    TerminalOutputRef::Artifact {
+                        artifact_kind: ArtifactKind::QualityReport,
+                        artifact_version: 1,
+                        ..
+                    }
+                )
+            {
+                return Err(StorageError::InvalidDraft(
+                    "Profile succeeds with profile_report.v1 and quality_report.v1 outputs",
+                ));
+            }
+            validate_artifact_outputs(transaction, run_id, workspace_id, outputs)?;
+            Ok((None, None))
+        }
+        OperationDescriptorV1::Export {
+            snapshot,
+            export_request: _,
+        } => {
+            validate_snapshot_input(transaction, inner, workspace_id, session_id, snapshot)?;
+            if outputs.len() != 1
+                || !matches!(
+                    outputs[0],
+                    TerminalOutputRef::Artifact {
+                        artifact_kind: ArtifactKind::ExportArtifact,
+                        artifact_version: 1,
+                        ..
+                    }
+                )
+            {
+                return Err(StorageError::InvalidDraft(
+                    "Export succeeds with exactly one ExportArtifact output",
+                ));
+            }
+            validate_artifact_outputs(transaction, run_id, workspace_id, outputs)?;
+            Ok((None, None))
+        }
+    }
+}
+
+fn validate_source_asset_input(
+    transaction: &Transaction<'_>,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+    asset_id: Uuid,
+) -> Result<(), StorageError> {
+    let row: Option<(String, String, String)> = transaction
+        .query_row(
+            "SELECT workspace_id, connection_id, state FROM cp_assets WHERE id = ?1",
+            params![asset_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check Materialize SourceAsset"))?;
+    let Some((asset_workspace, asset_connection, asset_state)) = row else {
+        return Err(StorageError::NotFound(asset_id));
+    };
+    if parse_uuid(&asset_workspace)? != workspace_id {
+        return Err(StorageError::InvalidDraft(
+            "Materialize SourceAsset belongs to another Workspace",
+        ));
+    }
+    if parse_uuid(&asset_connection)? != connection_id {
+        return Err(StorageError::InvalidDraft(
+            "Materialize SourceAsset belongs to another SourceConnection",
+        ));
+    }
+    if asset_state != "active" {
+        return Err(StorageError::InvalidDraft(
+            "Materialize SourceAsset is not active",
+        ));
+    }
+    let connection_workspace: Option<(String, String)> = transaction
+        .query_row(
+            "SELECT workspace_id, state FROM cp_connections WHERE id = ?1",
+            params![connection_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check Materialize SourceConnection"))?;
+    let Some((connection_workspace, connection_state)) = connection_workspace else {
+        return Err(StorageError::NotFound(connection_id));
+    };
+    if parse_uuid(&connection_workspace)? != workspace_id {
+        return Err(StorageError::InvalidDraft(
+            "Materialize SourceConnection belongs to another Workspace",
+        ));
+    }
+    if connection_state != "active" {
+        return Err(StorageError::InvalidDraft(
+            "Materialize SourceConnection is not active",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::type_complexity)]
+fn snapshot_row(
+    transaction: &Transaction<'_>,
+    snapshot_id: Uuid,
+) -> Result<(Uuid, Uuid, Uuid, Uuid, [u8; 32], u16), StorageError> {
+    let row: Option<(String, String, String, String, String, i64)> = transaction
+        .query_row(
+            "SELECT s.dataset_id, s.session_id, s.source_asset_id,
+                    d.workspace_id, s.schema_fingerprint, s.version
+             FROM snapshots s
+             JOIN cp_datasets d ON d.id = s.dataset_id
+             WHERE s.id = ?1 AND s.state = 1 AND d.state = 'active'",
+            params![snapshot_id.to_string()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check committed Snapshot"))?;
+    let Some((dataset, session, source_asset, workspace, schema, version)) = row else {
+        return Err(StorageError::InvalidDraft(
+            "Snapshot input or output is not a committed active Snapshot",
+        ));
+    };
+    Ok((
+        parse_uuid(&dataset)?,
+        parse_uuid(&session)?,
+        parse_uuid(&source_asset)?,
+        parse_uuid(&workspace)?,
+        parse_digest(&schema)?,
+        u16::try_from(version).map_err(|_| StorageError::Serialization("Snapshot version"))?,
+    ))
+}
+
+fn validate_snapshot_input(
+    transaction: &Transaction<'_>,
+    inner: &StoreInner,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    reference: &SnapshotRef,
+) -> Result<(), StorageError> {
+    if reference.workspace_id != workspace_id || reference.session_id != session_id {
+        return Err(StorageError::InvalidDraft(
+            "Snapshot input is outside the Job Workspace or Session",
+        ));
+    }
+    let (dataset_id, actual_session, _source_asset_id, actual_workspace, schema, version) =
+        snapshot_row(transaction, reference.snapshot_id)?;
+    if dataset_id != reference.dataset_id
+        || actual_session != reference.session_id
+        || actual_workspace != reference.workspace_id
+        || schema != reference.schema_fingerprint
+        || version != reference.snapshot_version
+    {
+        return Err(StorageError::InvalidDraft(
+            "Snapshot input identity does not match the committed manifest",
+        ));
+    }
+    let actual_digest = snapshot_version_digest_inner(inner, reference.snapshot_id)?;
+    if actual_digest != reference.version_digest {
+        return Err(StorageError::InvalidDraft(
+            "Snapshot input version digest does not match the committed manifest",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_materialized_snapshot_output(
+    transaction: &Transaction<'_>,
+    inner: &StoreInner,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    source_asset_id: Uuid,
+    output: &SnapshotOutputRef,
+) -> Result<(), StorageError> {
+    output.validate()?;
+    let (actual_dataset, actual_session, actual_source_asset, actual_workspace, schema, version) =
+        snapshot_row(transaction, output.snapshot_id)?;
+    if output.workspace_id != workspace_id
+        || output.session_id != session_id
+        || output.dataset_id != actual_dataset
+        || actual_session != session_id
+        || actual_source_asset != source_asset_id
+        || actual_workspace != workspace_id
+        || schema != output.schema_fingerprint
+        || version != output.snapshot_version
+    {
+        return Err(StorageError::InvalidDraft(
+            "Materialize Snapshot output identity is inconsistent",
+        ));
+    }
+    if snapshot_version_digest_inner(inner, output.snapshot_id)? != output.version_digest {
+        return Err(StorageError::InvalidDraft(
+            "Materialize Snapshot output digest does not match the committed manifest",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_verification_bundle_output(
+    transaction: &Transaction<'_>,
+    inner: &StoreInner,
+    run_id: Uuid,
+    snapshot_id: Uuid,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    bundle_id: Uuid,
+    version_digest: [u8; 32],
+    output_workspace_id: Uuid,
+    output_run_id: Uuid,
+    bundle_version: u16,
+    accepted_snapshot: &SnapshotOutputRef,
+    members: &[ArtifactOutputRef],
+) -> Result<(), StorageError> {
+    if output_workspace_id.is_nil()
+        || output_workspace_id != workspace_id
+        || output_run_id.is_nil()
+        || output_run_id != run_id
+        || bundle_version == 0
+    {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle output ownership or version is invalid",
+        ));
+    }
+    let row: Option<(String, String)> = transaction
+        .query_row(
+            "SELECT run_id, accepted_snapshot_id FROM verification_bundles
+             WHERE bundle_id = ?1",
+            params![bundle_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check VerificationBundle output"))?;
+    let Some((bundle_run, accepted_snapshot_text)) = row else {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle output is not committed",
+        ));
+    };
+    if parse_uuid(&bundle_run)? != run_id {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle output is owned by another Run",
+        ));
+    }
+    let accepted_snapshot_id = parse_uuid(&accepted_snapshot_text)?;
+    let bundle = crate::bundle::load_bundle_inner(inner, bundle_id)?;
+    if bundle_version != bundle.provenance().draft.verification_contract_version {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle version does not match its committed provenance",
+        ));
+    }
+    let InputRef::Snapshot {
+        snapshot_id: provenance_snapshot_id,
+    } = &bundle.provenance().draft.input.input.input
+    else {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle provenance must bind to a Snapshot input",
+        ));
+    };
+    if *provenance_snapshot_id != snapshot_id {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle provenance is owned by another Snapshot",
+        ));
+    }
+    if accepted_snapshot_id != snapshot_id {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle accepted Snapshot must equal its input Snapshot",
+        ));
+    }
+    accepted_snapshot.validate()?;
+    let (
+        accepted_dataset,
+        accepted_session,
+        _accepted_source_asset,
+        accepted_workspace,
+        schema,
+        snapshot_version,
+    ) = snapshot_row(transaction, accepted_snapshot.snapshot_id)?;
+    if accepted_snapshot.snapshot_id != snapshot_id
+        || accepted_snapshot.workspace_id != output_workspace_id
+        || accepted_snapshot.workspace_id != workspace_id
+        || accepted_snapshot.session_id != accepted_session
+        || accepted_snapshot.session_id != session_id
+        || accepted_snapshot.dataset_id != accepted_dataset
+        || accepted_snapshot.workspace_id != accepted_workspace
+        || accepted_snapshot.schema_fingerprint != schema
+        || accepted_snapshot.snapshot_version != snapshot_version
+        || accepted_snapshot.version_digest
+            != snapshot_version_digest_inner(inner, accepted_snapshot.snapshot_id)?
+    {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle accepted Snapshot reference is inconsistent",
+        ));
+    }
+    let membership = bundle.membership();
+    let expected_member_count = if membership.rejected_rows_artifact_id().is_some() {
+        3
+    } else {
+        2
+    };
+    if members.len() != expected_member_count {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle members do not match its required report set",
+        ));
+    }
+    let expected_members = [
+        (
+            membership.validation_report_artifact_id(),
+            ArtifactKind::ValidationReport,
+        ),
+        (
+            membership.deduplication_report_artifact_id(),
+            ArtifactKind::DeduplicationReport,
+        ),
+    ];
+    for (member, (expected_id, expected_kind)) in members.iter().zip(expected_members) {
+        if member.workspace_id != output_workspace_id
+            || member.run_id != run_id
+            || member.artifact_id != expected_id
+            || member.artifact_kind != expected_kind
+            || member.artifact_version != 1
+            || member.state != ArtifactRefState::Committed
+        {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle member identity is inconsistent",
+            ));
+        }
+        let expected_digest = match expected_kind {
+            ArtifactKind::ValidationReport => {
+                bundle.validation_report().provenance().content_digest
+            }
+            ArtifactKind::DeduplicationReport => {
+                bundle.deduplication_report().provenance().content_digest
+            }
+            _ => unreachable!("expected bundle report kind"),
+        };
+        if member.content_digest != expected_digest {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle member digest is inconsistent",
+            ));
+        }
+    }
+    if let Some(rejected) = members.get(2) {
+        let Some(expected_id) = membership.rejected_rows_artifact_id() else {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle has an unexpected rejected-rows member",
+            ));
+        };
+        if rejected.workspace_id != output_workspace_id
+            || rejected.run_id != run_id
+            || rejected.artifact_id != expected_id
+            || rejected.artifact_kind != ArtifactKind::RejectedRows
+            || rejected.artifact_version != 1
+            || rejected.state != ArtifactRefState::Committed
+        {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle rejected-rows member is inconsistent",
+            ));
+        }
+        let expected_digest = bundle
+            .rejected_rows()
+            .ok_or(StorageError::InvalidDraft(
+                "VerificationBundle rejected-rows member is missing",
+            ))?
+            .provenance()
+            .content_digest;
+        if rejected.content_digest != expected_digest {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle rejected-rows digest is inconsistent",
+            ));
+        }
+    }
+    if accepted_snapshot.version_digest != bundle.provenance().draft.input.input.version_digest {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle accepted Snapshot digest does not match its input",
+        ));
+    }
+    if verification_bundle_version_digest_inner(inner, bundle_id)? != version_digest {
+        return Err(StorageError::InvalidDraft(
+            "VerificationBundle output digest does not match its committed provenance",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_artifact_outputs(
+    transaction: &Transaction<'_>,
+    run_id: Uuid,
+    workspace_id: Uuid,
+    outputs: &[TerminalOutputRef],
+) -> Result<(), StorageError> {
+    let expected_artifact_count = outputs
+        .iter()
+        .filter(|output| matches!(output, TerminalOutputRef::Artifact { .. }))
+        .count();
+    let staged_count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM cp_artifact_refs WHERE run_id = ?1 AND state = 'staged'",
+            params![run_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| StorageError::database("count staged terminal artifacts"))?;
+    if usize::try_from(staged_count).unwrap_or(usize::MAX) != expected_artifact_count {
+        return Err(StorageError::InvalidDraft(
+            "staged ArtifactRefs do not exactly match the typed terminal output set",
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    for output in outputs {
+        let TerminalOutputRef::Artifact {
+            workspace_id: output_workspace_id,
+            run_id: output_run_id,
+            artifact_id,
+            artifact_kind,
+            artifact_version,
+            content_digest,
+            state,
+        } = output
+        else {
+            continue;
+        };
+        if !ids.insert(*artifact_id) {
+            return Err(StorageError::InvalidDraft(
+                "typed terminal output contains duplicate ArtifactRefs",
+            ));
+        }
+        if *output_workspace_id != workspace_id
+            || *output_run_id != run_id
+            || *artifact_version != 1
+            || *state != ArtifactRefState::Committed
+        {
+            return Err(StorageError::InvalidDraft(
+                "terminal ArtifactRef ownership or version is invalid",
+            ));
+        }
+        let row: Option<(String, String, String, String, String)> = transaction
+            .query_row(
+                "SELECT workspace_id, run_id, artifact_kind, external_ref_kind,
+                        content_digest
+                 FROM cp_artifact_refs
+                 WHERE id = ?1 AND state = 'staged'",
+                params![artifact_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| StorageError::database("check staged terminal ArtifactRef"))?;
+        let Some((artifact_workspace, artifact_run, kind_json, external_kind, digest)) = row else {
+            return Err(StorageError::InvalidDraft(
+                "typed terminal ArtifactRef is missing or not staged",
+            ));
+        };
+        if parse_uuid(&artifact_workspace)? != workspace_id
+            || parse_uuid(&artifact_run)? != run_id
+            || external_kind != ExternalRefKind::Artifact.as_str()
+            || parse_enum_json::<ArtifactKind>(&kind_json, "Artifact kind")? != *artifact_kind
+            || parse_digest(&digest)? != *content_digest
+        {
+            return Err(StorageError::InvalidDraft(
+                "staged ArtifactRef identity does not match the typed output",
+            ));
+        }
+        let body: Option<(String, i64, String, Vec<u8>, String)> = transaction
+            .query_row(
+                "SELECT artifact_kind, artifact_version, content_digest, body, state
+                 FROM cp_artifact_bodies WHERE artifact_id = ?1",
+                params![artifact_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| StorageError::database("check staged Artifact body"))?;
+        let body_required = matches!(
+            artifact_kind,
+            ArtifactKind::ProfileReport | ArtifactKind::QualityReport
+        );
+        match (body_required, body) {
+            (true, Some((body_kind, body_version, body_digest, body, body_state))) => {
+                if parse_enum_json::<ArtifactKind>(&body_kind, "Artifact body kind")?
+                    != *artifact_kind
+                    || body_version != 1
+                    || parse_digest(&body_digest)? != *content_digest
+                    || body_state != "staged"
+                {
+                    return Err(StorageError::InvalidDraft(
+                        "staged report Artifact body identity is inconsistent",
+                    ));
+                }
+                validate_artifact_body(*artifact_kind, *content_digest, &body)?;
+            }
+            (true, None) => {
+                return Err(StorageError::InvalidDraft(
+                    "staged report ArtifactRef has no canonical body",
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(StorageError::InvalidDraft(
+                    "non-report ArtifactRef has an unexpected canonical body",
+                ));
+            }
+            (false, None) => {}
+        }
+    }
+    Ok(())
+}
+
+fn commit_staged_terminal_artifacts(
+    transaction: &Transaction<'_>,
+    run_id: Uuid,
+    job_id: Uuid,
+    outputs: &[TerminalOutputRef],
+    run_event: &EventDraft,
+) -> Result<(), StorageError> {
+    for output in outputs {
+        let TerminalOutputRef::Artifact {
+            artifact_id,
+            artifact_kind,
+            ..
+        } = output
+        else {
+            continue;
+        };
+        let changed = transaction
+            .execute(
+                "UPDATE cp_artifact_refs
+                 SET state = 'committed', committed_at_utc = ?2
+                 WHERE id = ?1 AND run_id = ?3 AND state = 'staged'",
+                params![
+                    artifact_id.to_string(),
+                    timestamp(&run_event.occurred_at),
+                    run_id.to_string()
+                ],
+            )
+            .map_err(|_| StorageError::database("commit terminal ArtifactRef"))?;
+        if changed != 1 {
+            return Err(StorageError::InvalidDraft(
+                "staged ArtifactRef changed before terminal commit",
+            ));
+        }
+        let body_changed = transaction
+            .execute(
+                "UPDATE cp_artifact_bodies
+                 SET state = 'committed', committed_at_utc = ?2
+                 WHERE artifact_id = ?1 AND state = 'staged'",
+                params![artifact_id.to_string(), timestamp(&run_event.occurred_at)],
+            )
+            .map_err(|_| StorageError::database("commit terminal Artifact body"))?;
+        let body_required = matches!(
+            artifact_kind,
+            ArtifactKind::ProfileReport | ArtifactKind::QualityReport
+        );
+        if body_required && body_changed != 1 {
+            return Err(StorageError::InvalidDraft(
+                "report ArtifactRef has no staged canonical body",
+            ));
+        }
+        if !body_required && body_changed != 0 {
+            return Err(StorageError::InvalidDraft(
+                "non-report ArtifactRef cannot carry a canonical JSON body",
+            ));
+        }
+        let event_id = Uuid::new_v5(
+            &run_event.event_id,
+            format!("artifact-committed:{artifact_id}").as_bytes(),
+        );
+        append_event_tx(
+            transaction,
+            EventDraft::new(
+                event_id,
+                EventStreamKind::Run,
+                run_id,
+                job_id,
+                Some(run_id),
+                ControlPlaneEventType::ArtifactCommitted,
+                run_event.occurred_at,
+                run_event.request_id.clone(),
+                run_event.correlation_id.clone(),
+                run_event.actor_ref.clone(),
+                serde_json::json!({
+                    "state": "committed",
+                    "artifactId": artifact_id
+                }),
+            ),
+        )?;
+    }
+    Ok(())
 }
 
 fn parse_failure(value: &str) -> Result<FailureInfo, StorageError> {
@@ -4001,16 +5856,23 @@ fn raw_job_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawJob> {
         workspace_id: row.get(1)?,
         session_id: row.get(2)?,
         plan_version_id: row.get(3)?,
-        canonical_plan_digest: row.get(4)?,
-        input_json: row.get(5)?,
-        execution_policy_json: row.get(6)?,
-        output_policy_json: row.get(7)?,
-        state: row.get(8)?,
-        queued_at_utc: row.get(9)?,
-        started_at_utc: row.get(10)?,
-        finished_at_utc: row.get(11)?,
-        run_id: row.get(12)?,
-        failure_json: row.get(13)?,
+        plan_id: row.get(4)?,
+        canonical_plan_digest: row.get(5)?,
+        operation_kind: row.get(6)?,
+        operation_version: row.get(7)?,
+        operation_descriptor_json: row.get(8)?,
+        operation_descriptor_digest: row.get(9)?,
+        request_digest: row.get(10)?,
+        input_json: row.get(11)?,
+        execution_policy_json: row.get(12)?,
+        output_policy_json: row.get(13)?,
+        state: row.get(14)?,
+        queued_at_utc: row.get(15)?,
+        started_at_utc: row.get(16)?,
+        finished_at_utc: row.get(17)?,
+        run_id: row.get(18)?,
+        failure_json: row.get(19)?,
+        output_refs_json: row.get(20)?,
     })
 }
 
@@ -4024,15 +5886,20 @@ fn raw_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawRun> {
         plan_version_id: row.get(5)?,
         canonical_plan_digest: row.get(6)?,
         plan_fingerprint: row.get(7)?,
-        input_json: row.get(8)?,
-        engine_contract_version: row.get(9)?,
-        engine_build: row.get(10)?,
-        state: row.get(11)?,
-        started_at_utc: row.get(12)?,
-        finished_at_utc: row.get(13)?,
-        failure_json: row.get(14)?,
-        snapshot_ref: row.get(15)?,
-        bundle_ref: row.get(16)?,
+        operation_kind: row.get(8)?,
+        operation_version: row.get(9)?,
+        operation_descriptor_json: row.get(10)?,
+        operation_descriptor_digest: row.get(11)?,
+        input_json: row.get(12)?,
+        engine_contract_version: row.get(13)?,
+        engine_build: row.get(14)?,
+        state: row.get(15)?,
+        started_at_utc: row.get(16)?,
+        finished_at_utc: row.get(17)?,
+        failure_json: row.get(18)?,
+        snapshot_ref: row.get(19)?,
+        bundle_ref: row.get(20)?,
+        output_refs_json: row.get(21)?,
     })
 }
 
@@ -4117,6 +5984,113 @@ fn artifact_from_transaction(
     artifact_from_raw(artifact_raw(transaction, artifact_id)?)
 }
 
+#[allow(clippy::type_complexity)]
+fn artifact_body_from_connection(
+    connection: &Connection,
+    artifact_id: Uuid,
+) -> Result<ArtifactBodyRecord, StorageError> {
+    let row: Option<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        Vec<u8>,
+        String,
+        String,
+        String,
+        Option<String>,
+    )> = connection
+        .query_row(
+            "SELECT a.id, a.workspace_id, a.run_id, a.artifact_kind,
+                    a.content_digest, b.artifact_kind, b.artifact_version,
+                    b.content_digest, b.body, b.provenance_json, b.state,
+                    b.created_at_utc, b.committed_at_utc
+             FROM cp_artifact_refs AS a
+             JOIN cp_artifact_bodies AS b ON b.artifact_id = a.id
+             WHERE a.id = ?1 AND a.state = 'committed' AND b.state = 'committed'",
+            params![artifact_id.to_string()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| StorageError::database("read Artifact body"))?;
+    let Some((
+        id,
+        workspace_id,
+        run_id,
+        artifact_kind_json,
+        artifact_digest,
+        body_kind_json,
+        body_version,
+        body_digest,
+        body,
+        provenance_json,
+        body_state,
+        created_at,
+        committed_at,
+    )) = row
+    else {
+        return Err(StorageError::NotFound(artifact_id));
+    };
+    let artifact_kind: ArtifactKind = parse_enum_json(&artifact_kind_json, "Artifact kind")?;
+    let body_kind: ArtifactKind = parse_enum_json(&body_kind_json, "Artifact body kind")?;
+    let artifact_digest = parse_digest(&artifact_digest)?;
+    let body_digest = parse_digest(&body_digest)?;
+    let artifact_id = parse_uuid(&id)?;
+    let workspace_id = parse_uuid(&workspace_id)?;
+    let run_id = parse_uuid(&run_id)?;
+    let artifact_version = u16::try_from(body_version)
+        .map_err(|_| StorageError::Serialization("Artifact body version"))?;
+    let state = parse_artifact_state(&body_state)?;
+    if body_kind != artifact_kind
+        || artifact_digest != body_digest
+        || state != ArtifactRefState::Committed
+        || artifact_version != 1
+    {
+        return Err(StorageError::Serialization(
+            "Artifact body identity does not match its ArtifactRef",
+        ));
+    }
+    validate_artifact_body(artifact_kind, artifact_digest, &body)?;
+    let provenance = parse_json(&provenance_json, "Artifact body provenance")?;
+    validate_safe_json(&provenance, false)?;
+    Ok(ArtifactBodyRecord {
+        artifact_id,
+        workspace_id,
+        run_id,
+        artifact_kind,
+        artifact_version,
+        content_digest: body_digest,
+        body,
+        provenance,
+        state,
+        created_at: parse_timestamp(&created_at, "Artifact body creation timestamp")?,
+        committed_at: committed_at
+            .as_deref()
+            .map(|value| parse_timestamp(value, "Artifact body commit timestamp"))
+            .transpose()?,
+    })
+}
+
 fn artifact_from_raw(row: RawArtifact) -> Result<ArtifactRefRecord, StorageError> {
     let metadata = parse_json(&row.metadata_json, "ArtifactRef metadata")?;
     validate_safe_json(&metadata, false)?;
@@ -4152,6 +6126,49 @@ fn artifact_from_raw(row: RawArtifact) -> Result<ArtifactRefRecord, StorageError
             .map(|value| parse_timestamp(value, "Artifact tombstone timestamp"))
             .transpose()?,
     })
+}
+
+fn validate_artifact_body(
+    artifact_kind: ArtifactKind,
+    content_digest: [u8; 32],
+    body: &[u8],
+) -> Result<(), StorageError> {
+    let expected_type = match artifact_kind {
+        ArtifactKind::ProfileReport => "profile_report",
+        ArtifactKind::QualityReport => "quality_report",
+        _ => {
+            return Err(StorageError::InvalidDraft(
+                "only ProfileReport and QualityReport support canonical JSON bodies",
+            ))
+        }
+    };
+    if body.is_empty() || body.len() as u64 > crate::MAX_REPORT_BYTES {
+        return Err(StorageError::InvalidDraft(
+            "Artifact body exceeds the bounded report body limit",
+        ));
+    }
+    let value: Value = serde_json::from_slice(body)
+        .map_err(|_| StorageError::Serialization("Artifact body JSON"))?;
+    validate_safe_json(&value, false)?;
+    let actual_type = value
+        .get("artifact_type")
+        .and_then(Value::as_str)
+        .ok_or(StorageError::Serialization("Artifact body type"))?;
+    let actual_version = value
+        .get("artifact_body_version")
+        .and_then(Value::as_u64)
+        .ok_or(StorageError::Serialization("Artifact body version"))?;
+    if actual_type != expected_type || actual_version != 1 {
+        return Err(StorageError::InvalidDraft(
+            "Artifact body type or version does not match its ArtifactRef",
+        ));
+    }
+    if sha256(body) != content_digest {
+        return Err(StorageError::InvalidDraft(
+            "Artifact body digest does not match its ArtifactRef",
+        ));
+    }
+    Ok(())
 }
 
 fn readable_artifact(record: ArtifactRefRecord) -> Result<ArtifactRefRecord, StorageError> {
@@ -4858,6 +6875,78 @@ fn transition_job_state_tx(
     Ok(())
 }
 
+/// Fails a queued typed row whose durable operation cannot be decoded or
+/// validated. This path deliberately avoids materializing a `JobRecord`,
+/// because the record itself is the corrupt object. It is used by the durable
+/// queue reader so an unsupported/corrupt operation cannot be retried forever
+/// without a terminal lifecycle event.
+fn fail_corrupt_queued_job(connection: &mut Connection, job_id: Uuid) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin incompatible Job failure"))?;
+    let current: Option<(String, String)> = transaction
+        .query_row(
+            "SELECT state, queued_at_utc FROM cp_jobs WHERE id = ?1",
+            params![job_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| StorageError::database("read incompatible Job"))?;
+    let Some((state, queued_at_text)) = current else {
+        return Err(StorageError::NotFound(job_id));
+    };
+    if state != "queued" {
+        transaction
+            .commit()
+            .map_err(|_| StorageError::database("commit incompatible Job no-op"))?;
+        return Ok(());
+    }
+    let queued_at = parse_timestamp(&queued_at_text, "incompatible Job queue timestamp")?;
+    let occurred_at = Utc::now().max(queued_at);
+    let failure = FailureInfo::try_new(
+        "incompatible_operation",
+        false,
+        "queued Job contains an unsupported or corrupt typed operation",
+    )?;
+    let failure_json = failure_json(Some(&failure))?;
+    transition_job_state_tx(
+        &transaction,
+        job_id,
+        "queued",
+        JobState::Failed,
+        Some(timestamp(&occurred_at)),
+    )?;
+    transaction
+        .execute(
+            "UPDATE cp_jobs SET failure_json = ?2 WHERE id = ?1",
+            params![job_id.to_string(), failure_json],
+        )
+        .map_err(|_| StorageError::database("persist incompatible Job failure"))?;
+    append_event_tx(
+        &transaction,
+        EventDraft::new(
+            Uuid::new_v4(),
+            EventStreamKind::Job,
+            job_id,
+            job_id,
+            None,
+            ControlPlaneEventType::JobFailed,
+            occurred_at,
+            format!("storage:incompatible:{job_id}"),
+            format!("storage:incompatible:{job_id}"),
+            "actor:control-plane",
+            serde_json::json!({
+                "state": "failed",
+                "category": "incompatible_operation"
+            }),
+        ),
+    )?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit incompatible Job failure"))?;
+    Ok(())
+}
+
 fn transition_run_state_tx(
     transaction: &Transaction<'_>,
     run_id: Uuid,
@@ -5012,7 +7101,7 @@ mod tests {
     #[test]
     fn fresh_schema_and_reopen_are_idempotent() {
         let fixture = Fixture::new();
-        assert_eq!(fixture.store.schema_version(), 4);
+        assert_eq!(fixture.store.schema_version(), 5);
         let job = fixture
             .store
             .submit_job(fixture.submission(1, 10))
@@ -5457,6 +7546,73 @@ mod tests {
     }
 
     #[test]
+    fn canonical_artifact_body_is_invisible_until_reference_commit() {
+        let fixture = Fixture::new();
+        let job = match fixture
+            .store
+            .submit_job(fixture.submission(1, 10))
+            .expect("submit")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        let run_id = Uuid::from_u128(2000);
+        fixture.claim(job.id, run_id);
+        let body = br#"{"artifact_body_version":1,"artifact_type":"profile_report","columns":[],"dataset":{},"profiling_contract_version":1}"#
+            .to_vec();
+        let artifact_id = Uuid::from_u128(3002);
+        let digest = sha256(&body);
+        fixture
+            .store
+            .create_artifact_ref_with_body(
+                ArtifactRefDraft {
+                    workspace_id: fixture.workspace_id,
+                    run_id,
+                    artifact_id,
+                    artifact_kind: ArtifactKind::ProfileReport,
+                    external_ref_kind: ExternalRefKind::Artifact,
+                    external_ref_id: Uuid::from_u128(4002),
+                    content_digest: digest,
+                    metadata: serde_json::json!({"runId": run_id}),
+                    created_at: at(21),
+                },
+                body.clone(),
+            )
+            .expect("stage canonical Artifact body");
+        assert!(matches!(
+            fixture.store.get_artifact_body(artifact_id),
+            Err(StorageError::NotFound(id)) if id == artifact_id
+        ));
+        fixture
+            .store
+            .transition_artifact_ref(
+                artifact_id,
+                ArtifactRefState::Committed,
+                EventDraft::new(
+                    Uuid::from_u128(5002),
+                    EventStreamKind::Run,
+                    run_id,
+                    job.id,
+                    Some(run_id),
+                    ControlPlaneEventType::ArtifactCommitted,
+                    at(22),
+                    "artifact-body",
+                    "artifact-body",
+                    "actor:test",
+                    serde_json::json!({"state": "committed", "artifactId": artifact_id}),
+                ),
+            )
+            .expect("commit canonical Artifact body");
+        let committed = fixture
+            .store
+            .get_artifact_body(artifact_id)
+            .expect("read committed Artifact body");
+        assert_eq!(committed.content_digest, digest);
+        assert_eq!(committed.body, body);
+        assert_eq!(committed.state, ArtifactRefState::Committed);
+    }
+
+    #[test]
     fn artifact_commit_is_rejected_after_run_terminal_state() {
         let fixture = Fixture::new();
         let job = match fixture
@@ -5737,6 +7893,57 @@ mod tests {
                 .list_reconciliation_candidates(fixture.workspace_id, 10)
                 .expect("reconciliation candidates"),
             Vec::new()
+        );
+    }
+
+    #[test]
+    fn corrupt_typed_queued_job_becomes_one_terminal_failure() {
+        let fixture = Fixture::new();
+        let job = match fixture
+            .store
+            .submit_job(fixture.submission(1, 10))
+            .expect("submit")
+        {
+            SubmitOutcome::Created(job) => job,
+            SubmitOutcome::Replayed(_) => panic!("first submission must create"),
+        };
+        let connection =
+            Connection::open(fixture._temp.path().join("metadata.sqlite3")).expect("database");
+        connection
+            .execute(
+                "UPDATE cp_jobs SET operation_kind = 'unsupported' WHERE id = ?1",
+                params![job.id.to_string()],
+            )
+            .expect("corrupt typed operation");
+
+        assert!(fixture
+            .store
+            .next_queued_job(fixture.workspace_id)
+            .expect("consume corrupt queued Job")
+            .is_none());
+
+        let (state, failure_json): (String, String) = connection
+            .query_row(
+                "SELECT state, failure_json FROM cp_jobs WHERE id = ?1",
+                params![job.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("failed Job");
+        assert_eq!(state, "failed");
+        assert_eq!(
+            serde_json::from_str::<FailureInfo>(&failure_json)
+                .expect("failure info")
+                .category,
+            "incompatible_operation"
+        );
+        let events = fixture
+            .store
+            .list_events(fixture.workspace_id, EventStreamKind::Job, job.id, None, 10)
+            .expect("Job events");
+        assert_eq!(events.events.len(), 2);
+        assert_eq!(
+            events.events[1].event_type,
+            ControlPlaneEventType::JobFailed
         );
     }
 

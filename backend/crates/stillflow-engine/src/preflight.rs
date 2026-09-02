@@ -74,6 +74,62 @@ pub(crate) async fn preflight_inner(
     preview_target: Option<PlanNodeId>,
     verification: bool,
 ) -> Result<PreparedPlan, EngineError> {
+    preflight_inner_with_schema(
+        registry,
+        plan,
+        connection,
+        asset,
+        schema_override,
+        context,
+        preview_target,
+        verification,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Snapshot-backed execution uses the committed Snapshot schema as the
+/// authorized source schema. It must not inspect or read the source
+/// connector, and it disables connector projection pushdown because the
+/// Snapshot reader returns the immutable stored schema.
+pub(crate) async fn preflight_snapshot_inner(
+    registry: &ConnectorRegistry,
+    plan: &LogicalPlan,
+    connection: &SourceConnection,
+    asset: &SourceAsset,
+    snapshot_schema: &LogicalSchema,
+    context: &RequestContext,
+    verification: bool,
+) -> Result<PreparedPlan, EngineError> {
+    preflight_inner_with_schema(
+        registry,
+        plan,
+        connection,
+        asset,
+        None,
+        context,
+        None,
+        verification,
+        Some(snapshot_schema),
+        Some(false),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn preflight_inner_with_schema(
+    registry: &ConnectorRegistry,
+    plan: &LogicalPlan,
+    connection: &SourceConnection,
+    asset: &SourceAsset,
+    schema_override: Option<&LogicalSchema>,
+    context: &RequestContext,
+    preview_target: Option<PlanNodeId>,
+    verification: bool,
+    authorized_schema: Option<&LogicalSchema>,
+    push_projection_override: Option<bool>,
+) -> Result<PreparedPlan, EngineError> {
     context.ensure_active().map_err(map_context_error)?;
     if context
         .remaining()
@@ -164,7 +220,8 @@ pub(crate) async fn preflight_inner(
     capabilities
         .ensure(Capability::Streaming)
         .map_err(EngineError::from_connector)?;
-    let push_projection = capabilities.supports(Capability::ColumnProjection);
+    let push_projection = push_projection_override
+        .unwrap_or_else(|| capabilities.supports(Capability::ColumnProjection));
 
     let mut steps = Vec::new();
     let mut preview_steps = Vec::new();
@@ -252,8 +309,12 @@ pub(crate) async fn preflight_inner(
     }
 
     let _ = scan_id;
-    let authorized =
-        authorized_source_schema(registry, connection, asset, schema_override, context).await?;
+    let authorized = match authorized_schema {
+        Some(schema) => schema.clone(),
+        None => {
+            authorized_source_schema(registry, connection, asset, schema_override, context).await?
+        }
+    };
     reject_paused_schema(&authorized)?;
     // One Engine-private lookup view over the exact validated schema state,
     // shared by the projection existence check and both scan projections.

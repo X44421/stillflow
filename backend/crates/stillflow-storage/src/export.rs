@@ -157,6 +157,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 pub struct ExportManifest {
     manifest_version: u16,
     export_id: Uuid,
+    run_id: Option<Uuid>,
     input: ExportInputIdentity,
     format: ExportFormat,
     shape: ExportShape,
@@ -180,6 +181,8 @@ pub struct ExportManifest {
 struct ExportManifestData {
     manifest_version: u16,
     export_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run_id: Option<Uuid>,
     input: ExportInputIdentity,
     format: ExportFormat,
     shape: ExportShape,
@@ -206,6 +209,7 @@ impl Serialize for ExportManifest {
         ExportManifestData {
             manifest_version: self.manifest_version,
             export_id: self.export_id,
+            run_id: self.run_id,
             input: self.input,
             format: self.format,
             shape: self.shape,
@@ -239,8 +243,38 @@ impl<'de> Deserialize<'de> for ExportManifest {
 
 impl ExportManifest {
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub(crate) fn try_new(
         export_id: Uuid,
+        input: ExportInputIdentity,
+        format: ExportFormat,
+        shape: ExportShape,
+        engine_contract_version: u16,
+        created_at: DateTime<Utc>,
+        row_count: u64,
+        files: Vec<ExportManifestFile>,
+        destination_root: PathBuf,
+        destination_relative: Vec<String>,
+    ) -> Result<Self, StorageError> {
+        Self::try_new_with_run(
+            export_id,
+            None,
+            input,
+            format,
+            shape,
+            engine_contract_version,
+            created_at,
+            row_count,
+            files,
+            destination_root,
+            destination_relative,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_with_run(
+        export_id: Uuid,
+        run_id: Option<Uuid>,
         input: ExportInputIdentity,
         format: ExportFormat,
         shape: ExportShape,
@@ -255,6 +289,7 @@ impl ExportManifest {
         Self::try_from_data(ExportManifestData {
             manifest_version: EXPORT_MANIFEST_VERSION,
             export_id,
+            run_id,
             input,
             format,
             shape,
@@ -283,6 +318,11 @@ impl ExportManifest {
         if data.export_id.is_nil() {
             return Err(StorageError::InvalidManifest(
                 "export identity must not be nil",
+            ));
+        }
+        if data.run_id.is_some_and(|value| value.is_nil()) {
+            return Err(StorageError::InvalidManifest(
+                "export Run identity must not be nil",
             ));
         }
         if data.format_contract_version != EXPORT_FORMAT_CONTRACT_VERSION {
@@ -388,6 +428,7 @@ impl ExportManifest {
         Ok(Self {
             manifest_version: data.manifest_version,
             export_id: data.export_id,
+            run_id: data.run_id,
             input: data.input,
             format: data.format,
             shape: data.shape,
@@ -413,6 +454,10 @@ impl ExportManifest {
 
     pub const fn export_id(&self) -> Uuid {
         self.export_id
+    }
+
+    pub const fn run_id(&self) -> Option<Uuid> {
+        self.run_id
     }
 
     pub const fn input(&self) -> &ExportInputIdentity {
@@ -497,6 +542,7 @@ impl ExportManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportPlan {
     export_id: Uuid,
+    run_id: Option<Uuid>,
     input: ExportInputIdentity,
     destination: ExportDestination,
     format: ExportFormat,
@@ -506,6 +552,17 @@ pub struct ExportPlan {
 impl ExportPlan {
     pub fn try_new(
         export_id: Uuid,
+        input: ExportInputIdentity,
+        destination: ExportDestination,
+        format: ExportFormat,
+        policy: ExportPolicy,
+    ) -> Result<Self, StorageError> {
+        Self::try_new_with_run(export_id, None, input, destination, format, policy)
+    }
+
+    pub fn try_new_with_run(
+        export_id: Uuid,
+        run_id: Option<Uuid>,
         input: ExportInputIdentity,
         destination: ExportDestination,
         format: ExportFormat,
@@ -521,8 +578,14 @@ impl ExportPlan {
                 "export destinations must be managed local roots in v1",
             ));
         }
+        if run_id.is_some_and(|value| value.is_nil()) {
+            return Err(StorageError::InvalidDraft(
+                "export Run identity must not be nil",
+            ));
+        }
         Ok(Self {
             export_id,
+            run_id,
             input,
             destination,
             format,
@@ -532,6 +595,10 @@ impl ExportPlan {
 
     pub const fn export_id(&self) -> Uuid {
         self.export_id
+    }
+
+    pub const fn run_id(&self) -> Option<Uuid> {
+        self.run_id
     }
 
     pub const fn input(&self) -> &ExportInputIdentity {
@@ -931,8 +998,9 @@ impl ExportWriter {
                 "export creation and publication start",
             ));
         }
-        let manifest = ExportManifest::try_new(
+        let manifest = ExportManifest::try_new_with_run(
             self.plan.export_id(),
+            self.plan.run_id(),
             *self.plan.input(),
             self.plan.format(),
             self.plan.policy().shape,

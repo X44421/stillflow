@@ -300,6 +300,9 @@ impl Serialize for ArtifactKindForSerde {
             stillflow_core::ArtifactKind::ValidationReport => "validation-report",
             stillflow_core::ArtifactKind::RejectedRows => "rejected-rows",
             stillflow_core::ArtifactKind::DeduplicationReport => "deduplication-report",
+            stillflow_core::ArtifactKind::ProfileReport => "profile-report",
+            stillflow_core::ArtifactKind::QualityReport => "quality-report",
+            stillflow_core::ArtifactKind::ExportArtifact => "export-artifact",
         };
         serializer.serialize_str(name)
     }
@@ -314,6 +317,9 @@ impl<'de> Deserialize<'de> for ArtifactKindForSerde {
             "validation-report" => stillflow_core::ArtifactKind::ValidationReport,
             "rejected-rows" => stillflow_core::ArtifactKind::RejectedRows,
             "deduplication-report" => stillflow_core::ArtifactKind::DeduplicationReport,
+            "profile-report" => stillflow_core::ArtifactKind::ProfileReport,
+            "quality-report" => stillflow_core::ArtifactKind::QualityReport,
+            "export-artifact" => stillflow_core::ArtifactKind::ExportArtifact,
             other => {
                 return Err(DeError::custom(format!("unknown artifact kind {other}")));
             }
