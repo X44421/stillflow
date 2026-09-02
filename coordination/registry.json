@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 290,
+  "revision": 291,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -222,89 +222,8 @@
       "note": "First API edit is blocked until E5-A1 publishes API_BOOTSTRAP_READY; then rebind/stack onto that exact bootstrap head. Shared bootstrap files remain read-only for E5-E1.",
       "reclaim_reason": "GitHub Issue #229 and PR #230 are closed/completed; claim lease expired; clear stale registry lock before E5-J2 #235.",
       "reclaimed_by": "agent-e5-j2-235"
-    },
-    {
-      "id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
-      "title": "Multi-operation Job Runtime Bridge (issue #235)",
-      "risk_level": "L3",
-      "status": "running",
-      "mode": "write",
-      "owner": "agent-e5-j2-235",
-      "target_issue": 235,
-      "target_branch": "agent/issue-235-e5-j2-multi-operation-job-runtime",
-      "expected_base": "212fa9b64630f3e3f94dc4e543a100b2c39e7e73",
-      "locks": [
-        "core:job-operation",
-        "storage:job-operation",
-        "engine:job-runtime-dispatch",
-        "api:job-operation"
-      ],
-      "paths": [
-        "backend/crates/stillflow-core/src/job_operation.rs",
-        "backend/crates/stillflow-core/src/lib.rs",
-        "backend/crates/stillflow-storage/src/control_plane.rs",
-        "backend/crates/stillflow-storage/src/lib.rs",
-        "backend/crates/stillflow-storage/src/artifact.rs",
-        "backend/crates/stillflow-storage/src/bundle.rs",
-        "backend/crates/stillflow-storage/src/manifest.rs",
-        "backend/crates/stillflow-storage/src/store.rs",
-        "backend/crates/stillflow-engine/src/job_runtime.rs",
-        "backend/crates/stillflow-engine/src/lib.rs",
-        "backend/crates/stillflow-engine/src/profile.rs",
-        "backend/crates/stillflow-engine/src/quality.rs",
-        "backend/crates/stillflow-engine/src/verification.rs",
-        "backend/crates/stillflow-engine/src/export.rs",
-        "backend/crates/stillflow-api/src/service.rs",
-        "backend/crates/stillflow-api/src/lib.rs",
-        "backend/crates/stillflow-api/src/manifest.rs",
-        "backend/crates/stillflow-api/src/envelope.rs",
-        "backend/crates/stillflow-api/src/error.rs",
-        "backend/crates/stillflow-api/src/version.rs",
-        "backend/crates/stillflow-api/tests/e5_j2_multi_operation.rs",
-        "backend/crates/stillflow-engine/tests/e5_j2_multi_operation.rs",
-        "backend/crates/stillflow-storage/tests/e5_j2_multi_operation.rs"
-      ],
-      "shared_paths": [
-        "backend/Cargo.lock"
-      ],
-      "depends_on": [],
-      "conflicts_with": [],
-      "lease_expires_at": "2026-09-02T14:51:28Z",
-      "registered_at": "2026-09-02T10:53:32Z",
-      "updated_at": "2026-09-02T13:21:28Z",
-      "registered_by": "agent-e5-j2-235",
-      "started_at": "2026-09-02T10:53:52Z"
     }
   ],
-  "locks": {
-    "core:job-operation": {
-      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
-      "owner": "agent-e5-j2-235",
-      "expected_head": null,
-      "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T14:51:28Z"
-    },
-    "storage:job-operation": {
-      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
-      "owner": "agent-e5-j2-235",
-      "expected_head": null,
-      "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T14:51:28Z"
-    },
-    "engine:job-runtime-dispatch": {
-      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
-      "owner": "agent-e5-j2-235",
-      "expected_head": null,
-      "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T14:51:28Z"
-    },
-    "api:job-operation": {
-      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
-      "owner": "agent-e5-j2-235",
-      "expected_head": null,
-      "acquired_at": "2026-09-02T10:53:52Z",
-      "lease_expires_at": "2026-09-02T14:51:28Z"
-    }
-  },
-  "updated_at": "2026-09-02T13:21:28Z"
+  "locks": {},
+  "updated_at": "2026-09-02T15:52:05Z"
 }
