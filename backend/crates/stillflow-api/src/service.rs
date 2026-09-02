@@ -1396,6 +1396,8 @@ impl ApiService {
         request: ApiRequest<CancelJobRequest>,
     ) -> ApiResult<ApiResponse<JobView>> {
         self.validate_meta(&request, true)?;
+        let current = self.control_plane.get_job(request.body.job_id)?;
+        self.ensure_scope(current.workspace_id, request.meta.workspace_id)?;
         let runtime = self
             .runtime
             .as_ref()
@@ -1557,6 +1559,10 @@ impl ApiService {
         {
             return Err(ApiError::limit("artifact byte page exceeds the API bound"));
         }
+        let artifact = self
+            .control_plane
+            .get_artifact_ref(request.body.artifact_id)?;
+        self.ensure_scope(artifact.workspace_id, request.meta.workspace_id)?;
         let mut reader = self
             .snapshot_store
             .as_ref()
@@ -2127,5 +2133,22 @@ mod tests {
             .expect_err("embedded secret");
         assert_eq!(error.code, crate::ApiErrorCode::InvalidRequest);
         assert!(store.get_source_connection(connection_id).is_err());
+    }
+
+    #[tokio::test]
+    async fn cancel_job_scopes_before_runtime_lookup() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(ControlPlaneStore::open(root.path()).expect("store"));
+        let service = ApiService::new(store);
+        let error = service
+            .cancel_job(ApiRequest {
+                meta: metadata(Uuid::from_u128(40)),
+                body: CancelJobRequest {
+                    job_id: Uuid::from_u128(41),
+                },
+            })
+            .await
+            .expect_err("unknown Job must fail closed before runtime lookup");
+        assert_eq!(error.code, crate::ApiErrorCode::NotFound);
     }
 }
