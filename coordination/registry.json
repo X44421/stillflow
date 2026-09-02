@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 288,
+  "revision": 289,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -227,9 +227,9 @@
       "id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
       "title": "Multi-operation Job Runtime Bridge (issue #235)",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-e5-j2-235",
       "target_issue": 235,
       "target_branch": "agent/issue-235-e5-j2-multi-operation-job-runtime",
       "expected_base": "212fa9b64630f3e3f94dc4e543a100b2c39e7e73",
@@ -269,12 +269,42 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-02T12:53:52Z",
       "registered_at": "2026-09-02T10:53:32Z",
-      "updated_at": "2026-09-02T10:53:32Z",
-      "registered_by": "agent-e5-j2-235"
+      "updated_at": "2026-09-02T10:53:52Z",
+      "registered_by": "agent-e5-j2-235",
+      "started_at": "2026-09-02T10:53:52Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-02T10:53:32Z"
+  "locks": {
+    "core:job-operation": {
+      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
+      "owner": "agent-e5-j2-235",
+      "expected_head": null,
+      "acquired_at": "2026-09-02T10:53:52Z",
+      "lease_expires_at": "2026-09-02T12:53:52Z"
+    },
+    "storage:job-operation": {
+      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
+      "owner": "agent-e5-j2-235",
+      "expected_head": null,
+      "acquired_at": "2026-09-02T10:53:52Z",
+      "lease_expires_at": "2026-09-02T12:53:52Z"
+    },
+    "engine:job-runtime-dispatch": {
+      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
+      "owner": "agent-e5-j2-235",
+      "expected_head": null,
+      "acquired_at": "2026-09-02T10:53:52Z",
+      "lease_expires_at": "2026-09-02T12:53:52Z"
+    },
+    "api:job-operation": {
+      "task_id": "E5-J2-MULTI-OPERATION-JOB-RUNTIME-BRIDGE",
+      "owner": "agent-e5-j2-235",
+      "expected_head": null,
+      "acquired_at": "2026-09-02T10:53:52Z",
+      "lease_expires_at": "2026-09-02T12:53:52Z"
+    }
+  },
+  "updated_at": "2026-09-02T10:53:52Z"
 }
