@@ -246,7 +246,7 @@ impl EventStreamService {
             .events
             .last()
             .map(EventFrame::cursor)
-            .or_else(|| page.next)
+            .or(page.next)
             .unwrap_or(observed_cursor);
         let replay = VecDeque::from(page.events);
         let (sender, receiver) = mpsc::channel(self.buffer_capacity);
