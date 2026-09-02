@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 281,
+  "revision": 282,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -218,6 +218,30 @@
       "started_at": "2026-09-01T12:16:00Z",
       "updated_at": "2026-09-01T12:16:00Z",
       "note": "First API edit is blocked until E5-A1 publishes API_BOOTSTRAP_READY; then rebind/stack onto that exact bootstrap head. Shared bootstrap files remain read-only for E5-E1."
+    },
+    {
+      "id": "E5-J2-C0",
+      "title": "Typed Job Operation v1 contract (issue #233)",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 233,
+      "target_branch": "agent/issue-233-e5-j2-c0-job-operation-contract",
+      "expected_base": "babf89e294aaab7a8a84c432b5b52fe382b84b8d",
+      "locks": [
+        "contract:job-operation"
+      ],
+      "paths": [
+        "docs/issues/e5-j2-c0-typed-job-operation-contract.md"
+      ],
+      "shared_paths": [],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-02T08:36:08Z",
+      "updated_at": "2026-09-02T08:36:08Z",
+      "registered_by": "agent-e5-j2-c0-233"
     }
   ],
   "locks": {
@@ -252,5 +276,5 @@
       "lease_expires_at": "2026-09-01T13:46:00Z"
     }
   },
-  "updated_at": "2026-09-02T07:59:26Z"
+  "updated_at": "2026-09-02T08:36:08Z"
 }
