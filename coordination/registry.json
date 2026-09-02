@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 280,
+  "revision": 281,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -218,33 +218,6 @@
       "started_at": "2026-09-01T12:16:00Z",
       "updated_at": "2026-09-01T12:16:00Z",
       "note": "First API edit is blocked until E5-A1 publishes API_BOOTSTRAP_READY; then rebind/stack onto that exact bootstrap head. Shared bootstrap files remain read-only for E5-E1."
-    },
-    {
-      "id": "E5-G1",
-      "title": "Runtime end-to-end gate (issue #232)",
-      "risk_level": "L3",
-      "status": "running",
-      "mode": "write",
-      "owner": "agent-e5-g1-232",
-      "target_issue": 232,
-      "target_branch": "agent/issue-232-e5-g1-runtime-e2e",
-      "expected_base": "babf89e294aaab7a8a84c432b5b52fe382b84b8d",
-      "locks": [
-        "gate:e5-g1-runtime"
-      ],
-      "paths": [
-        "backend/crates/stillflow-api/tests/e5_g1_runtime_e2e.rs",
-        "backend/crates/stillflow-api/tests/e5_g1_*.rs",
-        "backend/crates/stillflow-api/tests/fixtures/e5_g1/*"
-      ],
-      "shared_paths": [],
-      "depends_on": [],
-      "conflicts_with": [],
-      "lease_expires_at": "2026-09-02T10:33:10Z",
-      "registered_at": "2026-09-02T07:32:49Z",
-      "updated_at": "2026-09-02T07:33:10Z",
-      "registered_by": "agent-e5-g1-232",
-      "started_at": "2026-09-02T07:33:10Z"
     }
   ],
   "locks": {
@@ -277,14 +250,7 @@
       "owner": "agent-e5-e1-229",
       "acquired_at": "2026-09-01T12:16:00Z",
       "lease_expires_at": "2026-09-01T13:46:00Z"
-    },
-    "gate:e5-g1-runtime": {
-      "task_id": "E5-G1",
-      "owner": "agent-e5-g1-232",
-      "expected_head": null,
-      "acquired_at": "2026-09-02T07:33:10Z",
-      "lease_expires_at": "2026-09-02T10:33:10Z"
     }
   },
-  "updated_at": "2026-09-02T07:33:10Z"
+  "updated_at": "2026-09-02T07:59:26Z"
 }
