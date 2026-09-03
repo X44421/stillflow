@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 298,
+  "revision": 299,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
-  "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
+  "source_main_sha": "0805c59201e4f2862493dbb29279226f5bd7e559",
   "policy": {
     "risk_levels": [
       "L2",
@@ -305,5 +305,6 @@
       "lease_expires_at": "2026-09-03T07:38:16Z"
     }
   },
-  "updated_at": "2026-09-03T06:23:37Z"
+  "updated_at": "2026-09-03T06:28:44Z",
+  "source_main_rebind_reason": "Rebound from stale registry baseline a70b0ac to live main 0805c592 before Q-D1 runtime claim; no task ownership or lock state changed."
 }
