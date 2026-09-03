@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 294,
+  "revision": 295,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -244,9 +244,9 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-03T04:24:24Z",
+      "lease_expires_at": "2026-09-03T04:26:07Z",
       "registered_at": "2026-09-03T01:21:45Z",
-      "updated_at": "2026-09-03T02:54:24Z",
+      "updated_at": "2026-09-03T02:56:07Z",
       "registered_by": "agent-e5-g1-232",
       "note": "E5-G1 rebound onto post-E5-J2 main 0805c59201e4f2862493dbb29279226f5bd7e559 per dispatch receipt; #235 merged, post-merge CI 6/6 passed.",
       "started_at": "2026-09-03T01:22:07Z"
@@ -258,8 +258,8 @@
       "owner": "agent-e5-g1-232",
       "expected_head": null,
       "acquired_at": "2026-09-03T01:22:07Z",
-      "lease_expires_at": "2026-09-03T04:24:24Z"
+      "lease_expires_at": "2026-09-03T04:26:07Z"
     }
   },
-  "updated_at": "2026-09-03T02:54:24Z"
+  "updated_at": "2026-09-03T02:56:07Z"
 }
