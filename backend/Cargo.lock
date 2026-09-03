@@ -3161,6 +3161,7 @@ dependencies = [
  "chrono",
  "csv",
  "futures",
+ "memchr",
  "parquet",
  "polars",
  "polars-arrow",
