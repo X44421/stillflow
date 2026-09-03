@@ -23,8 +23,8 @@ use uuid::Uuid;
 
 use stillflow_core::{
     logical_schema_to_arrow, ArtifactKind, ArtifactProvenance, ArtifactProvenanceDraft,
-    ArtifactSummary, BatchEnvelope, LogicalSchema, LogicalSchemaFingerprint, SnapshotStats,
-    MAX_BATCH_ROWS, VERIFICATION_CONTRACT_VERSION,
+    ArtifactSummary, BatchEnvelope, InputRef, LogicalSchema, LogicalSchemaFingerprint,
+    SnapshotStats, MAX_BATCH_ROWS, VERIFICATION_CONTRACT_VERSION,
 };
 
 use crate::artifact;
@@ -40,10 +40,10 @@ use crate::artifact::{
 use crate::dedup::{self, DedupIndex};
 use crate::{
     abort_bundle_publication, acquire_activity, build_snapshot, create_exact_directory,
-    format_timestamp, integrity_error, load_manifest_inner, open_connection, staging_root,
-    sync_directory, write_envelope_parquet, ActivityGuard, ActivityKind, SnapshotDraft,
-    SnapshotManifest, SnapshotPartition, SnapshotStore, StorageError, StoreInner,
-    MAX_INPUT_ENVELOPES,
+    format_timestamp, integrity_error, load_manifest_inner, open_connection,
+    snapshot_version_digest_inner, staging_root, sync_directory, write_envelope_parquet,
+    ActivityGuard, ActivityKind, SnapshotDraft, SnapshotManifest, SnapshotPartition, SnapshotStore,
+    StorageError, StoreInner, MAX_INPUT_ENVELOPES,
 };
 
 use rusqlite::OptionalExtension;
@@ -207,6 +207,10 @@ pub(crate) static PREPARED_WINDOW_HOOK: std::sync::Mutex<
 pub struct VerificationBundleDraft {
     provenance: ArtifactProvenanceDraft,
     accepted: SnapshotDraft,
+    /// When present, the accepted child is an already committed input
+    /// Snapshot. The bundle references it without creating a second
+    /// Snapshot identity or rewriting its partitions (E5-J2).
+    accepted_existing_snapshot_id: Option<Uuid>,
     validation_report_artifact_id: Uuid,
     rejected_rows_artifact_id: Option<Uuid>,
     deduplication_report_artifact_id: Uuid,
@@ -290,6 +294,7 @@ impl VerificationBundleDraft {
         Ok(Self {
             provenance,
             accepted,
+            accepted_existing_snapshot_id: None,
             validation_report_artifact_id,
             rejected_rows_artifact_id,
             deduplication_report_artifact_id,
@@ -307,6 +312,32 @@ impl VerificationBundleDraft {
     pub fn with_rejected_source_schema(mut self, schema: LogicalSchema) -> Self {
         self.rejected_source_schema = Some(schema);
         self
+    }
+
+    /// Reuses one committed Snapshot as the accepted bundle child. This is
+    /// reserved for Snapshot-backed Verification: the provenance input and
+    /// accepted child must carry the same Snapshot identity.
+    pub fn with_existing_accepted_snapshot(
+        mut self,
+        snapshot_id: Uuid,
+    ) -> Result<Self, StorageError> {
+        if snapshot_id.is_nil() || snapshot_id != self.accepted.id() {
+            return Err(StorageError::InvalidDraft(
+                "existing accepted Snapshot identity does not match the draft",
+            ));
+        }
+        match self.provenance.input.input.input {
+            InputRef::Snapshot {
+                snapshot_id: input_id,
+            } if input_id == snapshot_id => {}
+            _ => {
+                return Err(StorageError::InvalidDraft(
+                    "existing accepted Snapshot requires Snapshot provenance input",
+                ));
+            }
+        }
+        self.accepted_existing_snapshot_id = Some(snapshot_id);
+        Ok(self)
     }
 
     pub const fn provenance(&self) -> &ArtifactProvenanceDraft {
@@ -347,6 +378,7 @@ pub struct VerificationBundleWriter {
     inner: Arc<StoreInner>,
     _activity: Option<ActivityGuard>,
     draft: VerificationBundleDraft,
+    existing_accepted_manifest: Option<SnapshotManifest>,
     started_at: DateTime<Utc>,
     staging_dir: PathBuf,
     state: BundleState,
@@ -504,10 +536,41 @@ impl SnapshotStore {
     ) -> Result<VerificationBundleWriter, StorageError> {
         let inner = &self.inner;
         let bundle_id = draft.provenance.input.bundle_id;
+        // Validate the existing accepted child before reserving the bundle
+        // journal. This keeps a stale/tombstoned Snapshot from entering a
+        // publication that can never satisfy the typed input contract.
+        let existing_accepted_manifest =
+            if let Some(snapshot_id) = draft.accepted_existing_snapshot_id {
+                let manifest = load_manifest_inner(inner, snapshot_id)?;
+                let actual_digest = snapshot_version_digest_inner(inner, snapshot_id)?;
+                if actual_digest != draft.provenance.input.input.version_digest {
+                    return Err(StorageError::InvalidDraft(
+                        "existing accepted Snapshot digest does not match provenance input",
+                    ));
+                }
+                Some(manifest)
+            } else {
+                None
+            };
         let mut connection = open_connection(inner)?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StorageError::database("begin bundle journal transaction"))?;
+        if let Some(snapshot_id) = draft.accepted_existing_snapshot_id {
+            let state: Option<i64> = transaction
+                .query_row(
+                    "SELECT state FROM snapshots WHERE id = ?1",
+                    params![snapshot_id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| StorageError::database("check existing accepted Snapshot"))?;
+            if state != Some(1) {
+                return Err(StorageError::InvalidDraft(
+                    "existing accepted Snapshot is not committed",
+                ));
+            }
+        }
         // Symmetric identity reservation (contract 10.5): every identity that
         // maps to a `partitions/<id>` directory — the accepted snapshot id and
         // each artifact id — must be free across BOTH families. It may not be
@@ -515,9 +578,28 @@ impl SnapshotStore {
         // bundle journal row, or by any committed bundle, regardless of which
         // column carries it. A `None` rejected id binds SQL NULL, which never
         // matches.
-        let conflict: bool = transaction
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM snapshots
+        let conflict_sql = if draft.accepted_existing_snapshot_id.is_some() {
+            "SELECT EXISTS(SELECT 1 FROM snapshots
+                                 WHERE id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                                   AND id != ?2)
+                   OR EXISTS(SELECT 1 FROM publications
+                              WHERE snapshot_id IN (?1, ?2, ?3, ?4, ?5, ?6))
+                   OR EXISTS(SELECT 1 FROM bundle_publications WHERE
+                              bundle_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR accepted_snapshot_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR bundle_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR validation_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR rejected_rows_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR deduplication_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6))
+                   OR EXISTS(SELECT 1 FROM verification_bundles WHERE
+                              bundle_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR accepted_snapshot_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR bundle_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR validation_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR rejected_rows_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
+                           OR deduplication_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6))"
+        } else {
+            "SELECT EXISTS(SELECT 1 FROM snapshots
                                  WHERE id IN (?1, ?2, ?3, ?4, ?5, ?6))
                    OR EXISTS(SELECT 1 FROM publications
                               WHERE snapshot_id IN (?1, ?2, ?3, ?4, ?5, ?6))
@@ -534,7 +616,11 @@ impl SnapshotStore {
                            OR bundle_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
                            OR validation_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
                            OR rejected_rows_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6)
-                           OR deduplication_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6))",
+                           OR deduplication_report_artifact_id IN (?1, ?2, ?3, ?4, ?5, ?6))"
+        };
+        let conflict: bool = transaction
+            .query_row(
+                conflict_sql,
                 params![
                     bundle_id.to_string(),
                     draft.accepted.id().to_string(),
@@ -549,6 +635,7 @@ impl SnapshotStore {
         if conflict {
             return Err(StorageError::AlreadyExists(bundle_id));
         }
+        let sections = section_plan(draft)?;
         transaction
             .execute(
                 "INSERT INTO bundle_publications(
@@ -601,6 +688,7 @@ impl SnapshotStore {
             inner: Arc::clone(inner),
             _activity: None,
             draft: draft.clone(),
+            existing_accepted_manifest,
             started_at,
             staging_dir,
             state: BundleState::Staged,
@@ -610,7 +698,7 @@ impl SnapshotStore {
             accepted_canonical_partitions: Vec::new(),
             accepted_row_count: 0,
             accepted_stored_byte_count: 0,
-            sections: section_plan(draft)?,
+            sections,
             installed_dirs: Vec::new(),
         })
     }
@@ -643,6 +731,16 @@ impl SnapshotStore {
     ) -> Result<VerificationBundle, StorageError> {
         let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
         load_bundle_inner(&self.inner, bundle_id)
+    }
+
+    /// Returns the committed bundle provenance digest used by the typed
+    /// `VerificationBundleRef` output contract.
+    pub fn verification_bundle_version_digest(
+        &self,
+        bundle_id: Uuid,
+    ) -> Result<[u8; 32], StorageError> {
+        let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
+        verification_bundle_version_digest_inner(&self.inner, bundle_id)
     }
 
     /// Loads the unique committed bundle containing this accepted snapshot.
@@ -887,7 +985,7 @@ fn accepted_provenance_from(
     }
 }
 
-fn load_bundle_inner(
+pub(crate) fn load_bundle_inner(
     inner: &StoreInner,
     bundle_id: Uuid,
 ) -> Result<VerificationBundle, StorageError> {
@@ -1035,6 +1133,16 @@ fn load_bundle_inner(
     })
 }
 
+/// Returns the committed bundle provenance digest used as the version
+/// identity of a typed VerificationBundleRef.
+pub(crate) fn verification_bundle_version_digest_inner(
+    inner: &StoreInner,
+    bundle_id: Uuid,
+) -> Result<[u8; 32], StorageError> {
+    let bundle = load_bundle_inner(inner, bundle_id)?;
+    Ok(bundle.provenance().content_digest)
+}
+
 impl VerificationBundleWriter {
     fn ensure_writable(&self) -> Result<(), StorageError> {
         if self.state != BundleState::Staged {
@@ -1050,6 +1158,11 @@ impl VerificationBundleWriter {
     /// snapshot semantics and limits.
     pub fn append_accepted(&mut self, envelope: &BatchEnvelope) -> Result<(), StorageError> {
         self.ensure_writable()?;
+        if self.existing_accepted_manifest.is_some() {
+            return Err(StorageError::InvalidDraft(
+                "an existing accepted Snapshot cannot receive bundle appends",
+            ));
+        }
         let limits = self.inner.limits;
         let envelope_count = self
             .accepted_envelope_count
@@ -1457,9 +1570,13 @@ impl VerificationBundleWriter {
                     });
                 }
             }
-            ArtifactKind::VerificationBundle | ArtifactKind::AcceptedSnapshot => {
+            ArtifactKind::VerificationBundle
+            | ArtifactKind::AcceptedSnapshot
+            | ArtifactKind::ProfileReport
+            | ArtifactKind::QualityReport
+            | ArtifactKind::ExportArtifact => {
                 return Err(StorageError::InvalidManifest(
-                    "sections cannot belong to bundle-level artifacts",
+                    "sections cannot belong to bundle-level or generic artifacts",
                 ));
             }
         }
@@ -1508,22 +1625,31 @@ impl VerificationBundleWriter {
         }
 
         // ---- Assemble the accepted snapshot ----
-        let partition_count = u32::try_from(self.accepted_partitions.len())
-            .map_err(|_| StorageError::ArithmeticOverflow("partition count"))?;
-        let stats = SnapshotStats::try_new(
-            self.accepted_row_count,
-            self.accepted_stored_byte_count,
-            partition_count,
-        )?;
-        let snapshot = build_snapshot(&self.draft.accepted, stats)?;
-        let accepted_manifest =
-            SnapshotManifest::try_new(snapshot, self.accepted_partitions.clone())?;
-        // Logical digest: canonical Arrow IPC facts recorded on append, never
-        // Parquet file hashes (contract 8.1.1).
-        let accepted_digest = accepted_snapshot_manifest_digest(
-            accepted_manifest.snapshot(),
-            &self.accepted_canonical_partitions,
-        )?;
+        let (accepted_manifest, accepted_digest) =
+            if let Some(manifest) = &self.existing_accepted_manifest {
+                (
+                    manifest.clone(),
+                    snapshot_version_digest_inner(&self.inner, manifest.snapshot().id())?,
+                )
+            } else {
+                let partition_count = u32::try_from(self.accepted_partitions.len())
+                    .map_err(|_| StorageError::ArithmeticOverflow("partition count"))?;
+                let stats = SnapshotStats::try_new(
+                    self.accepted_row_count,
+                    self.accepted_stored_byte_count,
+                    partition_count,
+                )?;
+                let snapshot = build_snapshot(&self.draft.accepted, stats)?;
+                let accepted_manifest =
+                    SnapshotManifest::try_new(snapshot, self.accepted_partitions.clone())?;
+                // Logical digest: canonical Arrow IPC facts recorded on append, never
+                // Parquet file hashes (contract 8.1.1).
+                let accepted_digest = accepted_snapshot_manifest_digest(
+                    accepted_manifest.snapshot(),
+                    &self.accepted_canonical_partitions,
+                )?;
+                (accepted_manifest, accepted_digest)
+            };
 
         // ---- Assemble report and rejected manifests ----
         let mut validation_sections: Vec<ArtifactSection> = Vec::new();
@@ -1558,9 +1684,13 @@ impl VerificationBundleWriter {
                         rejected_section = Some(built);
                     }
                 }
-                ArtifactKind::VerificationBundle | ArtifactKind::AcceptedSnapshot => {
+                ArtifactKind::VerificationBundle
+                | ArtifactKind::AcceptedSnapshot
+                | ArtifactKind::ProfileReport
+                | ArtifactKind::QualityReport
+                | ArtifactKind::ExportArtifact => {
                     return Err(StorageError::InvalidManifest(
-                        "sections cannot belong to bundle-level artifacts",
+                        "sections cannot belong to bundle-level or generic artifacts",
                     ));
                 }
             }
@@ -1647,7 +1777,11 @@ impl VerificationBundleWriter {
         }
 
         let mut children: Vec<(Uuid, [u8; 32], [u8; 32])> = Vec::new();
-        children.push((self.draft.accepted.id(), accepted_digest, accepted_digest));
+        children.push((
+            accepted_manifest.snapshot().id(),
+            accepted_digest,
+            accepted_digest,
+        ));
         children.push((
             validation_manifest.artifact_id(),
             *validation_manifest.manifest_digest().as_bytes(),
@@ -1674,7 +1808,7 @@ impl VerificationBundleWriter {
             input.run_id,
             input.bundle_id,
             input.artifact_id,
-            self.draft.accepted.id(),
+            accepted_manifest.snapshot().id(),
             self.draft.validation_report_artifact_id,
             rejected_manifest
                 .as_ref()
@@ -1692,7 +1826,7 @@ impl VerificationBundleWriter {
             bundle_id: input.bundle_id,
             run_id: input.run_id,
             bundle_artifact_id: input.artifact_id,
-            accepted_snapshot_id: self.draft.accepted.id(),
+            accepted_snapshot_id: accepted_manifest.snapshot().id(),
             validation_report_artifact_id: self.draft.validation_report_artifact_id,
             rejected_rows_artifact_id: rejected_manifest
                 .as_ref()
@@ -1703,10 +1837,12 @@ impl VerificationBundleWriter {
         // ---- Installing: final directories precede SQLite visibility ----
         self.state = BundleState::Installing;
         let mut final_dirs: Vec<Uuid> = vec![
-            self.draft.accepted.id(),
             validation_manifest.artifact_id(),
             dedup_manifest.artifact_id(),
         ];
+        if self.existing_accepted_manifest.is_none() {
+            final_dirs.insert(0, accepted_manifest.snapshot().id());
+        }
         if let Some(manifest) = &rejected_manifest {
             final_dirs.push(manifest.artifact_id());
         }
@@ -1760,7 +1896,9 @@ impl VerificationBundleWriter {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StorageError::database("begin bundle commit transaction"))?;
-        crate::insert_visible_snapshot(&transaction, &accepted_manifest, false)?;
+        if self.existing_accepted_manifest.is_none() {
+            crate::insert_visible_snapshot(&transaction, &accepted_manifest, false)?;
+        }
         transaction
             .execute(
                 "INSERT INTO verification_bundles(
@@ -1801,6 +1939,13 @@ impl VerificationBundleWriter {
                             ArtifactKind::ValidationReport => "validation-report",
                             ArtifactKind::RejectedRows => "rejected-rows",
                             ArtifactKind::DeduplicationReport => "deduplication-report",
+                            ArtifactKind::ProfileReport
+                            | ArtifactKind::QualityReport
+                            | ArtifactKind::ExportArtifact => {
+                                return Err(StorageError::InvalidManifest(
+                                    "generic artifact kind cannot be persisted in a verification bundle",
+                                ));
+                            }
                         },
                         manifest_json,
                         provenance_json,
@@ -1854,19 +1999,21 @@ impl VerificationBundleWriter {
         dedup: &ArtifactManifest,
         rejected: &Option<ArtifactManifest>,
     ) -> Result<(), StorageError> {
-        let accepted_dir =
-            crate::partitions_root(&self.inner).join(accepted.snapshot().id().to_string());
-        for partition in accepted.partitions() {
-            let staged = self
-                .staging_dir
-                .join(format!("accepted-{:010}.parquet", partition.sequence()));
-            let final_path = accepted_dir.join(format!(
-                "{:010}-{}.parquet",
-                partition.sequence(),
-                partition.digest()
-            ));
-            fs::rename(staged, final_path)
-                .map_err(|error| StorageError::io("install accepted partition", &error))?;
+        if self.existing_accepted_manifest.is_none() {
+            let accepted_dir =
+                crate::partitions_root(&self.inner).join(accepted.snapshot().id().to_string());
+            for partition in accepted.partitions() {
+                let staged = self
+                    .staging_dir
+                    .join(format!("accepted-{:010}.parquet", partition.sequence()));
+                let final_path = accepted_dir.join(format!(
+                    "{:010}-{}.parquet",
+                    partition.sequence(),
+                    partition.digest()
+                ));
+                fs::rename(staged, final_path)
+                    .map_err(|error| StorageError::io("install accepted partition", &error))?;
+            }
         }
         for manifest in [validation, dedup] {
             install_manifest_partitions(
@@ -4211,5 +4358,64 @@ mod tests {
             vec![None, Some(5), Some(6)],
             "rebatched rows must keep their logical values across boundaries"
         );
+    }
+
+    #[test]
+    fn snapshot_backed_bundle_reuses_input_snapshot_exactly() {
+        let temp = TempDir::new().expect("temp");
+        let store = open_store(&temp);
+        let mut snapshot_writer = store
+            .begin_snapshot(ordinary_snapshot_draft(ACCEPTED), at(STARTED))
+            .expect("begin input snapshot");
+        snapshot_writer
+            .append(&accepted_envelope(0, vec![1, 2, 3]))
+            .expect("append input snapshot");
+        let input_manifest = snapshot_writer.commit().expect("commit input snapshot");
+        let input_digest = store
+            .version_digest(input_manifest.snapshot().id())
+            .expect("input digest");
+
+        let mut provenance = provenance_input();
+        provenance.session_id = input_manifest.snapshot().session_id();
+        provenance.input = stillflow_core::LogicalInputRef {
+            input: stillflow_core::InputRef::Snapshot {
+                snapshot_id: input_manifest.snapshot().id(),
+            },
+            version_digest: input_digest,
+        };
+        let provenance = ArtifactProvenanceDraft {
+            input: provenance,
+            plan_fingerprint: [0x21; 32],
+            canonical_plan_digest: [0x22; 32],
+            engine_contract_version: 1,
+            engine_build: "test-engine-build".to_owned(),
+            verification_contract_version: VERIFICATION_CONTRACT_VERSION,
+        };
+        let draft = VerificationBundleDraft::try_new(
+            provenance,
+            ordinary_snapshot_draft(ACCEPTED),
+            Uuid::from_u128(VALIDATION),
+            None,
+            Uuid::from_u128(DEDUP),
+        )
+        .expect("snapshot-backed bundle draft")
+        .with_existing_accepted_snapshot(input_manifest.snapshot().id())
+        .expect("reuse input snapshot");
+
+        let bundle = store
+            .begin_verification_bundle(draft, at(STARTED))
+            .expect("begin snapshot-backed bundle")
+            .commit(at(COMMITTED))
+            .expect("commit snapshot-backed bundle");
+        assert_eq!(
+            bundle.membership().accepted_snapshot_id(),
+            input_manifest.snapshot().id()
+        );
+        assert_eq!(bundle.accepted().manifest(), &input_manifest);
+        assert_eq!(bundle.accepted().provenance().content_digest, input_digest);
+        let loaded = store
+            .load_verification_bundle_by_snapshot(input_manifest.snapshot().id())
+            .expect("load bundle by input snapshot");
+        assert_eq!(loaded.membership(), bundle.membership());
     }
 }

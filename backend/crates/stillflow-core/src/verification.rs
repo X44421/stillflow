@@ -85,6 +85,9 @@ pub enum ArtifactKind {
     ValidationReport,
     RejectedRows,
     DeduplicationReport,
+    ProfileReport,
+    QualityReport,
+    ExportArtifact,
 }
 
 impl ArtifactKind {
@@ -96,6 +99,9 @@ impl ArtifactKind {
             Self::ValidationReport => 0x03,
             Self::RejectedRows => 0x04,
             Self::DeduplicationReport => 0x05,
+            Self::ProfileReport => 0xF1,
+            Self::QualityReport => 0xF2,
+            Self::ExportArtifact => 0xF3,
         }
     }
 
@@ -106,6 +112,9 @@ impl ArtifactKind {
             0x03 => Some(Self::ValidationReport),
             0x04 => Some(Self::RejectedRows),
             0x05 => Some(Self::DeduplicationReport),
+            0xF1 => Some(Self::ProfileReport),
+            0xF2 => Some(Self::QualityReport),
+            0xF3 => Some(Self::ExportArtifact),
             _ => None,
         }
     }

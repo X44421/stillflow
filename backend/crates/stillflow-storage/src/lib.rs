@@ -27,11 +27,12 @@ pub use bundle::{
     VerificationBundleMembership, VerificationBundleWriter,
 };
 pub use control_plane::{
-    ArtifactCursor, ArtifactPage, ArtifactRefDraft, ArtifactRefRecord, ControlPlaneStore,
-    DatasetRecord, EventCursor, EventDraft, EventPage, EventRecord, ExternalRefKind, FailureInfo,
-    JobCursor, JobPage, JobRecord, JobRecoveryDraft, JobRecoveryResult, JobSubmission, PlanRecord,
-    PlanVersionDraft, PlanVersionRecord, ReconciliationCandidate, RunCursor, RunPage, RunRecord,
-    SessionRecord, SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, WorkspaceRecord,
+    ArtifactBodyRecord, ArtifactCursor, ArtifactOutputRef, ArtifactPage, ArtifactRefDraft,
+    ArtifactRefRecord, ControlPlaneStore, DatasetRecord, EventCursor, EventDraft, EventPage,
+    EventRecord, ExternalRefKind, FailureInfo, JobCursor, JobPage, JobRecord, JobRecoveryDraft,
+    JobRecoveryResult, JobSubmission, PlanRecord, PlanVersionDraft, PlanVersionRecord,
+    ReconciliationCandidate, RunCursor, RunPage, RunRecord, SessionRecord, SnapshotOutputRef,
+    SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, TerminalOutputRef, WorkspaceRecord,
 };
 pub use dedup::{
     DedupIndex, DedupInsert, MAX_DEDUP_INDEX_CACHE_KIB, MAX_DEDUP_INDEX_DISK_BYTES,
@@ -51,6 +52,7 @@ pub use manifest::{
 };
 pub use store::{SnapshotBatchReader, SnapshotStore, SnapshotWriter};
 
+pub(crate) use bundle::verification_bundle_version_digest_inner;
 pub(crate) use digest::digest_file;
 pub(crate) use manifest::build_snapshot;
 pub(crate) use store::acquire_maintenance;
@@ -58,5 +60,6 @@ pub(crate) use store::{
     abort_bundle_publication, acquire_activity, create_exact_directory, ensure_managed_directory,
     ensure_private_directory, format_timestamp, insert_visible_snapshot, integrity_error,
     load_manifest_inner, open_connection, parse_timestamp, partitions_root, read_partition,
-    staging_root, sync_directory, write_envelope_parquet, ActivityGuard, ActivityKind, StoreInner,
+    snapshot_version_digest_inner, staging_root, sync_directory, write_envelope_parquet,
+    ActivityGuard, ActivityKind, StoreInner,
 };

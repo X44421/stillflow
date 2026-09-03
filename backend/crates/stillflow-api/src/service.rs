@@ -17,9 +17,10 @@ use sha2::{Digest, Sha256};
 use stillflow_connectors::ConnectorRegistry;
 use stillflow_core::{
     AssetKind, AssetLocator, AssetMetadata, ConnectionStatus, ConnectorKind, ControlPlaneEventType,
-    ControlPlaneInput, DatasetState, DiscoverRequest, EventStreamKind, InspectRequest, JobState,
-    LogicalSchema, PreviewRequest, RequestContext, RunState, SamplingStrategy, SessionState,
-    SourceAsset, SourceConnection, SourceConnectionState, TestConnectionRequest,
+    ControlPlaneInput, DatasetState, DiscoverRequest, EventStreamKind, InspectRequest,
+    JobOperation, JobState, LogicalSchema, OperationKind, PreviewRequest, RequestContext, RunState,
+    SamplingStrategy, SessionState, SourceAsset, SourceConnection, SourceConnectionState,
+    TestConnectionRequest,
 };
 use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePreviewOpRequest};
 use stillflow_plan::{LogicalPlan, PlanNodeId};
@@ -27,7 +28,8 @@ use stillflow_storage::{
     ArtifactCursor, ArtifactPage, ArtifactRefRecord, ArtifactSectionId, ControlPlaneStore,
     DatasetRecord, EventCursor, EventPage, JobCursor, JobPage, JobRecord, JobSubmission,
     PlanRecord, PlanVersionDraft, PlanVersionRecord, RunCursor, RunPage, RunRecord, SessionRecord,
-    SnapshotStore, SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, WorkspaceRecord,
+    SnapshotStore, SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, TerminalOutputRef,
+    WorkspaceRecord,
 };
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -144,8 +146,14 @@ pub struct JobView {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub session_id: Uuid,
+    pub plan_id: Uuid,
     pub plan_version_id: Uuid,
     pub canonical_plan_digest: String,
+    pub operation_kind: Option<OperationKind>,
+    pub operation_version: Option<u16>,
+    pub operation: Option<JobOperation>,
+    pub operation_descriptor_digest: Option<String>,
+    pub request_digest: Option<String>,
     pub inputs: Vec<ControlPlaneInput>,
     pub execution_policy: Value,
     pub output_policy: Value,
@@ -155,6 +163,7 @@ pub struct JobView {
     pub finished_at: Option<DateTime<Utc>>,
     pub run_id: Option<Uuid>,
     pub failure: Option<stillflow_storage::FailureInfo>,
+    pub outputs: Vec<TerminalOutputRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -168,6 +177,10 @@ pub struct RunView {
     pub plan_version_id: Uuid,
     pub canonical_plan_digest: String,
     pub plan_fingerprint: String,
+    pub operation_kind: Option<OperationKind>,
+    pub operation_version: Option<u16>,
+    pub operation: Option<JobOperation>,
+    pub operation_descriptor_digest: Option<String>,
     pub inputs: Vec<ControlPlaneInput>,
     pub engine_contract_version: u16,
     pub engine_build: String,
@@ -177,6 +190,7 @@ pub struct RunView {
     pub failure: Option<stillflow_storage::FailureInfo>,
     pub snapshot_ref: Option<Uuid>,
     pub bundle_ref: Option<Uuid>,
+    pub outputs: Vec<TerminalOutputRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -374,7 +388,11 @@ pub struct ValidatePlanView {
 pub struct SubmitJobRequest {
     pub session_id: Uuid,
     pub plan_version_id: Uuid,
+    #[serde(default)]
+    pub plan_id: Option<Uuid>,
     pub job_id: Uuid,
+    #[serde(default)]
+    pub operation: Option<JobOperation>,
     pub inputs: Vec<ControlPlaneInput>,
     pub execution_policy: Value,
     pub output_policy: Value,
@@ -1361,22 +1379,49 @@ impl ApiService {
             .control_plane
             .get_plan_version(request.body.plan_version_id)?;
         self.ensure_scope(version.workspace_id, request.meta.workspace_id)?;
-        let submission = JobSubmission::try_new(
-            request.meta.workspace_id,
-            request.body.session_id,
-            request.body.plan_version_id,
-            version.canonical_plan_digest,
-            request.body.job_id,
-            idempotency_key,
-            request.body.inputs,
-            request.body.execution_policy,
-            request.body.output_policy,
-            request.body.queued_at,
-            request.body.event_id,
-            request.meta.request_id.to_string(),
-            request.body.correlation_id,
-            request.body.actor_ref,
-        )?;
+        if let Some(plan_id) = request.body.plan_id {
+            if plan_id != version.plan_id {
+                return Err(ApiError::invalid(
+                    "submitted Plan identity does not match the PlanVersion",
+                ));
+            }
+        }
+        let submission = match request.body.operation.clone() {
+            Some(operation) => JobSubmission::try_new_with_operation_and_plan(
+                request.meta.workspace_id,
+                request.body.session_id,
+                version.plan_id,
+                request.body.plan_version_id,
+                version.canonical_plan_digest,
+                operation,
+                request.body.job_id,
+                idempotency_key,
+                request.body.inputs,
+                request.body.execution_policy,
+                request.body.output_policy,
+                request.body.queued_at,
+                request.body.event_id,
+                request.meta.request_id.to_string(),
+                request.body.correlation_id,
+                request.body.actor_ref,
+            )?,
+            None => JobSubmission::try_new(
+                request.meta.workspace_id,
+                request.body.session_id,
+                request.body.plan_version_id,
+                version.canonical_plan_digest,
+                request.body.job_id,
+                idempotency_key,
+                request.body.inputs,
+                request.body.execution_policy,
+                request.body.output_policy,
+                request.body.queued_at,
+                request.body.event_id,
+                request.meta.request_id.to_string(),
+                request.body.correlation_id,
+                request.body.actor_ref,
+            )?,
+        };
         let outcome = if let Some(runtime) = &self.runtime {
             runtime.submit_job(submission)?
         } else {
@@ -1819,8 +1864,25 @@ fn job_view(record: JobRecord) -> JobView {
         id: record.id,
         workspace_id: record.workspace_id,
         session_id: record.session_id,
+        plan_id: record.plan_id,
         plan_version_id: record.plan_version_id,
         canonical_plan_digest: digest_hex(&record.canonical_plan_digest),
+        operation_kind: record
+            .operation
+            .as_ref()
+            .map(|operation| operation.operation_kind),
+        operation_version: record
+            .operation
+            .as_ref()
+            .map(|operation| operation.operation_version),
+        operation_descriptor_digest: record.operation.as_ref().and_then(|operation| {
+            operation
+                .descriptor_digest()
+                .ok()
+                .map(|digest| digest_hex(&digest))
+        }),
+        operation: record.operation,
+        request_digest: record.request_digest.as_ref().map(digest_hex),
         inputs: record.inputs,
         execution_policy: record.execution_policy,
         output_policy: record.output_policy,
@@ -1830,6 +1892,7 @@ fn job_view(record: JobRecord) -> JobView {
         finished_at: record.finished_at,
         run_id: record.run_id,
         failure: record.failure,
+        outputs: record.outputs,
     }
 }
 
@@ -1843,6 +1906,16 @@ fn run_view(record: RunRecord) -> RunView {
         plan_version_id: record.plan_version_id,
         canonical_plan_digest: digest_hex(&record.canonical_plan_digest),
         plan_fingerprint: digest_hex(&record.plan_fingerprint),
+        operation_kind: record
+            .operation
+            .as_ref()
+            .map(|operation| operation.operation_kind),
+        operation_version: record
+            .operation
+            .as_ref()
+            .map(|operation| operation.operation_version),
+        operation_descriptor_digest: record.operation_descriptor_digest.as_ref().map(digest_hex),
+        operation: record.operation,
         inputs: record.inputs,
         engine_contract_version: record.engine_contract_version,
         engine_build: record.engine_build,
@@ -1852,6 +1925,7 @@ fn run_view(record: RunRecord) -> RunView {
         failure: record.failure,
         snapshot_ref: record.snapshot_ref,
         bundle_ref: record.bundle_ref,
+        outputs: record.outputs,
     }
 }
 
@@ -2078,7 +2152,9 @@ mod tests {
         let body = SubmitJobRequest {
             session_id,
             plan_version_id: version_id,
+            plan_id: Some(plan_id),
             job_id,
+            operation: None,
             inputs: Vec::new(),
             execution_policy: serde_json::json!({"mode": "materialize"}),
             output_policy: serde_json::json!({}),

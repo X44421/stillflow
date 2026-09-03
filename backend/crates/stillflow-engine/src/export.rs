@@ -66,6 +66,29 @@ pub fn run_export(
     store: &SnapshotStore,
     request: ExportRequest,
 ) -> Result<ExportResult, EngineError> {
+    run_export_inner(store, request, None)
+}
+
+/// Runs one export while binding the committed manifest to the authoritative
+/// Job Run that will publish its terminal `ExportArtifactRef`.
+pub fn run_export_with_run(
+    store: &SnapshotStore,
+    request: ExportRequest,
+    run_id: Uuid,
+) -> Result<ExportResult, EngineError> {
+    if run_id.is_nil() {
+        return Err(EngineError::InvalidPlan(
+            "export Run identity must not be nil",
+        ));
+    }
+    run_export_inner(store, request, Some(run_id))
+}
+
+fn run_export_inner(
+    store: &SnapshotStore,
+    request: ExportRequest,
+    run_id: Option<Uuid>,
+) -> Result<ExportResult, EngineError> {
     if request.export_id.is_nil() {
         return Err(export_error(ExportError::NilIdentity("export")));
     }
@@ -102,8 +125,9 @@ pub fn run_export(
         snapshot.version(),
     )
     .map_err(export_error)?;
-    let plan = ExportPlan::try_new(
+    let plan = ExportPlan::try_new_with_run(
         request.export_id,
+        run_id,
         input,
         request.destination.clone(),
         request.format,

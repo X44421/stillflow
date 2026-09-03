@@ -8,20 +8,24 @@
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use futures::FutureExt;
+use sha2::{Digest as _, Sha256};
 use stillflow_core::{
-    ControlPlaneEventType, ErrorCategory, EventStreamKind, JobState, LogicalSchema, RequestContext,
-    RunState, SourceAsset, SourceConnection,
+    ArtifactKind, ControlPlaneEventType, ErrorCategory, EventStreamKind, ExportDestination,
+    ExportPolicy, InputRef, JobState, LogicalInputRef, LogicalSchema, OperationDescriptorV1,
+    ProfileColumnsV1, RequestContext, RunState, SourceAsset, SourceConnection,
 };
 use stillflow_plan::LogicalPlan;
 use stillflow_storage::{
-    ControlPlaneStore, EventDraft, FailureInfo, JobRecord, JobRecoveryDraft, JobSubmission,
-    RunRecord, SnapshotStore, StorageError, SubmitOutcome,
+    ArtifactOutputRef, ArtifactRefDraft, ControlPlaneStore, EventDraft, ExternalRefKind,
+    FailureInfo, JobRecord, JobRecoveryDraft, JobSubmission, RunRecord, SnapshotOutputRef,
+    SnapshotStore, StorageError, SubmitOutcome, TerminalOutputRef,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit};
@@ -30,10 +34,12 @@ use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::error::EngineError;
+use crate::error::{map_context_error, EngineError};
 use crate::{
-    ExecutionEngine, ExecutionIdentities, ExecutionRequest, ENGINE_BUILD, ENGINE_CONTRACT_VERSION,
-    ENGINE_DEFAULT_DEADLINE, ENGINE_MAX_DEADLINE, MAX_ENGINE_CONCURRENT_RUNS,
+    run_export_with_run, ExecutionEngine, ExecutionIdentities, ExecutionRequest, ExportRequest,
+    FindingProvenance, ProfileColumns, QualityRequest, VerificationIdentities, VerificationRequest,
+    ENGINE_BUILD, ENGINE_CONTRACT_VERSION, ENGINE_DEFAULT_DEADLINE, ENGINE_MAX_DEADLINE,
+    MAX_ENGINE_CONCURRENT_RUNS,
 };
 
 pub const JOB_RUNTIME_WAKE_CAPACITY: usize = MAX_ENGINE_CONCURRENT_RUNS as usize;
@@ -542,7 +548,7 @@ async fn process_one(inner: Arc<RuntimeInner>) -> WorkerProgress {
     let outcome = execute_claimed(&inner, &job, &run, context.clone(), permit).await;
     remove_active(&inner, job.id).await;
     match outcome {
-        Ok((manifest_id, bundle_ref)) => {
+        Ok(outcome) => {
             finish_claimed(
                 &inner,
                 &job,
@@ -550,8 +556,9 @@ async fn process_one(inner: Arc<RuntimeInner>) -> WorkerProgress {
                 RunState::Succeeded,
                 JobState::Succeeded,
                 None,
-                Some(manifest_id),
-                bundle_ref,
+                outcome.snapshot_ref,
+                outcome.bundle_ref,
+                outcome.terminal_outputs,
             )
             .await;
         }
@@ -570,12 +577,19 @@ async fn process_one(inner: Arc<RuntimeInner>) -> WorkerProgress {
                 )
             };
             finish_claimed(
-                &inner, &job, &run, run_state, job_state, failure, None, None,
+                &inner, &job, &run, run_state, job_state, failure, None, None, None,
             )
             .await;
         }
     }
     WorkerProgress::Processed
+}
+
+#[derive(Debug)]
+struct ExecutionOutcome {
+    snapshot_ref: Option<Uuid>,
+    bundle_ref: Option<Uuid>,
+    terminal_outputs: Option<Vec<TerminalOutputRef>>,
 }
 
 async fn execute_claimed(
@@ -584,7 +598,7 @@ async fn execute_claimed(
     run: &RunRecord,
     context: RequestContext,
     permit: OwnedSemaphorePermit,
-) -> Result<(Uuid, Option<Uuid>), JobRuntimeError> {
+) -> Result<ExecutionOutcome, JobRuntimeError> {
     let resolved = AssertUnwindSafe(async {
         let future = inner
             .resolver
@@ -605,43 +619,571 @@ async fn execute_claimed(
         Ok(Err(error)) => return Err(error),
         Err(_) => return Err(JobRuntimeError::ResolverPanic),
     };
-    let request = ExecutionRequest {
-        plan: spec.plan,
-        connection: spec.connection,
-        asset: spec.asset,
-        schema_override: spec.schema_override,
-        identities: ExecutionIdentities {
-            snapshot_id: spec.snapshot_id,
-            dataset_id: spec.dataset_id,
-            session_id: job.session_id,
-            created_at: job.queued_at,
-            started_at: run.started_at,
-            lineage: spec.lineage,
-            quality_score: spec.quality_score,
-        },
-        context: context.clone(),
-        batch_size: spec.batch_size,
-        store: inner.snapshot_store.as_ref(),
+    let operation = match (&job.operation, &run.operation) {
+        (Some(job_operation), Some(run_operation)) if job_operation != run_operation => {
+            return Err(JobRuntimeError::Invalid(
+                "Job and Run operation identities disagree",
+            ));
+        }
+        (Some(operation), _) | (_, Some(operation)) => Some(operation.clone()),
+        (None, None) => None,
     };
-    let bundle_ref = spec.bundle_ref;
-    let executed = AssertUnwindSafe(async {
-        let deadline = context.deadline().ok_or(JobRuntimeError::ResolverTimeout)?;
-        tokio::select! {
-            _ = inner.shutdown.cancelled() => Err(JobRuntimeError::Shutdown),
-            result = time::timeout_at(deadline, inner.engine.materialize_with_permit(request, permit)) => match result {
-                Ok(Ok((manifest, _memory))) => Ok(manifest.snapshot().id()),
-                Ok(Err(error)) => Err(JobRuntimeError::Engine(error)),
-                Err(_) => Err(JobRuntimeError::Engine(EngineError::Timeout)),
+    if operation.is_some() {
+        validate_resolved_plan(&spec.plan, job.canonical_plan_digest)?;
+    }
+
+    let executed = AssertUnwindSafe(async move {
+        match operation {
+            // Compatibility path for E5-J1 rows written before the typed
+            // operation columns existed. New submissions never use it.
+            None => {
+                let request = ExecutionRequest {
+                    plan: spec.plan,
+                    connection: spec.connection,
+                    asset: spec.asset,
+                    schema_override: spec.schema_override,
+                    identities: ExecutionIdentities {
+                        snapshot_id: spec.snapshot_id,
+                        dataset_id: spec.dataset_id,
+                        session_id: job.session_id,
+                        created_at: job.queued_at,
+                        started_at: run.started_at,
+                        lineage: spec.lineage,
+                        quality_score: spec.quality_score,
+                    },
+                    context: context.clone(),
+                    batch_size: spec.batch_size,
+                    store: inner.snapshot_store.as_ref(),
+                };
+                let bundle_ref = spec.bundle_ref;
+                let deadline = context.deadline().ok_or(JobRuntimeError::ResolverTimeout)?;
+                let result = tokio::select! {
+                    _ = inner.shutdown.cancelled() => Err(JobRuntimeError::Shutdown),
+                    result = time::timeout_at(deadline, inner.engine.materialize_with_permit(request, permit)) => match result {
+                        Ok(Ok((manifest, _memory))) => Ok(manifest.snapshot().id()),
+                        Ok(Err(error)) => Err(JobRuntimeError::Engine(error)),
+                        Err(_) => Err(JobRuntimeError::Engine(EngineError::Timeout)),
+                    },
+                }?;
+                Ok(ExecutionOutcome {
+                    snapshot_ref: Some(result),
+                    bundle_ref,
+                    terminal_outputs: None,
+                })
+            }
+            Some(operation) => match operation.descriptor.clone() {
+                OperationDescriptorV1::Materialize {
+                    source_asset,
+                    materialize_policy,
+                } => {
+                    validate_source_binding(job, &spec, &source_asset)?;
+                    let snapshot_id = inner.identity.next_id();
+                    let request = ExecutionRequest {
+                        plan: spec.plan,
+                        connection: spec.connection,
+                        asset: spec.asset,
+                        schema_override: spec.schema_override,
+                        identities: ExecutionIdentities {
+                            snapshot_id,
+                            dataset_id: spec.dataset_id,
+                            session_id: job.session_id,
+                            created_at: job.queued_at,
+                            started_at: run.started_at,
+                            lineage: spec.lineage,
+                            quality_score: spec.quality_score,
+                        },
+                        context: context.clone(),
+                        batch_size: materialize_policy.batch_size,
+                        store: inner.snapshot_store.as_ref(),
+                    };
+                    let deadline = context.deadline().ok_or(JobRuntimeError::ResolverTimeout)?;
+                    let result = tokio::select! {
+                        _ = inner.shutdown.cancelled() => Err(JobRuntimeError::Shutdown),
+                        result = time::timeout_at(deadline, inner.engine.materialize_with_permit(request, permit)) => match result {
+                            Ok(Ok((manifest, _memory))) => Ok(manifest),
+                            Ok(Err(error)) => Err(JobRuntimeError::Engine(error)),
+                            Err(_) => Err(JobRuntimeError::Engine(EngineError::Timeout)),
+                        },
+                    }?;
+                    let output_id = result.snapshot().id();
+                    let version_digest = inner
+                        .snapshot_store
+                        .version_digest(output_id)
+                        .map_err(JobRuntimeError::Storage)?;
+                    let snapshot = result.snapshot();
+                    Ok(ExecutionOutcome {
+                        snapshot_ref: None,
+                        bundle_ref: None,
+                        terminal_outputs: Some(vec![TerminalOutputRef::Snapshot {
+                            workspace_id: job.workspace_id,
+                            session_id: snapshot.session_id(),
+                            dataset_id: snapshot.dataset_id(),
+                            snapshot_id: output_id,
+                            version_digest,
+                            schema_fingerprint: *snapshot.schema_fingerprint().as_bytes(),
+                            snapshot_version: snapshot.version(),
+                            committed: true,
+                        }]),
+                    })
+                }
+                OperationDescriptorV1::Verification {
+                    snapshot,
+                    verification_policy,
+                } => {
+                    let logical_input = LogicalInputRef {
+                        input: InputRef::Snapshot {
+                            snapshot_id: snapshot.snapshot_id,
+                        },
+                        version_digest: snapshot.version_digest,
+                    };
+                    let identities = VerificationIdentities {
+                        run_id: run.id,
+                        bundle_id: inner.identity.next_id(),
+                        bundle_artifact_id: inner.identity.next_id(),
+                        // Verification is Snapshot-backed: the accepted
+                        // bundle child is the committed input Snapshot, not
+                        // a second materialized Snapshot identity.
+                        snapshot_id: snapshot.snapshot_id,
+                        dataset_id: snapshot.dataset_id,
+                        validation_report_artifact_id: inner.identity.next_id(),
+                        rejected_rows_artifact_id: verification_policy
+                            .publish_rejected_rows
+                            .then(|| inner.identity.next_id()),
+                        deduplication_report_artifact_id: inner.identity.next_id(),
+                        session_id: job.session_id,
+                        logical_input,
+                        canonical_plan_digest: job.canonical_plan_digest,
+                        created_at: job.queued_at,
+                        started_at: run.started_at,
+                        committed_at: at_least(inner, run.started_at),
+                        lineage: spec.lineage,
+                        quality_score: spec.quality_score,
+                    };
+                    let request = VerificationRequest {
+                        plan: spec.plan,
+                        connection: spec.connection,
+                        asset: spec.asset,
+                        schema_override: spec.schema_override,
+                        identities,
+                        context: context.clone(),
+                        batch_size: verification_policy.batch_size,
+                        store: inner.snapshot_store.as_ref(),
+                    };
+                    let deadline = context.deadline().ok_or(JobRuntimeError::ResolverTimeout)?;
+                    let bundle = tokio::select! {
+                        _ = inner.shutdown.cancelled() => Err(JobRuntimeError::Shutdown),
+                        result = time::timeout_at(deadline, inner.engine.materialize_verification_snapshot_with_permit(request, snapshot.snapshot_id, &permit)) => match result {
+                            Ok(Ok(bundle)) => Ok(bundle),
+                            Ok(Err(error)) => Err(JobRuntimeError::Engine(error)),
+                            Err(_) => Err(JobRuntimeError::Engine(EngineError::Timeout)),
+                        },
+                    }?;
+                    let bundle_id = bundle.membership().bundle_id();
+                    let version_digest = inner
+                        .snapshot_store
+                        .verification_bundle_version_digest(bundle_id)
+                        .map_err(JobRuntimeError::Storage)?;
+                    let accepted = bundle.accepted().manifest().snapshot();
+                    let accepted_snapshot = SnapshotOutputRef {
+                        workspace_id: job.workspace_id,
+                        session_id: accepted.session_id(),
+                        dataset_id: accepted.dataset_id(),
+                        snapshot_id: accepted.id(),
+                        version_digest: inner
+                            .snapshot_store
+                            .version_digest(accepted.id())
+                            .map_err(JobRuntimeError::Storage)?,
+                        schema_fingerprint: *accepted.schema_fingerprint().as_bytes(),
+                        snapshot_version: accepted.version(),
+                        committed: true,
+                    };
+                    let mut members = vec![
+                        artifact_output_ref(
+                            job.workspace_id,
+                            run.id,
+                            bundle.validation_report().manifest().artifact_id(),
+                            bundle.validation_report().manifest().kind(),
+                            bundle.validation_report().manifest().version(),
+                            bundle.validation_report().provenance().content_digest,
+                        ),
+                        artifact_output_ref(
+                            job.workspace_id,
+                            run.id,
+                            bundle.deduplication_report().manifest().artifact_id(),
+                            bundle.deduplication_report().manifest().kind(),
+                            bundle.deduplication_report().manifest().version(),
+                            bundle.deduplication_report().provenance().content_digest,
+                        ),
+                    ];
+                    if let Some(rejected) = bundle.rejected_rows() {
+                        members.push(artifact_output_ref(
+                            job.workspace_id,
+                            run.id,
+                            rejected.manifest().artifact_id(),
+                            rejected.manifest().kind(),
+                            rejected.manifest().version(),
+                            rejected.provenance().content_digest,
+                        ));
+                    }
+                    Ok(ExecutionOutcome {
+                        snapshot_ref: None,
+                        bundle_ref: None,
+                        terminal_outputs: Some(vec![TerminalOutputRef::VerificationBundle {
+                            workspace_id: job.workspace_id,
+                            run_id: run.id,
+                            bundle_id,
+                            bundle_version: bundle
+                                .provenance()
+                                .draft
+                                .verification_contract_version,
+                            version_digest,
+                            accepted_snapshot,
+                            members,
+                        }]),
+                    })
+                }
+                OperationDescriptorV1::Profile {
+                    snapshot,
+                    profile_request,
+                } => {
+                    let columns = match profile_request.columns {
+                        ProfileColumnsV1::All => ProfileColumns::All,
+                        ProfileColumnsV1::Explicit(columns) => ProfileColumns::Explicit(columns),
+                    };
+                    let deadline = context.deadline().ok_or(JobRuntimeError::ResolverTimeout)?;
+                    let profile = tokio::select! {
+                        _ = inner.shutdown.cancelled() => Err(JobRuntimeError::Shutdown),
+                        result = time::timeout_at(deadline, inner.engine.profile_snapshot_with_permit(
+                            inner.snapshot_store.as_ref(),
+                            snapshot.snapshot_id,
+                            columns,
+                            profile_request.top_k,
+                            profile_request.histogram_buckets,
+                            context.clone(),
+                            run.id,
+                        )) => match result {
+                            Ok(Ok(profile)) => Ok(profile),
+                            Ok(Err(error)) => Err(JobRuntimeError::Engine(error)),
+                            Err(_) => Err(JobRuntimeError::Engine(EngineError::Timeout)),
+                        },
+                    }?;
+                    let profile_body = profile.canonical_body.clone();
+                    let profile_rows = profile.profile.dataset.row_count_scanned;
+                    let profile_bytes = profile.profile.dataset.scanned_bytes;
+                    let profile_truncated = profile.profile.dataset.truncated;
+                    let profile_contract_version = profile.profile.profiling_contract_version;
+                    let profile_digest_hex = profile.canonical_digest.clone();
+                    let profile_digest = parse_digest_hex(
+                        &profile_digest_hex,
+                        "profile report digest is invalid",
+                    )?;
+                    let request_digest = digest_hex_bytes(
+                        &job
+                            .request_digest
+                            .ok_or(JobRuntimeError::Invalid("typed Job request digest is missing"))?,
+                    );
+                    let provenance = FindingProvenance::deterministic(
+                        run.id,
+                        format!("snapshot:{}", snapshot.snapshot_id),
+                        request_digest,
+                        Some(digest_hex_bytes(&run.plan_fingerprint)),
+                    );
+                    let quality_request = QualityRequest::new(
+                        profile,
+                        context.clone(),
+                        provenance,
+                    )
+                        .map_err(JobRuntimeError::Engine)?;
+                    let quality = tokio::select! {
+                        _ = inner.shutdown.cancelled() => Err(JobRuntimeError::Shutdown),
+                        result = time::timeout_at(deadline, inner.engine.quality_with_permit(quality_request)) => match result {
+                            Ok(Ok(quality)) => Ok(quality),
+                            Ok(Err(error)) => Err(JobRuntimeError::Engine(error)),
+                            Err(_) => Err(JobRuntimeError::Engine(EngineError::Timeout)),
+                        },
+                    }?;
+                    let quality_body = quality.canonical_body.clone();
+                    let created_at = at_least(inner, run.started_at);
+                    let profile_artifact_id = inner.identity.next_id();
+                    let quality_artifact_id = inner.identity.next_id();
+                    let operation_descriptor_digest = digest_hex_bytes(
+                        &operation
+                            .descriptor_digest()
+                            .map_err(|_| JobRuntimeError::Invalid("typed operation digest is invalid"))?,
+                    );
+                    let request_digest_hex = digest_hex_bytes(
+                        &job
+                            .request_digest
+                            .ok_or(JobRuntimeError::Invalid("typed Job request digest is missing"))?,
+                    );
+                    let common_provenance = serde_json::json!({
+                        "workspaceId": job.workspace_id,
+                        "sessionId": job.session_id,
+                        "runId": run.id,
+                        "planId": job.plan_id,
+                        "planVersionId": job.plan_version_id,
+                        "canonicalPlanDigest": digest_hex_bytes(&job.canonical_plan_digest),
+                        "operationKind": "profile",
+                        "operationVersion": operation.operation_version,
+                        "operationDescriptorDigest": operation_descriptor_digest,
+                        "requestDigest": request_digest_hex,
+                        "snapshotId": snapshot.snapshot_id,
+                        "snapshotVersionDigest": digest_hex_bytes(&snapshot.version_digest),
+                        "schemaFingerprint": digest_hex_bytes(&snapshot.schema_fingerprint),
+                        "snapshotVersion": snapshot.snapshot_version,
+                        "profilingContractVersion": profile_contract_version,
+                        "scan": {
+                            "rowCountScanned": profile_rows,
+                            "scannedBytes": profile_bytes,
+                            "truncated": profile_truncated
+                        }
+                    });
+                    let profile_metadata = serde_json::json!({
+                        "artifactType": "profile_report",
+                        "artifactBodyVersion": 1,
+                        "canonicalDigest": profile_digest_hex,
+                        "provenance": common_provenance.clone()
+                    });
+                    inner.control_plane.create_artifact_ref_with_body(ArtifactRefDraft {
+                        workspace_id: job.workspace_id,
+                        run_id: run.id,
+                        artifact_id: profile_artifact_id,
+                        artifact_kind: ArtifactKind::ProfileReport,
+                        external_ref_kind: ExternalRefKind::Artifact,
+                        external_ref_id: snapshot.snapshot_id,
+                        content_digest: profile_digest,
+                        metadata: profile_metadata,
+                        created_at,
+                    }, profile_body)?;
+                    let quality_digest = parse_digest_hex(
+                        &quality.canonical_digest,
+                        "quality report digest is invalid",
+                    )?;
+                    let quality_metadata = serde_json::json!({
+                        "artifactType": "quality_report",
+                        "artifactBodyVersion": 1,
+                        "canonicalDigest": quality.canonical_digest,
+                        "profileReportArtifactId": profile_artifact_id,
+                        "profileReportDigest": quality.report.profile_report_digest,
+                        "qualityScoreVersion": quality.report.score.version,
+                        "detectorContractVersion": crate::DETECTOR_CONTRACT_VERSION,
+                        "findingCount": quality.report.findings.len(),
+                        "provenance": common_provenance
+                    });
+                    inner.control_plane.create_artifact_ref_with_body(ArtifactRefDraft {
+                        workspace_id: job.workspace_id,
+                        run_id: run.id,
+                        artifact_id: quality_artifact_id,
+                        artifact_kind: ArtifactKind::QualityReport,
+                        external_ref_kind: ExternalRefKind::Artifact,
+                        external_ref_id: profile_artifact_id,
+                        content_digest: quality_digest,
+                        metadata: quality_metadata,
+                        created_at,
+                    }, quality_body)?;
+                    Ok(ExecutionOutcome {
+                        snapshot_ref: None,
+                        bundle_ref: None,
+                        terminal_outputs: Some(vec![
+                            TerminalOutputRef::Artifact {
+                                workspace_id: job.workspace_id,
+                                run_id: run.id,
+                                artifact_id: profile_artifact_id,
+                                artifact_kind: ArtifactKind::ProfileReport,
+                                artifact_version: 1,
+                                content_digest: profile_digest,
+                                state: stillflow_core::ArtifactRefState::Committed,
+                            },
+                            TerminalOutputRef::Artifact {
+                                workspace_id: job.workspace_id,
+                                run_id: run.id,
+                                artifact_id: quality_artifact_id,
+                                artifact_kind: ArtifactKind::QualityReport,
+                                artifact_version: 1,
+                                content_digest: quality_digest,
+                                state: stillflow_core::ArtifactRefState::Committed,
+                            },
+                        ]),
+                    })
+                }
+                OperationDescriptorV1::Export {
+                    snapshot,
+                    export_request,
+                } => {
+                    let destination = export_destination(
+                        export_request.destination,
+                        export_request.format,
+                        export_request.shape,
+                    )?;
+                    context.ensure_active().map_err(map_context_error)?;
+                    if inner.shutdown.is_cancelled() {
+                        return Err(JobRuntimeError::Shutdown);
+                    }
+                    let result = run_export_with_run(
+                        inner.snapshot_store.as_ref(),
+                        ExportRequest {
+                            export_id: export_request.export_id,
+                            snapshot_id: snapshot.snapshot_id,
+                            format: export_request.format,
+                            policy: ExportPolicy {
+                                shape: export_request.shape,
+                            },
+                            destination,
+                            created_at: job.queued_at,
+                            context: context.clone(),
+                        },
+                        run.id,
+                    )?;
+                    context.ensure_active().map_err(map_context_error)?;
+                    let content_digest = parse_digest_hex(
+                        result.set_digest(),
+                        "export set digest is invalid",
+                    )?;
+                    let artifact_id = inner.identity.next_id();
+                    inner.control_plane.create_artifact_ref(ArtifactRefDraft {
+                        workspace_id: job.workspace_id,
+                        run_id: run.id,
+                        artifact_id,
+                        artifact_kind: ArtifactKind::ExportArtifact,
+                        external_ref_kind: ExternalRefKind::Artifact,
+                        external_ref_id: export_request.export_id,
+                        content_digest,
+                        metadata: serde_json::json!({
+                            "artifactType": "export_artifact",
+                            "artifactBodyVersion": 1,
+                            "exportId": export_request.export_id,
+                            "snapshotId": snapshot.snapshot_id,
+                            "rowCount": result.row_count(),
+                            "byteCount": result.byte_count(),
+                            "fileCount": result.files().len(),
+                            "manifestVersion": result.manifest_version(),
+                            "setDigest": result.set_digest(),
+                        }),
+                        created_at: at_least(inner, run.started_at),
+                    })?;
+                    Ok(ExecutionOutcome {
+                        snapshot_ref: None,
+                        bundle_ref: None,
+                        terminal_outputs: Some(vec![TerminalOutputRef::Artifact {
+                            workspace_id: job.workspace_id,
+                            run_id: run.id,
+                            artifact_id,
+                            artifact_kind: ArtifactKind::ExportArtifact,
+                            artifact_version: 1,
+                            content_digest,
+                            state: stillflow_core::ArtifactRefState::Committed,
+                        }]),
+                    })
+                }
             },
         }
     })
     .catch_unwind()
     .await;
     match executed {
-        Ok(Ok(snapshot_id)) => Ok((snapshot_id, bundle_ref)),
+        Ok(Ok(outcome)) => Ok(outcome),
         Ok(Err(error)) => Err(error),
         Err(_) => Err(JobRuntimeError::WorkerPanic),
     }
+}
+
+fn validate_resolved_plan(
+    plan: &LogicalPlan,
+    expected_digest: [u8; 32],
+) -> Result<(), JobRuntimeError> {
+    let bytes = plan
+        .canonical_bytes()
+        .map_err(|_| JobRuntimeError::Invalid("resolved plan canonicalization failed"))?;
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
+    if digest != expected_digest {
+        return Err(JobRuntimeError::Invalid(
+            "resolved plan digest does not match the durable Job",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_source_binding(
+    job: &JobRecord,
+    spec: &JobExecutionSpec,
+    source_asset: &stillflow_core::SourceAssetRef,
+) -> Result<(), JobRuntimeError> {
+    if source_asset.workspace_id != job.workspace_id
+        || spec.connection.id() != source_asset.source_connection_id
+        || spec.asset.id != source_asset.source_asset_id
+        || spec.asset.connection_id != source_asset.source_connection_id
+    {
+        return Err(JobRuntimeError::Invalid(
+            "resolved SourceAsset binding does not match the durable operation",
+        ));
+    }
+    Ok(())
+}
+
+fn export_destination(
+    destination: stillflow_core::ExportDestinationV1,
+    format: stillflow_core::ExportFormat,
+    shape: stillflow_core::ExportShape,
+) -> Result<ExportDestination, JobRuntimeError> {
+    match destination {
+        stillflow_core::ExportDestinationV1::Local { root, components } => {
+            ExportDestination::local(PathBuf::from(root), components, format, shape)
+                .map_err(|_| JobRuntimeError::Invalid("export destination is invalid"))
+        }
+        stillflow_core::ExportDestinationV1::ObjectStore { prefix } => {
+            Ok(ExportDestination::object_store(prefix))
+        }
+    }
+}
+
+fn artifact_output_ref(
+    workspace_id: Uuid,
+    run_id: Uuid,
+    artifact_id: Uuid,
+    artifact_kind: ArtifactKind,
+    artifact_version: u16,
+    content_digest: [u8; 32],
+) -> ArtifactOutputRef {
+    ArtifactOutputRef {
+        workspace_id,
+        run_id,
+        artifact_id,
+        artifact_kind,
+        artifact_version,
+        content_digest,
+        state: stillflow_core::ArtifactRefState::Committed,
+    }
+}
+
+fn parse_digest_hex(value: &str, error: &'static str) -> Result<[u8; 32], JobRuntimeError> {
+    if value.len() != 64 {
+        return Err(JobRuntimeError::Invalid(error));
+    }
+    let bytes = value.as_bytes();
+    let mut digest = [0_u8; 32];
+    for (index, slot) in digest.iter_mut().enumerate() {
+        let high = hex_nibble(bytes[index * 2]).ok_or(JobRuntimeError::Invalid(error))?;
+        let low = hex_nibble(bytes[index * 2 + 1]).ok_or(JobRuntimeError::Invalid(error))?;
+        *slot = (high << 4) | low;
+    }
+    Ok(digest)
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn digest_hex_bytes(digest: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    let mut value = String::with_capacity(64);
+    for byte in digest {
+        let _ = write!(value, "{byte:02x}");
+    }
+    value
 }
 
 async fn fail_queued_job(inner: &RuntimeInner, job: &JobRecord, failure: FailureInfo) {
@@ -671,34 +1213,52 @@ async fn finish_claimed(
     failure: Option<FailureInfo>,
     snapshot_ref: Option<Uuid>,
     bundle_ref: Option<Uuid>,
+    terminal_outputs: Option<Vec<TerminalOutputRef>>,
 ) {
     let at = at_least(inner, run.started_at.max(job.queued_at));
     let request_id = format!("job-runtime:terminal:{}", job.id);
-    let result = inner.control_plane.finish_run_and_job_with_outputs(
+    let run_terminal_event = run_event(
+        inner,
         run.id,
-        run_state,
-        job_state,
-        snapshot_ref,
-        bundle_ref,
-        run_event(
-            inner,
-            run.id,
-            job.id,
-            event_type_for_run_state(run_state),
-            at,
-            &request_id,
-            serde_json::json!({"state": run_state_text(run_state)}),
-        ),
-        job_event(
-            inner,
-            job.id,
-            event_type_for_job_state(job_state),
-            at,
-            &request_id,
-            serde_json::json!({"state": job_state_text(job_state)}),
-        ),
-        failure,
+        job.id,
+        event_type_for_run_state(run_state),
+        at,
+        &request_id,
+        serde_json::json!({"state": run_state_text(run_state)}),
     );
+    let job_terminal_event = job_event(
+        inner,
+        job.id,
+        event_type_for_job_state(job_state),
+        at,
+        &request_id,
+        serde_json::json!({"state": job_state_text(job_state)}),
+    );
+    let typed_outputs = terminal_outputs
+        .or_else(|| (job.operation.is_some() || run.operation.is_some()).then(Vec::new));
+    let result = match typed_outputs {
+        Some(outputs) => inner
+            .control_plane
+            .finish_run_and_job_with_terminal_outputs(
+                run.id,
+                run_state,
+                job_state,
+                outputs,
+                run_terminal_event,
+                job_terminal_event,
+                failure,
+            ),
+        None => inner.control_plane.finish_run_and_job_with_outputs(
+            run.id,
+            run_state,
+            job_state,
+            snapshot_ref,
+            bundle_ref,
+            run_terminal_event,
+            job_terminal_event,
+            failure,
+        ),
+    };
     if result.is_ok() {
         return;
     }
@@ -723,31 +1283,47 @@ async fn finish_claimed(
         };
     let fallback_at = at_least(inner, run.started_at.max(job.queued_at));
     let fallback_request_id = format!("job-runtime:terminal-recovery:{}", job.id);
-    let _ = inner.control_plane.finish_run_and_job_with_outputs(
+    let fallback_run_event = run_event(
+        inner,
         run.id,
-        fallback_run_state,
-        fallback_job_state,
-        None,
-        None,
-        run_event(
-            inner,
-            run.id,
-            job.id,
-            event_type_for_run_state(fallback_run_state),
-            fallback_at,
-            &fallback_request_id,
-            serde_json::json!({"state": run_state_text(fallback_run_state)}),
-        ),
-        job_event(
-            inner,
-            job.id,
-            event_type_for_job_state(fallback_job_state),
-            fallback_at,
-            &fallback_request_id,
-            serde_json::json!({"state": job_state_text(fallback_job_state)}),
-        ),
-        fallback_failure,
+        job.id,
+        event_type_for_run_state(fallback_run_state),
+        fallback_at,
+        &fallback_request_id,
+        serde_json::json!({"state": run_state_text(fallback_run_state)}),
     );
+    let fallback_job_event = job_event(
+        inner,
+        job.id,
+        event_type_for_job_state(fallback_job_state),
+        fallback_at,
+        &fallback_request_id,
+        serde_json::json!({"state": job_state_text(fallback_job_state)}),
+    );
+    if job.operation.is_some() || run.operation.is_some() {
+        let _ = inner
+            .control_plane
+            .finish_run_and_job_with_terminal_outputs(
+                run.id,
+                fallback_run_state,
+                fallback_job_state,
+                Vec::new(),
+                fallback_run_event,
+                fallback_job_event,
+                fallback_failure,
+            );
+    } else {
+        let _ = inner.control_plane.finish_run_and_job_with_outputs(
+            run.id,
+            fallback_run_state,
+            fallback_job_state,
+            None,
+            None,
+            fallback_run_event,
+            fallback_job_event,
+            fallback_failure,
+        );
+    }
 }
 
 async fn remove_active(inner: &RuntimeInner, job_id: Uuid) {
@@ -937,8 +1513,11 @@ mod tests {
             id: Uuid::from_u128(1),
             workspace_id: Uuid::from_u128(2),
             session_id: Uuid::from_u128(3),
+            plan_id: Uuid::from_u128(4),
             plan_version_id: Uuid::from_u128(4),
             canonical_plan_digest: [0; 32],
+            operation: None,
+            request_digest: None,
             inputs: Vec::new(),
             execution_policy,
             output_policy: serde_json::json!({}),
@@ -948,6 +1527,7 @@ mod tests {
             finished_at: None,
             run_id: None,
             failure: None,
+            outputs: Vec::new(),
         }
     }
 

@@ -100,7 +100,6 @@ pub struct VerificationRequest<'a> {
 /// integrity fields: the digest here is the recomputed one.
 pub(crate) fn bundle_provenance_draft(
     identities: &VerificationIdentities,
-    asset_id: Uuid,
     plan_fingerprint: [u8; 32],
     canonical_plan_digest: [u8; 32],
     engine_build: &'static str,
@@ -112,10 +111,7 @@ pub(crate) fn bundle_provenance_draft(
             artifact_id: identities.bundle_artifact_id,
             artifact_kind: ArtifactKind::VerificationBundle,
             session_id: identities.session_id,
-            input: LogicalInputRef {
-                input: stillflow_core::verification::InputRef::Asset { asset_id },
-                version_digest: identities.logical_input.version_digest,
-            },
+            input: identities.logical_input.clone(),
             lineage: identities.lineage.clone(),
             created_at: identities.created_at,
             started_at: identities.started_at,
@@ -2818,6 +2814,99 @@ impl ExecutionEngine {
             true,
         )
         .await?;
+        let read = stillflow_core::ReadRequest {
+            context: context.clone(),
+            asset: request.asset.clone(),
+            schema_override: Some(prepared.expected_connector.clone()),
+            projection: prepared
+                .push_projection
+                .then(|| prepared.scan_projection.clone()),
+            filter: None,
+            checkpoint: None,
+            batch_size: request.batch_size,
+        };
+        let stream = self
+            .registry()
+            .read_batches(&request.connection, read)
+            .await
+            .map_err(EngineError::from_connector)?
+            .map(|item| item.map_err(EngineError::from_connector));
+        self.materialize_verification_prepared(request, context, prepared, stream, false)
+            .await
+    }
+
+    /// Runs the existing E4 verification publisher over one committed
+    /// Snapshot. The source connector is used only for plan/asset identity
+    /// validation; all data comes from the immutable Snapshot reader.
+    pub(crate) async fn materialize_verification_snapshot_with_permit(
+        &self,
+        request: VerificationRequest<'_>,
+        snapshot_id: Uuid,
+        _permit: &tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<VerificationBundle, EngineError> {
+        let mut context = request.context.clone();
+        if context.deadline().is_none() {
+            context = RequestContext::with_cancellation_and_deadline(
+                context.cancellation().clone(),
+                tokio::time::Instant::now() + crate::ENGINE_DEFAULT_DEADLINE,
+            );
+        }
+        context.ensure_active().map_err(map_context_error)?;
+        if request.batch_size < stillflow_core::ReadRequest::MIN_BATCH_SIZE
+            || request.batch_size > stillflow_core::ReadRequest::MAX_BATCH_SIZE
+        {
+            return Err(EngineError::BoundExceeded(
+                "batch_size is outside 1..=65536",
+            ));
+        }
+        if context
+            .remaining()
+            .is_some_and(|remaining| remaining > crate::ENGINE_MAX_DEADLINE)
+        {
+            return Err(EngineError::BoundExceeded(
+                "request deadline exceeds ENGINE_MAX_DEADLINE",
+            ));
+        }
+        let manifest = request
+            .store
+            .load_manifest(snapshot_id)
+            .map_err(EngineError::from_storage)?;
+        if manifest.snapshot().session_id() != request.identities.session_id
+            || manifest.snapshot().source_asset_id() != request.asset.id
+        {
+            return Err(EngineError::SourceBinding);
+        }
+        let prepared = super::preflight::preflight_snapshot_inner(
+            self.registry(),
+            &request.plan,
+            &request.connection,
+            &request.asset,
+            manifest.snapshot().schema(),
+            &context,
+            true,
+        )
+        .await?;
+        let reader = request
+            .store
+            .read_batches(snapshot_id)
+            .map_err(EngineError::from_storage)?;
+        let stream =
+            futures::stream::iter(reader).map(|item| item.map_err(EngineError::from_storage));
+        self.materialize_verification_prepared(request, context, prepared, stream, true)
+            .await
+    }
+
+    async fn materialize_verification_prepared<S>(
+        &self,
+        request: VerificationRequest<'_>,
+        context: RequestContext,
+        prepared: super::preflight::PreparedPlan,
+        stream: S,
+        reuse_accepted_snapshot: bool,
+    ) -> Result<VerificationBundle, EngineError>
+    where
+        S: futures::Stream<Item = Result<BatchEnvelope, EngineError>> + Unpin,
+    {
         let vplan = build_verification_plan(&request.plan, &prepared)?;
 
         // The engine recomputes the canonical-plan SHA-256 and rejects a
@@ -2845,7 +2934,6 @@ impl ExecutionEngine {
         // Bundle provenance draft carries the recomputed digest (contract 7.2).
         let bundle_provenance = bundle_provenance_draft(
             &request.identities,
-            request.asset.id,
             plan_fingerprint,
             canonical_plan_digest,
             crate::ENGINE_BUILD,
@@ -2874,6 +2962,13 @@ impl ExecutionEngine {
         // materialized/post-rule schema — so terminal rejections keep their
         // original row schema and values across Drop/Rename/Cast/Derive.
         .with_rejected_source_schema(prepared.scan_output.clone());
+        let draft = if reuse_accepted_snapshot {
+            draft
+                .with_existing_accepted_snapshot(request.identities.snapshot_id)
+                .map_err(map_verification_storage_error)?
+        } else {
+            draft
+        };
 
         // Step 4: exactly one storage publisher permit + staging context.
         let mut writer = request
@@ -3017,12 +3112,12 @@ impl ExecutionEngine {
         let mut dedup = Some(index);
         let streamed = self
             .stream_verification(
-                &request,
+                stream,
                 &context,
                 &prepared,
                 &expected_fingerprint,
                 &mut run,
-                dedup.as_ref().expect("dedup index present"),
+                dedup.as_mut().expect("dedup index present"),
                 &mut writer,
                 &mut sinks,
                 &accepted_factory,
@@ -3120,41 +3215,28 @@ impl ExecutionEngine {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn stream_verification(
+    async fn stream_verification<S>(
         &self,
-        request: &VerificationRequest<'_>,
+        mut stream: S,
         context: &RequestContext,
         prepared: &super::preflight::PreparedPlan,
         expected_fingerprint: &stillflow_core::LogicalSchemaFingerprint,
         run: &mut VerificationRun,
-        dedup: &DedupIndex,
+        dedup: &mut DedupIndex,
         writer: &mut VerificationBundleWriter,
         sinks: &mut ReportSinks,
         accepted_factory: &BatchEnvelopeFactory,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), EngineError>
+    where
+        S: futures::Stream<Item = Result<BatchEnvelope, EngineError>> + Unpin,
+    {
         // Checkpoint 2: before opening read_batches.
         context.ensure_active().map_err(map_context_error)?;
-        let read = stillflow_core::ReadRequest {
-            context: context.clone(),
-            asset: request.asset.clone(),
-            schema_override: Some(prepared.expected_connector.clone()),
-            projection: prepared
-                .push_projection
-                .then(|| prepared.scan_projection.clone()),
-            filter: None,
-            checkpoint: None,
-            batch_size: request.batch_size,
-        };
-        let mut stream = self
-            .registry()
-            .read_batches(&request.connection, read)
-            .await
-            .map_err(EngineError::from_connector)?;
 
         while let Some(item) = stream.next().await {
             // Checkpoint 3: on every connector stream poll.
             context.ensure_active().map_err(map_context_error)?;
-            let envelope = item.map_err(EngineError::from_connector)?;
+            let envelope = item?;
             process_envelope(
                 run,
                 prepared,

@@ -14,13 +14,14 @@ use arrow_array::{
     UInt32Array, UInt64Array, UInt8Array,
 };
 use arrow_schema::DataType;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use sha2::{Digest as _, Sha256};
 use stillflow_connectors::InspectRequest;
 use stillflow_core::{
-    LogicalSchema, LogicalType, ReadRequest, RequestContext, SourceAsset, SourceConnection,
-    TimeUnit, MAX_BATCH_BYTES,
+    BatchEnvelope, LogicalSchema, LogicalType, ReadRequest, RequestContext, SourceAsset,
+    SourceConnection, TimeUnit, MAX_BATCH_BYTES,
 };
+use stillflow_storage::SnapshotStore;
 use uuid::Uuid;
 
 use crate::error::{map_context_error, EngineError};
@@ -1828,12 +1829,52 @@ impl ExecutionEngine {
         let permit = Arc::clone(&self.run_gate)
             .try_acquire_owned()
             .map_err(|_| EngineError::Busy)?;
-        let result = self.profile_inner(request).await;
+        let result = self.profile_inner(request, Uuid::new_v4()).await;
         drop(permit);
         result
     }
 
-    async fn profile_inner(&self, request: ProfileRequest) -> Result<ProfileResult, EngineError> {
+    /// Runs Q-R1 over a committed Snapshot while the caller holds the
+    /// JobRuntime's single Engine run permit. The Snapshot reader is the only
+    /// input path; no SourceAsset inspection or connector read is performed.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn profile_snapshot_with_permit(
+        &self,
+        store: &SnapshotStore,
+        snapshot_id: Uuid,
+        columns: ProfileColumns,
+        top_k: usize,
+        histogram_buckets: usize,
+        context: RequestContext,
+        run_id: Uuid,
+    ) -> Result<ProfileResult, EngineError> {
+        context.ensure_active().map_err(map_context_error)?;
+        let manifest = store
+            .load_manifest(snapshot_id)
+            .map_err(EngineError::from_storage)?;
+        let schema = manifest.snapshot().schema().clone();
+        let reader = store
+            .read_batches(snapshot_id)
+            .map_err(EngineError::from_storage)?;
+        let stream =
+            futures::stream::iter(reader).map(|item| item.map_err(EngineError::from_storage));
+        profile_batches(
+            context,
+            schema,
+            columns,
+            top_k,
+            histogram_buckets,
+            stream,
+            run_id,
+        )
+        .await
+    }
+
+    async fn profile_inner(
+        &self,
+        request: ProfileRequest,
+        run_id: Uuid,
+    ) -> Result<ProfileResult, EngineError> {
         let context = request.context.clone();
         context.ensure_active().map_err(map_context_error)?;
         let metadata = self
@@ -1849,58 +1890,6 @@ impl ExecutionEngine {
             .map_err(EngineError::from_connector)?;
         context.ensure_active().map_err(map_context_error)?;
         let schema: LogicalSchema = metadata.schema;
-        let resolved: Vec<(usize, LogicalType, String)> = match &request.columns {
-            ProfileColumns::All => schema
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(index, field)| (index, field.data_type.clone(), field.name.clone()))
-                .collect(),
-            ProfileColumns::Explicit(names) => {
-                let mut resolved = Vec::with_capacity(names.len());
-                for name in names {
-                    let index = schema
-                        .fields
-                        .iter()
-                        .position(|field| &field.name == name)
-                        .ok_or(EngineError::InvalidPlan(
-                            "profile column not found in schema",
-                        ))?;
-                    let field = &schema.fields[index];
-                    resolved.push((index, field.data_type.clone(), field.name.clone()));
-                }
-                resolved
-            }
-        };
-        if resolved.len() > PROFILE_MAX_COLUMNS {
-            return Err(EngineError::BoundExceeded(
-                "profile resolved column count exceeds PROFILE_MAX_COLUMNS",
-            ));
-        }
-
-        let mut run = ProfileRun {
-            dataset: DatasetMetrics {
-                column_count_profiled: resolved.len(),
-                ..DatasetMetrics::default()
-            },
-            columns: resolved
-                .iter()
-                .map(|(_, logical, name)| ColumnRuntime {
-                    name: name.clone(),
-                    logical_type: logical_type_name(logical),
-                    state: column_state_for(logical),
-                    null_count: 0,
-                    distinct_overflow: false,
-                    state_bytes: 0,
-                })
-                .collect(),
-            full_row: FullRowState {
-                keys: BTreeMap::new(),
-                bytes: 0,
-                overflow: false,
-            },
-        };
-
         let read = ReadRequest {
             context: context.clone(),
             asset: request.asset.clone(),
@@ -1910,65 +1899,140 @@ impl ExecutionEngine {
             checkpoint: None,
             batch_size: PROFILE_BATCH_SIZE,
         };
-        let mut stream = self
+        let stream = self
             .registry
             .read_batches(&request.connection, read)
             .await
-            .map_err(EngineError::from_connector)?;
-
-        while let Some(item) = stream.next().await {
-            context.ensure_active().map_err(map_context_error)?;
-            let envelope = item.map_err(EngineError::from_connector)?;
-            // Byte-bound admission: payload bytes are envelope-level facts;
-            // an envelope that would push scanned_bytes past the ceiling is
-            // not consumed and truncation is disclosed (never an error).
-            if run.dataset.scanned_bytes + envelope.byte_count() as u64
-                > PROFILE_MAX_SCAN_BYTES as u64
-            {
-                run.dataset.truncated = true;
-                break;
-            }
-            if envelope.schema() != &schema {
-                return Err(EngineError::SchemaDrift {
-                    sequence: envelope.sequence(),
-                });
-            }
-            let payload = envelope.payload();
-            let mut rows = payload.num_rows();
-            if run.dataset.row_count_scanned + rows as u64 > PROFILE_MAX_ROWS as u64 {
-                rows = (PROFILE_MAX_ROWS as u64 - run.dataset.row_count_scanned) as usize;
-                run.dataset.truncated = true;
-            }
-            let view = if rows == payload.num_rows() {
-                payload.clone()
-            } else {
-                payload.slice(0, rows)
-            };
-            let columns: Vec<(usize, LogicalType)> = resolved
-                .iter()
-                .map(|(index, logical, _)| (*index, logical.clone()))
-                .collect();
-            for (runtime_index, (column_index, _)) in columns.iter().enumerate() {
-                run.columns[runtime_index].observe(&view, *column_index)?;
-            }
-            run.full_row.observe(&view, &columns)?;
-            run.dataset.row_count_scanned += rows as u64;
-            run.dataset.scanned_bytes += envelope.byte_count() as u64;
-            if rows < payload.num_rows() {
-                break; // row bound reached
-            }
-        }
-
-        let profile = run.finish(request.top_k, request.histogram_buckets);
-        let canonical_body = profile.canonical_body();
-        let mut hasher = Sha256::new();
-        hasher.update(&canonical_body);
-        let canonical_digest = hex_lower(&hasher.finalize());
-        Ok(ProfileResult {
-            run_id: Uuid::new_v4(),
-            profile,
-            canonical_body,
-            canonical_digest,
-        })
+            .map_err(EngineError::from_connector)?
+            .map(|item| item.map_err(EngineError::from_connector));
+        profile_batches(
+            context,
+            schema,
+            request.columns,
+            request.top_k,
+            request.histogram_buckets,
+            stream,
+            run_id,
+        )
+        .await
     }
+}
+
+async fn profile_batches<S>(
+    context: RequestContext,
+    schema: LogicalSchema,
+    columns: ProfileColumns,
+    top_k: usize,
+    histogram_buckets: usize,
+    mut stream: S,
+    run_id: Uuid,
+) -> Result<ProfileResult, EngineError>
+where
+    S: Stream<Item = Result<BatchEnvelope, EngineError>> + Unpin,
+{
+    let resolved: Vec<(usize, LogicalType, String)> = match &columns {
+        ProfileColumns::All => schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (index, field.data_type.clone(), field.name.clone()))
+            .collect(),
+        ProfileColumns::Explicit(names) => {
+            let mut resolved = Vec::with_capacity(names.len());
+            for name in names {
+                let index = schema
+                    .fields
+                    .iter()
+                    .position(|field| field.name == *name)
+                    .ok_or(EngineError::InvalidPlan(
+                        "profile column not found in schema",
+                    ))?;
+                let field = &schema.fields[index];
+                resolved.push((index, field.data_type.clone(), field.name.clone()));
+            }
+            resolved
+        }
+    };
+    if resolved.len() > PROFILE_MAX_COLUMNS {
+        return Err(EngineError::BoundExceeded(
+            "profile resolved column count exceeds PROFILE_MAX_COLUMNS",
+        ));
+    }
+
+    let mut run = ProfileRun {
+        dataset: DatasetMetrics {
+            column_count_profiled: resolved.len(),
+            ..DatasetMetrics::default()
+        },
+        columns: resolved
+            .iter()
+            .map(|(_, logical, name)| ColumnRuntime {
+                name: name.clone(),
+                logical_type: logical_type_name(logical),
+                state: column_state_for(logical),
+                null_count: 0,
+                distinct_overflow: false,
+                state_bytes: 0,
+            })
+            .collect(),
+        full_row: FullRowState {
+            keys: BTreeMap::new(),
+            bytes: 0,
+            overflow: false,
+        },
+    };
+
+    while let Some(item) = stream.next().await {
+        context.ensure_active().map_err(map_context_error)?;
+        let envelope = item?;
+        // Byte-bound admission: payload bytes are envelope-level facts;
+        // an envelope that would push scanned_bytes past the ceiling is
+        // not consumed and truncation is disclosed (never an error).
+        if run.dataset.scanned_bytes + envelope.byte_count() as u64 > PROFILE_MAX_SCAN_BYTES as u64
+        {
+            run.dataset.truncated = true;
+            break;
+        }
+        if envelope.schema() != &schema {
+            return Err(EngineError::SchemaDrift {
+                sequence: envelope.sequence(),
+            });
+        }
+        let payload = envelope.payload();
+        let mut rows = payload.num_rows();
+        if run.dataset.row_count_scanned + rows as u64 > PROFILE_MAX_ROWS as u64 {
+            rows = (PROFILE_MAX_ROWS as u64 - run.dataset.row_count_scanned) as usize;
+            run.dataset.truncated = true;
+        }
+        let view = if rows == payload.num_rows() {
+            payload.clone()
+        } else {
+            payload.slice(0, rows)
+        };
+        let columns: Vec<(usize, LogicalType)> = resolved
+            .iter()
+            .map(|(index, logical, _)| (*index, logical.clone()))
+            .collect();
+        for (runtime_index, (column_index, _)) in columns.iter().enumerate() {
+            run.columns[runtime_index].observe(&view, *column_index)?;
+        }
+        run.full_row.observe(&view, &columns)?;
+        run.dataset.row_count_scanned += rows as u64;
+        run.dataset.scanned_bytes += envelope.byte_count() as u64;
+        if rows < payload.num_rows() {
+            break; // row bound reached
+        }
+    }
+
+    let profile = run.finish(top_k, histogram_buckets);
+    let canonical_body = profile.canonical_body();
+    let mut hasher = Sha256::new();
+    hasher.update(&canonical_body);
+    let canonical_digest = hex_lower(&hasher.finalize());
+    Ok(ProfileResult {
+        run_id,
+        profile,
+        canonical_body,
+        canonical_digest,
+    })
 }

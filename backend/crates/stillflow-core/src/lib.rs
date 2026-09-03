@@ -12,6 +12,7 @@ pub mod error;
 pub mod events;
 pub mod export;
 pub mod expression;
+pub mod job_operation;
 pub mod logical;
 pub mod request;
 pub mod stream;
@@ -54,6 +55,11 @@ pub use export::{
     MAX_EXPORT_SINGLE_FILE_BYTES, MAX_EXPORT_TEMP_BYTES,
 };
 pub use expression::{BinaryOperator, Expr, FiniteF64, ScalarValue, SourceFilter, UnaryOperator};
+pub use job_operation::{
+    ExportDestinationV1, ExportRequestV1, JobOperation, MaterializePolicyV1, OperationDescriptorV1,
+    OperationKind, OperationValidationError, ProfileColumnsV1, ProfileRequestV1, SnapshotRef,
+    SourceAssetRef, VerificationPolicyV1,
+};
 pub use logical::{
     ColumnId, LogicalError, LogicalField, LogicalSchema, LogicalType, TimeUnit,
     LOGICAL_SCHEMA_VERSION, MAX_SCHEMA_FIELDS, MAX_SCHEMA_NESTING_DEPTH, MAX_SCHEMA_TEXT_BYTES,

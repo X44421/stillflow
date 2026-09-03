@@ -37,7 +37,7 @@ use uuid::Uuid;
 
 pub use engine::ExecutionEngine;
 pub use error::EngineError;
-pub use export::{run_export, ExportRequest};
+pub use export::{run_export, run_export_with_run, ExportRequest};
 pub use job_runtime::{
     JobExecutionSpec, JobRequestResolver, JobResolution, JobRuntime, JobRuntimeError,
     JobRuntimeIdentityProvider, SystemJobRuntimeIdentityProvider, JOB_RUNTIME_WAKE_CAPACITY,
