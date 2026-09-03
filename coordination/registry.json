@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 305,
+  "revision": 306,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "0805c59201e4f2862493dbb29279226f5bd7e559",
@@ -227,9 +227,9 @@
       "id": "E5-G1",
       "title": "Runtime end-to-end gate (issue #232)",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-e5-g1-merge-closeout-20260903",
       "target_issue": 232,
       "target_branch": "agent/issue-232-e5-g1-runtime-end-to-end-gate",
       "expected_base": "0805c59201e4f2862493dbb29279226f5bd7e559",
@@ -244,9 +244,9 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-03T10:47:39Z",
       "registered_at": "2026-09-03T01:21:45Z",
-      "updated_at": "2026-09-03T09:16:43Z",
+      "updated_at": "2026-09-03T09:17:39Z",
       "registered_by": "agent-e5-g1-232",
       "note": "E5-G1 rebound onto post-E5-J2 main 0805c59201e4f2862493dbb29279226f5bd7e559 per dispatch receipt; #235 merged, post-merge CI 6/6 passed.",
       "started_at": "2026-09-03T01:22:07Z",
@@ -325,8 +325,15 @@
       "expected_head": null,
       "acquired_at": "2026-09-03T07:07:13Z",
       "lease_expires_at": "2026-09-03T12:53:28Z"
+    },
+    "gate:e5-g1-runtime": {
+      "task_id": "E5-G1",
+      "owner": "agent-e5-g1-merge-closeout-20260903",
+      "expected_head": null,
+      "acquired_at": "2026-09-03T09:17:39Z",
+      "lease_expires_at": "2026-09-03T10:47:39Z"
     }
   },
-  "updated_at": "2026-09-03T09:16:43Z",
+  "updated_at": "2026-09-03T09:17:39Z",
   "source_main_rebind_reason": "Rebound from stale registry baseline a70b0ac to live main 0805c592 before Q-D1 runtime claim; no task ownership or lock state changed."
 }
