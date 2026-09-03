@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 306,
+  "revision": 307,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "0805c59201e4f2862493dbb29279226f5bd7e559",
@@ -227,7 +227,7 @@
       "id": "E5-G1",
       "title": "Runtime end-to-end gate (issue #232)",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-e5-g1-merge-closeout-20260903",
       "target_issue": 232,
@@ -244,14 +244,18 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-03T10:47:39Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-03T01:21:45Z",
-      "updated_at": "2026-09-03T09:17:39Z",
+      "updated_at": "2026-09-03T09:25:59Z",
       "registered_by": "agent-e5-g1-232",
       "note": "E5-G1 rebound onto post-E5-J2 main 0805c59201e4f2862493dbb29279226f5bd7e559 per dispatch receipt; #235 merged, post-merge CI 6/6 passed.",
       "started_at": "2026-09-03T01:22:07Z",
       "reclaim_reason": "Reconcile stale merge-closure lease after exact-head acceptance, before Ready/merge guard",
-      "reclaimed_by": "agent-e5-g1-merge-closeout-20260903"
+      "reclaimed_by": "agent-e5-g1-merge-closeout-20260903",
+      "completed_at": "2026-09-03T09:25:59Z",
+      "result_head": "303299824fc8aec30a7b662dfcfafe91fb937dc5",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33738175350",
+      "completion_note": "E5-G1 completed after exact accepted head 303299824fc8aec30a7b662dfcfafe91fb937dc5 merged as ca18a092552a0037e33ef4945c8c2d99ae487b38 with parents 0805c59201e4f2862493dbb29279226f5bd7e559 and 303299824fc8aec30a7b662dfcfafe91fb937dc5; required post-merge CI 33738175350 passed 6/6; gate:e5-g1-runtime released"
     },
     {
       "id": "Q-D1-RUNTIME",
@@ -325,15 +329,8 @@
       "expected_head": null,
       "acquired_at": "2026-09-03T07:07:13Z",
       "lease_expires_at": "2026-09-03T12:53:28Z"
-    },
-    "gate:e5-g1-runtime": {
-      "task_id": "E5-G1",
-      "owner": "agent-e5-g1-merge-closeout-20260903",
-      "expected_head": null,
-      "acquired_at": "2026-09-03T09:17:39Z",
-      "lease_expires_at": "2026-09-03T10:47:39Z"
     }
   },
-  "updated_at": "2026-09-03T09:17:39Z",
+  "updated_at": "2026-09-03T09:25:59Z",
   "source_main_rebind_reason": "Rebound from stale registry baseline a70b0ac to live main 0805c592 before Q-D1 runtime claim; no task ownership or lock state changed."
 }
