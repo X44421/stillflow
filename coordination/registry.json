@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 295,
+  "revision": 296,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -227,9 +227,9 @@
       "id": "E5-G1",
       "title": "Runtime end-to-end gate (issue #232)",
       "risk_level": "L3",
-      "status": "running",
+      "status": "queued",
       "mode": "write",
-      "owner": "agent-e5-g1-232",
+      "owner": null,
       "target_issue": 232,
       "target_branch": "agent/issue-232-e5-g1-runtime-end-to-end-gate",
       "expected_base": "0805c59201e4f2862493dbb29279226f5bd7e559",
@@ -244,22 +244,16 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-03T04:26:07Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-03T01:21:45Z",
-      "updated_at": "2026-09-03T02:56:07Z",
+      "updated_at": "2026-09-03T06:07:58Z",
       "registered_by": "agent-e5-g1-232",
       "note": "E5-G1 rebound onto post-E5-J2 main 0805c59201e4f2862493dbb29279226f5bd7e559 per dispatch receipt; #235 merged, post-merge CI 6/6 passed.",
-      "started_at": "2026-09-03T01:22:07Z"
+      "started_at": "2026-09-03T01:22:07Z",
+      "reclaim_reason": "E5-G1 implementation lease expired at 2026-09-03T04:26:07Z; reclaiming for merge/closure closeout under single owner",
+      "reclaimed_by": "agent-e5-g1-closeout"
     }
   ],
-  "locks": {
-    "gate:e5-g1-runtime": {
-      "task_id": "E5-G1",
-      "owner": "agent-e5-g1-232",
-      "expected_head": null,
-      "acquired_at": "2026-09-03T01:22:07Z",
-      "lease_expires_at": "2026-09-03T04:26:07Z"
-    }
-  },
-  "updated_at": "2026-09-03T02:56:07Z"
+  "locks": {},
+  "updated_at": "2026-09-03T06:07:58Z"
 }
