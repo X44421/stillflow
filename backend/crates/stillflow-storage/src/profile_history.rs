@@ -26,6 +26,8 @@ use crate::{
 
 pub const PROFILE_HISTORY_ACTIVE: &str = "active";
 pub const PROFILE_HISTORY_TOMBSTONED: &str = "tombstoned";
+const PROFILE_HISTORY_PROFILE_CONTRACT_VERSION: u16 = 1;
+const PROFILE_HISTORY_POLICY_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -476,13 +478,13 @@ impl ControlPlaneStore {
                            AND profile_sequence < ?3
                            AND (?4 IS NULL OR profile_sequence >= ?4)
                            AND (?5 IS NULL OR profile_sequence < ?5)
-                         ORDER BY profile_sequence DESC, history_id DESC LIMIT 1",
+                         ORDER BY profile_sequence DESC, history_id DESC",
                     )
                     .map_err(|_| {
                         StorageError::database("prepare latest ProfileHistory baseline")
                     })?;
-                let row = statement
-                    .query_row(
+                let rows = statement
+                    .query_map(
                         params![
                             workspace_id.to_string(),
                             dataset_id.to_string(),
@@ -496,9 +498,26 @@ impl ControlPlaneStore {
                         ],
                         raw_profile_history_from_row,
                     )
-                    .optional()
-                    .map_err(|_| StorageError::database("read latest ProfileHistory baseline"))?;
-                row.map(profile_history_from_raw).transpose()
+                    .map_err(|_| StorageError::database("read latest ProfileHistory baselines"))?;
+                for row in rows {
+                    let raw = row.map_err(|_| {
+                        StorageError::database("read latest ProfileHistory baseline row")
+                    })?;
+                    let baseline = profile_history_from_raw(raw)?;
+                    if !profile_history_versions_match(&baseline, &candidate) {
+                        continue;
+                    }
+                    let body = match self.get_artifact_body(baseline.profile_artifact_id) {
+                        Ok(body) => body,
+                        Err(error) if is_ineligible_latest_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    if validate_profile_history_artifact(&baseline, &body).is_err() {
+                        continue;
+                    }
+                    return Ok(Some(baseline));
+                }
+                Ok(None)
             }
         }
     }
@@ -510,7 +529,26 @@ impl ControlPlaneStore {
         &self,
         draft: ProfileHistoryDraft,
     ) -> Result<ProfileHistoryEntry, StorageError> {
-        validate_draft(&draft)?;
+        self.record_profile_history_inner(draft, false)
+    }
+
+    /// Records a committed Profile artifact and allocates the next Dataset
+    /// sequence inside the same transaction. This is the runtime bridge used
+    /// after E5 terminal publication, so concurrent workers cannot race a
+    /// read-then-insert sequence allocation.
+    pub fn record_profile_history_next(
+        &self,
+        draft: ProfileHistoryDraft,
+    ) -> Result<ProfileHistoryEntry, StorageError> {
+        self.record_profile_history_inner(draft, true)
+    }
+
+    fn record_profile_history_inner(
+        &self,
+        mut draft: ProfileHistoryDraft,
+        allocate_sequence: bool,
+    ) -> Result<ProfileHistoryEntry, StorageError> {
+        validate_draft(&draft, allocate_sequence)?;
         let body = self.get_artifact_body(draft.profile_artifact_id)?;
         if body.artifact_kind != ArtifactKind::ProfileReport
             || body.run_id != draft.producing_run_id
@@ -521,11 +559,7 @@ impl ControlPlaneStore {
                 "ProfileHistory artifact identity does not match the committed body",
             ));
         }
-        validate_profile_body(
-            &body.body,
-            draft.profile_digest,
-            draft.profile_contract_version,
-        )?;
+        validate_profile_history_draft_artifact(&draft, &body)?;
 
         let mut connection = open_connection(&self.inner)?;
         let transaction = connection
@@ -558,7 +592,10 @@ impl ControlPlaneStore {
             .unwrap_or(0)
             .checked_add(1)
             .ok_or(StorageError::ArithmeticOverflow("ProfileHistory sequence"))?;
-        if i64::try_from(draft.profile_sequence).ok() != Some(next) {
+        if allocate_sequence {
+            draft.profile_sequence = u64::try_from(next)
+                .map_err(|_| StorageError::ArithmeticOverflow("ProfileHistory sequence"))?;
+        } else if i64::try_from(draft.profile_sequence).ok() != Some(next) {
             return Err(StorageError::InvalidDraft(
                 "ProfileHistory sequence is not the next Dataset sequence",
             ));
@@ -981,17 +1018,20 @@ fn ensure_profile_artifact(
     Ok(())
 }
 
-fn validate_draft(draft: &ProfileHistoryDraft) -> Result<(), StorageError> {
+fn validate_draft(
+    draft: &ProfileHistoryDraft,
+    allow_unassigned_sequence: bool,
+) -> Result<(), StorageError> {
     validate_scope(draft.workspace_id, draft.dataset_id, draft.history_id)?;
     if draft.profile_artifact_id.is_nil() || draft.producing_run_id.is_nil() {
         return Err(StorageError::InvalidDraft(
             "ProfileHistory artifact and Run identities must not be nil",
         ));
     }
-    if draft.profile_sequence == 0
-        || draft.profile_contract_version == 0
-        || draft.drift_contract_version == 0
-        || draft.profile_policy_version == 0
+    if (!allow_unassigned_sequence && draft.profile_sequence == 0)
+        || draft.profile_contract_version != PROFILE_HISTORY_PROFILE_CONTRACT_VERSION
+        || draft.drift_contract_version != stillflow_core::PROFILE_HISTORY_DRIFT_CONTRACT_VERSION
+        || draft.profile_policy_version != PROFILE_HISTORY_POLICY_VERSION
         || draft.top_k == 0
         || draft.histogram_buckets == 0
     {
@@ -1350,12 +1390,21 @@ fn profile_history_from_raw(raw: RawProfileHistory) -> Result<ProfileHistoryEntr
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_profile_body(
     body: &[u8],
     expected_digest: [u8; 32],
     expected_profile_version: u16,
+    expected_policy_version: u16,
+    expected_top_k: usize,
+    expected_histogram_buckets: usize,
+    expected_schema_fingerprint: [u8; 32],
+    expected_schema: &LogicalSchema,
+    expected_row_count: u64,
+    expected_scanned_bytes: u64,
+    expected_truncated: bool,
+    artifact_provenance: &Value,
 ) -> Result<(), StorageError> {
-    use sha2::{Digest, Sha256};
     let digest: [u8; 32] = Sha256::digest(body).into();
     if digest != expected_digest {
         return Err(StorageError::InvalidManifest(
@@ -1375,7 +1424,298 @@ fn validate_profile_body(
             "ProfileHistory body is not a compatible profile_report.v1",
         ));
     }
+    let dataset =
+        value
+            .get("dataset")
+            .and_then(Value::as_object)
+            .ok_or(StorageError::InvalidDraft(
+                "ProfileHistory body dataset metrics are missing",
+            ))?;
+    if dataset.get("row_count_scanned").and_then(Value::as_u64) != Some(expected_row_count)
+        || dataset.get("truncated").and_then(Value::as_bool) != Some(expected_truncated)
+    {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory body scan scope does not match persisted history",
+        ));
+    }
+    let columns =
+        value
+            .get("columns")
+            .and_then(Value::as_array)
+            .ok_or(StorageError::InvalidDraft(
+                "ProfileHistory body columns are missing",
+            ))?;
+    if dataset.get("column_count_profiled").and_then(Value::as_u64) != Some(columns.len() as u64) {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory body column count is inconsistent",
+        ));
+    }
+    let selected_columns = columns
+        .iter()
+        .map(|column| {
+            column
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or(StorageError::InvalidDraft(
+                    "ProfileHistory body column name is missing",
+                ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if selected_columns.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory body contains duplicate columns",
+        ));
+    }
+    for column in columns {
+        let column_name =
+            column
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or(StorageError::InvalidDraft(
+                    "ProfileHistory body column name is missing",
+                ))?;
+        let schema_field = expected_schema
+            .fields
+            .iter()
+            .find(|field| field.name == column_name)
+            .ok_or(StorageError::InvalidDraft(
+                "ProfileHistory body column is outside the persisted schema",
+            ))?;
+        if column.get("type").and_then(Value::as_str)
+            != Some(profile_type_name(&schema_field.data_type))
+        {
+            return Err(StorageError::InvalidDraft(
+                "ProfileHistory body column type does not match the persisted schema",
+            ));
+        }
+        if let Some(histogram) = column.get("histogram") {
+            let counts = histogram
+                .get("counts")
+                .or(Some(histogram))
+                .and_then(Value::as_array)
+                .ok_or(StorageError::InvalidDraft(
+                    "ProfileHistory histogram counts are invalid",
+                ))?;
+            if counts.len() != expected_histogram_buckets {
+                return Err(StorageError::InvalidDraft(
+                    "ProfileHistory histogram bucket count does not match policy",
+                ));
+            }
+        }
+        if let Some(top_values) = column.get("top_values").and_then(Value::as_array) {
+            if top_values.len() > expected_top_k {
+                return Err(StorageError::InvalidDraft(
+                    "ProfileHistory top values exceed policy",
+                ));
+            }
+        }
+    }
+    let metadata = artifact_provenance
+        .as_object()
+        .ok_or(StorageError::InvalidDraft(
+            "ProfileHistory artifact provenance is missing",
+        ))?;
+    if parse_digest(
+        metadata
+            .get("canonicalDigest")
+            .and_then(Value::as_str)
+            .ok_or(StorageError::InvalidDraft(
+                "ProfileHistory canonical digest provenance is missing",
+            ))?,
+    )? != expected_digest
+    {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory canonical digest provenance does not match body",
+        ));
+    }
+    let provenance = metadata
+        .get("provenance")
+        .and_then(Value::as_object)
+        .ok_or(StorageError::InvalidDraft(
+            "ProfileHistory scan provenance is missing",
+        ))?;
+    if provenance
+        .get("profilingContractVersion")
+        .and_then(Value::as_u64)
+        != Some(u64::from(expected_profile_version))
+        || provenance
+            .get("profilePolicyVersion")
+            .and_then(Value::as_u64)
+            != Some(u64::from(expected_policy_version))
+        || provenance.get("topK").and_then(Value::as_u64) != Some(expected_top_k as u64)
+        || provenance.get("histogramBuckets").and_then(Value::as_u64)
+            != Some(expected_histogram_buckets as u64)
+        || parse_digest(
+            provenance
+                .get("schemaFingerprint")
+                .and_then(Value::as_str)
+                .ok_or(StorageError::InvalidDraft(
+                    "ProfileHistory schema fingerprint provenance is missing",
+                ))?,
+        )? != expected_schema_fingerprint
+    {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory policy or schema provenance does not match history",
+        ));
+    }
+    let provenance_columns = provenance
+        .get("selectedColumns")
+        .and_then(Value::as_array)
+        .ok_or(StorageError::InvalidDraft(
+            "ProfileHistory selected column provenance is missing",
+        ))?
+        .iter()
+        .map(|column| {
+            column.as_str().ok_or(StorageError::InvalidDraft(
+                "ProfileHistory selected column provenance is invalid",
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if provenance_columns != selected_columns {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory selected column provenance does not match body",
+        ));
+    }
+    let scan =
+        provenance
+            .get("scan")
+            .and_then(Value::as_object)
+            .ok_or(StorageError::InvalidDraft(
+                "ProfileHistory scan provenance is missing",
+            ))?;
+    if scan.get("rowCountScanned").and_then(Value::as_u64) != Some(expected_row_count)
+        || scan.get("scannedBytes").and_then(Value::as_u64) != Some(expected_scanned_bytes)
+        || scan.get("truncated").and_then(Value::as_bool) != Some(expected_truncated)
+    {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory scan provenance does not match history",
+        ));
+    }
+    for name in selected_columns {
+        if !expected_schema
+            .fields
+            .iter()
+            .any(|field| field.name == name)
+        {
+            return Err(StorageError::InvalidDraft(
+                "ProfileHistory body column is outside the persisted schema",
+            ));
+        }
+    }
     Ok(())
+}
+
+fn profile_type_name(data_type: &stillflow_core::LogicalType) -> &'static str {
+    use stillflow_core::LogicalType;
+    match data_type {
+        LogicalType::Null => "null",
+        LogicalType::Boolean => "boolean",
+        LogicalType::Int8 => "int8",
+        LogicalType::Int16 => "int16",
+        LogicalType::Int32 => "int32",
+        LogicalType::Int64 => "int64",
+        LogicalType::UInt8 => "uint8",
+        LogicalType::UInt16 => "uint16",
+        LogicalType::UInt32 => "uint32",
+        LogicalType::UInt64 => "uint64",
+        LogicalType::Float32 => "float32",
+        LogicalType::Float64 => "float64",
+        LogicalType::Utf8 => "utf8",
+        LogicalType::Binary => "binary",
+        LogicalType::Date32 => "date32",
+        LogicalType::Timestamp { unit, .. } => match unit {
+            stillflow_core::TimeUnit::Second => "timestamp_s",
+            stillflow_core::TimeUnit::Millisecond => "timestamp_ms",
+            stillflow_core::TimeUnit::Microsecond => "timestamp_us",
+            stillflow_core::TimeUnit::Nanosecond => "timestamp_ns",
+        },
+        LogicalType::List(_) => "list",
+        LogicalType::Struct(_) => "struct",
+    }
+}
+
+fn validate_profile_history_draft_artifact(
+    draft: &ProfileHistoryDraft,
+    body: &crate::ArtifactBodyRecord,
+) -> Result<(), StorageError> {
+    if body.artifact_id != draft.profile_artifact_id
+        || body.artifact_kind != ArtifactKind::ProfileReport
+        || body.run_id != draft.producing_run_id
+        || body.workspace_id != draft.workspace_id
+        || body.content_digest != draft.profile_digest
+    {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory artifact identity does not match the committed body",
+        ));
+    }
+    validate_profile_body(
+        &body.body,
+        draft.profile_digest,
+        draft.profile_contract_version,
+        draft.profile_policy_version,
+        draft.top_k,
+        draft.histogram_buckets,
+        draft.schema_fingerprint,
+        &draft.schema,
+        draft.row_count_scanned,
+        draft.scanned_bytes,
+        draft.truncated,
+        &body.provenance,
+    )
+}
+
+fn validate_profile_history_artifact(
+    history: &ProfileHistoryEntry,
+    body: &crate::ArtifactBodyRecord,
+) -> Result<(), StorageError> {
+    if body.artifact_id != history.profile_artifact_id
+        || body.artifact_kind != ArtifactKind::ProfileReport
+        || body.run_id != history.producing_run_id
+        || body.workspace_id != history.workspace_id
+        || body.content_digest != history.profile_digest
+    {
+        return Err(StorageError::InvalidDraft(
+            "ProfileHistory artifact identity does not match history",
+        ));
+    }
+    validate_profile_body(
+        &body.body,
+        history.profile_digest,
+        history.profile_contract_version,
+        history.profile_policy_version,
+        history.top_k,
+        history.histogram_buckets,
+        history.schema_fingerprint,
+        &history.schema,
+        history.row_count_scanned,
+        history.scanned_bytes,
+        history.truncated,
+        &body.provenance,
+    )
+}
+
+fn profile_history_versions_match(
+    baseline: &ProfileHistoryEntry,
+    candidate: &ProfileHistoryEntry,
+) -> bool {
+    baseline.profile_contract_version == candidate.profile_contract_version
+        && baseline.drift_contract_version == candidate.drift_contract_version
+        && baseline.profile_policy_version == candidate.profile_policy_version
+        && baseline.top_k == candidate.top_k
+        && baseline.histogram_buckets == candidate.histogram_buckets
+        && baseline.profile_contract_version == PROFILE_HISTORY_PROFILE_CONTRACT_VERSION
+        && baseline.drift_contract_version == stillflow_core::PROFILE_HISTORY_DRIFT_CONTRACT_VERSION
+        && baseline.profile_policy_version == PROFILE_HISTORY_POLICY_VERSION
+}
+
+fn is_ineligible_latest_error(error: &StorageError) -> bool {
+    matches!(
+        error,
+        StorageError::NotFound(_)
+            | StorageError::InvalidDraft(_)
+            | StorageError::InvalidManifest(_)
+            | StorageError::Serialization(_)
+    )
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, StorageError> {
@@ -1410,6 +1750,128 @@ fn parse_timestamp(value: &str, label: &'static str) -> Result<DateTime<Utc>, St
     DateTime::parse_from_rfc3339(value)
         .map(|value| value.with_timezone(&Utc))
         .map_err(|_| StorageError::Serialization(label))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stillflow_core::{ColumnId, LogicalField, LogicalSchemaFingerprint, LogicalType};
+
+    fn profile_fixture() -> (Vec<u8>, [u8; 32], LogicalSchema, [u8; 32], Value) {
+        let schema = LogicalSchema::new(vec![LogicalField::new(
+            ColumnId::from_uuid(Uuid::from_u128(1)),
+            "amount",
+            LogicalType::Int64,
+            false,
+        )
+        .expect("field")])
+        .expect("schema");
+        let schema_fingerprint = *LogicalSchemaFingerprint::try_from_schema(&schema)
+            .expect("schema fingerprint")
+            .as_bytes();
+        let body = serde_json::to_vec(&serde_json::json!({
+            "artifact_body_version": 1,
+            "artifact_type": "profile_report",
+            "columns": [{
+                "name": "amount",
+                "status": "profiled",
+                "type": "int64"
+            }],
+            "dataset": {
+                "column_count_profiled": 1,
+                "row_count_scanned": 4,
+                "truncated": false
+            },
+            "profiling_contract_version": 1
+        }))
+        .expect("body");
+        let digest: [u8; 32] = Sha256::digest(&body).into();
+        let metadata = serde_json::json!({
+            "canonicalDigest": digest_hex(&digest),
+            "provenance": {
+                "profilingContractVersion": 1,
+                "profilePolicyVersion": 1,
+                "topK": 5,
+                "histogramBuckets": 2,
+                "schemaFingerprint": digest_hex(&schema_fingerprint),
+                "selectedColumns": ["amount"],
+                "scan": {
+                    "rowCountScanned": 4,
+                    "scannedBytes": 64,
+                    "truncated": false
+                }
+            }
+        });
+        (body, digest, schema, schema_fingerprint, metadata)
+    }
+
+    #[test]
+    fn profile_body_validation_binds_scan_policy_schema_and_digest() {
+        let (body, digest, schema, schema_fingerprint, metadata) = profile_fixture();
+        assert!(validate_profile_body(
+            &body,
+            digest,
+            1,
+            1,
+            5,
+            2,
+            schema_fingerprint,
+            &schema,
+            4,
+            64,
+            false,
+            &metadata,
+        )
+        .is_ok());
+
+        let mut mismatched = metadata;
+        mismatched["provenance"]["topK"] = Value::from(6_u64);
+        assert!(validate_profile_body(
+            &body,
+            digest,
+            1,
+            1,
+            5,
+            2,
+            schema_fingerprint,
+            &schema,
+            4,
+            64,
+            false,
+            &mismatched,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn latest_eligibility_requires_matching_version_tuple() {
+        let base = ProfileHistoryEntry {
+            history_id: Uuid::from_u128(1),
+            workspace_id: Uuid::from_u128(2),
+            dataset_id: Uuid::from_u128(3),
+            profile_artifact_id: Uuid::from_u128(4),
+            producing_run_id: Uuid::from_u128(5),
+            profile_digest: [1; 32],
+            profile_contract_version: 1,
+            drift_contract_version: 1,
+            profile_policy_version: 1,
+            top_k: 5,
+            histogram_buckets: 2,
+            schema_fingerprint: [2; 32],
+            schema: LogicalSchema::empty(),
+            row_count_scanned: 1,
+            scanned_bytes: 1,
+            truncated: false,
+            profile_sequence: 1,
+            state: ProfileHistoryState::Active,
+            created_at: Utc::now(),
+            tombstoned_at: None,
+        };
+        let mut incompatible = base.clone();
+        incompatible.top_k = 6;
+        assert!(!profile_history_versions_match(&base, &incompatible));
+        assert!(profile_history_versions_match(&base, &base));
+    }
 }
 
 fn positive_u16(value: i64, label: &'static str) -> Result<u16, StorageError> {

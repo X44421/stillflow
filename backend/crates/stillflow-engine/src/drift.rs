@@ -19,7 +19,7 @@ use stillflow_core::{
     DRIFT_MAX_RETAINED_EVIDENCE_BYTES_PER_FINDING, DRIFT_MINIMUM_METRIC_ROWS,
     DRIFT_THRESHOLD_POLICY_VERSION, PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
 };
-use stillflow_storage::{ProfileHistoryEntry, ProfileHistoryState};
+use stillflow_storage::{DriftReportDraft, ProfileHistoryEntry, ProfileHistoryState};
 
 pub const DRIFT_DETECTOR_ID: &str = "q-d1-v1";
 
@@ -41,14 +41,19 @@ pub struct DriftRequest {
 pub struct DriftFinding {
     pub finding_id: String,
     pub kind: DriftFindingKind,
+    pub category: &'static str,
     pub detector_id: &'static str,
     pub detector_contract_version: u16,
+    pub origin: &'static str,
     pub severity: FindingSeverity,
     pub column_name: String,
     pub metric_path: String,
     pub observed: Option<DriftRational>,
     pub threshold: Option<DriftRational>,
-    pub evidence: Vec<Value>,
+    pub baseline_profile_digest: String,
+    pub candidate_profile_digest: String,
+    pub evidence_refs: Vec<Value>,
+    pub provenance: Value,
     pub message: String,
 }
 
@@ -73,6 +78,7 @@ pub struct DriftReport {
 #[derive(Debug, Clone)]
 pub struct DriftResult {
     pub outcome: DriftOutcome,
+    pub baseline_history_id: Option<uuid::Uuid>,
     pub report: Option<DriftReport>,
     pub canonical_body: Option<Vec<u8>>,
     pub canonical_digest: Option<String>,
@@ -131,16 +137,132 @@ impl ExecutionEngine {
         let body = store
             .get_artifact_body(candidate.profile_artifact_id)
             .map_err(EngineError::Storage)?;
-        self.drift(DriftRequest {
-            comparison,
-            baseline,
-            candidate: DriftProfileInput {
-                entry: candidate,
-                body: body.body,
-            },
-            context,
+        let baseline_history_id = baseline.as_ref().map(|input| input.entry.history_id);
+        let result = self
+            .drift(DriftRequest {
+                comparison,
+                baseline,
+                candidate: DriftProfileInput {
+                    entry: candidate,
+                    body: body.body,
+                },
+                context,
+            })
+            .await?;
+        Ok(DriftResult {
+            baseline_history_id,
+            ..result
         })
-        .await
+    }
+
+    /// Resolves, computes, and publishes one drift report through the existing
+    /// E5 Artifact/Event authority. No new Job or transport/API surface is
+    /// introduced; the caller supplies the running generic E5 Run event.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn drift_history_and_publish(
+        &self,
+        store: &stillflow_storage::ControlPlaneStore,
+        comparison: DriftComparisonRequest,
+        context: stillflow_core::RequestContext,
+        producing_run_id: uuid::Uuid,
+        report_artifact_id: uuid::Uuid,
+        metadata: Value,
+        event: stillflow_storage::EventDraft,
+    ) -> Result<Option<stillflow_storage::DriftComparisonRecord>, EngineError> {
+        let result = self.drift_history(store, comparison, context).await?;
+        let Some(report) = result.report else {
+            return Ok(None);
+        };
+        let report_digest_text =
+            result
+                .canonical_digest
+                .as_deref()
+                .ok_or(EngineError::InvalidPlan(
+                    "drift report has no canonical digest",
+                ))?;
+        let report_body = result.canonical_body.ok_or(EngineError::InvalidPlan(
+            "drift report has no canonical body",
+        ))?;
+        let baseline_history_id = result.baseline_history_id.ok_or(EngineError::InvalidPlan(
+            "drift report cannot publish without a resolved baseline",
+        ))?;
+        let candidate = store
+            .get_profile_history(
+                comparison.workspace_id,
+                comparison.dataset_id,
+                comparison.candidate_history_id,
+            )
+            .map_err(EngineError::Storage)?;
+        let baseline = store
+            .get_profile_history(
+                comparison.workspace_id,
+                comparison.dataset_id,
+                baseline_history_id,
+            )
+            .map_err(EngineError::Storage)?;
+        let report_digest = parse_digest(report_digest_text)?;
+        let mut metadata = match metadata {
+            Value::Object(object) => Value::Object(object),
+            value => json_object([("callerMetadata", value)]),
+        };
+        if let Some(object) = metadata.as_object_mut() {
+            object.insert(
+                "provenance".to_owned(),
+                json_object([
+                    (
+                        "baselineHistoryId",
+                        Value::String(baseline.history_id.to_string()),
+                    ),
+                    (
+                        "candidateHistoryId",
+                        Value::String(candidate.history_id.to_string()),
+                    ),
+                    (
+                        "baselineProfileDigest",
+                        Value::String(report.baseline_profile_digest.clone()),
+                    ),
+                    (
+                        "candidateProfileDigest",
+                        Value::String(report.candidate_profile_digest.clone()),
+                    ),
+                    (
+                        "thresholdPolicyVersion",
+                        Value::from(u64::from(report.threshold_policy_version)),
+                    ),
+                    (
+                        "observationWindow",
+                        report.observation_window.map_or(
+                            Value::String("none".to_owned()),
+                            |window| {
+                                json_object([
+                                    ("startSequence", Value::from(window.start_sequence)),
+                                    ("endSequence", Value::from(window.end_sequence)),
+                                ])
+                            },
+                        ),
+                    ),
+                ]),
+            );
+        }
+        let record = store
+            .publish_drift_report(
+                DriftReportDraft {
+                    comparison_key: comparison_key_for_report(&comparison, &report),
+                    workspace_id: comparison.workspace_id,
+                    dataset_id: comparison.dataset_id,
+                    baseline_history_id,
+                    candidate_history_id: comparison.candidate_history_id,
+                    report_artifact_id,
+                    producing_run_id,
+                    report_digest,
+                    metadata,
+                    body: report_body,
+                    created_at: event.occurred_at,
+                },
+                event,
+            )
+            .map_err(EngineError::Storage)?;
+        Ok(Some(record))
     }
 
     /// Runs one bounded deterministic comparison through the existing Engine
@@ -350,8 +472,8 @@ fn compare(request: DriftRequest) -> Result<DriftResult, EngineError> {
     findings.sort_by(finding_order);
     if findings.len() > DRIFT_MAX_FINDINGS_PER_REPORT
         || findings.iter().any(|finding| {
-            finding.evidence.len() > DRIFT_MAX_EVIDENCE_REFS_PER_FINDING
-                || canonical_json(&Value::Array(finding.evidence.clone())).len()
+            finding.evidence_refs.len() > DRIFT_MAX_EVIDENCE_REFS_PER_FINDING
+                || canonical_json(&Value::Array(finding.evidence_refs.clone())).len()
                     > DRIFT_MAX_RETAINED_EVIDENCE_BYTES_PER_FINDING
         })
     {
@@ -384,6 +506,7 @@ fn compare(request: DriftRequest) -> Result<DriftResult, EngineError> {
     let digest: [u8; 32] = Sha256::digest(&body).into();
     Ok(DriftResult {
         outcome: report.outcome,
+        baseline_history_id: Some(baseline.entry.history_id),
         report: Some(report),
         canonical_body: Some(body),
         canonical_digest: Some(hex(&digest)),
@@ -724,31 +847,24 @@ fn metric_finding(
     candidate_digest: &str,
     histograms: Option<(&[u64], &[u64])>,
 ) -> DriftFinding {
-    let mut evidence = vec![json_object([
-        ("kind", Value::String("metric".to_owned())),
-        ("metric_path", Value::String(metric_path.to_owned())),
-        ("observed", rational_value(observed)),
-        ("threshold", rational_value(threshold)),
-        (
-            "baseline_profile_digest",
-            Value::String(baseline_digest.to_owned()),
-        ),
-        (
-            "candidate_profile_digest",
-            Value::String(candidate_digest.to_owned()),
-        ),
-    ])];
+    let mut evidence_refs = vec![metric_evidence(metric_path, Some(observed))];
     if let Some((baseline, candidate)) = histograms {
-        evidence.push(json_object([
-            ("kind", Value::String("histogram".to_owned())),
-            (
-                "baseline_counts",
-                Value::Array(baseline.iter().map(|v| Value::from(*v)).collect()),
-            ),
-            (
-                "candidate_counts",
-                Value::Array(candidate.iter().map(|v| Value::from(*v)).collect()),
-            ),
+        let changed = baseline
+            .iter()
+            .zip(candidate)
+            .enumerate()
+            .filter(|(_, (left, right))| left != right)
+            .map(|(bucket_index, (_, count))| {
+                json_object([
+                    ("bucket_index", Value::from(bucket_index)),
+                    ("count", Value::from(*count)),
+                ])
+            })
+            .collect();
+        evidence_refs.push(json_object([
+            ("buckets", Value::Array(changed)),
+            ("column_ref", Value::String(name.to_owned())),
+            ("kind", Value::String("HistogramEvidence".to_owned())),
         ]));
     }
     finding(
@@ -758,7 +874,7 @@ fn metric_finding(
         metric_path,
         Some(observed),
         Some(threshold),
-        evidence,
+        evidence_refs,
         baseline_digest,
         candidate_digest,
         "deterministic drift threshold exceeded",
@@ -771,28 +887,12 @@ fn schema_finding(
     severity: FindingSeverity,
     name: &str,
     message: &str,
-    baseline_value: Option<String>,
+    _baseline_value: Option<String>,
     baseline_digest: &str,
     candidate_digest: &str,
-    candidate_value: Option<String>,
+    _candidate_value: Option<String>,
 ) -> DriftFinding {
-    let mut evidence = vec![json_object([
-        ("kind", Value::String("schema".to_owned())),
-        (
-            "baseline_profile_digest",
-            Value::String(baseline_digest.to_owned()),
-        ),
-        (
-            "candidate_profile_digest",
-            Value::String(candidate_digest.to_owned()),
-        ),
-    ])];
-    if let Some(value) = baseline_value {
-        evidence[0]["baseline"] = Value::String(value);
-    }
-    if let Some(value) = candidate_value {
-        evidence[0]["candidate"] = Value::String(value);
-    }
+    let evidence_refs = vec![metric_evidence("schema", None)];
     finding(
         kind,
         severity,
@@ -800,7 +900,7 @@ fn schema_finding(
         "schema",
         None,
         None,
-        evidence,
+        evidence_refs,
         baseline_digest,
         candidate_digest,
         message,
@@ -815,7 +915,7 @@ fn finding(
     metric_path: &str,
     observed: Option<DriftRational>,
     threshold: Option<DriftRational>,
-    evidence: Vec<Value>,
+    evidence_refs: Vec<Value>,
     baseline_digest: &str,
     candidate_digest: &str,
     message: &str,
@@ -824,14 +924,19 @@ fn finding(
     DriftFinding {
         finding_id,
         kind,
+        category: category_text(kind),
         detector_id: DRIFT_DETECTOR_ID,
         detector_contract_version: PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
+        origin: "Deterministic",
         severity,
         column_name: name.to_owned(),
         metric_path: metric_path.to_owned(),
         observed,
         threshold,
-        evidence,
+        baseline_profile_digest: baseline_digest.to_owned(),
+        candidate_profile_digest: candidate_digest.to_owned(),
+        evidence_refs,
+        provenance: finding_provenance(baseline_digest, candidate_digest),
         message: message.to_owned(),
     }
 }
@@ -999,9 +1104,41 @@ fn comparison_digest(
     Sha256::digest(canonical_json(&Value::Object(value))).into()
 }
 
+fn comparison_key_for_report(request: &DriftComparisonRequest, report: &DriftReport) -> [u8; 32] {
+    comparison_digest(
+        request,
+        &report.baseline_profile_digest,
+        &report.candidate_profile_digest,
+    )
+}
+
+fn parse_digest(value: &str) -> Result<[u8; 32], EngineError> {
+    if value.len() != 64 {
+        return Err(EngineError::InvalidPlan("drift report digest is invalid"));
+    }
+    let mut digest = [0_u8; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        let high = hex_nibble(value.as_bytes()[index * 2])
+            .ok_or(EngineError::InvalidPlan("drift report digest is invalid"))?;
+        let low = hex_nibble(value.as_bytes()[index * 2 + 1])
+            .ok_or(EngineError::InvalidPlan("drift report digest is invalid"))?;
+        *byte = (high << 4) | low;
+    }
+    Ok(digest)
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
 fn no_report(outcome: DriftOutcome, input_digest: [u8; 32]) -> DriftResult {
     DriftResult {
         outcome,
+        baseline_history_id: None,
         report: None,
         canonical_body: None,
         canonical_digest: None,
@@ -1029,8 +1166,20 @@ impl DriftReport {
                     Value::String(finding.detector_id.to_owned()),
                 );
                 value.insert(
-                    "evidence".to_owned(),
-                    Value::Array(finding.evidence.clone()),
+                    "baseline_profile_digest".to_owned(),
+                    Value::String(finding.baseline_profile_digest.clone()),
+                );
+                value.insert(
+                    "candidate_profile_digest".to_owned(),
+                    Value::String(finding.candidate_profile_digest.clone()),
+                );
+                value.insert(
+                    "category".to_owned(),
+                    Value::String(finding.category.to_owned()),
+                );
+                value.insert(
+                    "evidence_refs".to_owned(),
+                    Value::Array(finding.evidence_refs.clone()),
                 );
                 value.insert(
                     "finding_id".to_owned(),
@@ -1048,6 +1197,10 @@ impl DriftReport {
                 value.insert(
                     "observed".to_owned(),
                     finding.observed.map_or(Value::Null, rational_value),
+                );
+                value.insert(
+                    "origin".to_owned(),
+                    Value::String(finding.origin.to_owned()),
                 );
                 value.insert(
                     "severity".to_owned(),
@@ -1162,6 +1315,51 @@ fn json_object<const N: usize>(entries: [(&str, Value); N]) -> Value {
         object.insert(key.to_owned(), value);
     }
     Value::Object(object)
+}
+
+fn metric_evidence(metric_path: &str, rational: Option<DriftRational>) -> Value {
+    let mut value = Map::new();
+    value.insert(
+        "kind".to_owned(),
+        Value::String("MetricEvidence".to_owned()),
+    );
+    value.insert(
+        "metric_path".to_owned(),
+        Value::String(metric_path.to_owned()),
+    );
+    if let Some(rational) = rational {
+        value.insert("rational".to_owned(), rational_value(rational));
+    }
+    Value::Object(value)
+}
+
+fn category_text(kind: DriftFindingKind) -> &'static str {
+    match kind {
+        DriftFindingKind::SchemaColumnAdded
+        | DriftFindingKind::SchemaColumnRemoved
+        | DriftFindingKind::SchemaColumnTypeChanged
+        | DriftFindingKind::SchemaColumnNullabilityChanged => "Schema",
+        DriftFindingKind::DistributionNumericHistogramL1Exceeded
+        | DriftFindingKind::DistributionNullRateDeltaExceeded => "Distribution",
+    }
+}
+
+fn finding_provenance(baseline_digest: &str, candidate_digest: &str) -> Value {
+    json_object([
+        (
+            "baseline_profile_digest",
+            Value::String(baseline_digest.to_owned()),
+        ),
+        (
+            "candidate_profile_digest",
+            Value::String(candidate_digest.to_owned()),
+        ),
+        (
+            "detector_contract_version",
+            Value::from(u64::from(PROFILE_HISTORY_DRIFT_CONTRACT_VERSION)),
+        ),
+        ("origin", Value::String("Deterministic".to_owned())),
+    ])
 }
 
 fn kind_text(kind: DriftFindingKind) -> &'static str {
@@ -1568,5 +1766,38 @@ mod tests {
         .expect("comparison");
         assert_eq!(first.canonical_digest, second.canonical_digest);
         assert_eq!(first.canonical_body, second.canonical_body);
+    }
+
+    #[test]
+    fn findings_use_adr003_shape_and_keep_provenance_outside_body() {
+        let field = LogicalField::new(
+            ColumnId::from_uuid(Uuid::from_u128(51)),
+            "value",
+            LogicalType::Int64,
+            false,
+        )
+        .expect("field");
+        let baseline = profile(51, 1, schema(vec![field.clone()]), &[20, 0], 0);
+        let candidate = profile(52, 2, schema(vec![field]), &[0, 20], 0);
+        let result = compare(DriftRequest {
+            comparison: request(&candidate, &baseline),
+            baseline: Some(baseline),
+            candidate,
+            context: stillflow_core::RequestContext::default(),
+        })
+        .expect("comparison");
+        let report = result.report.expect("report");
+        let finding = report.findings.first().expect("finding");
+        assert_eq!(finding.origin, "Deterministic");
+        assert_eq!(finding.category, "Distribution");
+        assert!(!finding.baseline_profile_digest.is_empty());
+        assert!(!finding.candidate_profile_digest.is_empty());
+        assert!(finding.provenance.get("origin").is_some());
+        let body: Value = serde_json::from_slice(&report.canonical_body()).expect("body");
+        let body_finding = &body["findings"][0];
+        assert_eq!(body_finding["origin"], "Deterministic");
+        assert!(body_finding["evidence_refs"].is_array());
+        assert!(body_finding.get("evidence").is_none());
+        assert!(body_finding.get("provenance").is_none());
     }
 }

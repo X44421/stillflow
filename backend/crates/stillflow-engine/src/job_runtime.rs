@@ -20,12 +20,13 @@ use stillflow_core::{
     ArtifactKind, ControlPlaneEventType, ErrorCategory, EventStreamKind, ExportDestination,
     ExportPolicy, InputRef, JobState, LogicalInputRef, LogicalSchema, OperationDescriptorV1,
     ProfileColumnsV1, RequestContext, RunState, SourceAsset, SourceConnection,
+    PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
 };
 use stillflow_plan::LogicalPlan;
 use stillflow_storage::{
     ArtifactOutputRef, ArtifactRefDraft, ControlPlaneStore, EventDraft, ExternalRefKind,
-    FailureInfo, JobRecord, JobRecoveryDraft, JobSubmission, RunRecord, SnapshotOutputRef,
-    SnapshotStore, StorageError, SubmitOutcome, TerminalOutputRef,
+    FailureInfo, JobRecord, JobRecoveryDraft, JobSubmission, ProfileHistoryDraft, RunRecord,
+    SnapshotOutputRef, SnapshotStore, StorageError, SubmitOutcome, TerminalOutputRef,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit};
@@ -39,7 +40,7 @@ use crate::{
     run_export_with_run, ExecutionEngine, ExecutionIdentities, ExecutionRequest, ExportRequest,
     FindingProvenance, ProfileColumns, QualityRequest, VerificationIdentities, VerificationRequest,
     ENGINE_BUILD, ENGINE_CONTRACT_VERSION, ENGINE_DEFAULT_DEADLINE, ENGINE_MAX_DEADLINE,
-    MAX_ENGINE_CONCURRENT_RUNS,
+    MAX_ENGINE_CONCURRENT_RUNS, PROFILING_CONTRACT_VERSION,
 };
 
 pub const JOB_RUNTIME_WAKE_CAPACITY: usize = MAX_ENGINE_CONCURRENT_RUNS as usize;
@@ -559,6 +560,7 @@ async fn process_one(inner: Arc<RuntimeInner>) -> WorkerProgress {
                 outcome.snapshot_ref,
                 outcome.bundle_ref,
                 outcome.terminal_outputs,
+                outcome.profile_history_draft,
             )
             .await;
         }
@@ -577,7 +579,7 @@ async fn process_one(inner: Arc<RuntimeInner>) -> WorkerProgress {
                 )
             };
             finish_claimed(
-                &inner, &job, &run, run_state, job_state, failure, None, None, None,
+                &inner, &job, &run, run_state, job_state, failure, None, None, None, None,
             )
             .await;
         }
@@ -590,6 +592,7 @@ struct ExecutionOutcome {
     snapshot_ref: Option<Uuid>,
     bundle_ref: Option<Uuid>,
     terminal_outputs: Option<Vec<TerminalOutputRef>>,
+    profile_history_draft: Option<ProfileHistoryDraft>,
 }
 
 async fn execute_claimed(
@@ -669,6 +672,7 @@ async fn execute_claimed(
                     snapshot_ref: Some(result),
                     bundle_ref,
                     terminal_outputs: None,
+                    profile_history_draft: None,
                 })
             }
             Some(operation) => match operation.descriptor.clone() {
@@ -724,6 +728,7 @@ async fn execute_claimed(
                             snapshot_version: snapshot.version(),
                             committed: true,
                         }]),
+                        profile_history_draft: None,
                     })
                 }
                 OperationDescriptorV1::Verification {
@@ -840,12 +845,15 @@ async fn execute_claimed(
                             accepted_snapshot,
                             members,
                         }]),
+                        profile_history_draft: None,
                     })
                 }
                 OperationDescriptorV1::Profile {
                     snapshot,
                     profile_request,
                 } => {
+                    let profile_top_k = profile_request.top_k;
+                    let profile_histogram_buckets = profile_request.histogram_buckets;
                     let columns = match profile_request.columns {
                         ProfileColumnsV1::All => ProfileColumns::All,
                         ProfileColumnsV1::Explicit(columns) => ProfileColumns::Explicit(columns),
@@ -872,6 +880,19 @@ async fn execute_claimed(
                     let profile_bytes = profile.profile.dataset.scanned_bytes;
                     let profile_truncated = profile.profile.dataset.truncated;
                     let profile_contract_version = profile.profile.profiling_contract_version;
+                    let selected_columns = profile
+                        .profile
+                        .columns
+                        .iter()
+                        .map(|column| column.name.clone())
+                        .collect::<Vec<_>>();
+                    let profile_schema = inner
+                        .snapshot_store
+                        .load_manifest(snapshot.snapshot_id)
+                        .map_err(EngineError::from_storage)?
+                        .snapshot()
+                        .schema()
+                        .clone();
                     let profile_digest_hex = profile.canonical_digest.clone();
                     let profile_digest = parse_digest_hex(
                         &profile_digest_hex,
@@ -932,6 +953,10 @@ async fn execute_claimed(
                         "schemaFingerprint": digest_hex_bytes(&snapshot.schema_fingerprint),
                         "snapshotVersion": snapshot.snapshot_version,
                         "profilingContractVersion": profile_contract_version,
+                        "profilePolicyVersion": PROFILING_CONTRACT_VERSION,
+                        "topK": profile_top_k,
+                        "histogramBuckets": profile_histogram_buckets,
+                        "selectedColumns": selected_columns,
                         "scan": {
                             "rowCountScanned": profile_rows,
                             "scannedBytes": profile_bytes,
@@ -955,6 +980,26 @@ async fn execute_claimed(
                         metadata: profile_metadata,
                         created_at,
                     }, profile_body)?;
+                    let profile_history_draft = ProfileHistoryDraft {
+                        history_id: inner.identity.next_id(),
+                        workspace_id: job.workspace_id,
+                        dataset_id: snapshot.dataset_id,
+                        profile_artifact_id,
+                        producing_run_id: run.id,
+                        profile_digest,
+                        profile_contract_version,
+                        drift_contract_version: PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
+                        profile_policy_version: PROFILING_CONTRACT_VERSION,
+                        top_k: profile_top_k,
+                        histogram_buckets: profile_histogram_buckets,
+                        schema_fingerprint: snapshot.schema_fingerprint,
+                        schema: profile_schema,
+                        row_count_scanned: profile_rows,
+                        scanned_bytes: profile_bytes,
+                        truncated: profile_truncated,
+                        profile_sequence: 0,
+                        created_at,
+                    };
                     let quality_digest = parse_digest_hex(
                         &quality.canonical_digest,
                         "quality report digest is invalid",
@@ -1004,6 +1049,7 @@ async fn execute_claimed(
                                 state: stillflow_core::ArtifactRefState::Committed,
                             },
                         ]),
+                        profile_history_draft: Some(profile_history_draft),
                     })
                 }
                 OperationDescriptorV1::Export {
@@ -1073,6 +1119,7 @@ async fn execute_claimed(
                             content_digest,
                             state: stillflow_core::ArtifactRefState::Committed,
                         }]),
+                        profile_history_draft: None,
                     })
                 }
             },
@@ -1214,6 +1261,7 @@ async fn finish_claimed(
     snapshot_ref: Option<Uuid>,
     bundle_ref: Option<Uuid>,
     terminal_outputs: Option<Vec<TerminalOutputRef>>,
+    profile_history_draft: Option<ProfileHistoryDraft>,
 ) {
     let at = at_least(inner, run.started_at.max(job.queued_at));
     let request_id = format!("job-runtime:terminal:{}", job.id);
@@ -1260,6 +1308,15 @@ async fn finish_claimed(
         ),
     };
     if result.is_ok() {
+        if run_state == RunState::Succeeded {
+            if let Some(draft) = profile_history_draft {
+                if let Err(error) = inner.control_plane.record_profile_history_next(draft) {
+                    eprintln!(
+                        "profile history publication failed after terminal E5 commit: {error}"
+                    );
+                }
+            }
+        }
         return;
     }
 
