@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 297,
+  "revision": 298,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -252,6 +252,48 @@
       "started_at": "2026-09-03T01:22:07Z",
       "reclaim_reason": "E5-G1 implementation lease expired at 2026-09-03T04:26:07Z; reclaiming for merge/closure closeout under single owner",
       "reclaimed_by": "agent-e5-g1-closeout"
+    },
+    {
+      "id": "Q-D1-RUNTIME",
+      "title": "Implement Profile History / Drift runtime (issue #238)",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "canonical_issue": 238,
+      "target_issue": 238,
+      "target_pr": null,
+      "target_branch": "agent/issue-238-q-d1-runtime",
+      "expected_base": "0805c59201e4f2862493dbb29279226f5bd7e559",
+      "expected_head": null,
+      "locks": [
+        "branch:agent/issue-238-q-d1-runtime",
+        "storage:profile-history",
+        "engine:drift",
+        "core:drift-contract"
+      ],
+      "paths": [
+        "backend/crates/stillflow-core/**",
+        "backend/crates/stillflow-storage/**",
+        "backend/crates/stillflow-engine/**"
+      ],
+      "acceptance_keys": [
+        "q-d1-runtime:profile-history-identity-lifecycle",
+        "q-d1-runtime:deterministic-baseline-selection",
+        "q-d1-runtime:schema-and-threshold-drift",
+        "q-d1-runtime:canonical-report-publication",
+        "q-d1-runtime:bounded-pagination-and-limits",
+        "q-d1-runtime:restart-idempotency-and-sanitization",
+        "q-d1-runtime:exact-head-independent-acceptance",
+        "q-d1-runtime:single-terminal-verdict"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "started_at": null,
+      "updated_at": "2026-09-03T06:23:35Z",
+      "queued_by": "maintainer:chatgpt-workmode (2026-09-03)",
+      "queue_reason": "Canonical Q-D1 runtime dispatch from live main 0805c592 after accepted #222 contract, ADR-003, and E5 Job/Run/Artifact ownership verification. Parallel with E5-G1 closeout because accepted #237 files are explicitly excluded.",
+      "notes": "Claim/register through taskctl before branch/edit. Fresh branch from exact live main at CLAIM. Stop for explicit rebind on base drift, lock overlap, or any need to touch PR #237 accepted files. No Q-A1 API, no second scheduler/queue/state/digest/baseline authority, no AI deterministic evidence, no SQL/DuckDB/HTTP/SEC/AUD/AUT/OPS/frontend work. Lease 240 minutes. Positive terminal authorizes only independent exact-head acceptance."
     }
   ],
   "locks": {
@@ -263,5 +305,5 @@
       "lease_expires_at": "2026-09-03T07:38:16Z"
     }
   },
-  "updated_at": "2026-09-03T06:08:16Z"
+  "updated_at": "2026-09-03T06:23:37Z"
 }
