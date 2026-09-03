@@ -26,6 +26,7 @@ publish = false
 stillflow-api = { path = "crates/stillflow-api" }
 stillflow-connector-local-tabular = { path = "crates/stillflow-connector-local-tabular" }
 stillflow-connector-object-store = { path = "crates/stillflow-connector-object-store" }
+stillflow-connector-workbook = { path = "crates/stillflow-connector-workbook" }
 stillflow-connectors = { path = "crates/stillflow-connectors" }
 stillflow-core = { path = "crates/stillflow-core" }
 stillflow-engine = { path = "crates/stillflow-engine" }
@@ -39,6 +40,7 @@ arrow-ipc = "59"
 arrow-schema = "59"
 arrow-select = "59"
 async-trait = "0.1"
+base64 = "0.22"
 bytes = "1"
 calamine = { version = "=0.35.0", features = ["chrono"] }
 chrono = { version = "0.4", features = ["serde"] }

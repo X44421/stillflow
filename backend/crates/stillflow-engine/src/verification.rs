@@ -2242,6 +2242,7 @@ fn flush_accepted_packs(
     factory: &BatchEnvelopeFactory,
     writer: &mut VerificationBundleWriter,
     context: &RequestContext,
+    reuse_accepted_snapshot: bool,
 ) -> Result<(), EngineError> {
     while run.accepted_pending_rows >= run.batch_size {
         let mut needed = run.batch_size;
@@ -2281,6 +2282,13 @@ fn flush_accepted_packs(
                 .map_err(|_| EngineError::Internal("accepted pack rebuild failed"))?
         };
         context.ensure_active().map_err(map_context_error)?;
+        if reuse_accepted_snapshot {
+            // Snapshot-backed Verification reuses the committed input Snapshot
+            // as the accepted bundle child; recomputed rows are validated in
+            // memory but never appended a second time.
+            drop(payload);
+            continue;
+        }
         let envelope = factory
             .try_build(run.accepted_emitted_sequences, payload)
             .map_err(|_| EngineError::Internal("accepted envelope build failed"))?;
@@ -2297,8 +2305,9 @@ fn finish_accepted(
     factory: &BatchEnvelopeFactory,
     writer: &mut VerificationBundleWriter,
     context: &RequestContext,
+    reuse_accepted_snapshot: bool,
 ) -> Result<(), EngineError> {
-    flush_accepted_packs(run, factory, writer, context)?;
+    flush_accepted_packs(run, factory, writer, context, reuse_accepted_snapshot)?;
     if run.accepted_pending_rows == 0 {
         return Ok(());
     }
@@ -2326,6 +2335,10 @@ fn finish_accepted(
     };
     debug_assert_eq!(payload.num_rows(), pending);
     context.ensure_active().map_err(map_context_error)?;
+    if reuse_accepted_snapshot {
+        drop(payload);
+        return Ok(());
+    }
     let envelope = factory
         .try_build(run.accepted_emitted_sequences, payload)
         .map_err(|_| EngineError::Internal("accepted envelope build failed"))?;
@@ -2350,6 +2363,7 @@ fn process_envelope(
     sinks: &mut ReportSinks,
     accepted_factory: &BatchEnvelopeFactory,
     context: &RequestContext,
+    reuse_accepted_snapshot: bool,
 ) -> Result<(), EngineError> {
     // Checkpoint 4: before lowering the envelope.
     context.ensure_active().map_err(map_context_error)?;
@@ -2673,7 +2687,13 @@ fn process_envelope(
                 run.hold_accepted(survivors.get_array_memory_size())?;
                 run.accepted_pending_rows += survivors.num_rows();
                 run.accepted_batches.push(survivors);
-                flush_accepted_packs(run, accepted_factory, writer, context)?;
+                flush_accepted_packs(
+                    run,
+                    accepted_factory,
+                    writer,
+                    context,
+                    reuse_accepted_snapshot,
+                )?;
             } else {
                 run.memory.drop_polars()?;
             }
@@ -3121,6 +3141,7 @@ impl ExecutionEngine {
                 &mut writer,
                 &mut sinks,
                 &accepted_factory,
+                reuse_accepted_snapshot,
             )
             .await;
 
@@ -3138,7 +3159,13 @@ impl ExecutionEngine {
         }
 
         // Accepted tail remainder (checkpoint 5 emission point).
-        finish_accepted(&mut run, &accepted_factory, &mut writer, &context)?;
+        finish_accepted(
+            &mut run,
+            &accepted_factory,
+            &mut writer,
+            &context,
+            reuse_accepted_snapshot,
+        )?;
 
         // Checkpoint 7: before close_and_delete.
         context.ensure_active().map_err(map_context_error)?;
@@ -3226,6 +3253,7 @@ impl ExecutionEngine {
         writer: &mut VerificationBundleWriter,
         sinks: &mut ReportSinks,
         accepted_factory: &BatchEnvelopeFactory,
+        reuse_accepted_snapshot: bool,
     ) -> Result<(), EngineError>
     where
         S: futures::Stream<Item = Result<BatchEnvelope, EngineError>> + Unpin,
@@ -3247,6 +3275,7 @@ impl ExecutionEngine {
                 sinks,
                 accepted_factory,
                 context,
+                reuse_accepted_snapshot,
             )?;
         }
         Ok(())
