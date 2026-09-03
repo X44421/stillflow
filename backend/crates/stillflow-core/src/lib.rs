@@ -8,6 +8,7 @@
 pub mod batch;
 pub mod control_plane;
 pub mod domain;
+pub mod drift;
 pub mod error;
 pub mod events;
 pub mod export;
@@ -40,6 +41,16 @@ pub use domain::{
     SourceAsset, SourceConnection, TestConnectionRequest, WorkbookHeaderCandidate,
     WorkbookHeaderSelection, WorkbookInspection, WorkbookRegionCandidate, WorkbookRegionSelection,
     WorkbookSheetVisibility, DATASET_SNAPSHOT_VERSION,
+};
+pub use drift::{
+    DriftBaselineMode, DriftComparisonRequest, DriftFindingKind, DriftMissingMetric,
+    DriftMissingReason, DriftObservationWindow, DriftOutcome, DriftRational,
+    DRIFT_MAX_COMPARE_COLUMNS, DRIFT_MAX_EVIDENCE_REFS_PER_FINDING, DRIFT_MAX_FINDINGS_PER_REPORT,
+    DRIFT_MAX_HISTORY_FILTER_COLUMNS, DRIFT_MAX_HISTORY_PAGE_SIZE,
+    DRIFT_MAX_HISTORY_REFERENCE_BYTES, DRIFT_MAX_MISSING_METRICS,
+    DRIFT_MAX_PROFILES_PER_COMPARISON, DRIFT_MAX_REPORT_BYTES, DRIFT_MAX_REPORT_PAGE_SIZE,
+    DRIFT_MAX_RETAINED_EVIDENCE_BYTES_PER_FINDING, DRIFT_MINIMUM_METRIC_ROWS,
+    DRIFT_THRESHOLD_POLICY_VERSION, PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
 };
 pub use error::{
     ensure_no_secret_fields, ensure_safe_event_metadata, ConnectorError, ConnectorResult,

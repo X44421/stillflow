@@ -1574,7 +1574,8 @@ impl VerificationBundleWriter {
             | ArtifactKind::AcceptedSnapshot
             | ArtifactKind::ProfileReport
             | ArtifactKind::QualityReport
-            | ArtifactKind::ExportArtifact => {
+            | ArtifactKind::ExportArtifact
+            | ArtifactKind::DriftReport => {
                 return Err(StorageError::InvalidManifest(
                     "sections cannot belong to bundle-level or generic artifacts",
                 ));
@@ -1688,7 +1689,8 @@ impl VerificationBundleWriter {
                 | ArtifactKind::AcceptedSnapshot
                 | ArtifactKind::ProfileReport
                 | ArtifactKind::QualityReport
-                | ArtifactKind::ExportArtifact => {
+                | ArtifactKind::ExportArtifact
+                | ArtifactKind::DriftReport => {
                     return Err(StorageError::InvalidManifest(
                         "sections cannot belong to bundle-level or generic artifacts",
                     ));
@@ -1941,7 +1943,8 @@ impl VerificationBundleWriter {
                             ArtifactKind::DeduplicationReport => "deduplication-report",
                             ArtifactKind::ProfileReport
                             | ArtifactKind::QualityReport
-                            | ArtifactKind::ExportArtifact => {
+                            | ArtifactKind::ExportArtifact
+                            | ArtifactKind::DriftReport => {
                                 return Err(StorageError::InvalidManifest(
                                     "generic artifact kind cannot be persisted in a verification bundle",
                                 ));

@@ -38,7 +38,7 @@ const OPERATION_JOB_SUBMIT: &str = "job.submit";
 
 #[derive(Clone)]
 pub struct ControlPlaneStore {
-    inner: Arc<StoreInner>,
+    pub(crate) inner: Arc<StoreInner>,
 }
 
 impl fmt::Debug for ControlPlaneStore {
@@ -3164,7 +3164,7 @@ pub struct ArtifactOutputRef {
 }
 
 impl TerminalOutputRef {
-    fn validate(&self) -> Result<(), StorageError> {
+    pub(crate) fn validate(&self) -> Result<(), StorageError> {
         match self {
             Self::Snapshot {
                 workspace_id,
@@ -3385,7 +3385,7 @@ pub struct ArtifactRefDraft {
 }
 
 impl ArtifactRefDraft {
-    fn validate(&self) -> Result<(), StorageError> {
+    pub(crate) fn validate(&self) -> Result<(), StorageError> {
         validate_id(self.workspace_id, "workspace")?;
         validate_id(self.run_id, "run")?;
         validate_id(self.artifact_id, "artifact")?;
@@ -4037,7 +4037,10 @@ fn parse_digest(value: &str) -> Result<[u8; 32], StorageError> {
     Ok(digest)
 }
 
-fn compact_json<T: Serialize>(value: &T, operation: &'static str) -> Result<String, StorageError> {
+pub(crate) fn compact_json<T: Serialize>(
+    value: &T,
+    operation: &'static str,
+) -> Result<String, StorageError> {
     serde_json::to_string(value).map_err(|_| StorageError::Serialization(operation))
 }
 
@@ -4109,7 +4112,7 @@ fn parse_json(value: &str, label: &'static str) -> Result<Value, StorageError> {
     serde_json::from_str(value).map_err(|_| StorageError::Serialization(label))
 }
 
-fn validate_safe_json(value: &Value, event_payload: bool) -> Result<(), StorageError> {
+pub(crate) fn validate_safe_json(value: &Value, event_payload: bool) -> Result<(), StorageError> {
     match value {
         Value::Object(map) => {
             for (key, child) in map {
@@ -4190,7 +4193,7 @@ fn validate_page_limit(limit: usize) -> Result<(), StorageError> {
     Ok(())
 }
 
-fn map_constraint(error: rusqlite::Error, id: Uuid) -> StorageError {
+pub(crate) fn map_constraint(error: rusqlite::Error, id: Uuid) -> StorageError {
     match error {
         rusqlite::Error::SqliteFailure(failure, _)
             if failure.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
@@ -5727,7 +5730,7 @@ fn validate_artifact_outputs(
             .map_err(|_| StorageError::database("check staged Artifact body"))?;
         let body_required = matches!(
             artifact_kind,
-            ArtifactKind::ProfileReport | ArtifactKind::QualityReport
+            ArtifactKind::ProfileReport | ArtifactKind::QualityReport | ArtifactKind::DriftReport
         );
         match (body_required, body) {
             (true, Some((body_kind, body_version, body_digest, body, body_state))) => {
@@ -5802,7 +5805,7 @@ fn commit_staged_terminal_artifacts(
             .map_err(|_| StorageError::database("commit terminal Artifact body"))?;
         let body_required = matches!(
             artifact_kind,
-            ArtifactKind::ProfileReport | ArtifactKind::QualityReport
+            ArtifactKind::ProfileReport | ArtifactKind::QualityReport | ArtifactKind::DriftReport
         );
         if body_required && body_changed != 1 {
             return Err(StorageError::InvalidDraft(
@@ -6128,7 +6131,7 @@ fn artifact_from_raw(row: RawArtifact) -> Result<ArtifactRefRecord, StorageError
     })
 }
 
-fn validate_artifact_body(
+pub(crate) fn validate_artifact_body(
     artifact_kind: ArtifactKind,
     content_digest: [u8; 32],
     body: &[u8],
@@ -6136,9 +6139,10 @@ fn validate_artifact_body(
     let expected_type = match artifact_kind {
         ArtifactKind::ProfileReport => "profile_report",
         ArtifactKind::QualityReport => "quality_report",
+        ArtifactKind::DriftReport => "drift_report.v1",
         _ => {
             return Err(StorageError::InvalidDraft(
-                "only ProfileReport and QualityReport support canonical JSON bodies",
+                "only profile, quality, and drift reports support canonical JSON bodies",
             ))
         }
     };
@@ -6529,7 +6533,7 @@ fn validate_submission_timestamp(
     Ok(())
 }
 
-fn ensure_run_workspace(
+pub(crate) fn ensure_run_workspace(
     transaction_or_connection: &impl ControlPlaneQuery,
     workspace_id: Uuid,
     run_id: Uuid,
@@ -6544,7 +6548,7 @@ fn ensure_run_workspace(
     }
 }
 
-trait ControlPlaneQuery {
+pub(crate) trait ControlPlaneQuery {
     fn run_workspace(&self, run_id: Uuid) -> Result<Option<String>, StorageError>;
 }
 
@@ -6740,7 +6744,10 @@ fn validate_event_identity(event: &EventDraft) -> Result<(), StorageError> {
     Ok(())
 }
 
-fn append_event_tx(transaction: &Transaction<'_>, event: EventDraft) -> Result<(), StorageError> {
+pub(crate) fn append_event_tx(
+    transaction: &Transaction<'_>,
+    event: EventDraft,
+) -> Result<(), StorageError> {
     validate_event_identity(&event)?;
     let job = job_raw(transaction, event.job_id)?;
     let expected_workspace = job.workspace_id.clone();
@@ -7101,7 +7108,7 @@ mod tests {
     #[test]
     fn fresh_schema_and_reopen_are_idempotent() {
         let fixture = Fixture::new();
-        assert_eq!(fixture.store.schema_version(), 5);
+        assert_eq!(fixture.store.schema_version(), 7);
         let job = fixture
             .store
             .submit_job(fixture.submission(1, 10))

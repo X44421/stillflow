@@ -782,27 +782,125 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_two(connection)?;
             migrate_to_version_three(connection)?;
             migrate_to_version_four(connection)?;
-            migrate_to_version_five(connection)
+            migrate_to_version_five(connection)?;
+            migrate_to_version_six(connection)?;
+            migrate_to_version_seven(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
             migrate_to_version_three(connection)?;
             migrate_to_version_four(connection)?;
-            migrate_to_version_five(connection)
+            migrate_to_version_five(connection)?;
+            migrate_to_version_six(connection)?;
+            migrate_to_version_seven(connection)
         }
         2 => {
             migrate_to_version_three(connection)?;
             migrate_to_version_four(connection)?;
-            migrate_to_version_five(connection)
+            migrate_to_version_five(connection)?;
+            migrate_to_version_six(connection)?;
+            migrate_to_version_seven(connection)
         }
         3 => {
             migrate_to_version_four(connection)?;
-            migrate_to_version_five(connection)
+            migrate_to_version_five(connection)?;
+            migrate_to_version_six(connection)?;
+            migrate_to_version_seven(connection)
         }
-        4 => migrate_to_version_five(connection),
-        5 => Ok(()),
+        4 => {
+            migrate_to_version_five(connection)?;
+            migrate_to_version_six(connection)?;
+            migrate_to_version_seven(connection)
+        }
+        5 => {
+            migrate_to_version_six(connection)?;
+            migrate_to_version_seven(connection)
+        }
+        6 => migrate_to_version_seven(connection),
+        7 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
+}
+
+/// Version six adds Dataset-owned Q-D1 ProfileHistory references. The table
+/// stores no profile payload; it references the committed E5 Artifact body.
+fn migrate_to_version_six(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version six"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE qd1_profile_history (
+                 history_id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 dataset_id TEXT NOT NULL REFERENCES cp_datasets(id),
+                 profile_artifact_id TEXT NOT NULL REFERENCES cp_artifact_refs(id),
+                 producing_run_id TEXT NOT NULL REFERENCES cp_runs(id),
+                 profile_digest TEXT NOT NULL CHECK (length(profile_digest) = 64),
+                 profile_contract_version INTEGER NOT NULL CHECK (profile_contract_version > 0),
+                 drift_contract_version INTEGER NOT NULL CHECK (drift_contract_version > 0),
+                 profile_policy_version INTEGER NOT NULL CHECK (profile_policy_version > 0),
+                 top_k INTEGER NOT NULL CHECK (top_k > 0),
+                 histogram_buckets INTEGER NOT NULL CHECK (histogram_buckets > 0),
+                 schema_fingerprint TEXT NOT NULL CHECK (length(schema_fingerprint) = 64),
+                 schema_json TEXT NOT NULL,
+                 row_count_scanned INTEGER NOT NULL CHECK (row_count_scanned >= 0),
+                 scanned_bytes INTEGER NOT NULL CHECK (scanned_bytes >= 0),
+                 truncated INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+                 profile_sequence INTEGER NOT NULL CHECK (profile_sequence > 0),
+                 state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+                 created_at_utc TEXT NOT NULL,
+                 tombstoned_at_utc TEXT,
+                 UNIQUE (workspace_id, dataset_id, profile_artifact_id, producing_run_id),
+                 UNIQUE (workspace_id, dataset_id, profile_sequence)
+             ) STRICT;
+
+             CREATE INDEX qd1_profile_history_order_index
+             ON qd1_profile_history(workspace_id, dataset_id, state,
+                                     profile_sequence DESC, history_id DESC);
+
+             CREATE INDEX qd1_profile_history_artifact_index
+             ON qd1_profile_history(profile_artifact_id, state);
+
+             PRAGMA user_version = 6;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version six"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version six"))
+}
+
+/// Version seven adds the resolved-comparison identity. The report Artifact
+/// is still owned by the existing E5 Run; this row only makes retries return
+/// the first committed report for one comparison key.
+fn migrate_to_version_seven(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version seven"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE qd1_drift_comparisons (
+                 comparison_key TEXT PRIMARY KEY NOT NULL CHECK (length(comparison_key) = 64),
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id),
+                 dataset_id TEXT NOT NULL REFERENCES cp_datasets(id),
+                 baseline_history_id TEXT NOT NULL REFERENCES qd1_profile_history(history_id),
+                 candidate_history_id TEXT NOT NULL REFERENCES qd1_profile_history(history_id),
+                 report_artifact_id TEXT NOT NULL UNIQUE REFERENCES cp_artifact_refs(id),
+                 producing_run_id TEXT NOT NULL REFERENCES cp_runs(id),
+                 report_digest TEXT NOT NULL CHECK (length(report_digest) = 64),
+                 created_at_utc TEXT NOT NULL
+             ) STRICT;
+
+             CREATE INDEX qd1_drift_comparisons_scope_index
+             ON qd1_drift_comparisons(workspace_id, dataset_id, created_at_utc,
+                                      comparison_key);
+
+             PRAGMA user_version = 7;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version seven"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version seven"))
 }
 
 /// Version four adds the durable E5 unified control-plane graph.  The tables
@@ -2399,7 +2497,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 7);
 
         // A legacy version-one database migrates through the current schema
         // and gains the bundle, export, and control-plane tables.
@@ -2451,7 +2549,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 7);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -2461,6 +2559,8 @@ mod tests {
             "export_manifests",
             "export_tombstones",
             "cp_artifact_bodies",
+            "qd1_profile_history",
+            "qd1_drift_comparisons",
         ] {
             let present: i64 = connection
                 .query_row(
@@ -2477,19 +2577,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 6;")
+            .execute_batch("PRAGMA user_version = 8;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(6))
+            Err(StorageError::UnsupportedStorageVersion(8))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 6);
+        assert_eq!(version, 8);
     }
 
     #[test]
@@ -2565,7 +2665,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 7);
         for (table, expected) in [
             ("snapshots", 1_i64),
             ("verification_bundles", 1_i64),
