@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 309,
+  "revision": 310,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -260,9 +260,9 @@
     {
       "id": "Q-D1-RUNTIME",
       "title": "Implement Profile History / Drift runtime (issue #238)",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-q-d1-runtime-main-20260903",
       "canonical_issue": 238,
       "target_issue": 238,
       "target_pr": 238,
@@ -292,9 +292,9 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-03T13:42:25Z",
       "started_at": "2026-09-03T06:33:26Z",
-      "updated_at": "2026-09-03T09:41:48Z",
+      "updated_at": "2026-09-03T09:42:25Z",
       "queued_by": "maintainer:chatgpt-workmode (2026-09-03)",
       "queue_reason": "Rebound Q-D1 runtime to current canonical main after E5-G1 merge; existing implementation head requires a non-rewriting merge and fresh exact-head gates.",
       "notes": "Claim/register through taskctl before branch/edit. Fresh branch from exact live main at CLAIM. Stop for explicit rebind on base drift, lock overlap, or any need to touch PR #237 accepted files. No Q-A1 API, no second scheduler/queue/state/digest/baseline authority, no AI deterministic evidence, no SQL/DuckDB/HTTP/SEC/AUD/AUT/OPS/frontend work. Lease 240 minutes. Positive terminal authorizes only independent exact-head acceptance.",
@@ -305,7 +305,36 @@
       "rebind_reason": "E5-G1 merged to canonical main after Q-D1 implementation; preserve implementation commit and revalidate on current main before acceptance"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-03T09:41:48Z",
+  "locks": {
+    "branch:agent/issue-238-q-d1-runtime": {
+      "task_id": "Q-D1-RUNTIME",
+      "owner": "agent-q-d1-runtime-main-20260903",
+      "expected_head": null,
+      "acquired_at": "2026-09-03T09:42:25Z",
+      "lease_expires_at": "2026-09-03T13:42:25Z"
+    },
+    "storage:profile-history": {
+      "task_id": "Q-D1-RUNTIME",
+      "owner": "agent-q-d1-runtime-main-20260903",
+      "expected_head": null,
+      "acquired_at": "2026-09-03T09:42:25Z",
+      "lease_expires_at": "2026-09-03T13:42:25Z"
+    },
+    "engine:drift": {
+      "task_id": "Q-D1-RUNTIME",
+      "owner": "agent-q-d1-runtime-main-20260903",
+      "expected_head": null,
+      "acquired_at": "2026-09-03T09:42:25Z",
+      "lease_expires_at": "2026-09-03T13:42:25Z"
+    },
+    "core:drift-contract": {
+      "task_id": "Q-D1-RUNTIME",
+      "owner": "agent-q-d1-runtime-main-20260903",
+      "expected_head": null,
+      "acquired_at": "2026-09-03T09:42:25Z",
+      "lease_expires_at": "2026-09-03T13:42:25Z"
+    }
+  },
+  "updated_at": "2026-09-03T09:42:25Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
