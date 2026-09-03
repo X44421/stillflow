@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 291,
+  "revision": 292,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "a70b0ac57f65f448f4abd6d6112f6238fd14f92f",
@@ -222,8 +222,35 @@
       "note": "First API edit is blocked until E5-A1 publishes API_BOOTSTRAP_READY; then rebind/stack onto that exact bootstrap head. Shared bootstrap files remain read-only for E5-E1.",
       "reclaim_reason": "GitHub Issue #229 and PR #230 are closed/completed; claim lease expired; clear stale registry lock before E5-J2 #235.",
       "reclaimed_by": "agent-e5-j2-235"
+    },
+    {
+      "id": "E5-G1",
+      "title": "Runtime end-to-end gate (issue #232)",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 232,
+      "target_branch": "agent/issue-232-e5-g1-runtime-end-to-end-gate",
+      "expected_base": "0805c59201e4f2862493dbb29279226f5bd7e559",
+      "locks": [
+        "gate:e5-g1-runtime"
+      ],
+      "paths": [
+        "backend/crates/stillflow-api/tests/e5_g1_runtime_e2e.rs",
+        "backend/crates/stillflow-api/tests/e5_g1_*.rs",
+        "backend/crates/stillflow-api/tests/fixtures/e5_g1/*"
+      ],
+      "shared_paths": [],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-03T01:21:45Z",
+      "updated_at": "2026-09-03T01:21:45Z",
+      "registered_by": "agent-e5-g1-232",
+      "note": "E5-G1 rebound onto post-E5-J2 main 0805c59201e4f2862493dbb29279226f5bd7e559 per dispatch receipt; #235 merged, post-merge CI 6/6 passed."
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-02T15:52:05Z"
+  "updated_at": "2026-09-03T01:21:45Z"
 }
