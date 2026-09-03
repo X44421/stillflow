@@ -88,6 +88,7 @@ pub enum ArtifactKind {
     ProfileReport,
     QualityReport,
     ExportArtifact,
+    DriftReport,
 }
 
 impl ArtifactKind {
@@ -102,6 +103,7 @@ impl ArtifactKind {
             Self::ProfileReport => 0xF1,
             Self::QualityReport => 0xF2,
             Self::ExportArtifact => 0xF3,
+            Self::DriftReport => 0xF4,
         }
     }
 
@@ -115,6 +117,7 @@ impl ArtifactKind {
             0xF1 => Some(Self::ProfileReport),
             0xF2 => Some(Self::QualityReport),
             0xF3 => Some(Self::ExportArtifact),
+            0xF4 => Some(Self::DriftReport),
             _ => None,
         }
     }

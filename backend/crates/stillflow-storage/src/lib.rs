@@ -11,6 +11,7 @@ mod digest;
 mod error;
 pub mod export;
 mod manifest;
+pub mod profile_history;
 mod store;
 
 pub use artifact::{
@@ -50,9 +51,17 @@ pub use manifest::{
     MAX_MAINTENANCE_CANDIDATES, MAX_SNAPSHOT_PARTITIONS, MAX_SNAPSHOT_ROWS,
     MAX_SNAPSHOT_STORED_BYTES, SQLITE_BUSY_TIMEOUT_MILLIS, STORAGE_SCHEMA_VERSION,
 };
+pub use profile_history::{
+    DriftComparisonRecord, DriftReportCursor, DriftReportDraft, DriftReportPage,
+    ProfileHistoryCursor, ProfileHistoryDraft, ProfileHistoryEntry, ProfileHistoryPage,
+    ProfileHistoryState,
+};
 pub use store::{SnapshotBatchReader, SnapshotStore, SnapshotWriter};
 
 pub(crate) use bundle::verification_bundle_version_digest_inner;
+pub(crate) use control_plane::{
+    append_event_tx, compact_json, map_constraint, validate_artifact_body, validate_safe_json,
+};
 pub(crate) use digest::digest_file;
 pub(crate) use manifest::build_snapshot;
 pub(crate) use store::acquire_maintenance;

@@ -2,6 +2,7 @@
 
 #![deny(unsafe_code)]
 
+mod drift;
 mod engine;
 mod error;
 mod export;
@@ -35,6 +36,7 @@ use stillflow_plan::{LogicalPlan, PlanFingerprint, PlanNodeId};
 use stillflow_storage::SnapshotStore;
 use uuid::Uuid;
 
+pub use drift::{DriftFinding, DriftProfileInput, DriftReport, DriftRequest, DriftResult};
 pub use engine::ExecutionEngine;
 pub use error::EngineError;
 pub use export::{run_export, run_export_with_run, ExportRequest};

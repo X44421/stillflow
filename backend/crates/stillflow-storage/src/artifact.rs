@@ -303,6 +303,7 @@ impl Serialize for ArtifactKindForSerde {
             stillflow_core::ArtifactKind::ProfileReport => "profile-report",
             stillflow_core::ArtifactKind::QualityReport => "quality-report",
             stillflow_core::ArtifactKind::ExportArtifact => "export-artifact",
+            stillflow_core::ArtifactKind::DriftReport => "drift-report",
         };
         serializer.serialize_str(name)
     }
@@ -320,6 +321,7 @@ impl<'de> Deserialize<'de> for ArtifactKindForSerde {
             "profile-report" => stillflow_core::ArtifactKind::ProfileReport,
             "quality-report" => stillflow_core::ArtifactKind::QualityReport,
             "export-artifact" => stillflow_core::ArtifactKind::ExportArtifact,
+            "drift-report" => stillflow_core::ArtifactKind::DriftReport,
             other => {
                 return Err(DeError::custom(format!("unknown artifact kind {other}")));
             }
