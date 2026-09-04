@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 312,
+  "revision": 313,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -312,9 +312,9 @@
       "id": "Q-A1-PROFILE-QUALITY-DRIFT-API",
       "title": "[Q-A1] Profile / Quality / Drift API integration",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-q-a1-239",
       "target_issue": 239,
       "target_branch": "agent/issue-239-q-a1-profile-quality-drift-api",
       "expected_base": "24ed2051f341c0f18374df8cb4744e266ea51e1f",
@@ -347,13 +347,50 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T04:21:08Z",
       "registered_at": "2026-09-04T00:20:37Z",
-      "updated_at": "2026-09-04T00:20:37Z",
-      "registered_by": "agent-q-a1-239"
+      "updated_at": "2026-09-04T00:21:08Z",
+      "registered_by": "agent-q-a1-239",
+      "started_at": "2026-09-04T00:21:08Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T00:20:37Z",
+  "locks": {
+    "branch:agent/issue-239-q-a1-profile-quality-drift-api": {
+      "task_id": "Q-A1-PROFILE-QUALITY-DRIFT-API",
+      "owner": "agent-q-a1-239",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T00:21:08Z",
+      "lease_expires_at": "2026-09-04T04:21:08Z"
+    },
+    "core:job-operation-drift": {
+      "task_id": "Q-A1-PROFILE-QUALITY-DRIFT-API",
+      "owner": "agent-q-a1-239",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T00:21:08Z",
+      "lease_expires_at": "2026-09-04T04:21:08Z"
+    },
+    "engine:job-runtime-drift": {
+      "task_id": "Q-A1-PROFILE-QUALITY-DRIFT-API",
+      "owner": "agent-q-a1-239",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T00:21:08Z",
+      "lease_expires_at": "2026-09-04T04:21:08Z"
+    },
+    "storage:drift-publication": {
+      "task_id": "Q-A1-PROFILE-QUALITY-DRIFT-API",
+      "owner": "agent-q-a1-239",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T00:21:08Z",
+      "lease_expires_at": "2026-09-04T04:21:08Z"
+    },
+    "api:profile-quality-drift": {
+      "task_id": "Q-A1-PROFILE-QUALITY-DRIFT-API",
+      "owner": "agent-q-a1-239",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T00:21:08Z",
+      "lease_expires_at": "2026-09-04T04:21:08Z"
+    }
+  },
+  "updated_at": "2026-09-04T00:21:08Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
