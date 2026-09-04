@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 375,
+  "revision": 376,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1010,9 +1010,38 @@
       "result_head": "1810edefbe61aff4fcd6e423290daf34a88b7c85",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33918311723",
       "completion_note": "OPS_O4_PR277_MERGED_A267E453_POST_MAIN_CI_33918311723_ACCEPTANCE_5546264125"
+    },
+    {
+      "id": "H2",
+      "title": "H2-security-failure-recovery-matrix",
+      "risk_level": "L3",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 278,
+      "target_branch": "agent/issue-278-h2-security-failure-recovery",
+      "expected_base": "a267e453667f00da09d05c7999b2f9d875ad178c",
+      "locks": [
+        "branch:agent/issue-278-h2-security-failure-recovery",
+        "gate:h2"
+      ],
+      "paths": [
+        "docs/evidence/h2/security-failure-recovery.md"
+      ],
+      "shared_paths": [],
+      "depends_on": [
+        "OPS-O4",
+        "H2-B01"
+      ],
+      "conflicts_with": [],
+      "registered_at": "2026-09-04T21:07:17Z",
+      "registered_by": "codex-h2-20260904",
+      "dispatch_reason": "OPS-O4 is complete; H2 is the current release gate.",
+      "note": "Review-only security, failure, and recovery matrix. Use existing executable evidence and contracts; no new runtime, transport, storage schema, or frontend behavior.",
+      "lease_expires_at": null
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T21:04:50Z",
+  "updated_at": "2026-09-04T21:07:17Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
