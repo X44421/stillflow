@@ -20,17 +20,18 @@ use uuid::Uuid;
 
 use stillflow_core::{
     ArtifactKind, ArtifactRefState, AssetKind, ConnectorKind, ControlPlaneEventType,
-    ControlPlaneInput, CredentialRef, DatasetState, EventStreamKind, InputRef, JobOperation,
-    JobState, OperationDescriptorV1, OperationKind, PlanState, PlanVersionState, RunState,
-    SessionState, SnapshotRef, SourceAssetState, SourceConnectionState, WorkspaceState,
+    ControlPlaneInput, CredentialRef, DatasetState, DriftOutcome, EventStreamKind, InputRef,
+    JobOperation, JobState, OperationDescriptorV1, OperationKind, PlanState, PlanVersionState,
+    RunState, SessionState, SnapshotRef, SourceAssetState, SourceConnectionState, WorkspaceState,
     DATASET_SNAPSHOT_VERSION, MAX_EVENT_PAGE_SIZE, MAX_EVENT_PAYLOAD_BYTES,
     MAX_QUEUED_JOBS_PER_WORKSPACE,
 };
 
+use crate::profile_history::commit_drift_report_tx;
 use crate::{
     acquire_activity, acquire_maintenance, open_connection, snapshot_version_digest_inner,
-    verification_bundle_version_digest_inner, ActivityKind, SnapshotStore, StorageError,
-    StoreInner,
+    verification_bundle_version_digest_inner, ActivityKind, DriftReportDraft, SnapshotStore,
+    StorageError, StoreInner,
 };
 
 const EVENT_VERSION: u16 = 1;
@@ -1040,6 +1041,13 @@ impl ControlPlaneStore {
                         snapshot,
                     )?;
                 }
+                OperationDescriptorV1::Drift { comparison } => {
+                    if comparison.workspace_id != submission.workspace_id {
+                        return Err(StorageError::InvalidDraft(
+                            "Drift comparison is outside the Job Workspace",
+                        ));
+                    }
+                }
             }
         }
         validate_submission_timestamp(
@@ -1486,7 +1494,13 @@ impl ControlPlaneStore {
             let inputs: Vec<ControlPlaneInput> = serde_json::from_str(&job.input_json)
                 .map_err(|_| StorageError::Serialization("Job input references"))?;
             validate_inputs(&inputs)?;
-            if inputs.as_slice() != [operation.input()] {
+            if let Some(expected_input) = operation.input_ref() {
+                if inputs.as_slice() != [expected_input] {
+                    return Err(StorageError::Serialization(
+                        "Job input does not match its typed operation",
+                    ));
+                }
+            } else if !inputs.is_empty() {
                 return Err(StorageError::Serialization(
                     "Job input does not match its typed operation",
                 ));
@@ -1517,6 +1531,13 @@ impl ControlPlaneStore {
                         session_id,
                         snapshot,
                     )?;
+                }
+                OperationDescriptorV1::Drift { comparison } => {
+                    if comparison.workspace_id != workspace_id {
+                        return Err(StorageError::InvalidDraft(
+                            "Drift comparison is outside the Job Workspace",
+                        ));
+                    }
                 }
             }
         }
@@ -1894,6 +1915,7 @@ impl ControlPlaneStore {
             snapshot_ref,
             bundle_ref,
             None,
+            None,
             run_event,
             job_event,
             failure,
@@ -1922,6 +1944,35 @@ impl ControlPlaneStore {
             None,
             None,
             Some(outputs),
+            None,
+            run_event,
+            job_event,
+            failure,
+        )
+    }
+
+    /// Commits a Drift report Artifact, its typed comparison result, and the
+    /// terminal Run/Job transition in one SQLite transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_run_and_job_with_terminal_outputs_and_drift_report(
+        &self,
+        run_id: Uuid,
+        run_target: RunState,
+        job_target: JobState,
+        outputs: Vec<TerminalOutputRef>,
+        drift_report_draft: DriftReportDraft,
+        run_event: EventDraft,
+        job_event: EventDraft,
+        failure: Option<FailureInfo>,
+    ) -> Result<(RunRecord, JobRecord), StorageError> {
+        self.finish_run_and_job_with_terminal_outputs_inner(
+            run_id,
+            run_target,
+            job_target,
+            None,
+            None,
+            Some(outputs),
+            Some(drift_report_draft),
             run_event,
             job_event,
             failure,
@@ -1937,6 +1988,7 @@ impl ControlPlaneStore {
         mut snapshot_ref: Option<Uuid>,
         mut bundle_ref: Option<Uuid>,
         terminal_outputs: Option<Vec<TerminalOutputRef>>,
+        drift_report_draft: Option<DriftReportDraft>,
         run_event: EventDraft,
         job_event: EventDraft,
         failure: Option<FailureInfo>,
@@ -2011,6 +2063,73 @@ impl ControlPlaneStore {
                     operation.as_ref().expect("checked above"),
                     outputs,
                 )?;
+                if let Some(draft) = drift_report_draft.as_ref() {
+                    let OperationDescriptorV1::Drift { comparison } =
+                        &operation.as_ref().expect("checked above").descriptor
+                    else {
+                        return Err(StorageError::InvalidDraft(
+                            "drift report draft requires a Drift operation",
+                        ));
+                    };
+                    let TerminalOutputRef::DriftComparison {
+                        workspace_id: output_workspace_id,
+                        baseline_history_id: Some(baseline_history_id),
+                        report_artifact_id: Some(report_artifact_id),
+                        report_digest: Some(report_digest),
+                        ..
+                    } = &outputs[0]
+                    else {
+                        return Err(StorageError::InvalidDraft(
+                            "drift report draft requires a published comparison output",
+                        ));
+                    };
+                    let TerminalOutputRef::Artifact {
+                        artifact_id,
+                        artifact_kind: ArtifactKind::DriftReport,
+                        content_digest,
+                        ..
+                    } = &outputs[1]
+                    else {
+                        return Err(StorageError::InvalidDraft(
+                            "drift report draft requires a DriftReport Artifact output",
+                        ));
+                    };
+                    if draft.workspace_id != *output_workspace_id
+                        || draft.dataset_id != comparison.dataset_id
+                        || draft.candidate_history_id != comparison.candidate_history_id
+                        || draft.baseline_history_id != *baseline_history_id
+                        || draft.producing_run_id != run_id
+                        || draft.report_artifact_id != *report_artifact_id
+                        || draft.report_artifact_id != *artifact_id
+                        || parse_digest(report_digest)? != *content_digest
+                        || draft.report_digest != *content_digest
+                    {
+                        return Err(StorageError::InvalidDraft(
+                            "drift report draft does not match its terminal outputs",
+                        ));
+                    }
+                    let artifact_event_id = Uuid::new_v5(
+                        &run_event.event_id,
+                        format!("artifact-committed:{report_artifact_id}").as_bytes(),
+                    );
+                    let artifact_event = EventDraft::new(
+                        artifact_event_id,
+                        EventStreamKind::Run,
+                        run_id,
+                        job_id,
+                        Some(run_id),
+                        ControlPlaneEventType::ArtifactCommitted,
+                        run_event.occurred_at,
+                        run_event.request_id.clone(),
+                        run_event.correlation_id.clone(),
+                        run_event.actor_ref.clone(),
+                        serde_json::json!({
+                            "state": "committed",
+                            "artifactId": report_artifact_id
+                        }),
+                    );
+                    commit_drift_report_tx(&transaction, draft, &artifact_event, job_id)?;
+                }
                 snapshot_ref = typed_snapshot;
                 bundle_ref = typed_bundle;
             } else if !outputs.is_empty() {
@@ -3128,6 +3247,16 @@ pub enum TerminalOutputRef {
         content_digest: [u8; 32],
         state: ArtifactRefState,
     },
+    DriftComparison {
+        workspace_id: Uuid,
+        run_id: Uuid,
+        dataset_id: Uuid,
+        candidate_history_id: Uuid,
+        baseline_history_id: Option<Uuid>,
+        outcome: DriftOutcome,
+        report_artifact_id: Option<Uuid>,
+        report_digest: Option<String>,
+    },
 }
 
 /// A self-contained committed Snapshot reference used by typed terminal
@@ -3235,6 +3364,53 @@ impl TerminalOutputRef {
                 {
                     return Err(StorageError::InvalidDraft(
                         "Artifact output identity is not committed and complete",
+                    ));
+                }
+            }
+            Self::DriftComparison {
+                workspace_id,
+                run_id,
+                dataset_id,
+                candidate_history_id,
+                baseline_history_id,
+                outcome,
+                report_artifact_id,
+                report_digest,
+            } => {
+                validate_id(*workspace_id, "Drift output workspace")?;
+                validate_id(*run_id, "Drift output Run")?;
+                validate_id(*dataset_id, "Drift output Dataset")?;
+                validate_id(*candidate_history_id, "Drift candidate history")?;
+                if let Some(history_id) = baseline_history_id {
+                    validate_id(*history_id, "Drift baseline history")?;
+                    if history_id == candidate_history_id {
+                        return Err(StorageError::InvalidDraft(
+                            "Drift baseline and candidate histories must differ",
+                        ));
+                    }
+                }
+                if matches!(outcome, DriftOutcome::Complete | DriftOutcome::Partial)
+                    != report_artifact_id.is_some()
+                {
+                    return Err(StorageError::InvalidDraft(
+                        "Drift terminal outcome and report reference disagree",
+                    ));
+                }
+                if let Some(artifact_id) = report_artifact_id {
+                    validate_id(*artifact_id, "Drift report Artifact")?;
+                }
+                if let Some(digest) = report_digest {
+                    if digest.len() != 64
+                        || digest.bytes().any(|byte| !byte.is_ascii_hexdigit())
+                        || digest.bytes().any(|byte| byte.is_ascii_uppercase())
+                    {
+                        return Err(StorageError::InvalidDraft(
+                            "Drift report digest is not lowercase hexadecimal",
+                        ));
+                    }
+                } else if report_artifact_id.is_some() {
+                    return Err(StorageError::InvalidDraft(
+                        "Drift report digest is required with its Artifact",
                     ));
                 }
             }
@@ -3700,11 +3876,23 @@ impl JobSubmission {
                         ));
                     }
                 }
+                OperationDescriptorV1::Drift { comparison } => {
+                    if comparison.workspace_id != self.workspace_id {
+                        return Err(StorageError::InvalidDraft(
+                            "Drift comparison is outside the Job Workspace",
+                        ));
+                    }
+                }
             }
-            let expected_input = operation.input();
-            if self.inputs.len() != 1 || self.inputs.first() != Some(&expected_input) {
+            if let Some(expected_input) = operation.input_ref() {
+                if self.inputs.len() != 1 || self.inputs.first() != Some(&expected_input) {
+                    return Err(StorageError::InvalidDraft(
+                        "Job inputs must equal the typed operation input",
+                    ));
+                }
+            } else if !self.inputs.is_empty() {
                 return Err(StorageError::InvalidDraft(
-                    "Job inputs must equal the typed operation input",
+                    "Drift operations must not carry generic Job inputs",
                 ));
             }
         }
@@ -3984,6 +4172,7 @@ fn operation_kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Verification => "verification",
         OperationKind::Profile => "profile",
         OperationKind::Export => "export",
+        OperationKind::Drift => "drift",
     }
 }
 
@@ -4856,7 +5045,13 @@ fn job_from_raw(row: RawJob) -> Result<JobRecord, StorageError> {
         row.operation_descriptor_digest.as_deref(),
     )?;
     if let Some(operation) = operation.as_ref() {
-        if inputs.as_slice() != [operation.input()] {
+        if let Some(expected_input) = operation.input_ref() {
+            if inputs.as_slice() != [expected_input] {
+                return Err(StorageError::Serialization(
+                    "typed Job inputs do not match its operation input",
+                ));
+            }
+        } else if !inputs.is_empty() {
             return Err(StorageError::Serialization(
                 "typed Job inputs do not match its operation input",
             ));
@@ -5008,7 +5203,13 @@ fn run_from_raw(row: RawRun) -> Result<RunRecord, StorageError> {
         .transpose()
         .map_err(|_| StorageError::Serialization("Run operation descriptor digest"))?;
     if let Some(operation) = operation.as_ref() {
-        if inputs.as_slice() != [operation.input()] {
+        if let Some(expected_input) = operation.input_ref() {
+            if inputs.as_slice() != [expected_input] {
+                return Err(StorageError::Serialization(
+                    "typed Run inputs do not match its operation input",
+                ));
+            }
+        } else if !inputs.is_empty() {
             return Err(StorageError::Serialization(
                 "typed Run inputs do not match its operation input",
             ));
@@ -5111,6 +5312,10 @@ fn parse_terminal_outputs(value: &str) -> Result<Vec<TerminalOutputRef>, Storage
             TerminalOutputRef::Snapshot { snapshot_id, .. } => *snapshot_id,
             TerminalOutputRef::VerificationBundle { bundle_id, .. } => *bundle_id,
             TerminalOutputRef::Artifact { artifact_id, .. } => *artifact_id,
+            TerminalOutputRef::DriftComparison {
+                candidate_history_id,
+                ..
+            } => *candidate_history_id,
         };
         if !ids.insert(id) {
             return Err(StorageError::InvalidDraft(
@@ -5276,7 +5481,235 @@ fn validate_terminal_output_set(
             validate_artifact_outputs(transaction, run_id, workspace_id, outputs)?;
             Ok((None, None))
         }
+        OperationDescriptorV1::Drift { comparison } => {
+            if comparison.workspace_id != workspace_id {
+                return Err(StorageError::InvalidDraft(
+                    "Drift comparison belongs to another Workspace",
+                ));
+            }
+            if outputs.len() != 1 && outputs.len() != 2 {
+                return Err(StorageError::InvalidDraft(
+                    "Drift succeeds with one comparison output and an optional report Artifact",
+                ));
+            }
+            let TerminalOutputRef::DriftComparison {
+                workspace_id: output_workspace_id,
+                run_id: output_run_id,
+                dataset_id,
+                candidate_history_id,
+                baseline_history_id,
+                outcome,
+                report_artifact_id,
+                report_digest,
+            } = &outputs[0]
+            else {
+                return Err(StorageError::InvalidDraft(
+                    "Drift output must start with a comparison result",
+                ));
+            };
+            if *output_workspace_id != workspace_id
+                || *output_run_id != run_id
+                || *dataset_id != comparison.dataset_id
+                || *candidate_history_id != comparison.candidate_history_id
+            {
+                return Err(StorageError::InvalidDraft(
+                    "Drift comparison output identity is inconsistent",
+                ));
+            }
+            let publishes_report =
+                matches!(outcome, DriftOutcome::Complete | DriftOutcome::Partial);
+            if publishes_report != report_artifact_id.is_some()
+                || publishes_report != report_digest.is_some()
+            {
+                return Err(StorageError::InvalidDraft(
+                    "Drift comparison outcome and report identity disagree",
+                ));
+            }
+            match (publishes_report, outputs.get(1)) {
+                (false, None) => {
+                    validate_artifact_outputs(transaction, run_id, workspace_id, outputs)?
+                }
+                (false, Some(_)) => {
+                    return Err(StorageError::InvalidDraft(
+                        "non-report Drift outcome cannot publish an Artifact",
+                    ));
+                }
+                (
+                    true,
+                    Some(TerminalOutputRef::Artifact {
+                        artifact_id,
+                        artifact_kind,
+                        artifact_version,
+                        content_digest,
+                        ..
+                    }),
+                ) if Some(*artifact_id) == *report_artifact_id
+                    && *artifact_kind == ArtifactKind::DriftReport
+                    && *artifact_version == 1
+                    && report_digest
+                        .as_deref()
+                        .and_then(|value| parse_digest(value).ok())
+                        .is_some_and(|digest| digest == *content_digest) =>
+                {
+                    validate_artifact_outputs(transaction, run_id, workspace_id, outputs)?;
+                }
+                (true, Some(_)) => {
+                    return Err(StorageError::InvalidDraft(
+                        "Drift report Artifact identity is inconsistent",
+                    ));
+                }
+                (true, None) => {
+                    validate_committed_drift_report_output(
+                        transaction,
+                        workspace_id,
+                        comparison,
+                        *candidate_history_id,
+                        *baseline_history_id,
+                        *outcome,
+                        report_artifact_id.expect("report identity checked above"),
+                        report_digest
+                            .as_deref()
+                            .expect("report identity checked above"),
+                    )?;
+                }
+            }
+            Ok((None, None))
+        }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_committed_drift_report_output(
+    transaction: &Transaction<'_>,
+    workspace_id: Uuid,
+    comparison: &stillflow_core::DriftComparisonRequest,
+    candidate_history_id: Uuid,
+    baseline_history_id: Option<Uuid>,
+    outcome: DriftOutcome,
+    report_artifact_id: Uuid,
+    report_digest: &str,
+) -> Result<(), StorageError> {
+    let report_digest = parse_digest(report_digest)?;
+    let row: Option<(String, String, String, String)> = transaction
+        .query_row(
+            "SELECT workspace_id, artifact_kind, state, content_digest
+             FROM cp_artifact_refs WHERE id = ?1",
+            params![report_artifact_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check committed Drift report Artifact"))?;
+    let Some((artifact_workspace, artifact_kind, artifact_state, artifact_digest)) = row else {
+        return Err(StorageError::InvalidDraft(
+            "Drift report Artifact output is missing",
+        ));
+    };
+    if parse_uuid(&artifact_workspace)? != workspace_id
+        || parse_enum_json::<ArtifactKind>(&artifact_kind, "Drift report Artifact kind")?
+            != ArtifactKind::DriftReport
+        || artifact_state != "committed"
+        || parse_digest(&artifact_digest)? != report_digest
+    {
+        return Err(StorageError::InvalidDraft(
+            "Drift report Artifact output is not a committed scoped report",
+        ));
+    }
+    let body: Option<(String, i64, String, Vec<u8>, String)> = transaction
+        .query_row(
+            "SELECT artifact_kind, artifact_version, content_digest, body, state
+             FROM cp_artifact_bodies WHERE artifact_id = ?1",
+            params![report_artifact_id.to_string()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check committed Drift report body"))?;
+    let Some((body_kind, body_version, body_digest, body, body_state)) = body else {
+        return Err(StorageError::InvalidDraft(
+            "Drift report Artifact has no committed body",
+        ));
+    };
+    if parse_enum_json::<ArtifactKind>(&body_kind, "Drift report body kind")?
+        != ArtifactKind::DriftReport
+        || body_version != 1
+        || parse_digest(&body_digest)? != report_digest
+        || body_state != "committed"
+    {
+        return Err(StorageError::InvalidDraft(
+            "Drift report body identity is inconsistent",
+        ));
+    }
+    let value: Value = serde_json::from_slice(&body)
+        .map_err(|_| StorageError::Serialization("decode committed Drift report"))?;
+    let key = parse_digest(
+        value
+            .get("canonical_input_digest")
+            .and_then(Value::as_str)
+            .ok_or(StorageError::InvalidDraft(
+                "Drift report has no canonical comparison identity",
+            ))?,
+    )?;
+    let stored: Option<(String, String, String, String, String, String)> = transaction
+        .query_row(
+            "SELECT workspace_id, dataset_id, baseline_history_id,
+                    candidate_history_id, report_artifact_id, report_digest
+             FROM qd1_drift_comparisons WHERE comparison_key = ?1",
+            params![digest_hex(&key)],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check Drift comparison identity"))?;
+    let Some((
+        stored_workspace,
+        stored_dataset,
+        stored_baseline,
+        stored_candidate,
+        stored_artifact,
+        stored_digest,
+    )) = stored
+    else {
+        return Err(StorageError::InvalidDraft(
+            "Drift report has no committed comparison identity",
+        ));
+    };
+    if parse_uuid(&stored_workspace)? != workspace_id
+        || parse_uuid(&stored_dataset)? != comparison.dataset_id
+        || parse_uuid(&stored_baseline)?
+            != baseline_history_id.ok_or(StorageError::InvalidDraft(
+                "Drift report comparison has no baseline",
+            ))?
+        || parse_uuid(&stored_candidate)? != candidate_history_id
+        || parse_uuid(&stored_artifact)? != report_artifact_id
+        || parse_digest(&stored_digest)? != report_digest
+    {
+        return Err(StorageError::InvalidDraft(
+            "committed Drift report does not match its comparison",
+        ));
+    }
+    let expected_outcome = serde_json::to_value(outcome)
+        .map_err(|_| StorageError::Serialization("serialize Drift outcome"))?;
+    if value.get("outcome") != Some(&expected_outcome) {
+        return Err(StorageError::InvalidDraft(
+            "Drift report outcome does not match its terminal output",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_source_asset_input(

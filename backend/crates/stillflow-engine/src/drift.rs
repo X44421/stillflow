@@ -95,6 +95,30 @@ impl ExecutionEngine {
         comparison: DriftComparisonRequest,
         context: stillflow_core::RequestContext,
     ) -> Result<DriftResult, EngineError> {
+        self.drift_history_inner(store, comparison, context, false)
+            .await
+    }
+
+    /// Resolves and compares a ProfileHistory request while the caller owns
+    /// the JobRuntime Engine permit. This is the same resolver and comparator
+    /// as [`Self::drift_history`], without acquiring a second permit.
+    pub(crate) async fn drift_history_with_permit(
+        &self,
+        store: &stillflow_storage::ControlPlaneStore,
+        comparison: DriftComparisonRequest,
+        context: stillflow_core::RequestContext,
+    ) -> Result<DriftResult, EngineError> {
+        self.drift_history_inner(store, comparison, context, true)
+            .await
+    }
+
+    async fn drift_history_inner(
+        &self,
+        store: &stillflow_storage::ControlPlaneStore,
+        comparison: DriftComparisonRequest,
+        context: stillflow_core::RequestContext,
+        permit_held: bool,
+    ) -> Result<DriftResult, EngineError> {
         if context.deadline().is_none() {
             return Err(EngineError::InvalidPlan(
                 "drift run requires a request deadline",
@@ -138,17 +162,20 @@ impl ExecutionEngine {
             .get_artifact_body(candidate.profile_artifact_id)
             .map_err(EngineError::Storage)?;
         let baseline_history_id = baseline.as_ref().map(|input| input.entry.history_id);
-        let result = self
-            .drift(DriftRequest {
-                comparison,
-                baseline,
-                candidate: DriftProfileInput {
-                    entry: candidate,
-                    body: body.body,
-                },
-                context,
-            })
-            .await?;
+        let request = DriftRequest {
+            comparison,
+            baseline,
+            candidate: DriftProfileInput {
+                entry: candidate,
+                body: body.body,
+            },
+            context,
+        };
+        let result = if permit_held {
+            self.drift_with_permit(request).await?
+        } else {
+            self.drift(request).await?
+        };
         Ok(DriftResult {
             baseline_history_id,
             ..result
