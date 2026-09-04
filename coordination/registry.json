@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 368,
+  "revision": 369,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -896,7 +896,7 @@
       "id": "AUT-A1",
       "title": "AUT-A1-automation-api",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-aut-a1-20260904",
       "target_issue": 272,
@@ -926,34 +926,16 @@
       "registered_by": "codex-dispatcher-20260904",
       "dispatch_reason": "AUT-J1 is complete; AUT-A1 is the only current mainline node.",
       "note": "Bounded Automation CRUD/API projection with CAS lifecycle, manual E5 trigger handoff, history, and SEC/AUD integration; no second executor or queue authority.",
-      "lease_expires_at": "2026-09-04T21:54:20Z",
+      "lease_expires_at": null,
       "started_at": "2026-09-04T17:54:20Z",
-      "updated_at": "2026-09-04T17:54:20Z"
+      "updated_at": "2026-09-04T19:43:25Z",
+      "completed_at": "2026-09-04T19:43:25Z",
+      "result_head": "9591ad25a45f249b976beed34244d418cc57ca05",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33910382647",
+      "completion_note": "PR #273 merged as 4753bb4e11677044cd85b2c84eedfac09d9c9fa1; exact-head independent acceptance 5545382016; PR CI 33910382647 passed 6/6. Post-merge main CI 33910892792 reproduced a pre-existing dedup test race twice; conditional H2-B01 #274 tracks the test-only serialization fix."
     }
   ],
-  "locks": {
-    "branch:agent/issue-272-aut-a1-automation-api": {
-      "task_id": "AUT-A1",
-      "owner": "codex-aut-a1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T17:54:20Z",
-      "lease_expires_at": "2026-09-04T21:54:20Z"
-    },
-    "api:automation": {
-      "task_id": "AUT-A1",
-      "owner": "codex-aut-a1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T17:54:20Z",
-      "lease_expires_at": "2026-09-04T21:54:20Z"
-    },
-    "gate:aut-api": {
-      "task_id": "AUT-A1",
-      "owner": "codex-aut-a1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T17:54:20Z",
-      "lease_expires_at": "2026-09-04T21:54:20Z"
-    }
-  },
-  "updated_at": "2026-09-04T17:54:20Z",
+  "locks": {},
+  "updated_at": "2026-09-04T19:43:25Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
