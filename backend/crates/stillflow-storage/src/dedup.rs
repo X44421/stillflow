@@ -37,6 +37,12 @@ pub const MAX_DEDUP_INDEX_DISK_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub(crate) static PRE_FLOCK_HOOK: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>> =
     std::sync::Mutex::new(None);
 
+/// Serializes tests that mutate the process-global pre-flock hook. The hook
+/// is test-only, but its state must not race across parallel Rust test
+/// threads.
+#[cfg(test)]
+pub(crate) static PRE_FLOCK_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Typed result of the exact keep-first insert decision (contract 9.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DedupInsert {
@@ -874,6 +880,7 @@ mod tests {
     /// sleep, timeout, or scheduling assumption.
     #[test]
     fn open_critical_section_excludes_recovery_via_activity_guard() {
+        let _test_serial = PRE_FLOCK_TEST_MUTEX.lock().expect("hook test mutex");
         let temp = TempDir::new().expect("temp");
         let store = store(&temp);
         let run_id = Uuid::from_u128(0xD066);
@@ -925,6 +932,7 @@ mod tests {
     /// directory entry.
     #[test]
     fn lost_lock_during_open_fails_closed_without_residue() {
+        let _test_serial = PRE_FLOCK_TEST_MUTEX.lock().expect("hook test mutex");
         let temp = TempDir::new().expect("temp");
         let store = store(&temp);
         let run_id = Uuid::from_u128(0xD067);
