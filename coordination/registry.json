@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 346,
+  "revision": 347,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -630,9 +630,9 @@
       "id": "OPS-O1",
       "title": "OPS-O1-observability-health-metrics",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-ops-o1-20260904",
       "target_issue": 256,
       "target_branch": "agent/issue-256-ops-o1-observability",
       "expected_base": "c9a994f462e19066a60f6d1939cb887c48482d25",
@@ -657,13 +657,43 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T14:54:57Z",
       "registered_at": "2026-09-04T10:54:22Z",
-      "updated_at": "2026-09-04T10:54:22Z",
-      "registered_by": "codex-ops-o1-20260904"
+      "updated_at": "2026-09-04T10:54:57Z",
+      "registered_by": "codex-ops-o1-20260904",
+      "started_at": "2026-09-04T10:54:57Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T10:54:22Z",
+  "locks": {
+    "branch:agent/issue-256-ops-o1-observability": {
+      "task_id": "OPS-O1",
+      "owner": "codex-ops-o1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T10:54:57Z",
+      "lease_expires_at": "2026-09-04T14:54:57Z"
+    },
+    "core:telemetry": {
+      "task_id": "OPS-O1",
+      "owner": "codex-ops-o1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T10:54:57Z",
+      "lease_expires_at": "2026-09-04T14:54:57Z"
+    },
+    "api:observability": {
+      "task_id": "OPS-O1",
+      "owner": "codex-ops-o1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T10:54:57Z",
+      "lease_expires_at": "2026-09-04T14:54:57Z"
+    },
+    "storage:observability": {
+      "task_id": "OPS-O1",
+      "owner": "codex-ops-o1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T10:54:57Z",
+      "lease_expires_at": "2026-09-04T14:54:57Z"
+    }
+  },
+  "updated_at": "2026-09-04T10:54:57Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
