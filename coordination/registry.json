@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 356,
+  "revision": 357,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -735,7 +735,7 @@
       "id": "AUD-A1",
       "title": "AUD-A1-audit-lineage-api",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-aud-a1-20260904",
       "target_issue": 263,
@@ -762,36 +762,18 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-04T16:55:37Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-04T12:55:13Z",
-      "updated_at": "2026-09-04T12:55:37Z",
+      "updated_at": "2026-09-04T14:12:30Z",
       "registered_by": "codex-aud-a1-20260904",
-      "started_at": "2026-09-04T12:55:37Z"
+      "started_at": "2026-09-04T12:55:37Z",
+      "completed_at": "2026-09-04T14:12:30Z",
+      "result_head": "9ce206e4dcc87401dc1b607b07e2832537e8ac82",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33878863940",
+      "completion_note": "AUD_A1_PR264_MERGED_POST_MAIN_CI_33878863940_ACCEPTANCE_5541200377"
     }
   ],
-  "locks": {
-    "branch:agent/issue-263-aud-a1-audit-lineage-api": {
-      "task_id": "AUD-A1",
-      "owner": "codex-aud-a1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T12:55:37Z",
-      "lease_expires_at": "2026-09-04T16:55:37Z"
-    },
-    "audit:events": {
-      "task_id": "AUD-A1",
-      "owner": "codex-aud-a1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T12:55:37Z",
-      "lease_expires_at": "2026-09-04T16:55:37Z"
-    },
-    "api:audit": {
-      "task_id": "AUD-A1",
-      "owner": "codex-aud-a1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T12:55:37Z",
-      "lease_expires_at": "2026-09-04T16:55:37Z"
-    }
-  },
-  "updated_at": "2026-09-04T12:55:37Z",
+  "locks": {},
+  "updated_at": "2026-09-04T14:12:30Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
