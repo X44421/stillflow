@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 347,
+  "revision": 348,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -630,7 +630,7 @@
       "id": "OPS-O1",
       "title": "OPS-O1-observability-health-metrics",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-ops-o1-20260904",
       "target_issue": 256,
@@ -657,43 +657,18 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-04T14:54:57Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-04T10:54:22Z",
-      "updated_at": "2026-09-04T10:54:57Z",
+      "updated_at": "2026-09-04T11:41:23Z",
       "registered_by": "codex-ops-o1-20260904",
-      "started_at": "2026-09-04T10:54:57Z"
+      "started_at": "2026-09-04T10:54:57Z",
+      "completed_at": "2026-09-04T11:41:23Z",
+      "result_head": "21686f51ede9f8c572b094e2b20bbf161d2c5a64",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33868738468",
+      "completion_note": "OPS_O1_PR258_MERGED_POST_MAIN_CI_33868738468_ACCEPTANCE_5539878375"
     }
   ],
-  "locks": {
-    "branch:agent/issue-256-ops-o1-observability": {
-      "task_id": "OPS-O1",
-      "owner": "codex-ops-o1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T10:54:57Z",
-      "lease_expires_at": "2026-09-04T14:54:57Z"
-    },
-    "core:telemetry": {
-      "task_id": "OPS-O1",
-      "owner": "codex-ops-o1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T10:54:57Z",
-      "lease_expires_at": "2026-09-04T14:54:57Z"
-    },
-    "api:observability": {
-      "task_id": "OPS-O1",
-      "owner": "codex-ops-o1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T10:54:57Z",
-      "lease_expires_at": "2026-09-04T14:54:57Z"
-    },
-    "storage:observability": {
-      "task_id": "OPS-O1",
-      "owner": "codex-ops-o1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T10:54:57Z",
-      "lease_expires_at": "2026-09-04T14:54:57Z"
-    }
-  },
-  "updated_at": "2026-09-04T10:54:57Z",
+  "locks": {},
+  "updated_at": "2026-09-04T11:41:23Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
