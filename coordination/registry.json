@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 339,
+  "revision": 340,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -591,9 +591,37 @@
       "result_head": "6532e42ffdb0b8c1e7824f0f8eba4eb7d52e5ac8",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33858712504",
       "completion_note": "Merged PR #253 as main e750b8dc1470f72b30ba01245879d9af855d85d5; exact-head CI 33858712504 passed 6/6; independent acceptance receipt 5538605648; post-merge main CI 33859420763 passed all 6 jobs; roadmap #81 comment 5538680123; SEC-A1 only next mainline node."
+    },
+    {
+      "id": "SEC-A1",
+      "title": "[SEC-A1] Workspace / Member / RBAC API",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 254,
+      "target_branch": "agent/issue-254-sec-a1-rbac-api",
+      "expected_base": "e750b8dc1470f72b30ba01245879d9af855d85d5",
+      "locks": [
+        "branch:agent/issue-254-sec-a1-rbac-api",
+        "api:authorization",
+        "gate:sec-rbac"
+      ],
+      "paths": [
+        "backend/crates/stillflow-api/src/**",
+        "backend/crates/stillflow-api/tests/**",
+        "docs/evidence/security/**"
+      ],
+      "shared_paths": [],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-04T09:47:59Z",
+      "updated_at": "2026-09-04T09:47:59Z",
+      "registered_by": "codex-sec-a1-20260904"
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T09:45:03Z",
+  "updated_at": "2026-09-04T09:47:59Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
