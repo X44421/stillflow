@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 337,
+  "revision": 338,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -558,9 +558,9 @@
       "id": "SEC-S1",
       "title": "[SEC-S1] Identity / Credential persistence",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-sec-s1-20260904",
       "target_issue": 252,
       "target_branch": "agent/issue-252-sec-s1-identity-credential",
       "expected_base": "e106fddeb3e5e6ece1fd3bf10475f4880e53e84d",
@@ -582,13 +582,36 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T13:27:38Z",
       "registered_at": "2026-09-04T09:27:17Z",
-      "updated_at": "2026-09-04T09:27:17Z",
-      "registered_by": "codex-sec-s1-20260904"
+      "updated_at": "2026-09-04T09:27:38Z",
+      "registered_by": "codex-sec-s1-20260904",
+      "started_at": "2026-09-04T09:27:38Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T09:27:17Z",
+  "locks": {
+    "branch:agent/issue-252-sec-s1-identity-credential": {
+      "task_id": "SEC-S1",
+      "owner": "codex-sec-s1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T09:27:38Z",
+      "lease_expires_at": "2026-09-04T13:27:38Z"
+    },
+    "storage:identity": {
+      "task_id": "SEC-S1",
+      "owner": "codex-sec-s1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T09:27:38Z",
+      "lease_expires_at": "2026-09-04T13:27:38Z"
+    },
+    "gate:sec-identity": {
+      "task_id": "SEC-S1",
+      "owner": "codex-sec-s1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T09:27:38Z",
+      "lease_expires_at": "2026-09-04T13:27:38Z"
+    }
+  },
+  "updated_at": "2026-09-04T09:27:38Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
