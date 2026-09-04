@@ -18,7 +18,7 @@ cap-std = "4.0.2"
 chrono.workspace = true
 csv = "1.3"
 futures.workspace = true
-polars = { version = "0.46", default-features = false, features = [
+polars = { version = "0.55", default-features = false, features = [
     "csv",
     "dtype-date",
     "dtype-datetime",
@@ -26,7 +26,7 @@ polars = { version = "0.46", default-features = false, features = [
     "json",
     "parquet",
 ] }
-polars-arrow = "0.46"
+polars-arrow = "0.55"
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 stillflow-connectors.workspace = true

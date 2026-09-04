@@ -14,7 +14,7 @@ arrow-schema = { workspace = true, features = ["ffi"] }
 chrono.workspace = true
 futures.workspace = true
 parquet.workspace = true
-polars = { version = "0.46", default-features = false, features = [
+polars = { version = "0.55", default-features = false, features = [
     "lazy",
     "strings",
     "dtype-u8",
@@ -25,7 +25,7 @@ polars = { version = "0.46", default-features = false, features = [
     "dtype-datetime",
     "dtype-struct",
 ] }
-polars-arrow = "0.46"
+polars-arrow = "0.55"
 serde_json.workspace = true
 stillflow-connectors.workspace = true
 stillflow-core.workspace = true
