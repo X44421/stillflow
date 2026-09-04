@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 318,
+  "revision": 319,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -396,9 +396,9 @@
       "id": "X-A1-EXPORT-JOB-API",
       "title": "[X-A1] Export Job/API integration",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-x-a1-242",
       "target_issue": 242,
       "target_branch": "agent/issue-242-x-a1-export-job-api",
       "expected_base": "0455b68bc646c04283099820be16cbdaac222df9",
@@ -423,13 +423,36 @@
       ],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T07:13:42Z",
       "registered_at": "2026-09-04T03:13:20Z",
-      "updated_at": "2026-09-04T03:13:20Z",
-      "registered_by": "agent-x-a1-242"
+      "updated_at": "2026-09-04T03:13:42Z",
+      "registered_by": "agent-x-a1-242",
+      "started_at": "2026-09-04T03:13:42Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T03:13:20Z",
+  "locks": {
+    "branch:agent/issue-242-x-a1-export-job-api": {
+      "task_id": "X-A1-EXPORT-JOB-API",
+      "owner": "agent-x-a1-242",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T03:13:42Z",
+      "lease_expires_at": "2026-09-04T07:13:42Z"
+    },
+    "api:export-job": {
+      "task_id": "X-A1-EXPORT-JOB-API",
+      "owner": "agent-x-a1-242",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T03:13:42Z",
+      "lease_expires_at": "2026-09-04T07:13:42Z"
+    },
+    "storage:export-read-gc": {
+      "task_id": "X-A1-EXPORT-JOB-API",
+      "owner": "agent-x-a1-242",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T03:13:42Z",
+      "lease_expires_at": "2026-09-04T07:13:42Z"
+    }
+  },
+  "updated_at": "2026-09-04T03:13:42Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
