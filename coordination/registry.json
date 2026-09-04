@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 365,
+  "revision": 366,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -851,7 +851,7 @@
       "id": "AUT-J1",
       "title": "AUT-J1-scheduler-runtime",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-aut-j1-20260904",
       "target_issue": 269,
@@ -884,34 +884,16 @@
       "registered_by": "codex-dispatcher-20260904",
       "dispatch_reason": "AUT-C0 is complete; AUT-J1 is the only current mainline node.",
       "note": "Bounded durable scheduler runtime that delegates only to the existing E5 Job submission and JobRuntime; no second execution engine or Job authority.",
-      "lease_expires_at": "2026-09-04T20:19:53Z",
+      "lease_expires_at": null,
       "started_at": "2026-09-04T16:19:53Z",
-      "updated_at": "2026-09-04T16:19:53Z"
+      "updated_at": "2026-09-04T17:45:12Z",
+      "completed_at": "2026-09-04T17:45:12Z",
+      "result_head": "d46f2805afabfb75277f06174234413db0fa7100",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33901531142",
+      "completion_note": "Merged PR #270 at 3ea78cf; exact-head independent acceptance 5544218384; post-merge main CI 33901531142 passed 6/6."
     }
   ],
-  "locks": {
-    "branch:agent/issue-269-aut-j1-scheduler-runtime": {
-      "task_id": "AUT-J1",
-      "owner": "codex-aut-j1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T16:19:53Z",
-      "lease_expires_at": "2026-09-04T20:19:53Z"
-    },
-    "storage:automation-schedule": {
-      "task_id": "AUT-J1",
-      "owner": "codex-aut-j1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T16:19:53Z",
-      "lease_expires_at": "2026-09-04T20:19:53Z"
-    },
-    "gate:aut-runtime": {
-      "task_id": "AUT-J1",
-      "owner": "codex-aut-j1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T16:19:53Z",
-      "lease_expires_at": "2026-09-04T20:19:53Z"
-    }
-  },
-  "updated_at": "2026-09-04T16:19:53Z",
+  "locks": {},
+  "updated_at": "2026-09-04T17:45:12Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
