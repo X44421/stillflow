@@ -5,6 +5,7 @@
 
 pub mod artifact;
 pub mod audit;
+pub mod automation;
 pub mod backup;
 pub mod bundle;
 pub mod control_plane;
@@ -30,6 +31,11 @@ pub use audit::{
     AuditActor, AuditActorKind, AuditCursor, AuditEventDraft, AuditEventRecord, AuditLineageEdge,
     AuditObjectRef, AuditPage, AuditQuery, AuditRetentionState, AuditStore, AUDIT_VERSION,
     MAX_AUDIT_LINEAGE_EDGES, MAX_AUDIT_PAGE_SIZE, MAX_AUDIT_TEXT_BYTES,
+};
+pub use automation::{
+    AutomationScheduleDraft, AutomationScheduleRecord, AutomationScheduleState, AutomationTrigger,
+    AutomationTriggerLease, DEFAULT_AUTOMATION_CLAIM_LEASE_SECONDS,
+    MAX_AUTOMATION_SUBMISSION_ATTEMPTS, MAX_AUTOMATION_TEMPLATE_BYTES,
 };
 pub use backup::{BackupFile, BackupManifest, BACKUP_FORMAT_VERSION, BACKUP_MANIFEST_FILE};
 pub use bundle::{

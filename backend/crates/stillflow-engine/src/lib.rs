@@ -19,6 +19,7 @@ pub(crate) mod preview;
 mod profile;
 mod quality;
 mod remainder;
+mod scheduler;
 mod types;
 mod typing;
 mod verification;
@@ -54,6 +55,12 @@ pub use quality::{
     QUALITY_MAX_FINDINGS, QUALITY_MAX_IDENTITY_BYTES, QUALITY_MAX_PLAN_FINGERPRINT_BYTES,
     QUALITY_MAX_PROVENANCE_REF_BYTES, QUALITY_STATE_BYTE_BUDGET,
     QUALITY_STATE_FIXED_OVERHEAD_BYTES,
+};
+pub use scheduler::{
+    create_schedule, next_run_for_record, occurrence_idempotency_key, AutomationJobFactory,
+    AutomationScheduler, AutomationSchedulerConfig, AutomationSchedulerError, AutomationTickReport,
+    E5JobSubmitter, E5SubmissionReceipt, SCHEDULER_DEFAULT_POLL_INTERVAL,
+    SCHEDULER_MAX_DUE_PER_TICK, SCHEDULER_WAKE_CAPACITY,
 };
 pub use verification::{
     VerificationIdentities, VerificationRequest, MAX_DEDUP_KEY_COLUMNS,

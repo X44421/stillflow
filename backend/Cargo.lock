@@ -3255,6 +3255,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "chrono",
+ "chrono-tz",
  "futures",
  "serde",
  "serde_json",
