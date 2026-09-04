@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 372,
+  "revision": 373,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -969,9 +969,44 @@
       "result_head": "fe9ff9559b118ad359b6c71d87e764cbf3f44f43",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33914839133",
       "completion_note": "PR #275 merged as 981b377463fe2782ba51c7959e3bad9fcc78af42; exact-head independent acceptance 5545838825; PR CI 33914295634 passed 6/6; post-merge main CI 33914839133 passed 6/6; closeout 5545958135."
+    },
+    {
+      "id": "OPS-O4",
+      "title": "OPS-O4-service-packaging-desktop-daemon",
+      "risk_level": "L3",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 276,
+      "target_branch": "agent/issue-276-ops-o4-service-packaging-daemon",
+      "expected_base": "981b377463fe2782ba51c7959e3bad9fcc78af42",
+      "locks": [
+        "branch:agent/issue-276-ops-o4-service-packaging-daemon",
+        "api:transport",
+        "ops:daemon",
+        "gate:ops-daemon"
+      ],
+      "paths": [
+        "backend/crates/stillflow-api/src/deployment.rs",
+        "backend/crates/stillflow-api/src/lib.rs",
+        "docs/evidence/operations/ops-o4.md"
+      ],
+      "shared_paths": [],
+      "depends_on": [
+        "SEC-A1",
+        "OPS-O1",
+        "OPS-O3",
+        "AUT-A1"
+      ],
+      "conflicts_with": [],
+      "registered_at": "2026-09-04T20:24:43Z",
+      "registered_by": "codex-ops-o4-20260904",
+      "dispatch_reason": "H2-B01 is complete; OPS-O4 is the only current mainline node.",
+      "note": "Transport-neutral service packaging and Desktop-daemon lifecycle contract; reuse existing API, health, scheduler, runtime, authorization, and storage authorities. No new executor, queue, HTTP server, installer, or frontend execution path.",
+      "lease_expires_at": null
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T20:16:22Z",
+  "updated_at": "2026-09-04T20:24:43Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
