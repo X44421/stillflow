@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 335,
+  "revision": 336,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -553,63 +553,9 @@
       "result_head": "ed0a37a185181d55205c510662c8f8c0c148de64",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33853464715",
       "completion_note": "Merged PR #251 as e106fddeb3e5e6ece1fd3bf10475f4880e53e84d; exact-head CI 33853464715 passed 6/6; independent acceptance receipt 5537873982; post-merge main CI 33854003332 passed 6/6; #81 roadmap receipt 5537939591; SEC-S1 only next mainline node."
-    },
-    {
-      "id": "SEC-S1",
-      "title": "[SEC-S1] Identity / Credential persistence",
-      "risk_level": "L3",
-      "status": "running",
-      "mode": "write",
-      "owner": "codex-sec-s1-20260904",
-      "target_issue": 252,
-      "target_branch": "agent/issue-252-sec-s1-identity-credential",
-      "expected_base": "e106fddeb3e5e6ece1fd3bf10475f4880e53e84d",
-      "locks": [
-        "branch:agent/issue-252-sec-s1-identity-credential",
-        "storage:identity",
-        "gate:sec-identity"
-      ],
-      "paths": [
-        "backend/crates/stillflow-storage/src/identity.rs",
-        "backend/crates/stillflow-storage/src/store.rs",
-        "backend/crates/stillflow-storage/src/error.rs",
-        "backend/crates/stillflow-storage/src/lib.rs",
-        "backend/crates/stillflow-storage/Cargo.toml",
-        "docs/evidence/security/**"
-      ],
-      "shared_paths": [],
-      "depends_on": [],
-      "conflicts_with": [],
-      "lease_expires_at": "2026-09-04T12:46:19Z",
-      "registered_at": "2026-09-04T08:43:42Z",
-      "updated_at": "2026-09-04T08:46:19Z",
-      "registered_by": "codex-sec-s1-20260904",
-      "started_at": "2026-09-04T08:46:19Z"
     }
   ],
-  "locks": {
-    "branch:agent/issue-252-sec-s1-identity-credential": {
-      "task_id": "SEC-S1",
-      "owner": "codex-sec-s1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T08:46:19Z",
-      "lease_expires_at": "2026-09-04T12:46:19Z"
-    },
-    "storage:identity": {
-      "task_id": "SEC-S1",
-      "owner": "codex-sec-s1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T08:46:19Z",
-      "lease_expires_at": "2026-09-04T12:46:19Z"
-    },
-    "gate:sec-identity": {
-      "task_id": "SEC-S1",
-      "owner": "codex-sec-s1-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T08:46:19Z",
-      "lease_expires_at": "2026-09-04T12:46:19Z"
-    }
-  },
-  "updated_at": "2026-09-04T08:46:19Z",
+  "locks": {},
+  "updated_at": "2026-09-04T09:26:51Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
