@@ -43,6 +43,8 @@ pub enum Capability {
     ArtifactDownload,
     ExportWrite,
     CredentialManage,
+    AuditRead,
+    AuditExport,
 }
 
 impl Capability {
@@ -67,6 +69,8 @@ impl Capability {
             Self::ArtifactDownload => "artifact:download",
             Self::ExportWrite => "export:write",
             Self::CredentialManage => "credential:manage",
+            Self::AuditRead => "audit:read",
+            Self::AuditExport => "audit:export",
         }
     }
 
@@ -91,6 +95,8 @@ impl Capability {
             "artifact:download" => Self::ArtifactDownload,
             "export:write" => Self::ExportWrite,
             "credential:manage" => Self::CredentialManage,
+            "audit:read" => Self::AuditRead,
+            "audit:export" => Self::AuditExport,
             _ => return None,
         })
     }

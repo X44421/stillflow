@@ -77,6 +77,12 @@ impl ControlPlaneStore {
         crate::IdentityStore::from_inner(Arc::clone(&self.inner))
     }
 
+    /// Returns the AUD-A1 audit and lineage view sharing this store's managed
+    /// root lock and SQLite schema.
+    pub fn audit(&self) -> crate::AuditStore {
+        crate::AuditStore::from_inner(Arc::clone(&self.inner))
+    }
+
     pub fn create_workspace(
         &self,
         workspace_id: Uuid,
@@ -7565,7 +7571,7 @@ mod tests {
     #[test]
     fn fresh_schema_and_reopen_are_idempotent() {
         let fixture = Fixture::new();
-        assert_eq!(fixture.store.schema_version(), 8);
+        assert_eq!(fixture.store.schema_version(), 9);
         let job = fixture
             .store
             .submit_job(fixture.submission(1, 10))

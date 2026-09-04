@@ -4,6 +4,7 @@
 //! schemas remain in `stillflow-core`.
 
 pub mod artifact;
+pub mod audit;
 pub mod backup;
 pub mod bundle;
 pub mod control_plane;
@@ -23,6 +24,11 @@ pub use artifact::{
     ArtifactSectionId, ArtifactSectionStats, MAX_BUNDLE_REPORT_BYTES, MAX_BUNDLE_REPORT_PARTITIONS,
     MAX_BUNDLE_REPORT_ROWS, MAX_REPORT_BYTES, MAX_REPORT_PARTITIONS, MAX_REPORT_ROWS,
     REPORT_PACK_BYTES, REPORT_PACK_ROWS,
+};
+pub use audit::{
+    AuditActor, AuditActorKind, AuditCursor, AuditEventDraft, AuditEventRecord, AuditLineageEdge,
+    AuditObjectRef, AuditPage, AuditQuery, AuditRetentionState, AuditStore, AUDIT_VERSION,
+    MAX_AUDIT_LINEAGE_EDGES, MAX_AUDIT_PAGE_SIZE, MAX_AUDIT_TEXT_BYTES,
 };
 pub use backup::{BackupFile, BackupManifest, BACKUP_FORMAT_VERSION, BACKUP_MANIFEST_FILE};
 pub use bundle::{
