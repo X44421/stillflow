@@ -1182,6 +1182,24 @@ impl ControlPlaneStore {
         job_from_connection(&connection, job_id)
     }
 
+    /// Returns the durable queued-job count for one Workspace. This is a
+    /// bounded operational gauge; it does not create a second in-memory queue
+    /// or expose job identifiers.
+    pub fn queue_depth(&self, workspace_id: Uuid) -> Result<u64, StorageError> {
+        validate_id(workspace_id, "workspace")?;
+        let _activity = self.read_activity()?;
+        let connection = open_connection(&self.inner)?;
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM cp_jobs
+                 WHERE workspace_id = ?1 AND state = 'queued'",
+                params![workspace_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| StorageError::database("read queued Job count"))?;
+        u64::try_from(count).map_err(|_| StorageError::ArithmeticOverflow("queue depth"))
+    }
+
     /// Returns the oldest queued Job for one Workspace. The durable row is the
     /// queue; the runtime only uses this method to wake workers and never
     /// mirrors these rows in an in-memory scheduler.
