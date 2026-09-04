@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 358,
+  "revision": 359,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -776,9 +776,9 @@
       "id": "OPS-O2",
       "title": "OPS-O2-retention-gc",
       "risk_level": "L3",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-ops-o2-20260904",
       "target_issue": 265,
       "target_branch": "agent/issue-265-ops-o2-retention-gc",
       "expected_base": "944d82be7ae852e7302fea1446c34d0f9d268999",
@@ -804,10 +804,35 @@
       "registered_at": "2026-09-04T14:19:00Z",
       "registered_by": "codex-dispatcher-20260904",
       "dispatch_reason": "AUD-A1 is complete; OPS-O2 is the only current mainline node.",
-      "note": "Storage-owned tombstone-first retention with dry-run, bounded reference-safe GC, and no automatic worker or HTTP surface."
+      "note": "Storage-owned tombstone-first retention with dry-run, bounded reference-safe GC, and no automatic worker or HTTP surface.",
+      "lease_expires_at": "2026-09-04T18:19:42Z",
+      "started_at": "2026-09-04T14:19:42Z",
+      "updated_at": "2026-09-04T14:19:42Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T14:19:05Z",
+  "locks": {
+    "branch:agent/issue-265-ops-o2-retention-gc": {
+      "task_id": "OPS-O2",
+      "owner": "codex-ops-o2-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T14:19:42Z",
+      "lease_expires_at": "2026-09-04T18:19:42Z"
+    },
+    "storage:retention": {
+      "task_id": "OPS-O2",
+      "owner": "codex-ops-o2-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T14:19:42Z",
+      "lease_expires_at": "2026-09-04T18:19:42Z"
+    },
+    "gate:ops-retention": {
+      "task_id": "OPS-O2",
+      "owner": "codex-ops-o2-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T14:19:42Z",
+      "lease_expires_at": "2026-09-04T18:19:42Z"
+    }
+  },
+  "updated_at": "2026-09-04T14:19:42Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
