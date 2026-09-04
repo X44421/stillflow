@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 349,
+  "revision": 350,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -671,9 +671,9 @@
       "id": "OPS-O3",
       "title": "OPS-O3-backup-restore",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-ops-o3-20260904",
       "target_issue": 259,
       "target_branch": "agent/issue-259-ops-o3-backup-restore",
       "expected_base": "7b3bc28636efaad5973931b485e07e06a99b129b",
@@ -691,13 +691,36 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T15:47:41Z",
       "registered_at": "2026-09-04T11:47:18Z",
-      "updated_at": "2026-09-04T11:47:18Z",
-      "registered_by": "codex-ops-o3-20260904"
+      "updated_at": "2026-09-04T11:47:41Z",
+      "registered_by": "codex-ops-o3-20260904",
+      "started_at": "2026-09-04T11:47:41Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T11:47:18Z",
+  "locks": {
+    "branch:agent/issue-259-ops-o3-backup-restore": {
+      "task_id": "OPS-O3",
+      "owner": "codex-ops-o3-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T11:47:41Z",
+      "lease_expires_at": "2026-09-04T15:47:41Z"
+    },
+    "storage:backup-restore": {
+      "task_id": "OPS-O3",
+      "owner": "codex-ops-o3-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T11:47:41Z",
+      "lease_expires_at": "2026-09-04T15:47:41Z"
+    },
+    "storage:stillflow-storage": {
+      "task_id": "OPS-O3",
+      "owner": "codex-ops-o3-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T11:47:41Z",
+      "lease_expires_at": "2026-09-04T15:47:41Z"
+    }
+  },
+  "updated_at": "2026-09-04T11:47:41Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
