@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 329,
+  "revision": 330,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -499,7 +499,7 @@
       "id": "P23-C0",
       "title": "[P23-C0] Phase 2/3 execution dependency freeze",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-p23-c0-20260904",
       "target_issue": 248,
@@ -514,22 +514,18 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-04T09:54:01Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-04T07:53:45Z",
-      "updated_at": "2026-09-04T07:54:01Z",
+      "updated_at": "2026-09-04T08:18:30Z",
       "registered_by": "codex-p23-c0-20260904",
-      "started_at": "2026-09-04T07:54:01Z"
+      "started_at": "2026-09-04T07:54:01Z",
+      "completed_at": "2026-09-04T08:18:30Z",
+      "result_head": "eefd014f9bbcf1b4108304f393550c2bdc3a55a1",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33851059984",
+      "completion_note": "Merged PR #249 as e8557402ae0cd9d8ec9eb0a15501bb85c04e43fe; exact-head CI 33851059984 passed 6/6; independent acceptance receipt 5537583750; post-merge main CI 33851952228 passed 6/6; #81 roadmap receipt 5537718712; SEC-C0 only next mainline node."
     }
   ],
-  "locks": {
-    "gate:phase23-freeze": {
-      "task_id": "P23-C0",
-      "owner": "codex-p23-c0-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T07:54:01Z",
-      "lease_expires_at": "2026-09-04T09:54:01Z"
-    }
-  },
-  "updated_at": "2026-09-04T07:54:01Z",
+  "locks": {},
+  "updated_at": "2026-09-04T08:18:30Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
