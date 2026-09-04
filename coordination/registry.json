@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 316,
+  "revision": 317,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -361,7 +361,7 @@
       "id": "Q-G1-QUALITY-FINAL-GATE",
       "title": "[Q-G1] Quality final gate (review-only)",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "hold",
       "mode": "write",
       "owner": null,
       "target_issue": 241,
@@ -384,11 +384,16 @@
       "conflicts_with": [],
       "lease_expires_at": null,
       "registered_at": "2026-09-04T02:27:46Z",
-      "updated_at": "2026-09-04T02:27:46Z",
-      "registered_by": "agent-q-g1-dispatch"
+      "updated_at": "2026-09-04T03:06:38Z",
+      "registered_by": "agent-q-g1-dispatch",
+      "not_planned": true,
+      "not_planned_at": "2026-09-04T03:06:38Z",
+      "not_planned_by": "agent-q-g1-governance",
+      "not_planned_reason": "GitHub Issue #241 is CLOSED/NOT_PLANNED; standalone Q-G1 is skipped and X-A1 is the next product task.",
+      "completion_note": "Q-G1 not planned; no implementation, claim, lease, or lock authorized."
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T02:27:46Z",
+  "updated_at": "2026-09-04T03:06:38Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
