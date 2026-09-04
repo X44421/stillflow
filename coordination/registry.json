@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 363,
+  "revision": 364,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -846,9 +846,47 @@
       "result_head": "cc333b6de77a0db79ee8c05a3e93a3561512716e",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33893121722",
       "completion_note": "AUT_C0_PR268_MERGED_D3D17E7_MAIN_CI_33893121722_ACCEPTANCE_5543036827"
+    },
+    {
+      "id": "AUT-J1",
+      "title": "AUT-J1-scheduler-runtime",
+      "risk_level": "L3",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 269,
+      "target_branch": "agent/issue-269-aut-j1-scheduler-runtime",
+      "expected_base": "d3d17e7af46510c58c53ab22b8c197fa22c2472a",
+      "locks": [
+        "branch:agent/issue-269-aut-j1-scheduler-runtime",
+        "storage:automation-schedule",
+        "gate:aut-runtime"
+      ],
+      "paths": [
+        "backend/crates/stillflow-core/src/automation.rs",
+        "backend/crates/stillflow-core/src/lib.rs",
+        "backend/crates/stillflow-storage/src/control_plane.rs",
+        "backend/crates/stillflow-storage/src/lib.rs",
+        "backend/crates/stillflow-storage/src/manifest.rs",
+        "backend/crates/stillflow-storage/src/store.rs",
+        "backend/crates/stillflow-engine/src/lib.rs",
+        "backend/crates/stillflow-engine/src/scheduler.rs",
+        "backend/Cargo.toml",
+        "backend/Cargo.lock",
+        "docs/evidence/automation/aut-j1.md"
+      ],
+      "shared_paths": [],
+      "depends_on": [
+        "AUT-C0"
+      ],
+      "conflicts_with": [],
+      "registered_at": "2026-09-04T16:18:30Z",
+      "registered_by": "codex-dispatcher-20260904",
+      "dispatch_reason": "AUT-C0 is complete; AUT-J1 is the only current mainline node.",
+      "note": "Bounded durable scheduler runtime that delegates only to the existing E5 Job submission and JobRuntime; no second execution engine or Job authority."
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T16:10:39Z",
+  "updated_at": "2026-09-04T16:18:35Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
