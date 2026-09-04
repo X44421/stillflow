@@ -2933,7 +2933,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
         for table in [
             "bundle_publications",
             "verification_bundles",

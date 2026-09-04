@@ -7591,7 +7591,7 @@ mod tests {
     #[test]
     fn fresh_schema_and_reopen_are_idempotent() {
         let fixture = Fixture::new();
-        assert_eq!(fixture.store.schema_version(), 10);
+        assert_eq!(fixture.store.schema_version(), 11);
         let job = fixture
             .store
             .submit_job(fixture.submission(1, 10))
