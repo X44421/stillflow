@@ -842,7 +842,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
@@ -854,7 +855,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         2 => {
             migrate_to_version_three(connection)?;
@@ -865,7 +867,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         3 => {
             migrate_to_version_four(connection)?;
@@ -875,7 +878,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         4 => {
             migrate_to_version_five(connection)?;
@@ -884,7 +888,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         5 => {
             migrate_to_version_six(connection)?;
@@ -892,32 +897,41 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         6 => {
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         7 => {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         8 => {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
         9 => {
             migrate_to_version_ten(connection)?;
-            migrate_to_version_eleven(connection)
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
         }
-        10 => migrate_to_version_eleven(connection),
-        11 => Ok(()),
+        10 => {
+            migrate_to_version_eleven(connection)?;
+            migrate_to_version_twelve(connection)
+        }
+        11 => migrate_to_version_twelve(connection),
+        12 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
 }
@@ -1206,6 +1220,46 @@ fn migrate_to_version_eleven(connection: &mut Connection) -> Result<(), StorageE
     transaction
         .commit()
         .map_err(|_| StorageError::database("commit storage migration version eleven"))
+}
+
+/// Version twelve adds the bounded AutomationExecution handoff/history
+/// projection used by AUT-A1. It stores only redaction-safe identities and
+/// the existing E5 Job reference; it does not own Job or Run lifecycle.
+fn migrate_to_version_twelve(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version twelve"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE aut_executions (
+                 execution_id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 schedule_id TEXT NOT NULL REFERENCES aut_schedules(id) ON DELETE CASCADE,
+                 trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('manual', 'schedule', 'event')),
+                 occurrence_key TEXT NOT NULL,
+                 idempotency_key TEXT NOT NULL,
+                 request_digest TEXT NOT NULL CHECK (length(request_digest) = 64),
+                 job_id TEXT NOT NULL,
+                 state TEXT NOT NULL CHECK (state IN ('accepted', 'submitted', 'failed', 'skipped')),
+                 failure TEXT,
+                 created_at_utc TEXT NOT NULL,
+                 updated_at_utc TEXT NOT NULL,
+                 UNIQUE (workspace_id, schedule_id, trigger_kind, occurrence_key),
+                 UNIQUE (workspace_id, idempotency_key)
+             ) STRICT;
+
+             CREATE INDEX aut_executions_history_index
+             ON aut_executions(workspace_id, schedule_id, created_at_utc DESC, execution_id DESC);
+
+             CREATE INDEX aut_executions_idempotency_index
+             ON aut_executions(workspace_id, idempotency_key);
+
+             PRAGMA user_version = 12;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version twelve"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version twelve"))
 }
 
 /// Version nine adds the immutable, workspace-scoped AUD-C0 audit envelope.
@@ -2881,7 +2935,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
 
         // A legacy version-one database migrates through the current schema
         // and gains the bundle, export, and control-plane tables.
@@ -2933,7 +2987,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -2948,6 +3002,7 @@ mod tests {
             "audit_events",
             "retention_tombstones",
             "aut_schedules",
+            "aut_executions",
         ] {
             let present: i64 = connection
                 .query_row(
@@ -2964,19 +3019,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 12;")
+            .execute_batch("PRAGMA user_version = 13;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(12))
+            Err(StorageError::UnsupportedStorageVersion(13))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
     }
 
     #[test]
@@ -3052,7 +3107,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
         for (table, expected) in [
             ("snapshots", 1_i64),
             ("verification_bundles", 1_i64),

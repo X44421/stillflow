@@ -41,6 +41,10 @@ use stillflow_storage::{
 use tokio::time::Instant;
 use uuid::Uuid;
 
+#[path = "automation.rs"]
+mod automation;
+pub use automation::*;
+
 use crate::authorization::AuthorizationGate;
 use crate::observability::{
     health_view, liveness_view, metrics_view, readiness_view, EmptyRequest, HealthView,

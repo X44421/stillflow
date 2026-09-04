@@ -1673,12 +1673,12 @@ mod tests {
         drop(control);
         let database = Connection::open(temp.path().join("metadata.sqlite3")).expect("database");
         database
-            .pragma_update(None, "user_version", 12_i64)
+            .pragma_update(None, "user_version", 13_i64)
             .expect("future version");
         drop(database);
         assert!(matches!(
             crate::ControlPlaneStore::open(temp.path()),
-            Err(StorageError::UnsupportedStorageVersion(12))
+            Err(StorageError::UnsupportedStorageVersion(13))
         ));
     }
 }
