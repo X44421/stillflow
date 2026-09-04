@@ -494,13 +494,36 @@ mod tests {
         let first_record = control_plane
             .get_automation_schedule(first_id)
             .expect("read first schedule");
-        assert_eq!(first_record.next_run_at, Some(at(160)));
+        let second_record = control_plane
+            .get_automation_schedule(second_id)
+            .expect("read second schedule");
+        assert_eq!(
+            [first_record.next_run_at, second_record.next_run_at]
+                .into_iter()
+                .filter(|next_run| *next_run == Some(at(160)))
+                .count(),
+            1
+        );
 
         let second_report = scheduler.tick_at(at(100)).await.expect("second tick");
         assert_eq!(second_report.due_schedules, 1);
         assert_eq!(second_report.claimed, 1);
         assert_eq!(second_report.submitted, 1);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            control_plane
+                .get_automation_schedule(first_id)
+                .expect("read first schedule after second tick")
+                .next_run_at,
+            Some(at(160))
+        );
+        assert_eq!(
+            control_plane
+                .get_automation_schedule(second_id)
+                .expect("read second schedule after second tick")
+                .next_run_at,
+            Some(at(160))
+        );
 
         let replay_guard_report = scheduler.tick_at(at(100)).await.expect("replay guard tick");
         assert_eq!(replay_guard_report.due_schedules, 0);
