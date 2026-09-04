@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 367,
+  "revision": 368,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -896,9 +896,9 @@
       "id": "AUT-A1",
       "title": "AUT-A1-automation-api",
       "risk_level": "L3",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-aut-a1-20260904",
       "target_issue": 272,
       "target_branch": "agent/issue-272-aut-a1-automation-api",
       "expected_base": "3ea78cf3968dbbffc64c0fe75ee507f77ceddd86",
@@ -925,10 +925,35 @@
       "registered_at": "2026-09-04T17:53:43Z",
       "registered_by": "codex-dispatcher-20260904",
       "dispatch_reason": "AUT-J1 is complete; AUT-A1 is the only current mainline node.",
-      "note": "Bounded Automation CRUD/API projection with CAS lifecycle, manual E5 trigger handoff, history, and SEC/AUD integration; no second executor or queue authority."
+      "note": "Bounded Automation CRUD/API projection with CAS lifecycle, manual E5 trigger handoff, history, and SEC/AUD integration; no second executor or queue authority.",
+      "lease_expires_at": "2026-09-04T21:54:20Z",
+      "started_at": "2026-09-04T17:54:20Z",
+      "updated_at": "2026-09-04T17:54:20Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T17:53:46Z",
+  "locks": {
+    "branch:agent/issue-272-aut-a1-automation-api": {
+      "task_id": "AUT-A1",
+      "owner": "codex-aut-a1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T17:54:20Z",
+      "lease_expires_at": "2026-09-04T21:54:20Z"
+    },
+    "api:automation": {
+      "task_id": "AUT-A1",
+      "owner": "codex-aut-a1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T17:54:20Z",
+      "lease_expires_at": "2026-09-04T21:54:20Z"
+    },
+    "gate:aut-api": {
+      "task_id": "AUT-A1",
+      "owner": "codex-aut-a1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T17:54:20Z",
+      "lease_expires_at": "2026-09-04T21:54:20Z"
+    }
+  },
+  "updated_at": "2026-09-04T17:54:20Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
