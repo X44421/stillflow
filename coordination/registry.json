@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 376,
+  "revision": 377,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1015,9 +1015,9 @@
       "id": "H2",
       "title": "H2-security-failure-recovery-matrix",
       "risk_level": "L3",
-      "status": "dispatched",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-h2-20260904",
       "target_issue": 278,
       "target_branch": "agent/issue-278-h2-security-failure-recovery",
       "expected_base": "a267e453667f00da09d05c7999b2f9d875ad178c",
@@ -1038,10 +1038,27 @@
       "registered_by": "codex-h2-20260904",
       "dispatch_reason": "OPS-O4 is complete; H2 is the current release gate.",
       "note": "Review-only security, failure, and recovery matrix. Use existing executable evidence and contracts; no new runtime, transport, storage schema, or frontend behavior.",
-      "lease_expires_at": null
+      "lease_expires_at": "2026-09-05T01:07:49Z",
+      "started_at": "2026-09-04T21:07:49Z",
+      "updated_at": "2026-09-04T21:07:49Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T21:07:17Z",
+  "locks": {
+    "branch:agent/issue-278-h2-security-failure-recovery": {
+      "task_id": "H2",
+      "owner": "codex-h2-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T21:07:49Z",
+      "lease_expires_at": "2026-09-05T01:07:49Z"
+    },
+    "gate:h2": {
+      "task_id": "H2",
+      "owner": "codex-h2-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T21:07:49Z",
+      "lease_expires_at": "2026-09-05T01:07:49Z"
+    }
+  },
+  "updated_at": "2026-09-04T21:07:49Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
