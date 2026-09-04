@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 354,
+  "revision": 355,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -730,9 +730,45 @@
       "result_head": "b68b4a54db27f4418f39e2f234885e8a3554012f",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33874320081",
       "completion_note": "AUD_C0_PR262_MERGED_POST_MAIN_CI_33874320081_ACCEPTANCE_5540603669"
+    },
+    {
+      "id": "AUD-A1",
+      "title": "AUD-A1-audit-lineage-api",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 263,
+      "target_branch": "agent/issue-263-aud-a1-audit-lineage-api",
+      "expected_base": "5d187e2a12d12c1bf00ca7e1db227babc42d0412",
+      "locks": [
+        "branch:agent/issue-263-aud-a1-audit-lineage-api",
+        "audit:events",
+        "api:audit"
+      ],
+      "paths": [
+        "backend/crates/stillflow-storage/src/audit.rs",
+        "backend/crates/stillflow-storage/src/store.rs",
+        "backend/crates/stillflow-storage/src/manifest.rs",
+        "backend/crates/stillflow-storage/src/lib.rs",
+        "backend/crates/stillflow-api/src/service.rs",
+        "backend/crates/stillflow-api/src/authorization.rs",
+        "backend/crates/stillflow-api/src/error.rs",
+        "backend/crates/stillflow-api/src/lib.rs",
+        "backend/crates/stillflow-api/src/manifest.rs",
+        "backend/crates/stillflow-api/tests/aud_a1_api.rs",
+        "docs/evidence/audit/aud-a1.md"
+      ],
+      "shared_paths": [],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-04T12:55:13Z",
+      "updated_at": "2026-09-04T12:55:13Z",
+      "registered_by": "codex-aud-a1-20260904"
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T12:50:02Z",
+  "updated_at": "2026-09-04T12:55:13Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
