@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 315,
+  "revision": 316,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -356,9 +356,39 @@
       "result_head": "f7179ce3d5a63062a6511b045050316f83090ccc",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33828411000",
       "completion_note": "PR #240 merged as 0455b68bc646c04283099820be16cbdaac222df9; independent exact-head acceptance passed; post-merge CI 33828411000 passed 6/6; Pages deploy 33828411001 is unrelated repository configuration failure (Pages disabled)."
+    },
+    {
+      "id": "Q-G1-QUALITY-FINAL-GATE",
+      "title": "[Q-G1] Quality final gate (review-only)",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 241,
+      "target_branch": "agent/issue-241-q-g1-quality-final-gate",
+      "expected_base": "0455b68bc646c04283099820be16cbdaac222df9",
+      "locks": [
+        "gate:q-g1-quality-final"
+      ],
+      "paths": [
+        "backend/crates/stillflow-core/**",
+        "backend/crates/stillflow-engine/**",
+        "backend/crates/stillflow-storage/**",
+        "backend/crates/stillflow-api/**"
+      ],
+      "shared_paths": [
+        "docs/architecture/adr-003-profiling-quality-and-findings.md",
+        "docs/issues/issue-222-profile-history-drift-contract.md"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-04T02:27:46Z",
+      "updated_at": "2026-09-04T02:27:46Z",
+      "registered_by": "agent-q-g1-dispatch"
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T02:18:44Z",
+  "updated_at": "2026-09-04T02:27:46Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
