@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 343,
+  "revision": 344,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -596,9 +596,9 @@
       "id": "SEC-A1",
       "title": "[SEC-A1] Workspace / Member / RBAC API",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-sec-a1-20260904",
       "target_issue": 254,
       "target_branch": "agent/issue-254-sec-a1-rbac-api",
       "expected_base": "e750b8dc1470f72b30ba01245879d9af855d85d5",
@@ -616,13 +616,36 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T13:51:57Z",
       "registered_at": "2026-09-04T09:51:48Z",
-      "updated_at": "2026-09-04T09:51:48Z",
-      "registered_by": "codex-sec-a1-20260904"
+      "updated_at": "2026-09-04T09:51:57Z",
+      "registered_by": "codex-sec-a1-20260904",
+      "started_at": "2026-09-04T09:51:57Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T09:51:48Z",
+  "locks": {
+    "branch:agent/issue-254-sec-a1-rbac-api": {
+      "task_id": "SEC-A1",
+      "owner": "codex-sec-a1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T09:51:57Z",
+      "lease_expires_at": "2026-09-04T13:51:57Z"
+    },
+    "api:authorization": {
+      "task_id": "SEC-A1",
+      "owner": "codex-sec-a1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T09:51:57Z",
+      "lease_expires_at": "2026-09-04T13:51:57Z"
+    },
+    "gate:sec-rbac": {
+      "task_id": "SEC-A1",
+      "owner": "codex-sec-a1-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T09:51:57Z",
+      "lease_expires_at": "2026-09-04T13:51:57Z"
+    }
+  },
+  "updated_at": "2026-09-04T09:51:57Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
