@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 328,
+  "revision": 329,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -499,9 +499,9 @@
       "id": "P23-C0",
       "title": "[P23-C0] Phase 2/3 execution dependency freeze",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-p23-c0-20260904",
       "target_issue": 248,
       "target_branch": "agent/issue-248-p23-c0-execution-freeze",
       "expected_base": "1530e0714c53d3d290703bcd4596eab2f162698e",
@@ -514,13 +514,22 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T09:54:01Z",
       "registered_at": "2026-09-04T07:53:45Z",
-      "updated_at": "2026-09-04T07:53:45Z",
-      "registered_by": "codex-p23-c0-20260904"
+      "updated_at": "2026-09-04T07:54:01Z",
+      "registered_by": "codex-p23-c0-20260904",
+      "started_at": "2026-09-04T07:54:01Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T07:53:45Z",
+  "locks": {
+    "gate:phase23-freeze": {
+      "task_id": "P23-C0",
+      "owner": "codex-p23-c0-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T07:54:01Z",
+      "lease_expires_at": "2026-09-04T09:54:01Z"
+    }
+  },
+  "updated_at": "2026-09-04T07:54:01Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
