@@ -15,6 +15,7 @@ pub mod export;
 pub mod identity;
 mod manifest;
 pub mod profile_history;
+pub mod retention;
 mod store;
 
 pub use artifact::{
@@ -72,6 +73,7 @@ pub use profile_history::{
     ProfileHistoryCursor, ProfileHistoryDraft, ProfileHistoryEntry, ProfileHistoryPage,
     ProfileHistoryState,
 };
+pub use retention::{RetentionCandidate, RetentionObjectKind, RetentionPolicy, RetentionReport};
 pub use store::{SnapshotBatchReader, SnapshotStore, SnapshotWriter};
 
 pub(crate) use bundle::verification_bundle_version_digest_inner;

@@ -83,6 +83,26 @@ impl ControlPlaneStore {
         crate::AuditStore::from_inner(Arc::clone(&self.inner))
     }
 
+    /// Plans or collects reference-safe retention work across the durable
+    /// control-plane object graph. Both operations share this store's
+    /// maintenance gate and audit/ledger semantics.
+    pub fn retention_plan(
+        &self,
+        now: DateTime<Utc>,
+        policy: crate::RetentionPolicy,
+    ) -> Result<crate::RetentionReport, StorageError> {
+        crate::retention::plan(&self.inner, now, policy)
+    }
+
+    pub fn collect_retention(
+        &self,
+        now: DateTime<Utc>,
+        policy: crate::RetentionPolicy,
+        dry_run: bool,
+    ) -> Result<crate::RetentionReport, StorageError> {
+        crate::retention::collect(&self.inner, now, policy, dry_run)
+    }
+
     pub fn create_workspace(
         &self,
         workspace_id: Uuid,
@@ -7571,7 +7591,7 @@ mod tests {
     #[test]
     fn fresh_schema_and_reopen_are_idempotent() {
         let fixture = Fixture::new();
-        assert_eq!(fixture.store.schema_version(), 9);
+        assert_eq!(fixture.store.schema_version(), 10);
         let job = fixture
             .store
             .submit_job(fixture.submission(1, 10))

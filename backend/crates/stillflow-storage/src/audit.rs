@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{
-    params, params_from_iter, types::ToSql, OptionalExtension, Row, TransactionBehavior,
+    params, params_from_iter, types::ToSql, OptionalExtension, Row, Transaction,
+    TransactionBehavior,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -645,6 +646,107 @@ impl AuditStore {
             .map_err(|_| StorageError::database("commit audit expiry"))?;
         Ok(record)
     }
+}
+
+/// Appends a system audit receipt inside an already-held maintenance
+/// transaction. Normal callers use `AuditStore::append`, which acquires a
+/// publisher activity guard; retention must instead keep its tombstone and
+/// deletion receipt in the same transaction while the maintenance gate is
+/// held.
+pub(crate) fn append_maintenance_audit_tx(
+    transaction: &Transaction<'_>,
+    draft: AuditEventDraft,
+) -> Result<(), StorageError> {
+    draft.validate()?;
+    let digest = draft.digest()?;
+    let workspace_exists: Option<i64> = transaction
+        .query_row(
+            "SELECT 1 FROM cp_workspaces WHERE id = ?1",
+            [draft.workspace_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| StorageError::database("check maintenance audit workspace"))?;
+    if workspace_exists.is_none() {
+        return Err(StorageError::NotFound(draft.workspace_id));
+    }
+    let existing: Option<String> = transaction
+        .query_row(
+            "SELECT event_digest FROM audit_events
+             WHERE workspace_id = ?1 AND (event_id = ?2 OR
+                   (?3 IS NOT NULL AND idempotency_key = ?3))
+             LIMIT 1",
+            params![
+                draft.workspace_id.to_string(),
+                draft.event_id.to_string(),
+                draft.idempotency_key.as_deref(),
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| StorageError::database("read maintenance audit receipt"))?;
+    if let Some(existing) = existing {
+        if existing == hex_encode(&digest) {
+            return Ok(());
+        }
+        return Err(StorageError::InvalidDraft(
+            "maintenance audit idempotency key was reused with a different receipt",
+        ));
+    }
+    let max_sequence: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(sequence), 0) FROM audit_events WHERE workspace_id = ?1",
+            [draft.workspace_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| StorageError::database("read maintenance audit sequence"))?;
+    let sequence = u64::try_from(max_sequence.checked_add(1).ok_or(
+        StorageError::ArithmeticOverflow("maintenance audit sequence"),
+    )?)
+    .map_err(|_| StorageError::ArithmeticOverflow("maintenance audit sequence"))?;
+    let before_json = serialize_optional(&draft.before, "serialize maintenance audit before")?;
+    let after_json = serialize_optional(&draft.after, "serialize maintenance audit after")?;
+    let lineage_json = serde_json::to_string(&draft.lineage)
+        .map_err(|_| StorageError::Serialization("serialize maintenance audit lineage"))?;
+    let payload_json = serde_json::to_string(&draft.payload)
+        .map_err(|_| StorageError::Serialization("serialize maintenance audit payload"))?;
+    transaction
+        .execute(
+            "INSERT INTO audit_events
+             (event_id, audit_version, workspace_id, sequence, occurred_at_utc,
+              actor_kind, actor_ref, action, reason_code, request_id,
+              correlation_id, trace_id, object_kind, object_id, before_json,
+              after_json, lineage_json, source_event_id, payload_json,
+              idempotency_key, event_digest, retention_state, expired_at_utc)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 'active', NULL)",
+            params![
+                draft.event_id.to_string(),
+                i64::from(draft.audit_version),
+                draft.workspace_id.to_string(),
+                i64::try_from(sequence)
+                    .map_err(|_| StorageError::ArithmeticOverflow("maintenance audit sequence"))?,
+                format_timestamp(&draft.occurred_at),
+                draft.actor.kind.as_str(),
+                draft.actor.actor_ref,
+                draft.action,
+                draft.reason_code,
+                draft.request_id,
+                draft.correlation_id,
+                draft.trace_id,
+                draft.object.kind,
+                draft.object.id.to_string(),
+                before_json,
+                after_json,
+                lineage_json,
+                draft.source_event_id.map(|value| value.to_string()),
+                payload_json,
+                draft.idempotency_key,
+                hex_encode(&digest),
+            ],
+        )
+        .map_err(|_| StorageError::database("insert maintenance audit receipt"))?;
+    Ok(())
 }
 
 fn record_from_row(row: &Row<'_>) -> Result<AuditEventRecord, rusqlite::Error> {
