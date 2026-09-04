@@ -146,6 +146,7 @@ impl SnapshotStore {
         });
         let mut connection = open_connection(&inner)?;
         migrate(&mut connection)?;
+        crate::IdentityStore::from_inner(Arc::clone(&inner)).recover_incomplete_rotations()?;
         Ok(Self { inner })
     }
 
@@ -826,7 +827,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_four(connection)?;
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
-            migrate_to_version_seven(connection)
+            migrate_to_version_seven(connection)?;
+            migrate_to_version_eight(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
@@ -834,32 +836,40 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_four(connection)?;
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
-            migrate_to_version_seven(connection)
+            migrate_to_version_seven(connection)?;
+            migrate_to_version_eight(connection)
         }
         2 => {
             migrate_to_version_three(connection)?;
             migrate_to_version_four(connection)?;
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
-            migrate_to_version_seven(connection)
+            migrate_to_version_seven(connection)?;
+            migrate_to_version_eight(connection)
         }
         3 => {
             migrate_to_version_four(connection)?;
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
-            migrate_to_version_seven(connection)
+            migrate_to_version_seven(connection)?;
+            migrate_to_version_eight(connection)
         }
         4 => {
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
-            migrate_to_version_seven(connection)
+            migrate_to_version_seven(connection)?;
+            migrate_to_version_eight(connection)
         }
         5 => {
             migrate_to_version_six(connection)?;
-            migrate_to_version_seven(connection)
+            migrate_to_version_seven(connection)?;
+            migrate_to_version_eight(connection)
         }
-        6 => migrate_to_version_seven(connection),
-        7 => Ok(()),
+        6 => {
+            migrate_to_version_seven(connection).and_then(|_| migrate_to_version_eight(connection))
+        }
+        7 => migrate_to_version_eight(connection),
+        8 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
 }
@@ -943,6 +953,125 @@ fn migrate_to_version_seven(connection: &mut Connection) -> Result<(), StorageEr
     transaction
         .commit()
         .map_err(|_| StorageError::database("commit storage migration version seven"))
+}
+
+/// Version eight adds workspace identity and provider-owned credential
+/// references. Secret material is deliberately absent from every table.
+fn migrate_to_version_eight(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version eight"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE sec_members (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 subject_ref TEXT NOT NULL CHECK (length(subject_ref) > 0),
+                 state TEXT NOT NULL CHECK (state IN ('active', 'revoked')),
+                 created_at_utc TEXT NOT NULL,
+                 revoked_at_utc TEXT,
+                 UNIQUE (id, workspace_id),
+                 UNIQUE (workspace_id, subject_ref)
+             ) STRICT;
+
+             CREATE INDEX sec_members_workspace_index
+             ON sec_members(workspace_id, state, id);
+
+             CREATE TABLE sec_roles (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 name TEXT NOT NULL CHECK (length(name) > 0),
+                 created_at_utc TEXT NOT NULL,
+                 UNIQUE (id, workspace_id),
+                 UNIQUE (workspace_id, name)
+             ) STRICT;
+
+             CREATE INDEX sec_roles_workspace_index
+             ON sec_roles(workspace_id, id);
+
+             CREATE TABLE sec_role_capabilities (
+                 role_id TEXT NOT NULL REFERENCES sec_roles(id) ON DELETE CASCADE,
+                 capability TEXT NOT NULL CHECK (length(capability) > 0),
+                 PRIMARY KEY (role_id, capability)
+             ) STRICT;
+
+             CREATE TABLE sec_member_roles (
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 member_id TEXT NOT NULL,
+                 role_id TEXT NOT NULL,
+                 PRIMARY KEY (member_id, role_id),
+                 FOREIGN KEY (member_id, workspace_id)
+                     REFERENCES sec_members(id, workspace_id) ON DELETE CASCADE,
+                 FOREIGN KEY (role_id, workspace_id)
+                     REFERENCES sec_roles(id, workspace_id) ON DELETE CASCADE
+             ) STRICT;
+
+             CREATE INDEX sec_member_roles_workspace_index
+             ON sec_member_roles(workspace_id, member_id, role_id);
+
+             CREATE TABLE sec_service_accounts (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 name TEXT NOT NULL CHECK (length(name) > 0),
+                 state TEXT NOT NULL CHECK (state IN ('active', 'revoked')),
+                 created_at_utc TEXT NOT NULL,
+                 revoked_at_utc TEXT,
+                 UNIQUE (id, workspace_id),
+                 UNIQUE (workspace_id, name)
+             ) STRICT;
+
+             CREATE INDEX sec_service_accounts_workspace_index
+             ON sec_service_accounts(workspace_id, state, id);
+
+             CREATE TABLE sec_credentials (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 owner_kind TEXT NOT NULL CHECK (owner_kind IN ('member', 'service_account')),
+                 owner_id TEXT NOT NULL,
+                 provider_kind TEXT NOT NULL CHECK (length(provider_kind) > 0),
+                 credential_ref TEXT NOT NULL CHECK (credential_ref LIKE 'cred://%'),
+                 state TEXT NOT NULL CHECK (state IN (
+                     'pending', 'active', 'rotating', 'revoked', 'expired',
+                     'recovery_required'
+                 )),
+                 created_at_utc TEXT NOT NULL,
+                 expires_at_utc TEXT,
+                 revoked_at_utc TEXT,
+                 UNIQUE (id, workspace_id),
+                 UNIQUE (workspace_id, credential_ref)
+             ) STRICT;
+
+             CREATE INDEX sec_credentials_workspace_index
+             ON sec_credentials(workspace_id, state, id);
+
+             CREATE TRIGGER sec_credentials_member_owner_insert
+             BEFORE INSERT ON sec_credentials
+             WHEN NEW.owner_kind = 'member'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sec_members
+                      WHERE id = NEW.owner_id AND workspace_id = NEW.workspace_id
+                  )
+             BEGIN
+                 SELECT RAISE(ABORT, 'credential member owner is not in workspace');
+             END;
+
+             CREATE TRIGGER sec_credentials_service_owner_insert
+             BEFORE INSERT ON sec_credentials
+             WHEN NEW.owner_kind = 'service_account'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sec_service_accounts
+                      WHERE id = NEW.owner_id AND workspace_id = NEW.workspace_id
+                  )
+             BEGIN
+                 SELECT RAISE(ABORT, 'credential service owner is not in workspace');
+             END;
+
+             PRAGMA user_version = 8;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version eight"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version eight"))
 }
 
 /// Version four adds the durable E5 unified control-plane graph.  The tables
@@ -2539,7 +2668,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
 
         // A legacy version-one database migrates through the current schema
         // and gains the bundle, export, and control-plane tables.
@@ -2591,7 +2720,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -2619,19 +2748,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 8;")
+            .execute_batch("PRAGMA user_version = 9;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(8))
+            Err(StorageError::UnsupportedStorageVersion(9))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
     }
 
     #[test]
@@ -2707,7 +2836,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         for (table, expected) in [
             ("snapshots", 1_i64),
             ("verification_bundles", 1_i64),
