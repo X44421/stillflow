@@ -4,6 +4,7 @@
 //! schemas remain in `stillflow-core`.
 
 pub mod artifact;
+pub mod backup;
 pub mod bundle;
 pub mod control_plane;
 pub mod dedup;
@@ -23,6 +24,7 @@ pub use artifact::{
     MAX_BUNDLE_REPORT_ROWS, MAX_REPORT_BYTES, MAX_REPORT_PARTITIONS, MAX_REPORT_ROWS,
     REPORT_PACK_BYTES, REPORT_PACK_ROWS,
 };
+pub use backup::{BackupFile, BackupManifest, BACKUP_FORMAT_VERSION, BACKUP_MANIFEST_FILE};
 pub use bundle::{
     AcceptedSnapshotArtifact, DeduplicationReportArtifact, RejectedRowsArtifact,
     ValidationReportArtifact, VerificationBundle, VerificationBundleDraft,
