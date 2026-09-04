@@ -8,6 +8,7 @@
 //! implementation file and its tests after stacking on the API bootstrap.
 
 pub mod authorization;
+pub mod deployment;
 pub mod envelope;
 pub mod error;
 pub mod limits;
@@ -22,6 +23,10 @@ pub mod event_stream {
 }
 
 pub use authorization::{AuthorizationMode, Capability};
+pub use deployment::{
+    CredentialReference, DaemonLifecycle, DaemonState, DeploymentError, LifecycleError,
+    RollbackPlan, ServiceConfig, ServicePlatform, TransportContract, TransportKind, UpgradePlan,
+};
 pub use envelope::{
     ApiErrorBody, ApiErrorResponse, ApiRequest, ApiResponse, RequestMetadata, RequestPrincipal,
     RequestPrincipalKind, ResponseMetadata,
