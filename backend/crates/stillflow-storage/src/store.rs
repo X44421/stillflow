@@ -378,6 +378,29 @@ impl SnapshotStore {
         Ok(report)
     }
 
+    /// Collects only tombstoned Export artifacts. This keeps the X-A1
+    /// maintenance endpoint from also mutating Snapshot retention state.
+    pub fn collect_export_garbage(
+        &self,
+        workspace_id: Uuid,
+        now: DateTime<Utc>,
+        retention: Duration,
+        max_candidates: u32,
+    ) -> Result<GarbageCollectionReport, StorageError> {
+        validate_maintenance_bound(max_candidates)?;
+        let _maintenance = acquire_maintenance(&self.inner)?;
+        let cutoff = cutoff_timestamp(now, retention, "export garbage-collection cutoff")?;
+        let mut report = GarbageCollectionReport::default();
+        crate::export::collect_export_garbage_for_workspace(
+            &self.inner,
+            &cutoff,
+            max_candidates,
+            workspace_id,
+            &mut report,
+        )?;
+        Ok(report)
+    }
+
     /// Loads the committed Export Manifest of one visible export (ADR-004
     /// §7). Tombstoned, never-committed, and unknown exports fail typed; the
     /// manifest is revalidated against its own file list on every load so the
@@ -388,6 +411,25 @@ impl SnapshotStore {
     ) -> Result<crate::export::ExportManifest, StorageError> {
         let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
         crate::export::load_export_manifest_inner(&self.inner, export_id)
+    }
+
+    /// Reads at most `max_bytes` from one committed export file. The path is
+    /// reconstructed from the validated manifest on every call.
+    pub fn read_export_file_chunk(
+        &self,
+        export_id: Uuid,
+        file_name: &str,
+        offset: u64,
+        max_bytes: usize,
+    ) -> Result<crate::export::ExportFileChunk, StorageError> {
+        let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
+        crate::export::read_export_file_chunk_inner(
+            &self.inner,
+            export_id,
+            file_name,
+            offset,
+            max_bytes,
+        )
     }
 
     /// Tombstones one committed export: the manifest stops being visible to

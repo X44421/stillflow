@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -18,16 +19,18 @@ use stillflow_connectors::ConnectorRegistry;
 use stillflow_core::{
     AssetKind, AssetLocator, AssetMetadata, ConnectionStatus, ConnectorKind, ControlPlaneEventType,
     ControlPlaneInput, DatasetState, DiscoverRequest, DriftComparisonRequest, EventStreamKind,
-    InspectRequest, JobOperation, JobState, LogicalSchema, OperationDescriptorV1, OperationKind,
-    PreviewRequest, RequestContext, RunState, SamplingStrategy, SessionState, SourceAsset,
-    SourceConnection, SourceConnectionState, TestConnectionRequest,
+    ExportRequestV1, ExportShape, InspectRequest, JobOperation, JobState, LogicalSchema,
+    OperationDescriptorV1, OperationKind, PreviewRequest, RequestContext, RunState,
+    SamplingStrategy, SessionState, SnapshotRef, SourceAsset, SourceConnection,
+    SourceConnectionState, TestConnectionRequest,
 };
 use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePreviewOpRequest};
 use stillflow_plan::{LogicalPlan, PlanNodeId};
 use stillflow_storage::{
     ArtifactCursor, ArtifactPage, ArtifactRefRecord, ArtifactSectionId, ControlPlaneStore,
-    DatasetRecord, EventCursor, EventPage, JobCursor, JobPage, JobRecord, JobSubmission,
-    PlanRecord, PlanVersionDraft, PlanVersionRecord, ProfileHistoryCursor, ProfileHistoryEntry,
+    DatasetRecord, EventCursor, EventPage, ExportManifest, ExportManifestFile, ExternalRefKind,
+    GarbageCollectionReport, JobCursor, JobPage, JobRecord, JobSubmission, PlanRecord,
+    PlanVersionDraft, PlanVersionRecord, ProfileHistoryCursor, ProfileHistoryEntry,
     ProfileHistoryState, RunCursor, RunPage, RunRecord, SessionRecord, SnapshotStore,
     SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, TerminalOutputRef, WorkspaceRecord,
 };
@@ -398,6 +401,148 @@ pub struct SubmitDriftComparisonRequest {
     pub event_id: Uuid,
     pub correlation_id: String,
     pub actor_ref: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitExportRequest {
+    pub session_id: Uuid,
+    pub plan_version_id: Uuid,
+    #[serde(default)]
+    pub plan_id: Option<Uuid>,
+    pub job_id: Uuid,
+    pub snapshot: SnapshotRef,
+    pub export_request: ExportRequestV1,
+    pub execution_policy: Value,
+    pub output_policy: Value,
+    pub queued_at: DateTime<Utc>,
+    pub event_id: Uuid,
+    pub correlation_id: String,
+    pub actor_ref: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportInputView {
+    pub snapshot_id: Uuid,
+    pub dataset_id: Uuid,
+    pub session_id: Uuid,
+    pub source_asset_id: Uuid,
+    pub schema_fingerprint: String,
+    pub snapshot_version: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDestinationView {
+    pub kind: String,
+    pub relative_components: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFileView {
+    pub name: String,
+    pub byte_count: u64,
+    pub digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportManifestView {
+    pub manifest_version: u16,
+    pub export_id: Uuid,
+    pub run_id: Uuid,
+    pub input: ExportInputView,
+    pub format: stillflow_core::ExportFormat,
+    pub shape: ExportShape,
+    pub format_contract_version: u16,
+    pub encoder_version: String,
+    pub jsonl_float_encoder: String,
+    pub text_float_encoder: String,
+    pub storage_schema_version: u16,
+    pub engine_contract_version: u16,
+    pub created_at: DateTime<Utc>,
+    pub row_count: u64,
+    pub byte_count: u64,
+    pub files: Vec<ExportFileView>,
+    pub set_digest: String,
+    pub destination: ExportDestinationView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListExportFilesRequest {
+    pub export_id: Uuid,
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFilePageView {
+    pub export_id: Uuid,
+    pub manifest_digest: String,
+    pub files: Vec<ExportFileView>,
+    pub next: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDownloadRequest {
+    pub export_id: Uuid,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    pub max_bytes: usize,
+    #[serde(default)]
+    pub handle: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDownloadPage {
+    pub export_id: Uuid,
+    pub file_name: String,
+    pub offset: u64,
+    /// Base64-encoded bytes from one bounded file chunk.
+    pub data: String,
+    pub byte_count: usize,
+    pub total_bytes: u64,
+    pub digest: String,
+    pub eof: bool,
+    pub next: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TombstoneExportRequest {
+    pub export_id: Uuid,
+    pub tombstoned_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportLifecycleView {
+    pub export_id: Uuid,
+    pub state: String,
+    pub tombstoned_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectExportGarbageRequest {
+    pub now: DateTime<Utc>,
+    pub retention_seconds: u64,
+    pub max_candidates: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportGarbageCollectionView {
+    pub examined: u32,
+    pub deleted: u32,
+    pub retained: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1572,6 +1717,318 @@ impl ApiService {
         })
     }
 
+    /// Submits an Export through the existing typed JobOperation/JobRuntime
+    /// path. Export owns no independent queue or state machine at this layer.
+    pub fn submit_export(
+        &self,
+        request: ApiRequest<SubmitExportRequest>,
+    ) -> ApiResult<ApiResponse<JobView>> {
+        self.validate_meta(&request, true)?;
+        if request.body.snapshot.workspace_id != request.meta.workspace_id {
+            return Err(ApiError::invalid(
+                "Export Snapshot is outside the request Workspace",
+            ));
+        }
+        if request.body.snapshot.session_id != request.body.session_id {
+            return Err(ApiError::invalid(
+                "Export Snapshot is outside the request Session",
+            ));
+        }
+        let operation = JobOperation::try_new(
+            OperationKind::Export,
+            OperationDescriptorV1::Export {
+                snapshot: request.body.snapshot,
+                export_request: request.body.export_request,
+            },
+        )
+        .map_err(|_| ApiError::invalid("invalid Export request"))?;
+        let operation_input = operation.input();
+        self.submit_job(ApiRequest {
+            meta: request.meta,
+            body: SubmitJobRequest {
+                session_id: request.body.session_id,
+                plan_version_id: request.body.plan_version_id,
+                plan_id: request.body.plan_id,
+                job_id: request.body.job_id,
+                operation: Some(operation),
+                inputs: vec![operation_input],
+                execution_policy: request.body.execution_policy,
+                output_policy: request.body.output_policy,
+                queued_at: request.body.queued_at,
+                event_id: request.body.event_id,
+                correlation_id: request.body.correlation_id,
+                actor_ref: request.body.actor_ref,
+            },
+        })
+    }
+
+    pub fn read_export_job(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<JobView>> {
+        self.validate_meta(&request, false)?;
+        let record = self.control_plane.get_job(request.body.object_id)?;
+        self.ensure_scope(record.workspace_id, request.meta.workspace_id)?;
+        ensure_export_job(&record)?;
+        Ok(ApiResponse::new(request.meta.request_id, job_view(record)))
+    }
+
+    pub fn get_export_status(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<JobView>> {
+        self.read_export_job(request)
+    }
+
+    pub async fn cancel_export_job(
+        &self,
+        request: ApiRequest<CancelJobRequest>,
+    ) -> ApiResult<ApiResponse<JobView>> {
+        self.validate_meta(&request, true)?;
+        let record = self.control_plane.get_job(request.body.job_id)?;
+        self.ensure_scope(record.workspace_id, request.meta.workspace_id)?;
+        ensure_export_job(&record)?;
+        self.cancel_job(request).await
+    }
+
+    pub fn read_export_manifest(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<ExportManifestView>> {
+        self.validate_meta(&request, false)?;
+        let manifest =
+            self.scoped_export_manifest(request.body.object_id, request.meta.workspace_id)?;
+        let view = export_manifest_view(&manifest)?;
+        ensure_response_bound(&view, self.limits.max_response_bytes)?;
+        Ok(ApiResponse::new(request.meta.request_id, view))
+    }
+
+    pub fn list_export_files(
+        &self,
+        request: ApiRequest<ListExportFilesRequest>,
+    ) -> ApiResult<ApiResponse<ExportFilePageView>> {
+        self.validate_meta(&request, false)?;
+        let limit = bounded_export_file_limit(request.body.limit)?;
+        let manifest =
+            self.scoped_export_manifest(request.body.export_id, request.meta.workspace_id)?;
+        let digest = manifest.set_digest().to_owned();
+        let cursor = request
+            .body
+            .cursor
+            .as_deref()
+            .map(decode_export_file_cursor)
+            .transpose()?;
+        if let Some(cursor) = &cursor {
+            if cursor.api_version != request.meta.api_version.value()
+                || cursor.workspace_id != request.meta.workspace_id
+                || cursor.export_id != manifest.export_id()
+                || cursor.manifest_digest != digest
+                || cursor.sort_direction != X_A1_EXPORT_FILE_SORT
+            {
+                return Err(ApiError::invalid(
+                    "Export file cursor is outside its scope or manifest",
+                ));
+            }
+        }
+        let offset = cursor.map_or(0, |value| value.offset);
+        if offset > manifest.files().len() {
+            return Err(ApiError::invalid(
+                "Export file cursor is outside the manifest",
+            ));
+        }
+        let end = offset.saturating_add(limit).min(manifest.files().len());
+        let next = (end < manifest.files().len()).then(|| {
+            encode_cursor(&ExportFileCursorWire {
+                api_version: request.meta.api_version.value(),
+                workspace_id: request.meta.workspace_id,
+                export_id: manifest.export_id(),
+                manifest_digest: digest.clone(),
+                sort_direction: X_A1_EXPORT_FILE_SORT.to_owned(),
+                offset: end,
+            })
+        });
+        let response = ExportFilePageView {
+            export_id: manifest.export_id(),
+            manifest_digest: digest,
+            files: manifest.files()[offset..end]
+                .iter()
+                .map(export_file_view)
+                .collect(),
+            next: next.transpose()?,
+        };
+        ensure_response_bound(&response, self.limits.max_response_bytes)?;
+        Ok(ApiResponse::new(request.meta.request_id, response))
+    }
+
+    pub fn download_export(
+        &self,
+        request: ApiRequest<ExportDownloadRequest>,
+    ) -> ApiResult<ApiResponse<ExportDownloadPage>> {
+        self.validate_meta(&request, false)?;
+        let manifest =
+            self.scoped_export_manifest(request.body.export_id, request.meta.workspace_id)?;
+        let max_bytes = bounded_export_download_size(request.body.max_bytes, &self.limits)?;
+        let (file_name, offset, handle_max_bytes) = match request.body.handle.as_deref() {
+            None => (
+                request
+                    .body
+                    .file_name
+                    .as_deref()
+                    .ok_or_else(|| ApiError::invalid("initial Export download needs a file name"))?
+                    .to_owned(),
+                0,
+                max_bytes,
+            ),
+            Some(encoded) => {
+                let cursor = decode_export_download_handle(encoded)?;
+                if cursor.api_version != request.meta.api_version.value()
+                    || cursor.workspace_id != request.meta.workspace_id
+                    || cursor.export_id != manifest.export_id()
+                    || cursor.manifest_digest != manifest.set_digest()
+                    || cursor.max_bytes != max_bytes
+                    || request.body.file_name.is_some()
+                {
+                    return Err(ApiError::invalid(
+                        "Export download handle is outside its scope or chunk bound",
+                    ));
+                }
+                (cursor.file_name, cursor.offset, cursor.max_bytes)
+            }
+        };
+        let file = manifest
+            .files()
+            .iter()
+            .find(|candidate| candidate.name() == file_name)
+            .ok_or_else(ApiError::not_found)?;
+        let chunk = self
+            .snapshot_store
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("snapshot store is not configured"))?
+            .read_export_file_chunk(manifest.export_id(), &file_name, offset, handle_max_bytes)
+            .map_err(ApiError::from)?;
+        let next = (!chunk.eof).then(|| {
+            encode_cursor(&ExportDownloadHandleWire {
+                api_version: request.meta.api_version.value(),
+                workspace_id: request.meta.workspace_id,
+                export_id: manifest.export_id(),
+                manifest_digest: manifest.set_digest().to_owned(),
+                file_name: file_name.clone(),
+                offset: chunk.offset.saturating_add(chunk.bytes.len() as u64),
+                max_bytes,
+            })
+        });
+        let response = ExportDownloadPage {
+            export_id: manifest.export_id(),
+            file_name,
+            offset: chunk.offset,
+            data: BASE64.encode(&chunk.bytes),
+            byte_count: chunk.bytes.len(),
+            total_bytes: file.byte_count(),
+            digest: file.digest().to_owned(),
+            eof: chunk.eof,
+            next: next.transpose()?,
+        };
+        ensure_response_bound(&response, self.limits.max_response_bytes)?;
+        Ok(ApiResponse::new(request.meta.request_id, response))
+    }
+
+    pub fn tombstone_export(
+        &self,
+        request: ApiRequest<TombstoneExportRequest>,
+    ) -> ApiResult<ApiResponse<ExportLifecycleView>> {
+        self.validate_meta(&request, true)?;
+        let manifest =
+            self.scoped_export_manifest(request.body.export_id, request.meta.workspace_id)?;
+        self.snapshot_store
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("snapshot store is not configured"))?
+            .tombstone_export(manifest.export_id(), request.body.tombstoned_at)
+            .map_err(ApiError::from)?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            ExportLifecycleView {
+                export_id: manifest.export_id(),
+                state: "tombstoned".to_owned(),
+                tombstoned_at: Some(request.body.tombstoned_at),
+            },
+        ))
+    }
+
+    pub fn collect_export_garbage(
+        &self,
+        request: ApiRequest<CollectExportGarbageRequest>,
+    ) -> ApiResult<ApiResponse<ExportGarbageCollectionView>> {
+        self.validate_meta(&request, true)?;
+        self.scope_workspace(request.meta.workspace_id, request.meta.workspace_id)?;
+        let report = self
+            .snapshot_store
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("snapshot store is not configured"))?
+            .collect_export_garbage(
+                request.meta.workspace_id,
+                request.body.now,
+                Duration::from_secs(request.body.retention_seconds),
+                request.body.max_candidates,
+            )?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            export_garbage_collection_view(report),
+        ))
+    }
+
+    fn scoped_export_manifest(
+        &self,
+        export_id: Uuid,
+        workspace_id: Uuid,
+    ) -> ApiResult<ExportManifest> {
+        let manifest = self
+            .snapshot_store
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("snapshot store is not configured"))?
+            .load_export_manifest(export_id)
+            .map_err(ApiError::from)?;
+        let run_id = manifest.run_id().ok_or_else(ApiError::not_found)?;
+        let run = self.control_plane.get_run(run_id)?;
+        self.ensure_scope(run.workspace_id, workspace_id)?;
+        let Some(operation) = run.operation.as_ref() else {
+            return Err(ApiError::not_found());
+        };
+        match &operation.descriptor {
+            OperationDescriptorV1::Export {
+                snapshot,
+                export_request,
+            } if operation.operation_kind == OperationKind::Export
+                && export_request.export_id == manifest.export_id()
+                && snapshot.workspace_id == workspace_id => {}
+            _ => return Err(ApiError::not_found()),
+        }
+        let artifact_id = run.outputs.iter().find_map(|output| match output {
+            TerminalOutputRef::Artifact {
+                artifact_id,
+                artifact_kind: stillflow_core::ArtifactKind::ExportArtifact,
+                ..
+            } => Some(*artifact_id),
+            _ => None,
+        });
+        let Some(artifact_id) = artifact_id else {
+            return Err(ApiError::not_found());
+        };
+        let artifact = self.control_plane.get_artifact_ref(artifact_id)?;
+        let digest = hex_decode(manifest.set_digest())
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .ok_or_else(|| ApiError::invalid("Export set digest is invalid"))?;
+        if artifact.workspace_id != workspace_id
+            || artifact.run_id != run.id
+            || artifact.artifact_kind != stillflow_core::ArtifactKind::ExportArtifact
+            || artifact.external_ref_kind != ExternalRefKind::Artifact
+            || artifact.external_ref_id != manifest.export_id()
+            || artifact.content_digest != digest
+        {
+            return Err(ApiError::not_found());
+        }
+        Ok(manifest)
+    }
+
     pub fn list_profile_history(
         &self,
         request: ApiRequest<ListProfileHistoryRequest>,
@@ -2153,6 +2610,29 @@ struct FindingFilterWire {
     column_name: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportFileCursorWire {
+    api_version: u16,
+    workspace_id: Uuid,
+    export_id: Uuid,
+    manifest_digest: String,
+    sort_direction: String,
+    offset: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportDownloadHandleWire {
+    api_version: u16,
+    workspace_id: Uuid,
+    export_id: Uuid,
+    manifest_digest: String,
+    file_name: String,
+    offset: u64,
+    max_bytes: usize,
+}
+
 impl FindingFilterWire {
     fn from_request(request: &ListFindingsRequest) -> ApiResult<Self> {
         Ok(Self {
@@ -2171,6 +2651,34 @@ const Q_A1_HISTORY_METADATA_BYTES: usize = 1024 * 1024;
 const Q_A1_CURSOR_BYTES: usize = 16 * 1024;
 const Q_A1_HISTORY_SORT: &str = "profile_sequence_desc_history_id_desc";
 const Q_A1_FINDING_SORT: &str = "report_order_asc";
+const X_A1_EXPORT_FILE_SORT: &str = "manifest_file_order_asc";
+const X_A1_EXPORT_FILE_PAGE_SIZE: usize = 100;
+const X_A1_DOWNLOAD_RESPONSE_OVERHEAD: usize = 2048;
+
+fn bounded_export_file_limit(limit: usize) -> ApiResult<usize> {
+    if limit == 0 || limit > X_A1_EXPORT_FILE_PAGE_SIZE {
+        Err(ApiError::limit(
+            "Export file page size exceeds the X-A1 bound",
+        ))
+    } else {
+        Ok(limit)
+    }
+}
+
+fn bounded_export_download_size(limit: usize, api_limits: &ApiLimits) -> ApiResult<usize> {
+    let response_payload_limit = api_limits
+        .max_response_bytes
+        .saturating_sub(X_A1_DOWNLOAD_RESPONSE_OVERHEAD)
+        .saturating_mul(3)
+        / 4;
+    if limit == 0 || limit > api_limits.max_artifact_page_bytes || limit > response_payload_limit {
+        Err(ApiError::limit(
+            "Export download chunk exceeds the API bounded-read limit",
+        ))
+    } else {
+        Ok(limit)
+    }
+}
 
 fn bounded_history_limit(limit: usize) -> ApiResult<usize> {
     if limit == 0 || limit > Q_A1_HISTORY_PAGE_SIZE {
@@ -2249,6 +2757,14 @@ fn decode_finding_cursor(value: &str) -> ApiResult<FindingCursorWire> {
     decode_cursor(value)
 }
 
+fn decode_export_file_cursor(value: &str) -> ApiResult<ExportFileCursorWire> {
+    decode_cursor(value)
+}
+
+fn decode_export_download_handle(value: &str) -> ApiResult<ExportDownloadHandleWire> {
+    decode_cursor(value)
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     let mut value = String::with_capacity(bytes.len().saturating_mul(2));
     for byte in bytes {
@@ -2319,6 +2835,68 @@ fn profile_history_entry_view(entry: ProfileHistoryEntry) -> ProfileHistoryEntry
         state: entry.state,
         created_at: entry.created_at,
         tombstoned_at: entry.tombstoned_at,
+    }
+}
+
+fn ensure_export_job(record: &JobRecord) -> ApiResult<()> {
+    if record
+        .operation
+        .as_ref()
+        .is_some_and(|operation| operation.operation_kind == OperationKind::Export)
+    {
+        Ok(())
+    } else {
+        Err(ApiError::not_found())
+    }
+}
+
+fn export_file_view(file: &ExportManifestFile) -> ExportFileView {
+    ExportFileView {
+        name: file.name().to_owned(),
+        byte_count: file.byte_count(),
+        digest: file.digest().to_owned(),
+    }
+}
+
+fn export_manifest_view(manifest: &ExportManifest) -> ApiResult<ExportManifestView> {
+    let run_id = manifest.run_id().ok_or_else(ApiError::not_found)?;
+    Ok(ExportManifestView {
+        manifest_version: manifest.manifest_version(),
+        export_id: manifest.export_id(),
+        run_id,
+        input: ExportInputView {
+            snapshot_id: manifest.input().snapshot_id(),
+            dataset_id: manifest.input().dataset_id(),
+            session_id: manifest.input().session_id(),
+            source_asset_id: manifest.input().source_asset_id(),
+            schema_fingerprint: digest_hex(manifest.input().schema_fingerprint().as_bytes()),
+            snapshot_version: manifest.input().snapshot_version(),
+        },
+        format: manifest.format(),
+        shape: manifest.shape(),
+        format_contract_version: manifest.format_contract_version(),
+        encoder_version: manifest.encoder_version().to_owned(),
+        jsonl_float_encoder: manifest.jsonl_float_encoder().to_owned(),
+        text_float_encoder: manifest.text_float_encoder().to_owned(),
+        storage_schema_version: manifest.storage_schema_version(),
+        engine_contract_version: manifest.engine_contract_version(),
+        created_at: *manifest.created_at(),
+        row_count: manifest.row_count(),
+        byte_count: manifest.byte_count(),
+        files: manifest.files().iter().map(export_file_view).collect(),
+        set_digest: manifest.set_digest().to_owned(),
+        destination: ExportDestinationView {
+            kind: "managedLocal".to_owned(),
+            relative_components: manifest.destination_relative().to_vec(),
+        },
+    })
+}
+
+fn export_garbage_collection_view(report: GarbageCollectionReport) -> ExportGarbageCollectionView {
+    ExportGarbageCollectionView {
+        examined: report.examined(),
+        deleted: report.deleted(),
+        retained: report.retained(),
     }
 }
 

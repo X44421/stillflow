@@ -17,6 +17,7 @@ stillflow-plan.workspace = true
 stillflow-storage.workspace = true
 stillflow-connectors.workspace = true
 bytes.workspace = true
+base64.workspace = true
 chrono.workspace = true
 futures.workspace = true
 serde.workspace = true
