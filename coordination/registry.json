@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 360,
+  "revision": 361,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -812,9 +812,36 @@
       "result_head": "4bd3cf1861aade61f1f9c0d8b011e0fb14e240a2",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33889579209",
       "completion_note": "OPS_O2_PR266_MERGED_POST_MAIN_CI_33889579209_ACCEPTANCE_5542726930"
+    },
+    {
+      "id": "AUT-C0",
+      "title": "AUT-C0-automation-contract",
+      "risk_level": "L3",
+      "status": "dispatched",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 267,
+      "target_branch": "agent/issue-267-aut-c0-automation-contract",
+      "expected_base": "1b96653c0616c2be08a9b312f1c1dda1170d2889",
+      "locks": [
+        "branch:agent/issue-267-aut-c0-automation-contract",
+        "gate:aut-contract"
+      ],
+      "paths": [
+        "docs/evidence/automation/aut-c0.md"
+      ],
+      "shared_paths": [],
+      "depends_on": [
+        "OPS-O2"
+      ],
+      "conflicts_with": [],
+      "registered_at": "2026-09-04T15:42:25Z",
+      "registered_by": "codex-dispatcher-20260904",
+      "dispatch_reason": "OPS-O2 is complete; AUT-C0 is the only current mainline node.",
+      "note": "Contract/evidence only; freeze Automation, Trigger, Schedule, RunTemplate, time semantics, event deduplication, idempotency, retry/failure policy, authorization, and audit semantics without adding runtime, API, or a second executor."
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T15:36:16Z",
+  "updated_at": "2026-09-04T15:42:30Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
