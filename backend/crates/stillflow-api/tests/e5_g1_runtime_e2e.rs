@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use chrono::{DateTime, TimeZone, Utc};
+use sha2::{Digest, Sha256};
 use stillflow_api::{
     ApiRequest, ApiService, CancelJobRequest, CollectExportGarbageRequest, CreateDatasetRequest,
     CreatePlanRequest, CreateSessionRequest, DiscoverAssetsRequest, ExportDownloadRequest,
@@ -3132,4 +3133,147 @@ fn store_create_workspace(service: &ApiService, workspace_id: Uuid) {
             },
         })
         .expect("workspace");
+}
+
+fn h1_export_request(
+    root: &std::path::Path,
+    format: ExportFormat,
+    extension: &str,
+) -> stillflow_core::ExportRequestV1 {
+    stillflow_core::ExportRequestV1 {
+        export_id: Uuid::new_v4(),
+        format,
+        shape: ExportShape::SingleFile,
+        destination: ExportDestinationV1::Local {
+            root: root.to_str().expect("UTF-8 export root").to_owned(),
+            components: vec![format!("h1-output.{extension}")],
+        },
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut output = String::with_capacity(digest.len() * 2);
+    use std::fmt::Write;
+    for byte in digest {
+        write!(&mut output, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    output
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn h1_api_input_format_matrix_covers_tsv_and_json() {
+    let cases: [(&str, &[u8]); 2] = [
+        (
+            "rows.tsv",
+            b"id\tlabel\tignored\n1\talpha\tx\n2\tbeta\ty\n3\tgamma\tz\n",
+        ),
+        (
+            "rows.json",
+            br#"[{"id":1,"label":"alpha","ignored":"x"},{"id":2,"label":"beta","ignored":"y"},{"id":3,"label":"gamma","ignored":"z"}]"#,
+        ),
+    ];
+
+    for (file_name, bytes) in cases {
+        let stack = GateStack::local_stack().await;
+        std::fs::write(stack.fixture_dir.path().join(file_name), bytes).expect("input fixture");
+        let connection_id = stack.register_local(file_name);
+        let asset = stack.discover_one(connection_id).await;
+        let materialized = materialize_named(&stack, connection_id, &asset).await;
+        assert!(matches!(
+            materialized.outputs[0],
+            TerminalOutputRef::Snapshot {
+                committed: true,
+                ..
+            }
+        ));
+        stack.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn h1_api_export_format_matrix_recomputes_file_and_set_digests() {
+    let stack = GateStack::local_stack().await;
+    write_csv(stack.fixture_dir.path(), "rows.csv");
+    let connection_id = stack.register_local("csv");
+    let asset = stack.discover_one(connection_id).await;
+    let projection = inspect_projection(&stack, connection_id, asset.id).await;
+    let (plan_id, version_id) = stack.save_plan(asset.id, projection, 1);
+    stack.create_dataset(asset.id);
+    let materialized = stack
+        .submit_and_wait(
+            materialize_op(stack.workspace_id, connection_id, asset.id),
+            plan_id,
+            version_id,
+            "h1-export-formats-materialize",
+        )
+        .await;
+    let snapshot = snapshot_ref_of(&materialized);
+
+    for (format, extension) in [
+        (ExportFormat::Csv, "csv"),
+        (ExportFormat::Tsv, "tsv"),
+        (ExportFormat::Jsonl, "jsonl"),
+        (ExportFormat::Parquet, "parquet"),
+    ] {
+        let export_root = tempfile::tempdir().expect("export root");
+        let export_request = h1_export_request(export_root.path(), format, extension);
+        let export_id = export_request.export_id;
+        let job_id = Uuid::new_v4();
+        let submitted = stack
+            .service
+            .submit_export(ApiRequest {
+                meta: RequestMetadata {
+                    idempotency_key: Some(format!("h1-export-{extension}")),
+                    ..meta(stack.workspace_id)
+                },
+                body: SubmitExportRequest {
+                    session_id: stack.session_id,
+                    plan_version_id: version_id,
+                    plan_id: Some(plan_id),
+                    job_id,
+                    snapshot: snapshot.clone(),
+                    export_request,
+                    execution_policy: serde_json::json!({"deadlineSeconds": 300}),
+                    output_policy: serde_json::json!({}),
+                    queued_at: at(20),
+                    event_id: Uuid::new_v4(),
+                    correlation_id: format!("h1-export-{extension}"),
+                    actor_ref: "actor:h1".to_owned(),
+                },
+            })
+            .expect("submit Export format")
+            .body;
+        assert_eq!(submitted.id, job_id);
+        let job = stack.wait_terminal(job_id).await;
+        assert_eq!(job.state, JobState::Succeeded, "failure: {:?}", job.failure);
+
+        let manifest = stack
+            .service
+            .read_export_manifest(ApiRequest {
+                meta: meta(stack.workspace_id),
+                body: ObjectIdRequest {
+                    object_id: export_id,
+                },
+            })
+            .expect("read Export Manifest")
+            .body;
+        assert_eq!(manifest.format, format);
+        assert_eq!(manifest.input.snapshot_id, snapshot.snapshot_id);
+        assert_eq!(manifest.row_count, 3);
+        assert_eq!(manifest.files.len(), 1);
+        let file = &manifest.files[0];
+        let bytes = std::fs::read(export_root.path().join(&file.name)).expect("published bytes");
+        assert_eq!(file.byte_count, bytes.len() as u64);
+        assert_eq!(manifest.byte_count, file.byte_count);
+        assert_eq!(file.digest, sha256_hex(&bytes));
+        assert_eq!(
+            manifest.set_digest,
+            stillflow_storage::compute_export_set_digest([file.digest.as_str()])
+        );
+        assert!(!bytes.is_empty(), "{extension} export is non-empty");
+    }
+    stack.shutdown().await;
 }
