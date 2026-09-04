@@ -2101,7 +2101,7 @@ impl ControlPlaneStore {
                         || draft.producing_run_id != run_id
                         || draft.report_artifact_id != *report_artifact_id
                         || draft.report_artifact_id != *artifact_id
-                        || parse_digest(&report_digest)? != *content_digest
+                        || parse_digest(report_digest)? != *content_digest
                         || draft.report_digest != *content_digest
                     {
                         return Err(StorageError::InvalidDraft(
@@ -5578,6 +5578,7 @@ fn validate_terminal_output_set(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_committed_drift_report_output(
     transaction: &Transaction<'_>,
     workspace_id: Uuid,
