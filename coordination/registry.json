@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 331,
+  "revision": 332,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -528,9 +528,9 @@
       "id": "SEC-C0",
       "title": "[SEC-C0] Security & tenant contract",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "codex-sec-c0-20260904",
       "target_issue": 250,
       "target_branch": "agent/issue-250-sec-c0-security-tenant-contract",
       "expected_base": "e8557402ae0cd9d8ec9eb0a15501bb85c04e43fe",
@@ -544,13 +544,29 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-04T10:22:34Z",
       "registered_at": "2026-09-04T08:22:00Z",
-      "updated_at": "2026-09-04T08:22:00Z",
-      "registered_by": "codex-sec-c0-20260904"
+      "updated_at": "2026-09-04T08:22:34Z",
+      "registered_by": "codex-sec-c0-20260904",
+      "started_at": "2026-09-04T08:22:34Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-04T08:22:00Z",
+  "locks": {
+    "branch:agent/issue-250-sec-c0-security-tenant-contract": {
+      "task_id": "SEC-C0",
+      "owner": "codex-sec-c0-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T08:22:34Z",
+      "lease_expires_at": "2026-09-04T10:22:34Z"
+    },
+    "gate:sec-contract": {
+      "task_id": "SEC-C0",
+      "owner": "codex-sec-c0-20260904",
+      "expected_head": null,
+      "acquired_at": "2026-09-04T08:22:34Z",
+      "lease_expires_at": "2026-09-04T10:22:34Z"
+    }
+  },
+  "updated_at": "2026-09-04T08:22:34Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
