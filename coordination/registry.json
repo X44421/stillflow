@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 324,
+  "revision": 325,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -465,9 +465,33 @@
       "result_head": "171158ca30f04305745dcaff062dba00af4f3503",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33847243823",
       "completion_note": "Merged PR #245 as main 497180991f7edc3cea63b6d3277b09b10cdb71a7; exact-head CI 33847243823 passed 6/6; independent acceptance receipt 5537145811; post-merge main CI 33848535037 passed 6/6; H1-08 absorbs X-G1; no runtime semantics changed."
+    },
+    {
+      "id": "P1-CLOSE",
+      "title": "[P1-CLOSE] Phase 1 deterministic backend MVP closeout",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 246,
+      "target_branch": "agent/issue-246-p1-closeout",
+      "expected_base": "497180991f7edc3cea63b6d3277b09b10cdb71a7",
+      "locks": [
+        "gate:phase1-closeout"
+      ],
+      "paths": [
+        "docs/evidence/phase1/**"
+      ],
+      "shared_paths": [],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-04T07:32:26Z",
+      "updated_at": "2026-09-04T07:32:26Z",
+      "registered_by": "codex-p1-close-20260904"
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T07:30:08Z",
+  "updated_at": "2026-09-04T07:32:26Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
