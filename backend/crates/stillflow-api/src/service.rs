@@ -28,9 +28,10 @@ use stillflow_core::{
 use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePreviewOpRequest};
 use stillflow_plan::{LogicalPlan, PlanNodeId};
 use stillflow_storage::{
-    ArtifactCursor, ArtifactPage, ArtifactRefRecord, ArtifactSectionId, ControlPlaneStore,
-    CredentialOwner, CredentialRefDraft, CredentialRefRecord, CredentialState, DatasetRecord,
-    EventCursor, EventPage, ExportManifest, ExportManifestFile, ExternalRefKind,
+    ArtifactCursor, ArtifactPage, ArtifactRefRecord, ArtifactSectionId, AuditActorKind,
+    AuditCursor, AuditEventRecord, AuditLineageEdge, AuditQuery, AuditRetentionState,
+    ControlPlaneStore, CredentialOwner, CredentialRefDraft, CredentialRefRecord, CredentialState,
+    DatasetRecord, EventCursor, EventPage, ExportManifest, ExportManifestFile, ExternalRefKind,
     GarbageCollectionReport, IdentityState, JobCursor, JobPage, JobRecord, JobSubmission,
     MemberRecord, PlanRecord, PlanVersionDraft, PlanVersionRecord, PrincipalKind,
     ProfileHistoryCursor, ProfileHistoryEntry, ProfileHistoryState, RoleRecord, RunCursor, RunPage,
@@ -871,6 +872,97 @@ pub struct ListEventsRequest {
 pub struct EventPageView {
     pub events: Vec<EventView>,
     pub next_sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListAuditEventsRequest {
+    #[serde(default)]
+    pub actor_kind: Option<AuditActorKind>,
+    #[serde(default)]
+    pub actor_ref: Option<String>,
+    #[serde(default)]
+    pub object_kind: Option<String>,
+    #[serde(default)]
+    pub object_id: Option<Uuid>,
+    #[serde(default)]
+    pub from: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub to: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub trace_id: Option<String>,
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub include_expired: bool,
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLineageRequest {
+    pub object_kind: String,
+    pub object_id: Uuid,
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEventView {
+    pub event_id: Uuid,
+    pub audit_version: u16,
+    pub workspace_id: Uuid,
+    pub sequence: u64,
+    pub occurred_at: DateTime<Utc>,
+    pub actor: stillflow_storage::AuditActor,
+    pub action: String,
+    pub reason_code: String,
+    pub request_id: String,
+    pub correlation_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub object: stillflow_storage::AuditObjectRef,
+    pub before: Option<Value>,
+    pub after: Option<Value>,
+    pub lineage: Vec<AuditLineageEdge>,
+    pub source_event_id: Option<Uuid>,
+    pub payload: Value,
+    pub idempotency_key: Option<String>,
+    pub event_digest: String,
+    pub retention: AuditRetentionState,
+    pub expired_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEventPageView {
+    pub events: Vec<AuditEventView>,
+    pub next: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLineageView {
+    pub workspace_id: Uuid,
+    pub object: stillflow_storage::AuditObjectRef,
+    pub events: Vec<AuditEventView>,
+    pub edges: Vec<AuditLineageEdge>,
+    pub next: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditExportView {
+    pub workspace_id: Uuid,
+    pub events: Vec<AuditEventView>,
+    pub event_count: usize,
+    pub export_digest: String,
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3022,6 +3114,101 @@ impl ApiService {
         ))
     }
 
+    pub fn list_audit_events(
+        &self,
+        request: ApiRequest<ListAuditEventsRequest>,
+    ) -> ApiResult<ApiResponse<AuditEventPageView>> {
+        self.validate_meta(&request, false)?;
+        self.require_capability(&request, Capability::AuditRead)?;
+        let mut query = audit_query_from_request(request.meta.workspace_id, &request.body)?;
+        query.limit = self.page_limit(request.body.limit)?;
+        let page = self.control_plane.audit().query(query)?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            audit_event_page_view(page)?,
+        ))
+    }
+
+    pub fn export_audit_events(
+        &self,
+        request: ApiRequest<ListAuditEventsRequest>,
+    ) -> ApiResult<ApiResponse<AuditExportView>> {
+        self.validate_meta(&request, false)?;
+        self.require_capability(&request, Capability::AuditExport)?;
+        let mut query = audit_query_from_request(request.meta.workspace_id, &request.body)?;
+        query.limit = self.page_limit(request.body.limit)?;
+        let page = self.control_plane.audit().query(query)?;
+        let events = page
+            .events
+            .into_iter()
+            .map(audit_event_view)
+            .collect::<Vec<_>>();
+        let bytes = serde_json::to_vec(&events).map_err(|_| ApiError::internal())?;
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let digest: [u8; 32] = hasher.finalize().into();
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            AuditExportView {
+                workspace_id: request.meta.workspace_id,
+                event_count: events.len(),
+                events,
+                export_digest: digest_hex(&digest),
+                next: encode_audit_cursor(page.next)?,
+            },
+        ))
+    }
+
+    pub fn get_audit_lineage(
+        &self,
+        request: ApiRequest<AuditLineageRequest>,
+    ) -> ApiResult<ApiResponse<AuditLineageView>> {
+        self.validate_meta(&request, false)?;
+        self.require_capability(&request, Capability::AuditRead)?;
+        if request.body.object_id.is_nil() {
+            return Err(ApiError::invalid("lineage object identity is required"));
+        }
+        let object_kind = normalize_filter(Some(&request.body.object_kind), "objectKind")?
+            .expect("lineage object kind is present");
+        let cursor = decode_audit_cursor(request.body.cursor.as_deref())?;
+        let query = AuditQuery {
+            workspace_id: request.meta.workspace_id,
+            object_kind: Some(object_kind.clone()),
+            object_id: Some(request.body.object_id),
+            limit: self.page_limit(request.body.limit)?,
+            cursor,
+            ..AuditQuery::default()
+        };
+        let page = self.control_plane.audit().query(query)?;
+        let object = stillflow_storage::AuditObjectRef {
+            kind: object_kind,
+            id: request.body.object_id,
+        };
+        let mut edges = Vec::new();
+        let events = page
+            .events
+            .into_iter()
+            .map(|record| {
+                for edge in &record.lineage {
+                    if !edges.contains(edge) {
+                        edges.push(edge.clone());
+                    }
+                }
+                audit_event_view(record)
+            })
+            .collect::<Vec<_>>();
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            AuditLineageView {
+                workspace_id: request.meta.workspace_id,
+                object,
+                events,
+                edges,
+                next: encode_audit_cursor(page.next)?,
+            },
+        ))
+    }
+
     pub fn get_artifact_metadata(
         &self,
         request: ApiRequest<ObjectIdRequest>,
@@ -3939,6 +4126,111 @@ fn event_page_view(page: EventPage) -> EventPageView {
         next_sequence: page.next.map(|cursor| cursor.sequence),
         events: page.events.into_iter().map(event_view).collect(),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditCursorWire {
+    workspace_id: Uuid,
+    sequence: u64,
+    filter_digest: String,
+}
+
+fn audit_event_view(record: AuditEventRecord) -> AuditEventView {
+    AuditEventView {
+        event_id: record.event_id,
+        audit_version: record.audit_version,
+        workspace_id: record.workspace_id,
+        sequence: record.sequence,
+        occurred_at: record.occurred_at,
+        actor: record.actor,
+        action: record.action,
+        reason_code: record.reason_code,
+        request_id: record.request_id,
+        correlation_id: record.correlation_id,
+        trace_id: record.trace_id,
+        object: record.object,
+        before: record.before,
+        after: record.after,
+        lineage: record.lineage,
+        source_event_id: record.source_event_id,
+        payload: record.payload,
+        idempotency_key: record.idempotency_key,
+        event_digest: digest_hex(&record.event_digest),
+        retention: record.retention,
+        expired_at: record.expired_at,
+    }
+}
+
+fn audit_event_page_view(page: stillflow_storage::AuditPage) -> ApiResult<AuditEventPageView> {
+    Ok(AuditEventPageView {
+        events: page.events.into_iter().map(audit_event_view).collect(),
+        next: encode_audit_cursor(page.next)?,
+    })
+}
+
+fn audit_query_from_request(
+    workspace_id: Uuid,
+    request: &ListAuditEventsRequest,
+) -> ApiResult<AuditQuery> {
+    let actor_ref = normalize_filter(request.actor_ref.as_deref(), "actorRef")?;
+    let object_kind = normalize_filter(request.object_kind.as_deref(), "objectKind")?;
+    let action = normalize_filter(request.action.as_deref(), "action")?;
+    let trace_id = normalize_filter(request.trace_id.as_deref(), "traceId")?;
+    let correlation_id = normalize_filter(request.correlation_id.as_deref(), "correlationId")?;
+    if request.object_id.is_some() && object_kind.is_none() {
+        return Err(ApiError::invalid("objectKind is required with objectId"));
+    }
+    if let (Some(from), Some(to)) = (request.from, request.to) {
+        if from > to {
+            return Err(ApiError::invalid("audit time range is reversed"));
+        }
+    }
+    let cursor = decode_audit_cursor(request.cursor.as_deref())?;
+    Ok(AuditQuery {
+        workspace_id,
+        actor_kind: request.actor_kind,
+        actor_ref,
+        object_kind,
+        object_id: request.object_id,
+        from: request.from,
+        to: request.to,
+        action,
+        trace_id,
+        correlation_id,
+        include_expired: request.include_expired,
+        limit: request.limit,
+        cursor,
+    })
+}
+
+fn decode_audit_cursor(value: Option<&str>) -> ApiResult<Option<AuditCursor>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let wire: AuditCursorWire = decode_cursor(value)?;
+    let bytes = hex_decode(&wire.filter_digest)
+        .ok_or_else(|| ApiError::invalid("audit cursor is invalid"))?;
+    let filter_digest: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| ApiError::invalid("audit cursor is invalid"))?;
+    Ok(Some(AuditCursor {
+        workspace_id: wire.workspace_id,
+        sequence: wire.sequence,
+        filter_digest,
+    }))
+}
+
+fn encode_audit_cursor(cursor: Option<AuditCursor>) -> ApiResult<Option<String>> {
+    cursor
+        .map(|cursor| {
+            encode_cursor(&AuditCursorWire {
+                workspace_id: cursor.workspace_id,
+                sequence: cursor.sequence,
+                filter_digest: hex_encode(&cursor.filter_digest),
+            })
+        })
+        .transpose()
 }
 
 fn artifact_page_view(page: ArtifactPage) -> ArtifactPageView {

@@ -828,7 +828,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
-            migrate_to_version_eight(connection)
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
@@ -837,7 +838,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
-            migrate_to_version_eight(connection)
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
         }
         2 => {
             migrate_to_version_three(connection)?;
@@ -845,31 +847,41 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
-            migrate_to_version_eight(connection)
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
         }
         3 => {
             migrate_to_version_four(connection)?;
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
-            migrate_to_version_eight(connection)
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
         }
         4 => {
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
-            migrate_to_version_eight(connection)
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
         }
         5 => {
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
-            migrate_to_version_eight(connection)
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
         }
         6 => {
-            migrate_to_version_seven(connection).and_then(|_| migrate_to_version_eight(connection))
+            migrate_to_version_seven(connection)?;
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
         }
-        7 => migrate_to_version_eight(connection),
-        8 => Ok(()),
+        7 => {
+            migrate_to_version_eight(connection)?;
+            migrate_to_version_nine(connection)
+        }
+        8 => migrate_to_version_nine(connection),
+        9 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
 }
@@ -1072,6 +1084,69 @@ fn migrate_to_version_eight(connection: &mut Connection) -> Result<(), StorageEr
     transaction
         .commit()
         .map_err(|_| StorageError::database("commit storage migration version eight"))
+}
+
+/// Version nine adds the immutable, workspace-scoped AUD-C0 audit envelope.
+/// Audit records have their own sequence and retention state; operational
+/// `cp_events` remain the sole Job/Run lifecycle stream.
+fn migrate_to_version_nine(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version nine"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE audit_events (
+                 event_id TEXT PRIMARY KEY NOT NULL,
+                 audit_version INTEGER NOT NULL CHECK (audit_version > 0),
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 sequence INTEGER NOT NULL CHECK (sequence > 0),
+                 occurred_at_utc TEXT NOT NULL,
+                 actor_kind TEXT NOT NULL CHECK (actor_kind IN ('user', 'service_account', 'system')),
+                 actor_ref TEXT NOT NULL CHECK (length(actor_ref) > 0),
+                 action TEXT NOT NULL CHECK (length(action) > 0),
+                 reason_code TEXT NOT NULL CHECK (length(reason_code) > 0),
+                 request_id TEXT NOT NULL CHECK (length(request_id) > 0),
+                 correlation_id TEXT,
+                 trace_id TEXT,
+                 object_kind TEXT NOT NULL CHECK (length(object_kind) > 0),
+                 object_id TEXT NOT NULL,
+                 before_json TEXT,
+                 after_json TEXT,
+                 lineage_json TEXT NOT NULL,
+                 source_event_id TEXT,
+                 payload_json TEXT NOT NULL,
+                 idempotency_key TEXT,
+                 event_digest TEXT NOT NULL CHECK (length(event_digest) = 64),
+                 retention_state TEXT NOT NULL CHECK (retention_state IN ('active', 'retained', 'expired')),
+                 expired_at_utc TEXT,
+                 UNIQUE (workspace_id, sequence),
+                 UNIQUE (workspace_id, idempotency_key)
+             ) STRICT;
+
+             CREATE INDEX audit_events_workspace_order_index
+             ON audit_events(workspace_id, sequence);
+
+             CREATE INDEX audit_events_workspace_time_index
+             ON audit_events(workspace_id, occurred_at_utc, sequence);
+
+             CREATE INDEX audit_events_actor_index
+             ON audit_events(workspace_id, actor_kind, actor_ref, sequence);
+
+             CREATE INDEX audit_events_object_index
+             ON audit_events(workspace_id, object_kind, object_id, sequence);
+
+             CREATE INDEX audit_events_trace_index
+             ON audit_events(workspace_id, trace_id, sequence);
+
+             CREATE INDEX audit_events_correlation_index
+             ON audit_events(workspace_id, correlation_id, sequence);
+
+             PRAGMA user_version = 9;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version nine"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version nine"))
 }
 
 /// Version four adds the durable E5 unified control-plane graph.  The tables
@@ -2668,7 +2743,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         // A legacy version-one database migrates through the current schema
         // and gains the bundle, export, and control-plane tables.
@@ -2720,7 +2795,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -2732,6 +2807,7 @@ mod tests {
             "cp_artifact_bodies",
             "qd1_profile_history",
             "qd1_drift_comparisons",
+            "audit_events",
         ] {
             let present: i64 = connection
                 .query_row(
@@ -2748,19 +2824,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 9;")
+            .execute_batch("PRAGMA user_version = 10;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(9))
+            Err(StorageError::UnsupportedStorageVersion(10))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
     }
 
     #[test]
@@ -2836,7 +2912,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         for (table, expected) in [
             ("snapshots", 1_i64),
             ("verification_bundles", 1_i64),
