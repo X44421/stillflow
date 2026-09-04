@@ -4,10 +4,10 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `350`
-- Updated: `2026-09-04T11:47:41Z`
+- Registry revision: `351`
+- Updated: `2026-09-04T12:25:44Z`
 - Source main snapshot: `ca18a092552a0037e33ef4945c8c2d99ae487b38`
-- Legacy/inactive rows retained in JSON for migration compatibility: `16`
+- Legacy/inactive rows retained in JSON for migration compatibility: `17`
 
 ## Registered / active claims
 
@@ -15,15 +15,12 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `E5-A1` | L3 | **queued** | `—` | #228 | `agent/issue-228-e5-a1-versioned-api` | api:bootstrap, api:objects, storage:control-plane-api, storage:artifact-read |
 | `E5-E1` | L3 | **queued** | `—` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
-| `OPS-O3` | L3 | **running** | `codex-ops-o3-20260904` | #259 | `agent/issue-259-ops-o3-backup-restore` | branch:agent/issue-259-ops-o3-backup-restore, storage:backup-restore, storage:stillflow-storage |
 
 ## Active locks
 
 | Lock | Task | Owner | Lease expires |
 | --- | --- | --- | --- |
-| `branch:agent/issue-259-ops-o3-backup-restore` | `OPS-O3` | `codex-ops-o3-20260904` | `2026-09-04T15:47:41Z` |
-| `storage:backup-restore` | `OPS-O3` | `codex-ops-o3-20260904` | `2026-09-04T15:47:41Z` |
-| `storage:stillflow-storage` | `OPS-O3` | `codex-ops-o3-20260904` | `2026-09-04T15:47:41Z` |
+| — | — | — | — |
 
 ## L2/L3 protocol
 
