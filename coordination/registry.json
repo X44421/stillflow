@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 381,
+  "revision": 382,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1050,7 +1050,7 @@
       "id": "H3",
       "title": "H3-product-release-gate",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-h3-20260904",
       "target_issue": 280,
@@ -1067,22 +1067,18 @@
         "H2"
       ],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-04T23:21:23Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-04T21:49:31Z",
-      "updated_at": "2026-09-04T21:51:23Z",
+      "updated_at": "2026-09-04T22:10:01Z",
       "registered_by": "codex-h3-20260904",
-      "started_at": "2026-09-04T21:51:23Z"
+      "started_at": "2026-09-04T21:51:23Z",
+      "completed_at": "2026-09-04T22:10:01Z",
+      "result_head": "ed7d9ae16e22ffb5d5ce263f863e7de057f4608c",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33923942333",
+      "completion_note": "H3_PR281_MERGED_F61E0853_POST_MAIN_CI_33923942333_ACCEPTANCE_5546925023"
     }
   ],
-  "locks": {
-    "gate:h3": {
-      "task_id": "H3",
-      "owner": "codex-h3-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T21:51:23Z",
-      "lease_expires_at": "2026-09-04T23:21:23Z"
-    }
-  },
-  "updated_at": "2026-09-04T21:51:23Z",
+  "locks": {},
+  "updated_at": "2026-09-04T22:10:01Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
