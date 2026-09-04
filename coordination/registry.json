@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 353,
+  "revision": 354,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -705,7 +705,7 @@
       "id": "AUD-C0",
       "title": "AUD-C0-audit-event-contract",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-aud-c0-20260904",
       "target_issue": 261,
@@ -721,29 +721,18 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-04T16:31:37Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-04T12:31:04Z",
-      "updated_at": "2026-09-04T12:31:37Z",
+      "updated_at": "2026-09-04T12:50:02Z",
       "registered_by": "codex-aud-c0-20260904",
-      "started_at": "2026-09-04T12:31:37Z"
+      "started_at": "2026-09-04T12:31:37Z",
+      "completed_at": "2026-09-04T12:50:02Z",
+      "result_head": "b68b4a54db27f4418f39e2f234885e8a3554012f",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33874320081",
+      "completion_note": "AUD_C0_PR262_MERGED_POST_MAIN_CI_33874320081_ACCEPTANCE_5540603669"
     }
   ],
-  "locks": {
-    "branch:agent/issue-261-aud-c0-audit-contract": {
-      "task_id": "AUD-C0",
-      "owner": "codex-aud-c0-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T12:31:37Z",
-      "lease_expires_at": "2026-09-04T16:31:37Z"
-    },
-    "gate:aud-contract": {
-      "task_id": "AUD-C0",
-      "owner": "codex-aud-c0-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T12:31:37Z",
-      "lease_expires_at": "2026-09-04T16:31:37Z"
-    }
-  },
-  "updated_at": "2026-09-04T12:31:37Z",
+  "locks": {},
+  "updated_at": "2026-09-04T12:50:02Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
