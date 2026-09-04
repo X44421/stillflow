@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `322`
-- Updated: `2026-09-04T06:19:57Z`
+- Registry revision: `323`
+- Updated: `2026-09-04T07:02:31Z`
 - Source main snapshot: `ca18a092552a0037e33ef4945c8c2d99ae487b38`
 - Legacy/inactive rows retained in JSON for migration compatibility: `9`
 
@@ -21,7 +21,7 @@
 
 | Lock | Task | Owner | Lease expires |
 | --- | --- | --- | --- |
-| `gate:h1-golden-e2e` | `H1-GOLDEN-E2E` | `codex-h1-20260904` | `2026-09-04T07:49:57Z` |
+| `gate:h1-golden-e2e` | `H1-GOLDEN-E2E` | `codex-h1-20260904` | `2026-09-04T08:32:31Z` |
 
 ## L2/L3 protocol
 
