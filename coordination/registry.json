@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 326,
+  "revision": 327,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -470,7 +470,7 @@
       "id": "P1-CLOSE",
       "title": "[P1-CLOSE] Phase 1 deterministic backend MVP closeout",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-p1-close-20260904",
       "target_issue": 246,
@@ -485,22 +485,18 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-04T09:02:42Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-04T07:32:26Z",
-      "updated_at": "2026-09-04T07:32:42Z",
+      "updated_at": "2026-09-04T07:52:31Z",
       "registered_by": "codex-p1-close-20260904",
-      "started_at": "2026-09-04T07:32:42Z"
+      "started_at": "2026-09-04T07:32:42Z",
+      "completed_at": "2026-09-04T07:52:31Z",
+      "result_head": "8fc33211985c34e8dec4e33afc6c61bd1a5d80fa",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33849463506",
+      "completion_note": "Merged PR #247 as main 1530e0714c53d3d290703bcd4596eab2f162698e; exact-head CI 33849463506 passed 6/6; independent closeout acceptance receipt 5537349551; post-merge main CI 33850006057 passed 6/6; roadmap transition recorded on #81 comment 5537440734; Phase 1 deterministic backend MVP closed; P23-C0 is the only next mainline node."
     }
   ],
-  "locks": {
-    "gate:phase1-closeout": {
-      "task_id": "P1-CLOSE",
-      "owner": "codex-p1-close-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T07:32:42Z",
-      "lease_expires_at": "2026-09-04T09:02:42Z"
-    }
-  },
-  "updated_at": "2026-09-04T07:32:42Z",
+  "locks": {},
+  "updated_at": "2026-09-04T07:52:31Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
