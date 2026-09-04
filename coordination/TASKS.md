@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `379`
-- Updated: `2026-09-04T21:49:31Z`
+- Registry revision: `380`
+- Updated: `2026-09-04T21:50:57Z`
 - Source main snapshot: `ca18a092552a0037e33ef4945c8c2d99ae487b38`
 - Legacy/inactive rows retained in JSON for migration compatibility: `26`
 
