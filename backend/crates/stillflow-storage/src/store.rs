@@ -338,45 +338,7 @@ impl SnapshotStore {
         validate_maintenance_bound(max_candidates)?;
         let _maintenance = acquire_maintenance(&self.inner)?;
         let cutoff = cutoff_timestamp(now, retention, "garbage-collection cutoff")?;
-        let candidates = eligible_tombstones(&self.inner, &cutoff, max_candidates)?;
-        let mut report = GarbageCollectionReport::default();
-
-        for snapshot_id in candidates {
-            checked_increment(&mut report.examined, "garbage-collection examined count")?;
-            let outcome = remove_uuid_directory(
-                &partitions_root(&self.inner),
-                snapshot_id,
-                SymlinkPolicy::Reject,
-                "remove tombstoned snapshot files",
-            )?;
-            if outcome == RemovalOutcome::Ignored {
-                checked_increment(&mut report.retained, "garbage-collection retained count")?;
-                continue;
-            }
-
-            let mut connection = open_connection(&self.inner)?;
-            let transaction = connection
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(|_| StorageError::database("begin garbage-collection transaction"))?;
-            let deleted = transaction
-                .execute(
-                    "DELETE FROM snapshots
-                     WHERE id = ?1 AND state = ?2 AND tombstoned_at_utc <= ?3",
-                    params![snapshot_id.to_string(), TOMBSTONED_STATE, cutoff],
-                )
-                .map_err(|_| StorageError::database("delete tombstoned manifest"))?;
-            transaction
-                .commit()
-                .map_err(|_| StorageError::database("commit garbage-collection transaction"))?;
-            if deleted == 1 {
-                checked_increment(&mut report.deleted, "garbage-collection deleted count")?;
-            } else {
-                checked_increment(&mut report.retained, "garbage-collection retained count")?;
-            }
-        }
-
-        crate::export::collect_export_garbage(&self.inner, &cutoff, max_candidates, &mut report)?;
-        Ok(report)
+        collect_snapshot_export_garbage_inner(&self.inner, &cutoff, max_candidates)
     }
 
     /// Collects only tombstoned Export artifacts. This keeps the X-A1
@@ -444,6 +406,55 @@ impl SnapshotStore {
         let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
         crate::export::tombstone_export_inner(&self.inner, export_id, &tombstoned_at)
     }
+}
+
+/// Collects the legacy Snapshot and Export garbage while the caller already
+/// holds the store-wide maintenance gate. This is shared by the existing
+/// Snapshot API and the OPS-O2 retention plane so the gate is never nested.
+pub(crate) fn collect_snapshot_export_garbage_inner(
+    inner: &Arc<StoreInner>,
+    cutoff: &str,
+    max_candidates: u32,
+) -> Result<GarbageCollectionReport, StorageError> {
+    let candidates = eligible_tombstones(inner, cutoff, max_candidates)?;
+    let mut report = GarbageCollectionReport::default();
+
+    for snapshot_id in candidates {
+        checked_increment(&mut report.examined, "garbage-collection examined count")?;
+        let outcome = remove_uuid_directory(
+            &partitions_root(inner),
+            snapshot_id,
+            SymlinkPolicy::Reject,
+            "remove tombstoned snapshot files",
+        )?;
+        if outcome == RemovalOutcome::Ignored {
+            checked_increment(&mut report.retained, "garbage-collection retained count")?;
+            continue;
+        }
+
+        let mut connection = open_connection(inner)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| StorageError::database("begin garbage-collection transaction"))?;
+        let deleted = transaction
+            .execute(
+                "DELETE FROM snapshots
+                 WHERE id = ?1 AND state = ?2 AND tombstoned_at_utc <= ?3",
+                params![snapshot_id.to_string(), TOMBSTONED_STATE, cutoff],
+            )
+            .map_err(|_| StorageError::database("delete tombstoned manifest"))?;
+        transaction
+            .commit()
+            .map_err(|_| StorageError::database("commit garbage-collection transaction"))?;
+        if deleted == 1 {
+            checked_increment(&mut report.deleted, "garbage-collection deleted count")?;
+        } else {
+            checked_increment(&mut report.retained, "garbage-collection retained count")?;
+        }
+    }
+
+    crate::export::collect_export_garbage(inner, cutoff, max_candidates, &mut report)?;
+    Ok(report)
 }
 
 /// Computes the committed logical Snapshot version digest without opening a
@@ -829,7 +840,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
@@ -839,7 +851,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
         2 => {
             migrate_to_version_three(connection)?;
@@ -848,7 +861,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
         3 => {
             migrate_to_version_four(connection)?;
@@ -856,32 +870,41 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
         4 => {
             migrate_to_version_five(connection)?;
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
         5 => {
             migrate_to_version_six(connection)?;
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
         6 => {
             migrate_to_version_seven(connection)?;
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
         7 => {
             migrate_to_version_eight(connection)?;
-            migrate_to_version_nine(connection)
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
         }
-        8 => migrate_to_version_nine(connection),
-        9 => Ok(()),
+        8 => {
+            migrate_to_version_nine(connection)?;
+            migrate_to_version_ten(connection)
+        }
+        9 => migrate_to_version_ten(connection),
+        10 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
 }
@@ -1084,6 +1107,38 @@ fn migrate_to_version_eight(connection: &mut Connection) -> Result<(), StorageEr
     transaction
         .commit()
         .map_err(|_| StorageError::database("commit storage migration version eight"))
+}
+
+/// Version ten adds the bounded OPS-O2 tombstone ledger. Object identities are
+/// deliberately strings without foreign keys so maintenance can delete in a
+/// safe dependency order while preserving an idempotent tombstone record.
+fn migrate_to_version_ten(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version ten"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE retention_tombstones (
+                 object_kind TEXT NOT NULL CHECK (object_kind IN (
+                     'dataset', 'snapshot', 'artifact', 'event', 'run'
+                 )),
+                 object_id TEXT NOT NULL,
+                 workspace_id TEXT,
+                 tombstoned_at_utc TEXT NOT NULL,
+                 eligible_at_utc TEXT NOT NULL,
+                 reason TEXT NOT NULL CHECK (length(reason) > 0),
+                 PRIMARY KEY (object_kind, object_id)
+             ) STRICT;
+
+             CREATE INDEX retention_tombstones_eligible_index
+             ON retention_tombstones(eligible_at_utc, object_kind, object_id);
+
+             PRAGMA user_version = 10;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version ten"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version ten"))
 }
 
 /// Version nine adds the immutable, workspace-scoped AUD-C0 audit envelope.
@@ -2573,6 +2628,22 @@ fn remove_uuid_directory(
     Ok(RemovalOutcome::Removed)
 }
 
+/// Removes one validated Snapshot partition directory during a retention
+/// transaction. Missing directories are safe to treat as already collected;
+/// malformed or symlinked managed paths remain a hard failure.
+pub(crate) fn delete_tombstoned_snapshot_files(
+    inner: &StoreInner,
+    snapshot_id: Uuid,
+) -> Result<bool, StorageError> {
+    let outcome = remove_uuid_directory(
+        &partitions_root(inner),
+        snapshot_id,
+        SymlinkPolicy::Reject,
+        "remove tombstoned snapshot files",
+    )?;
+    Ok(outcome != RemovalOutcome::Ignored)
+}
+
 fn validate_maintenance_bound(maximum: u32) -> Result<(), StorageError> {
     if maximum == 0 || maximum > MAX_MAINTENANCE_CANDIDATES {
         return Err(StorageError::InvalidConfiguration(
@@ -2743,7 +2814,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
 
         // A legacy version-one database migrates through the current schema
         // and gains the bundle, export, and control-plane tables.
@@ -2795,7 +2866,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -2808,6 +2879,7 @@ mod tests {
             "qd1_profile_history",
             "qd1_drift_comparisons",
             "audit_events",
+            "retention_tombstones",
         ] {
             let present: i64 = connection
                 .query_row(
@@ -2824,19 +2896,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 10;")
+            .execute_batch("PRAGMA user_version = 11;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(10))
+            Err(StorageError::UnsupportedStorageVersion(11))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
     }
 
     #[test]
@@ -2912,7 +2984,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         for (table, expected) in [
             ("snapshots", 1_i64),
             ("verification_bundles", 1_i64),
