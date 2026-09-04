@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `334`
-- Updated: `2026-09-04T08:43:42Z`
+- Registry revision: `335`
+- Updated: `2026-09-04T08:46:19Z`
 - Source main snapshot: `ca18a092552a0037e33ef4945c8c2d99ae487b38`
 - Legacy/inactive rows retained in JSON for migration compatibility: `13`
 
@@ -15,13 +15,15 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `E5-A1` | L3 | **queued** | `—` | #228 | `agent/issue-228-e5-a1-versioned-api` | api:bootstrap, api:objects, storage:control-plane-api, storage:artifact-read |
 | `E5-E1` | L3 | **queued** | `—` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
-| `SEC-S1` | L3 | **queued** | `—` | #252 | `agent/issue-252-sec-s1-identity-credential` | branch:agent/issue-252-sec-s1-identity-credential, storage:identity, gate:sec-identity |
+| `SEC-S1` | L3 | **running** | `codex-sec-s1-20260904` | #252 | `agent/issue-252-sec-s1-identity-credential` | branch:agent/issue-252-sec-s1-identity-credential, storage:identity, gate:sec-identity |
 
 ## Active locks
 
 | Lock | Task | Owner | Lease expires |
 | --- | --- | --- | --- |
-| — | — | — | — |
+| `branch:agent/issue-252-sec-s1-identity-credential` | `SEC-S1` | `codex-sec-s1-20260904` | `2026-09-04T12:46:19Z` |
+| `gate:sec-identity` | `SEC-S1` | `codex-sec-s1-20260904` | `2026-09-04T12:46:19Z` |
+| `storage:identity` | `SEC-S1` | `codex-sec-s1-20260904` | `2026-09-04T12:46:19Z` |
 
 ## L2/L3 protocol
 
