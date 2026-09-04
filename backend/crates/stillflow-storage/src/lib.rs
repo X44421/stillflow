@@ -42,8 +42,8 @@ pub use dedup::{
 pub use digest::{ContentDigest, DIGEST_BUFFER_BYTES};
 pub use error::{IntegrityFailure, StorageError};
 pub use export::{
-    compute_export_set_digest, ExportManifest, ExportManifestFile, ExportPlan, ExportProvenance,
-    ExportWriter, StagedExportFile,
+    compute_export_set_digest, ExportFileChunk, ExportManifest, ExportManifestFile, ExportPlan,
+    ExportProvenance, ExportWriter, StagedExportFile,
 };
 pub use manifest::{
     GarbageCollectionReport, RecoveryReport, SnapshotDraft, SnapshotManifest, SnapshotPartition,

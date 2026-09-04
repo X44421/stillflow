@@ -9,7 +9,7 @@
 //! maintenance gate; no second publication path exists.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -48,6 +48,16 @@ pub struct ExportManifestFile {
     name: String,
     byte_count: u64,
     digest: String,
+}
+
+/// One bounded read from a committed Export Manifest file. The storage layer
+/// owns the file handle and path validation; callers never need to materialize
+/// the complete export package in memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportFileChunk {
+    pub offset: u64,
+    pub bytes: Vec<u8>,
+    pub eof: bool,
 }
 
 impl ExportManifestFile {
@@ -1381,6 +1391,124 @@ pub(crate) fn load_export_manifest_inner(
     Ok(manifest)
 }
 
+pub(crate) fn read_export_file_chunk_inner(
+    inner: &Arc<StoreInner>,
+    export_id: Uuid,
+    file_name: &str,
+    offset: u64,
+    max_bytes: usize,
+) -> Result<ExportFileChunk, StorageError> {
+    if max_bytes == 0 {
+        return Err(StorageError::InvalidDraft(
+            "export download chunk must not be empty",
+        ));
+    }
+    let max_bytes_u64 = u64::try_from(max_bytes)
+        .map_err(|_| StorageError::ArithmeticOverflow("export download chunk size"))?;
+    if max_bytes_u64 > MAX_EXPORT_SINGLE_FILE_BYTES {
+        return Err(StorageError::ExportLimitExceeded {
+            resource: "export download chunk bytes",
+            actual: max_bytes_u64,
+            maximum: MAX_EXPORT_SINGLE_FILE_BYTES,
+        });
+    }
+
+    let manifest = load_export_manifest_inner(inner, export_id)?;
+    let file = manifest
+        .files()
+        .iter()
+        .find(|candidate| candidate.name() == file_name)
+        .ok_or(StorageError::NotFound(export_id))?;
+    validate_export_component(file_name)
+        .map_err(|_| StorageError::InvalidManifest("export file name is invalid"))?;
+
+    validate_destination_root(manifest.destination_root())?;
+    let mut components = manifest.destination_relative().to_vec();
+    match manifest.shape() {
+        ExportShape::SingleFile => {
+            if components.last().map(String::as_str) != Some(file_name) {
+                return Err(StorageError::InvalidManifest(
+                    "export file name does not match its destination",
+                ));
+            }
+        }
+        ExportShape::PartitionedSet => components.push(file_name.to_owned()),
+    }
+    let path = destination_path(manifest.destination_root(), &components)?;
+    validate_managed_export_path(manifest.destination_root(), &components, &path)?;
+
+    let metadata = fs::metadata(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            StorageError::NotFound(export_id)
+        } else {
+            StorageError::io("inspect export file", &error)
+        }
+    })?;
+    if !metadata.is_file() || metadata.len() != file.byte_count() {
+        return Err(StorageError::InvalidManifest(
+            "export file does not match its manifest",
+        ));
+    }
+    if offset > file.byte_count() {
+        return Err(StorageError::InvalidDraft(
+            "export download offset is outside the file",
+        ));
+    }
+
+    let mut handle =
+        File::open(&path).map_err(|error| StorageError::io("open export file", &error))?;
+    handle
+        .seek(SeekFrom::Start(offset))
+        .map_err(|error| StorageError::io("seek export file", &error))?;
+    let remaining = file.byte_count().saturating_sub(offset);
+    let read_len = remaining.min(max_bytes_u64) as usize;
+    let mut bytes = vec![0_u8; read_len];
+    if read_len > 0 {
+        handle
+            .read_exact(&mut bytes)
+            .map_err(|error| StorageError::io("read export file", &error))?;
+    }
+    Ok(ExportFileChunk {
+        offset,
+        eof: offset.saturating_add(read_len as u64) >= file.byte_count(),
+        bytes,
+    })
+}
+
+fn validate_managed_export_path(
+    root: &Path,
+    components: &[String],
+    path: &Path,
+) -> Result<(), StorageError> {
+    let mut current = root.to_path_buf();
+    for (index, component) in components.iter().enumerate() {
+        current.push(component);
+        let metadata = fs::symlink_metadata(&current).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                StorageError::InvalidManifest("export file path is missing")
+            } else {
+                StorageError::io("inspect export file path", &error)
+            }
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(StorageError::InvalidManifest(
+                "export file path contains a symlink",
+            ));
+        }
+        if index + 1 < components.len() && !metadata.is_dir() {
+            return Err(StorageError::InvalidManifest(
+                "export file path parent is not a directory",
+            ));
+        }
+    }
+    if current != path {
+        return Err(StorageError::InvalidManifest(
+            "export file path does not match its components",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn tombstone_export_inner(
     inner: &Arc<StoreInner>,
     export_id: Uuid,
@@ -1721,16 +1849,43 @@ pub(crate) fn collect_export_garbage(
     maximum: u32,
     report: &mut GarbageCollectionReport,
 ) -> Result<(), StorageError> {
+    collect_export_garbage_scoped(inner, cutoff, maximum, None, report)
+}
+
+pub(crate) fn collect_export_garbage_for_workspace(
+    inner: &Arc<StoreInner>,
+    cutoff: &str,
+    maximum: u32,
+    workspace_id: Uuid,
+    report: &mut GarbageCollectionReport,
+) -> Result<(), StorageError> {
+    collect_export_garbage_scoped(inner, cutoff, maximum, Some(workspace_id), report)
+}
+
+fn collect_export_garbage_scoped(
+    inner: &Arc<StoreInner>,
+    cutoff: &str,
+    maximum: u32,
+    workspace_id: Option<Uuid>,
+    report: &mut GarbageCollectionReport,
+) -> Result<(), StorageError> {
     let candidates: Vec<ExportResidue> = {
         let connection = open_connection(inner)?;
         let mut statement = connection
             .prepare(
-                "SELECT export_id, destination_root, destination_relative FROM export_tombstones
-                 WHERE tombstoned_at_utc <= ?1 ORDER BY tombstoned_at_utc, export_id LIMIT ?2",
+                "SELECT DISTINCT t.export_id, t.destination_root, t.destination_relative
+                 FROM export_tombstones t
+                 LEFT JOIN cp_artifact_refs a ON a.external_ref_id = t.export_id
+                    AND a.external_ref_kind = 'artifact'
+                    AND a.artifact_kind = '\"exportArtifact\"'
+                 WHERE t.tombstoned_at_utc <= ?1
+                   AND (?3 IS NULL OR a.workspace_id = ?3)
+                 ORDER BY t.tombstoned_at_utc, t.export_id LIMIT ?2",
             )
             .map_err(|_| StorageError::database("prepare export tombstone query"))?;
+        let workspace_id = workspace_id.map(|value| value.to_string());
         let rows = statement
-            .query_map(params![cutoff, i64::from(maximum)], |row| {
+            .query_map(params![cutoff, i64::from(maximum), workspace_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,

@@ -13,14 +13,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::Engine as _;
 use chrono::{DateTime, TimeZone, Utc};
 use stillflow_api::{
-    ApiRequest, ApiService, CancelJobRequest, CreateDatasetRequest, CreatePlanRequest,
-    CreateSessionRequest, DiscoverAssetsRequest, HandshakeRequest, InspectAssetRequest,
-    ListArtifactsRequest, ListEventsRequest, ListFindingsRequest, ListJobsRequest,
-    ListProfileHistoryRequest, ListRunsRequest, ObjectIdRequest, PreviewAssetRequest,
-    PublishPlanVersionRequest, RegisterSourceConnectionRequest, RequestMetadata,
-    SavePlanVersionRequest, SubmitDriftComparisonRequest, SubmitJobRequest,
+    ApiRequest, ApiService, CancelJobRequest, CollectExportGarbageRequest, CreateDatasetRequest,
+    CreatePlanRequest, CreateSessionRequest, DiscoverAssetsRequest, ExportDownloadRequest,
+    HandshakeRequest, InspectAssetRequest, ListArtifactsRequest, ListEventsRequest,
+    ListExportFilesRequest, ListFindingsRequest, ListJobsRequest, ListProfileHistoryRequest,
+    ListRunsRequest, ObjectIdRequest, PreviewAssetRequest, PublishPlanVersionRequest,
+    RegisterSourceConnectionRequest, RequestMetadata, SavePlanVersionRequest,
+    SubmitDriftComparisonRequest, SubmitExportRequest, SubmitJobRequest, TombstoneExportRequest,
 };
 use stillflow_connector_local_tabular::LocalTabularConnector;
 use stillflow_connectors::{ConnectorRegistry, SourceConnectorRef};
@@ -822,14 +824,53 @@ async fn csv_full_lifecycle_verify_profile_export() {
 
     // Export publishes exactly one logical artifact; files stay nested.
     let export_dir = tempfile::tempdir().expect("export dir");
-    let exported = stack
-        .submit_and_wait(
-            export_op(snapshot.clone(), export_dir.path()),
-            plan_id,
-            version_id,
-            "csv-export",
-        )
-        .await;
+    let export_operation = export_op(snapshot.clone(), export_dir.path());
+    let (export_snapshot, export_request) = match &export_operation.descriptor {
+        OperationDescriptorV1::Export {
+            snapshot,
+            export_request,
+        } => (snapshot.clone(), export_request.clone()),
+        other => panic!("expected Export operation, got {other:?}"),
+    };
+    let export_id = export_request.export_id;
+    let export_job_id = Uuid::new_v4();
+    let submitted_export = stack
+        .service
+        .submit_export(ApiRequest {
+            meta: meta_with_key(stack.workspace_id),
+            body: SubmitExportRequest {
+                session_id: stack.session_id,
+                plan_version_id: version_id,
+                plan_id: Some(plan_id),
+                job_id: export_job_id,
+                snapshot: export_snapshot,
+                export_request,
+                execution_policy: serde_json::json!({"deadlineSeconds": 300}),
+                output_policy: serde_json::json!({}),
+                queued_at: at(20),
+                event_id: Uuid::new_v4(),
+                correlation_id: "e5-g1-csv-export".to_owned(),
+                actor_ref: "actor:e5-g1".to_owned(),
+            },
+        })
+        .expect("submit Export through the X-A1 API")
+        .body;
+    assert_eq!(submitted_export.id, export_job_id);
+    let export_status = stack
+        .service
+        .read_export_job(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ObjectIdRequest {
+                object_id: export_job_id,
+            },
+        })
+        .expect("read Export status")
+        .body;
+    assert_eq!(
+        export_status.operation_kind,
+        Some(stillflow_core::OperationKind::Export)
+    );
+    let exported = stack.wait_terminal(export_job_id).await;
     assert_eq!(
         exported.state,
         JobState::Succeeded,
@@ -848,6 +889,188 @@ async fn csv_full_lifecycle_verify_profile_export() {
         ),
         "export publishes exactly one committed ExportArtifact"
     );
+    let terminal_cancel = stack
+        .service
+        .cancel_export_job(ApiRequest {
+            meta: meta_with_key(stack.workspace_id),
+            body: CancelJobRequest {
+                job_id: export_job_id,
+            },
+        })
+        .await
+        .expect("terminal Export cancellation is idempotent")
+        .body;
+    assert_eq!(terminal_cancel.state, JobState::Succeeded);
+
+    let manifest = stack
+        .service
+        .read_export_manifest(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ObjectIdRequest {
+                object_id: export_id,
+            },
+        })
+        .expect("read Export Manifest")
+        .body;
+    assert_eq!(manifest.export_id, export_id);
+    assert_eq!(manifest.run_id, exported.run_id.expect("Export Run"));
+    assert_eq!(manifest.files.len(), 1);
+    assert_eq!(manifest.destination.kind, "managedLocal");
+    assert!(!serde_json::to_string(&manifest)
+        .expect("Manifest JSON")
+        .contains(export_dir.path().to_str().expect("export root UTF-8")));
+
+    let foreign_workspace = Uuid::new_v4();
+    stack
+        .store
+        .create_workspace(foreign_workspace, Utc::now())
+        .expect("foreign workspace");
+    let foreign_read = stack.service.read_export_manifest(ApiRequest {
+        meta: meta(foreign_workspace),
+        body: ObjectIdRequest {
+            object_id: export_id,
+        },
+    });
+    assert_eq!(
+        foreign_read
+            .expect_err("foreign Workspace must not read Export Manifest")
+            .code,
+        stillflow_api::ApiErrorCode::NotFound
+    );
+    let foreign_files = stack.service.list_export_files(ApiRequest {
+        meta: meta(foreign_workspace),
+        body: ListExportFilesRequest {
+            export_id,
+            limit: 1,
+            cursor: None,
+        },
+    });
+    assert_eq!(
+        foreign_files
+            .expect_err("foreign Workspace must not list Export files")
+            .code,
+        stillflow_api::ApiErrorCode::NotFound
+    );
+
+    let file_page = stack
+        .service
+        .list_export_files(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ListExportFilesRequest {
+                export_id,
+                limit: 1,
+                cursor: None,
+            },
+        })
+        .expect("list Export files")
+        .body;
+    assert_eq!(file_page.files.len(), 1);
+    assert!(file_page.next.is_none());
+    let file_name = file_page.files[0].name.clone();
+    assert_eq!(
+        stack
+            .service
+            .list_export_files(ApiRequest {
+                meta: meta(stack.workspace_id),
+                body: ListExportFilesRequest {
+                    export_id,
+                    limit: 101,
+                    cursor: None,
+                },
+            })
+            .expect_err("Export file page is bounded")
+            .code,
+        stillflow_api::ApiErrorCode::LimitExceeded
+    );
+    assert_eq!(
+        stack
+            .service
+            .list_export_files(ApiRequest {
+                meta: meta(stack.workspace_id),
+                body: ListExportFilesRequest {
+                    export_id,
+                    limit: 1,
+                    cursor: Some("00".to_owned()),
+                },
+            })
+            .expect_err("malformed Export cursor fails closed")
+            .code,
+        stillflow_api::ApiErrorCode::InvalidRequest
+    );
+    let first_chunk = stack
+        .service
+        .download_export(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ExportDownloadRequest {
+                export_id,
+                file_name: Some(file_name.clone()),
+                max_bytes: 4,
+                handle: None,
+            },
+        })
+        .expect("bounded Export download")
+        .body;
+    assert_eq!(first_chunk.byte_count, 4);
+    assert!(!first_chunk.eof);
+    let second_chunk = stack
+        .service
+        .download_export(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ExportDownloadRequest {
+                export_id,
+                file_name: None,
+                max_bytes: 4,
+                handle: first_chunk.next.clone(),
+            },
+        })
+        .expect("continue bounded Export download")
+        .body;
+    let mut downloaded = base64::engine::general_purpose::STANDARD
+        .decode(first_chunk.data)
+        .expect("first Export chunk base64");
+    downloaded.extend(
+        base64::engine::general_purpose::STANDARD
+            .decode(second_chunk.data)
+            .expect("second Export chunk base64"),
+    );
+    assert_eq!(&downloaded, b"id,label");
+
+    let tombstoned_at = Utc::now() + chrono::Duration::seconds(1);
+    let tombstoned = stack
+        .service
+        .tombstone_export(ApiRequest {
+            meta: meta_with_key(stack.workspace_id),
+            body: TombstoneExportRequest {
+                export_id,
+                tombstoned_at,
+            },
+        })
+        .expect("tombstone Export")
+        .body;
+    assert_eq!(tombstoned.state, "tombstoned");
+    let hidden = stack.service.read_export_manifest(ApiRequest {
+        meta: meta(stack.workspace_id),
+        body: ObjectIdRequest {
+            object_id: export_id,
+        },
+    });
+    assert_eq!(
+        hidden.expect_err("tombstoned Export is hidden").code,
+        stillflow_api::ApiErrorCode::NotFound
+    );
+    let collected = stack
+        .service
+        .collect_export_garbage(ApiRequest {
+            meta: meta_with_key(stack.workspace_id),
+            body: CollectExportGarbageRequest {
+                now: tombstoned_at + chrono::Duration::seconds(1),
+                retention_seconds: 0,
+                max_candidates: 10,
+            },
+        })
+        .expect("collect Export garbage")
+        .body;
+    assert_eq!(collected.deleted, 1);
 
     // Terminal Job/Run state agrees across the whole lifecycle.
     for job in [&materialized, &verified, &profiled, &exported] {
