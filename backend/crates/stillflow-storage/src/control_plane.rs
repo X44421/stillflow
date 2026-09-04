@@ -71,6 +71,12 @@ impl ControlPlaneStore {
         crate::STORAGE_SCHEMA_VERSION
     }
 
+    /// Returns the SEC-S1 identity and provider-persistence view sharing this
+    /// store's managed-root lock and SQLite schema.
+    pub fn identity(&self) -> crate::IdentityStore {
+        crate::IdentityStore::from_inner(Arc::clone(&self.inner))
+    }
+
     pub fn create_workspace(
         &self,
         workspace_id: Uuid,
@@ -7541,7 +7547,7 @@ mod tests {
     #[test]
     fn fresh_schema_and_reopen_are_idempotent() {
         let fixture = Fixture::new();
-        assert_eq!(fixture.store.schema_version(), 7);
+        assert_eq!(fixture.store.schema_version(), 8);
         let job = fixture
             .store
             .submit_job(fixture.submission(1, 10))

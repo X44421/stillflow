@@ -9,7 +9,7 @@ use stillflow_core::{
 
 use crate::{ContentDigest, StorageError};
 
-pub const STORAGE_SCHEMA_VERSION: u16 = 7;
+pub const STORAGE_SCHEMA_VERSION: u16 = 8;
 pub const MAX_INPUT_ENVELOPES: u32 = 16_384;
 pub const MAX_SNAPSHOT_PARTITIONS: u32 = 16_384;
 pub const MAX_SNAPSHOT_ROWS: u64 = 1_000_000_000;

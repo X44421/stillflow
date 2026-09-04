@@ -10,6 +10,7 @@ pub mod dedup;
 mod digest;
 mod error;
 pub mod export;
+pub mod identity;
 mod manifest;
 pub mod profile_history;
 mod store;
@@ -44,6 +45,13 @@ pub use error::{IntegrityFailure, StorageError};
 pub use export::{
     compute_export_set_digest, ExportFileChunk, ExportManifest, ExportManifestFile, ExportPlan,
     ExportProvenance, ExportWriter, StagedExportFile,
+};
+pub use identity::{
+    CredentialOwner, CredentialProvider, CredentialProviderError, CredentialProviderRegistry,
+    CredentialRefDraft, CredentialRefRecord, CredentialState, EnvironmentCredentialProvider,
+    ExternalCredentialBackend, ExternalCredentialProvider, IdentityState, IdentityStore,
+    KeychainBackend, MemberRecord, OsKeychainProvider, PrincipalKind, RoleRecord, SecretMaterial,
+    ServiceAccountRecord,
 };
 pub use manifest::{
     GarbageCollectionReport, RecoveryReport, SnapshotDraft, SnapshotManifest, SnapshotPartition,

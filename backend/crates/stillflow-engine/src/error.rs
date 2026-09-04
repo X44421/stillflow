@@ -253,7 +253,10 @@ fn storage_category(error: &StorageError) -> ErrorCategory {
         | StorageError::ExportDestinationExists(_)
         | StorageError::ExportStagingExists(_)
         | StorageError::ExportNotCommitted(_)
-        | StorageError::Snapshot(_) => ErrorCategory::InvalidConfiguration,
+        | StorageError::Snapshot(_)
+        | StorageError::IdentityNotFound
+        | StorageError::IdentityAlreadyExists
+        | StorageError::Identity(_) => ErrorCategory::InvalidConfiguration,
         StorageError::Sequence { .. }
         | StorageError::LineageMismatch { .. }
         | StorageError::EnvelopeLimitExceeded { .. }

@@ -97,6 +97,9 @@ impl From<StorageError> for ApiError {
             | StorageError::ExportStagingExists(_)
             | StorageError::ExportNotCommitted(_)
             | StorageError::Snapshot(_)
+            | StorageError::IdentityNotFound
+            | StorageError::IdentityAlreadyExists
+            | StorageError::Identity(_)
             | StorageError::ArithmeticOverflow(_)
             | StorageError::Integrity { .. }
             | StorageError::Io { .. }

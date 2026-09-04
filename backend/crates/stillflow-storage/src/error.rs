@@ -100,6 +100,12 @@ pub enum StorageError {
     Batch(&'static str),
     #[error("storage activity state is unavailable")]
     ActivityState,
+    #[error("identity record was not found")]
+    IdentityNotFound,
+    #[error("identity record already exists")]
+    IdentityAlreadyExists,
+    #[error("identity contract rejected the request: {0}")]
+    Identity(&'static str),
 }
 
 impl StorageError {
