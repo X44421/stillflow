@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 371,
+  "revision": 372,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -938,7 +938,7 @@
       "id": "H2-B01",
       "title": "H2-B01-dedup-concurrency-test-stability",
       "risk_level": "L2",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "codex-h2-b01-20260904",
       "target_issue": 274,
@@ -962,34 +962,16 @@
       "registered_by": "codex-h2-b01-20260904",
       "dispatch_reason": "Post-merge main CI reproduced the same pre-existing dedup test race twice.",
       "note": "Test-only serialization of the process-global PRE_FLOCK_HOOK tests; no production behavior or schema changes.",
-      "lease_expires_at": "2026-09-04T23:45:05Z",
+      "lease_expires_at": null,
       "started_at": "2026-09-04T19:45:05Z",
-      "updated_at": "2026-09-04T19:45:05Z"
+      "updated_at": "2026-09-04T20:16:22Z",
+      "completed_at": "2026-09-04T20:16:22Z",
+      "result_head": "fe9ff9559b118ad359b6c71d87e764cbf3f44f43",
+      "ci_url": "https://github.com/X44421/stillflow/actions/runs/33914839133",
+      "completion_note": "PR #275 merged as 981b377463fe2782ba51c7959e3bad9fcc78af42; exact-head independent acceptance 5545838825; PR CI 33914295634 passed 6/6; post-merge main CI 33914839133 passed 6/6; closeout 5545958135."
     }
   ],
-  "locks": {
-    "branch:agent/issue-274-h2-b01-dedup-test": {
-      "task_id": "H2-B01",
-      "owner": "codex-h2-b01-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T19:45:05Z",
-      "lease_expires_at": "2026-09-04T23:45:05Z"
-    },
-    "storage:dedup-tests": {
-      "task_id": "H2-B01",
-      "owner": "codex-h2-b01-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T19:45:05Z",
-      "lease_expires_at": "2026-09-04T23:45:05Z"
-    },
-    "gate:h2-b01": {
-      "task_id": "H2-B01",
-      "owner": "codex-h2-b01-20260904",
-      "expected_head": null,
-      "acquired_at": "2026-09-04T19:45:05Z",
-      "lease_expires_at": "2026-09-04T23:45:05Z"
-    }
-  },
-  "updated_at": "2026-09-04T19:45:05Z",
+  "locks": {},
+  "updated_at": "2026-09-04T20:16:22Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
