@@ -12,8 +12,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    asset_input, ensure_no_secret_fields, snapshot_input, ControlPlaneInput, ExportFormat,
-    ExportShape, DATASET_SNAPSHOT_VERSION,
+    asset_input, ensure_no_secret_fields, snapshot_input, ControlPlaneInput,
+    DriftComparisonRequest, ExportFormat, ExportShape, DATASET_SNAPSHOT_VERSION,
 };
 
 /// The closed operation kind set for JobOperation v1.
@@ -24,6 +24,7 @@ pub enum OperationKind {
     Verification,
     Profile,
     Export,
+    Drift,
 }
 
 /// A workspace-bound source asset identity. It contains no credential or raw
@@ -137,6 +138,9 @@ pub enum OperationDescriptorV1 {
     Export {
         snapshot: SnapshotRef,
         export_request: ExportRequestV1,
+    },
+    Drift {
+        comparison: DriftComparisonRequest,
     },
 }
 
@@ -281,6 +285,7 @@ impl JobOperation {
             OperationDescriptorV1::Verification { .. } => OperationKind::Verification,
             OperationDescriptorV1::Profile { .. } => OperationKind::Profile,
             OperationDescriptorV1::Export { .. } => OperationKind::Export,
+            OperationDescriptorV1::Drift { .. } => OperationKind::Drift,
         };
         if descriptor_kind != self.operation_kind {
             return Err(OperationValidationError::KindMismatch);
@@ -321,6 +326,11 @@ impl JobOperation {
                     export_request.shape,
                 )?;
             }
+            OperationDescriptorV1::Drift { comparison } => {
+                if !comparison.validate() {
+                    return Err(OperationValidationError::InvalidDriftComparison);
+                }
+            }
         }
         Ok(())
     }
@@ -346,16 +356,27 @@ impl JobOperation {
         Ok(digest.finalize().into())
     }
 
+    /// Returns the logical input for operations backed by one source or
+    /// Snapshot. Drift resolves two Dataset-owned ProfileHistory entries and
+    /// therefore deliberately has no generic E5 input value.
     pub fn input(&self) -> ControlPlaneInput {
+        self.input_ref()
+            .expect("Drift operations do not have a generic input")
+    }
+
+    pub fn input_ref(&self) -> Option<ControlPlaneInput> {
         match &self.descriptor {
-            OperationDescriptorV1::Materialize { source_asset, .. } => {
-                asset_input(source_asset.source_asset_id, source_asset.version_digest)
-            }
+            OperationDescriptorV1::Materialize { source_asset, .. } => Some(asset_input(
+                source_asset.source_asset_id,
+                source_asset.version_digest,
+            )),
             OperationDescriptorV1::Verification { snapshot, .. }
             | OperationDescriptorV1::Profile { snapshot, .. }
-            | OperationDescriptorV1::Export { snapshot, .. } => {
-                snapshot_input(snapshot.snapshot_id, snapshot.version_digest)
-            }
+            | OperationDescriptorV1::Export { snapshot, .. } => Some(snapshot_input(
+                snapshot.snapshot_id,
+                snapshot.version_digest,
+            )),
+            OperationDescriptorV1::Drift { .. } => None,
         }
     }
 
@@ -364,7 +385,7 @@ impl JobOperation {
             OperationDescriptorV1::Verification { snapshot, .. }
             | OperationDescriptorV1::Profile { snapshot, .. }
             | OperationDescriptorV1::Export { snapshot, .. } => Some(snapshot),
-            OperationDescriptorV1::Materialize { .. } => None,
+            OperationDescriptorV1::Materialize { .. } | OperationDescriptorV1::Drift { .. } => None,
         }
     }
 }
@@ -380,6 +401,7 @@ pub enum OperationValidationError {
     DuplicateProfileColumn,
     InvalidProfileColumn,
     InvalidDestination,
+    InvalidDriftComparison,
     Serialization,
 }
 
@@ -409,6 +431,7 @@ impl std::fmt::Display for OperationValidationError {
                 formatter.write_str("profile column selection contains an invalid name")
             }
             Self::InvalidDestination => formatter.write_str("export destination is invalid"),
+            Self::InvalidDriftComparison => formatter.write_str("drift comparison is invalid"),
             Self::Serialization => formatter.write_str("JobOperation canonicalization failed"),
         }
     }

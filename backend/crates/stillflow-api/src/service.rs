@@ -11,25 +11,25 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use stillflow_connectors::ConnectorRegistry;
 use stillflow_core::{
     AssetKind, AssetLocator, AssetMetadata, ConnectionStatus, ConnectorKind, ControlPlaneEventType,
-    ControlPlaneInput, DatasetState, DiscoverRequest, EventStreamKind, InspectRequest,
-    JobOperation, JobState, LogicalSchema, OperationKind, PreviewRequest, RequestContext, RunState,
-    SamplingStrategy, SessionState, SourceAsset, SourceConnection, SourceConnectionState,
-    TestConnectionRequest,
+    ControlPlaneInput, DatasetState, DiscoverRequest, DriftComparisonRequest, EventStreamKind,
+    InspectRequest, JobOperation, JobState, LogicalSchema, OperationDescriptorV1, OperationKind,
+    PreviewRequest, RequestContext, RunState, SamplingStrategy, SessionState, SourceAsset,
+    SourceConnection, SourceConnectionState, TestConnectionRequest,
 };
 use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePreviewOpRequest};
 use stillflow_plan::{LogicalPlan, PlanNodeId};
 use stillflow_storage::{
     ArtifactCursor, ArtifactPage, ArtifactRefRecord, ArtifactSectionId, ControlPlaneStore,
     DatasetRecord, EventCursor, EventPage, JobCursor, JobPage, JobRecord, JobSubmission,
-    PlanRecord, PlanVersionDraft, PlanVersionRecord, RunCursor, RunPage, RunRecord, SessionRecord,
-    SnapshotStore, SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, TerminalOutputRef,
-    WorkspaceRecord,
+    PlanRecord, PlanVersionDraft, PlanVersionRecord, ProfileHistoryCursor, ProfileHistoryEntry,
+    ProfileHistoryState, RunCursor, RunPage, RunRecord, SessionRecord, SnapshotStore,
+    SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, TerminalOutputRef, WorkspaceRecord,
 };
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -336,6 +336,103 @@ pub struct SavePlanVersionRequest {
     pub parent_version_id: Option<Uuid>,
     pub logical_plan: LogicalPlan,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListProfileHistoryRequest {
+    pub dataset_id: Uuid,
+    #[serde(default)]
+    pub state: Option<ProfileHistoryState>,
+    #[serde(default)]
+    pub columns: Vec<String>,
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileHistoryEntryView {
+    pub history_id: Uuid,
+    pub workspace_id: Uuid,
+    pub dataset_id: Uuid,
+    pub profile_artifact_id: Uuid,
+    pub producing_run_id: Uuid,
+    pub profile_digest: String,
+    pub profile_contract_version: u16,
+    pub drift_contract_version: u16,
+    pub profile_policy_version: u16,
+    pub top_k: usize,
+    pub histogram_buckets: usize,
+    pub schema_fingerprint: String,
+    pub schema: LogicalSchema,
+    pub row_count_scanned: u64,
+    pub scanned_bytes: u64,
+    pub truncated: bool,
+    pub profile_sequence: u64,
+    pub state: ProfileHistoryState,
+    pub created_at: DateTime<Utc>,
+    pub tombstoned_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileHistoryPageView {
+    pub entries: Vec<ProfileHistoryEntryView>,
+    pub next: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitDriftComparisonRequest {
+    pub session_id: Uuid,
+    pub plan_version_id: Uuid,
+    #[serde(default)]
+    pub plan_id: Option<Uuid>,
+    pub job_id: Uuid,
+    pub comparison: DriftComparisonRequest,
+    pub execution_policy: Value,
+    pub output_policy: Value,
+    pub queued_at: DateTime<Utc>,
+    pub event_id: Uuid,
+    pub correlation_id: String,
+    pub actor_ref: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportView {
+    pub artifact: ArtifactView,
+    pub body: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListFindingsRequest {
+    pub artifact_id: Uuid,
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub column_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingPageView {
+    pub artifact_id: Uuid,
+    pub report_digest: String,
+    pub findings: Vec<Value>,
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1436,6 +1533,266 @@ impl ApiService {
         Ok(ApiResponse::new(request.meta.request_id, job_view(job)))
     }
 
+    /// Submits a ProfileHistory comparison through the existing E5 Job
+    /// authority. Drift has no generic E5 input reference; its typed
+    /// operation carries the complete Q-D1 comparison identity.
+    pub fn submit_drift_comparison(
+        &self,
+        request: ApiRequest<SubmitDriftComparisonRequest>,
+    ) -> ApiResult<ApiResponse<JobView>> {
+        self.validate_meta(&request, true)?;
+        if request.body.comparison.workspace_id != request.meta.workspace_id {
+            return Err(ApiError::invalid(
+                "Drift comparison is outside the request Workspace",
+            ));
+        }
+        let operation = JobOperation::try_new(
+            OperationKind::Drift,
+            OperationDescriptorV1::Drift {
+                comparison: request.body.comparison,
+            },
+        )
+        .map_err(|_| ApiError::invalid("invalid Drift comparison request"))?;
+        self.submit_job(ApiRequest {
+            meta: request.meta,
+            body: SubmitJobRequest {
+                session_id: request.body.session_id,
+                plan_version_id: request.body.plan_version_id,
+                plan_id: request.body.plan_id,
+                job_id: request.body.job_id,
+                operation: Some(operation),
+                inputs: Vec::new(),
+                execution_policy: request.body.execution_policy,
+                output_policy: request.body.output_policy,
+                queued_at: request.body.queued_at,
+                event_id: request.body.event_id,
+                correlation_id: request.body.correlation_id,
+                actor_ref: request.body.actor_ref,
+            },
+        })
+    }
+
+    pub fn list_profile_history(
+        &self,
+        request: ApiRequest<ListProfileHistoryRequest>,
+    ) -> ApiResult<ApiResponse<ProfileHistoryPageView>> {
+        self.validate_meta(&request, false)?;
+        let dataset = self.control_plane.get_dataset(request.body.dataset_id)?;
+        self.ensure_scope(dataset.workspace_id, request.meta.workspace_id)?;
+        let columns = normalize_history_columns(&request.body.columns)?;
+        let cursor = request
+            .body
+            .cursor
+            .as_deref()
+            .map(decode_history_cursor)
+            .transpose()?;
+        if let Some(cursor) = &cursor {
+            if cursor.api_version != request.meta.api_version.value()
+                || cursor.workspace_id != request.meta.workspace_id
+                || cursor.dataset_id != request.body.dataset_id
+                || cursor.state != request.body.state
+                || cursor.sort_direction != Q_A1_HISTORY_SORT
+                || cursor.columns != columns
+            {
+                return Err(ApiError::invalid(
+                    "ProfileHistory cursor is outside its scope or filter",
+                ));
+            }
+        }
+        let page = self.control_plane.list_profile_history(
+            request.meta.workspace_id,
+            request.body.dataset_id,
+            request.body.state,
+            cursor.as_ref().map(|value| ProfileHistoryCursor {
+                workspace_id: value.workspace_id,
+                dataset_id: value.dataset_id,
+                state: value.state,
+                profile_sequence: value.profile_sequence,
+                history_id: value.history_id,
+            }),
+            bounded_history_limit(request.body.limit)?,
+        )?;
+        for entry in &page.entries {
+            ensure_response_bound(&entry.schema, Q_A1_HISTORY_METADATA_BYTES)?;
+        }
+        let entries = page
+            .entries
+            .into_iter()
+            .filter(|entry| history_matches_columns(entry, &columns))
+            .map(profile_history_entry_view)
+            .collect::<Vec<_>>();
+        let next = page.next.map(|value| {
+            encode_cursor(&HistoryCursorWire {
+                api_version: request.meta.api_version.value(),
+                workspace_id: value.workspace_id,
+                dataset_id: value.dataset_id,
+                state: value.state,
+                sort_direction: Q_A1_HISTORY_SORT.to_owned(),
+                columns: columns.clone(),
+                profile_sequence: value.profile_sequence,
+                history_id: value.history_id,
+            })
+        });
+        let next = next.transpose()?;
+        let response = ProfileHistoryPageView { entries, next };
+        ensure_response_bound(&response, self.limits.max_response_bytes)?;
+        Ok(ApiResponse::new(request.meta.request_id, response))
+    }
+
+    pub fn read_drift_report(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<ReportView>> {
+        self.read_report(
+            request,
+            stillflow_core::ArtifactKind::DriftReport,
+            "drift_report.v1",
+        )
+    }
+
+    pub fn read_quality_report(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<ReportView>> {
+        self.read_report(
+            request,
+            stillflow_core::ArtifactKind::QualityReport,
+            "quality_report",
+        )
+    }
+
+    pub fn list_report_findings(
+        &self,
+        request: ApiRequest<ListFindingsRequest>,
+    ) -> ApiResult<ApiResponse<FindingPageView>> {
+        self.validate_meta(&request, false)?;
+        let limit = bounded_report_limit(request.body.limit)?;
+        let filters = FindingFilterWire::from_request(&request.body)?;
+        let artifact = self
+            .control_plane
+            .get_artifact_ref(request.body.artifact_id)?;
+        self.ensure_scope(artifact.workspace_id, request.meta.workspace_id)?;
+        if !matches!(
+            artifact.artifact_kind,
+            stillflow_core::ArtifactKind::DriftReport | stillflow_core::ArtifactKind::QualityReport
+        ) {
+            return Err(ApiError::not_found());
+        }
+        let body = self.control_plane.get_artifact_body(artifact.artifact_id)?;
+        if body.workspace_id != request.meta.workspace_id
+            || body.artifact_kind != artifact.artifact_kind
+            || body.artifact_version != 1
+            || body.content_digest != artifact.content_digest
+        {
+            return Err(ApiError::invalid(
+                "report Artifact body identity is inconsistent",
+            ));
+        }
+        let value: Value = serde_json::from_slice(&body.body)
+            .map_err(|_| ApiError::invalid("report body is not valid canonical JSON"))?;
+        let all_findings = value
+            .get("findings")
+            .and_then(Value::as_array)
+            .ok_or_else(|| ApiError::invalid("report body has no findings array"))?;
+        if all_findings.len() > stillflow_core::DRIFT_MAX_FINDINGS_PER_REPORT {
+            return Err(ApiError::limit("report findings exceed the API bound"));
+        }
+        let filtered = all_findings
+            .iter()
+            .filter(|finding| finding_matches(finding, &filters))
+            .cloned()
+            .collect::<Vec<_>>();
+        let cursor = request
+            .body
+            .cursor
+            .as_deref()
+            .map(decode_finding_cursor)
+            .transpose()?;
+        let digest = digest_hex(&body.content_digest);
+        if let Some(cursor) = &cursor {
+            if cursor.api_version != request.meta.api_version.value()
+                || cursor.workspace_id != request.meta.workspace_id
+                || cursor.artifact_id != artifact.artifact_id
+                || cursor.report_digest != digest
+                || cursor.sort_direction != Q_A1_FINDING_SORT
+                || cursor.filters != filters
+            {
+                return Err(ApiError::invalid(
+                    "report findings cursor is outside its scope or filter",
+                ));
+            }
+        }
+        let offset = cursor.map_or(0, |value| value.offset);
+        if offset > filtered.len() {
+            return Err(ApiError::invalid(
+                "report findings cursor is outside the report",
+            ));
+        }
+        let end = offset.saturating_add(limit).min(filtered.len());
+        let next = (end < filtered.len()).then(|| {
+            encode_cursor(&FindingCursorWire {
+                api_version: request.meta.api_version.value(),
+                workspace_id: request.meta.workspace_id,
+                artifact_id: artifact.artifact_id,
+                report_digest: digest.clone(),
+                sort_direction: Q_A1_FINDING_SORT.to_owned(),
+                filters: filters.clone(),
+                offset: end,
+            })
+        });
+        let response = FindingPageView {
+            artifact_id: artifact.artifact_id,
+            report_digest: digest,
+            findings: filtered[offset..end].to_vec(),
+            next: next.transpose()?,
+        };
+        ensure_response_bound(&response, self.limits.max_response_bytes)?;
+        Ok(ApiResponse::new(request.meta.request_id, response))
+    }
+
+    fn read_report(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+        expected_kind: stillflow_core::ArtifactKind,
+        expected_type: &str,
+    ) -> ApiResult<ApiResponse<ReportView>> {
+        self.validate_meta(&request, false)?;
+        let artifact = self
+            .control_plane
+            .get_artifact_ref(request.body.object_id)?;
+        self.ensure_scope(artifact.workspace_id, request.meta.workspace_id)?;
+        if artifact.artifact_kind != expected_kind {
+            return Err(ApiError::not_found());
+        }
+        let body = self.control_plane.get_artifact_body(artifact.artifact_id)?;
+        if body.workspace_id != request.meta.workspace_id
+            || body.run_id != artifact.run_id
+            || body.artifact_kind != expected_kind
+            || body.artifact_version != 1
+            || body.content_digest != artifact.content_digest
+        {
+            return Err(ApiError::invalid(
+                "report Artifact body identity is inconsistent",
+            ));
+        }
+        let value: Value = serde_json::from_slice(&body.body)
+            .map_err(|_| ApiError::invalid("report body is not valid canonical JSON"))?;
+        if value.get("artifact_type").and_then(Value::as_str) != Some(expected_type) {
+            return Err(ApiError::invalid("report Artifact type is inconsistent"));
+        }
+        if value.get("artifact_body_version").and_then(Value::as_u64) != Some(1) {
+            return Err(ApiError::invalid(
+                "report Artifact body version is inconsistent",
+            ));
+        }
+        let response = ReportView {
+            artifact: artifact_view(artifact),
+            body: value,
+        };
+        ensure_response_bound(&response, self.limits.max_response_bytes)?;
+        Ok(ApiResponse::new(request.meta.request_id, response))
+    }
+
     pub async fn cancel_job(
         &self,
         request: ApiRequest<CancelJobRequest>,
@@ -1759,6 +2116,223 @@ pub struct JobPageView {
 pub struct RunPageView {
     pub runs: Vec<RunView>,
     pub next: Option<RunCursorView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryCursorWire {
+    api_version: u16,
+    workspace_id: Uuid,
+    dataset_id: Uuid,
+    state: Option<ProfileHistoryState>,
+    sort_direction: String,
+    columns: Vec<String>,
+    profile_sequence: u64,
+    history_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FindingCursorWire {
+    api_version: u16,
+    workspace_id: Uuid,
+    artifact_id: Uuid,
+    report_digest: String,
+    sort_direction: String,
+    filters: FindingFilterWire,
+    offset: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FindingFilterWire {
+    severity: Option<String>,
+    category: Option<String>,
+    origin: Option<String>,
+    kind: Option<String>,
+    column_name: Option<String>,
+}
+
+impl FindingFilterWire {
+    fn from_request(request: &ListFindingsRequest) -> ApiResult<Self> {
+        Ok(Self {
+            severity: normalize_filter(request.severity.as_deref(), "severity")?,
+            category: normalize_filter(request.category.as_deref(), "category")?,
+            origin: normalize_filter(request.origin.as_deref(), "origin")?,
+            kind: normalize_filter(request.kind.as_deref(), "kind")?,
+            column_name: normalize_filter(request.column_name.as_deref(), "columnName")?,
+        })
+    }
+}
+
+const Q_A1_HISTORY_PAGE_SIZE: usize = 100;
+const Q_A1_REPORT_PAGE_SIZE: usize = 100;
+const Q_A1_HISTORY_METADATA_BYTES: usize = 1024 * 1024;
+const Q_A1_CURSOR_BYTES: usize = 16 * 1024;
+const Q_A1_HISTORY_SORT: &str = "profile_sequence_desc_history_id_desc";
+const Q_A1_FINDING_SORT: &str = "report_order_asc";
+
+fn bounded_history_limit(limit: usize) -> ApiResult<usize> {
+    if limit == 0 || limit > Q_A1_HISTORY_PAGE_SIZE {
+        Err(ApiError::limit(
+            "ProfileHistory page size exceeds the Q-A1 bound",
+        ))
+    } else {
+        Ok(limit)
+    }
+}
+
+fn bounded_report_limit(limit: usize) -> ApiResult<usize> {
+    if limit == 0 || limit > Q_A1_REPORT_PAGE_SIZE {
+        Err(ApiError::limit(
+            "report finding page size exceeds the Q-A1 bound",
+        ))
+    } else {
+        Ok(limit)
+    }
+}
+
+fn normalize_history_columns(columns: &[String]) -> ApiResult<Vec<String>> {
+    if columns.len() > stillflow_core::DRIFT_MAX_COMPARE_COLUMNS {
+        return Err(ApiError::limit(
+            "ProfileHistory column filter exceeds the Q-A1 bound",
+        ));
+    }
+    let mut normalized = Vec::with_capacity(columns.len());
+    for column in columns {
+        let value = normalize_filter(Some(column.as_str()), "columnName")?
+            .expect("a present column filter remains present");
+        normalized.push(value);
+    }
+    normalized.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    normalized.dedup();
+    if normalized.len() != columns.len() {
+        return Err(ApiError::invalid("ProfileHistory columns must be unique"));
+    }
+    Ok(normalized)
+}
+
+fn normalize_filter(value: Option<&str>, name: &str) -> ApiResult<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty() || value.len() > 256 || value.trim() != value {
+        return Err(ApiError::invalid(format!("invalid {name} filter")));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(ApiError::invalid(format!("invalid {name} filter")));
+    }
+    Ok(Some(value.to_owned()))
+}
+
+fn encode_cursor<T: Serialize>(value: &T) -> ApiResult<String> {
+    let bytes = serde_json::to_vec(value).map_err(|_| ApiError::internal())?;
+    if bytes.len() > Q_A1_CURSOR_BYTES {
+        return Err(ApiError::limit("cursor exceeds the API bound"));
+    }
+    Ok(hex_encode(&bytes))
+}
+
+fn decode_cursor<T: DeserializeOwned>(value: &str) -> ApiResult<T> {
+    if value.is_empty() || value.len() > Q_A1_CURSOR_BYTES.saturating_mul(2) {
+        return Err(ApiError::invalid("cursor is invalid"));
+    }
+    let bytes = hex_decode(value).ok_or_else(|| ApiError::invalid("cursor is invalid"))?;
+    serde_json::from_slice(&bytes).map_err(|_| ApiError::invalid("cursor is invalid"))
+}
+
+fn decode_history_cursor(value: &str) -> ApiResult<HistoryCursorWire> {
+    decode_cursor(value)
+}
+
+fn decode_finding_cursor(value: &str) -> ApiResult<FindingCursorWire> {
+    decode_cursor(value)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut value = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        write!(&mut value, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    value
+}
+
+fn hex_decode(value: &str) -> Option<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().chunks_exact(2) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        bytes.push((high << 4) | low);
+    }
+    Some(bytes)
+}
+
+fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn ensure_response_bound<T: Serialize>(value: &T, max_bytes: usize) -> ApiResult<()> {
+    let bytes = serde_json::to_vec(value).map_err(|_| ApiError::internal())?;
+    if bytes.len() > max_bytes {
+        Err(ApiError::limit("API response exceeds its bound"))
+    } else {
+        Ok(())
+    }
+}
+
+fn history_matches_columns(entry: &ProfileHistoryEntry, columns: &[String]) -> bool {
+    columns.iter().all(|column| {
+        entry
+            .schema
+            .fields
+            .iter()
+            .any(|field| field.name == *column)
+    })
+}
+
+fn profile_history_entry_view(entry: ProfileHistoryEntry) -> ProfileHistoryEntryView {
+    ProfileHistoryEntryView {
+        history_id: entry.history_id,
+        workspace_id: entry.workspace_id,
+        dataset_id: entry.dataset_id,
+        profile_artifact_id: entry.profile_artifact_id,
+        producing_run_id: entry.producing_run_id,
+        profile_digest: digest_hex(&entry.profile_digest),
+        profile_contract_version: entry.profile_contract_version,
+        drift_contract_version: entry.drift_contract_version,
+        profile_policy_version: entry.profile_policy_version,
+        top_k: entry.top_k,
+        histogram_buckets: entry.histogram_buckets,
+        schema_fingerprint: digest_hex(&entry.schema_fingerprint),
+        schema: entry.schema,
+        row_count_scanned: entry.row_count_scanned,
+        scanned_bytes: entry.scanned_bytes,
+        truncated: entry.truncated,
+        profile_sequence: entry.profile_sequence,
+        state: entry.state,
+        created_at: entry.created_at,
+        tombstoned_at: entry.tombstoned_at,
+    }
+}
+
+fn finding_matches(finding: &Value, filters: &FindingFilterWire) -> bool {
+    matches_filter(finding, "severity", filters.severity.as_deref())
+        && matches_filter(finding, "category", filters.category.as_deref())
+        && matches_filter(finding, "origin", filters.origin.as_deref())
+        && matches_filter(finding, "kind", filters.kind.as_deref())
+        && (matches_filter(finding, "column_name", filters.column_name.as_deref())
+            || matches_filter(finding, "columnName", filters.column_name.as_deref()))
+}
+
+fn matches_filter(value: &Value, key: &str, expected: Option<&str>) -> bool {
+    expected.is_none_or(|expected| value.get(key).and_then(Value::as_str) == Some(expected))
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -2183,6 +2757,166 @@ mod tests {
                     .canonical_plan_digest
             )
         );
+    }
+
+    #[test]
+    fn q_a1_cursor_is_bound_to_version_scope_and_filters() {
+        let workspace_id = Uuid::from_u128(100);
+        let dataset_id = Uuid::from_u128(101);
+        let history_id = Uuid::from_u128(102);
+        let cursor = HistoryCursorWire {
+            api_version: 1,
+            workspace_id,
+            dataset_id,
+            state: Some(ProfileHistoryState::Active),
+            sort_direction: Q_A1_HISTORY_SORT.to_owned(),
+            columns: vec!["amount".to_owned()],
+            profile_sequence: 7,
+            history_id,
+        };
+        let encoded = encode_cursor(&cursor).expect("cursor encoding");
+        let decoded = decode_history_cursor(&encoded).expect("cursor decoding");
+        assert_eq!(decoded, cursor);
+        assert!(decode_history_cursor(&encoded[..encoded.len() - 2]).is_err());
+        assert_ne!(
+            decoded,
+            HistoryCursorWire {
+                columns: vec!["other".to_owned()],
+                ..cursor
+            }
+        );
+    }
+
+    #[test]
+    fn q_a1_finding_filters_are_bounded_and_exact() {
+        let request = ListFindingsRequest {
+            artifact_id: Uuid::from_u128(110),
+            limit: 1,
+            cursor: None,
+            severity: Some("Warning".to_owned()),
+            category: Some("Schema".to_owned()),
+            origin: Some("Deterministic".to_owned()),
+            kind: Some("schema_column_added".to_owned()),
+            column_name: Some("amount".to_owned()),
+        };
+        let filters = FindingFilterWire::from_request(&request).expect("filters");
+        let finding = serde_json::json!({
+            "severity": "Warning",
+            "category": "Schema",
+            "origin": "Deterministic",
+            "kind": "schema_column_added",
+            "column_name": "amount"
+        });
+        assert!(finding_matches(&finding, &filters));
+        assert!(!finding_matches(
+            &serde_json::json!({"severity": "Info", "category": "Schema", "origin": "Deterministic", "kind": "schema_column_added", "column_name": "amount"}),
+            &filters
+        ));
+        let mut invalid = request;
+        invalid.severity = Some("bad\nvalue".to_owned());
+        assert!(FindingFilterWire::from_request(&invalid).is_err());
+    }
+
+    #[test]
+    fn q_a1_drift_submission_uses_typed_job_without_generic_inputs() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(ControlPlaneStore::open(root.path()).expect("store"));
+        let workspace_id = Uuid::from_u128(120);
+        let session_id = Uuid::from_u128(121);
+        let plan_id = Uuid::from_u128(122);
+        let version_id = Uuid::from_u128(123);
+        let at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        store.create_workspace(workspace_id, at).expect("workspace");
+        store
+            .create_session(workspace_id, session_id, at)
+            .expect("session");
+        let service = ApiService::new(Arc::clone(&store));
+        service
+            .create_plan(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::from_u128(124), workspace_id),
+                body: CreatePlanRequest {
+                    plan_id,
+                    created_at: at,
+                },
+            })
+            .expect("plan");
+        let scan = PlanNodeId::from_uuid(Uuid::from_u128(125));
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            scan,
+            PlanNode::new(
+                PlanNodeKind::Scan {
+                    source_asset_id: Uuid::from_u128(126),
+                    projection: vec![stillflow_core::ColumnId::from_uuid(Uuid::from_u128(127))],
+                    predicate: None,
+                },
+                Vec::new(),
+            ),
+        );
+        let logical_plan = LogicalPlan::new(scan, nodes).expect("plan validates");
+        service
+            .save_plan_version(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::from_u128(127), workspace_id),
+                body: SavePlanVersionRequest {
+                    plan_id,
+                    plan_version_id: version_id,
+                    version_number: 1,
+                    parent_version_id: None,
+                    logical_plan,
+                    created_at: at,
+                },
+            })
+            .expect("plan version");
+        service
+            .publish_plan_version(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::from_u128(128), workspace_id),
+                body: PublishPlanVersionRequest {
+                    plan_version_id: version_id,
+                    expected_current_version_id: None,
+                    published_at: at,
+                },
+            })
+            .expect("published plan version");
+        let job_id = Uuid::from_u128(129);
+        let response = service
+            .submit_drift_comparison(ApiRequest {
+                meta: crate::RequestMetadata {
+                    idempotency_key: Some("q-a1-drift-1".to_owned()),
+                    ..metadata(workspace_id)
+                },
+                body: SubmitDriftComparisonRequest {
+                    session_id,
+                    plan_version_id: version_id,
+                    plan_id: Some(plan_id),
+                    job_id,
+                    comparison: DriftComparisonRequest {
+                        workspace_id,
+                        dataset_id: Uuid::from_u128(130),
+                        candidate_history_id: Uuid::from_u128(131),
+                        baseline: stillflow_core::DriftBaselineMode::LatestEligible,
+                        threshold_policy_version: stillflow_core::DRIFT_THRESHOLD_POLICY_VERSION,
+                        observation_window: None,
+                        report_contract_version:
+                            stillflow_core::PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
+                    },
+                    execution_policy: serde_json::json!({"deadlineSeconds": 30}),
+                    output_policy: serde_json::json!({}),
+                    queued_at: at,
+                    event_id: Uuid::from_u128(132),
+                    correlation_id: "q-a1-correlation".to_owned(),
+                    actor_ref: "actor:q-a1-test".to_owned(),
+                },
+            })
+            .expect("drift submission");
+        assert_eq!(response.body.operation_kind, Some(OperationKind::Drift));
+        assert!(response.body.inputs.is_empty());
+        assert!(matches!(
+            response.body.operation,
+            Some(JobOperation {
+                descriptor: OperationDescriptorV1::Drift { .. },
+                ..
+            })
+        ));
     }
 
     #[test]

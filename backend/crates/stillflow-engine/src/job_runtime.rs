@@ -17,16 +17,16 @@ use chrono::{DateTime, Utc};
 use futures::FutureExt;
 use sha2::{Digest as _, Sha256};
 use stillflow_core::{
-    ArtifactKind, ControlPlaneEventType, ErrorCategory, EventStreamKind, ExportDestination,
-    ExportPolicy, InputRef, JobState, LogicalInputRef, LogicalSchema, OperationDescriptorV1,
-    ProfileColumnsV1, RequestContext, RunState, SourceAsset, SourceConnection,
-    PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
+    ArtifactKind, ControlPlaneEventType, DriftOutcome, ErrorCategory, EventStreamKind,
+    ExportDestination, ExportPolicy, InputRef, JobState, LogicalInputRef, LogicalSchema,
+    OperationDescriptorV1, ProfileColumnsV1, RequestContext, RunState, SourceAsset,
+    SourceConnection, PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
 };
 use stillflow_plan::LogicalPlan;
 use stillflow_storage::{
-    ArtifactOutputRef, ArtifactRefDraft, ControlPlaneStore, EventDraft, ExternalRefKind,
-    FailureInfo, JobRecord, JobRecoveryDraft, JobSubmission, ProfileHistoryDraft, RunRecord,
-    SnapshotOutputRef, SnapshotStore, StorageError, SubmitOutcome, TerminalOutputRef,
+    ArtifactOutputRef, ArtifactRefDraft, ControlPlaneStore, DriftReportDraft, EventDraft,
+    ExternalRefKind, FailureInfo, JobRecord, JobRecoveryDraft, JobSubmission, ProfileHistoryDraft,
+    RunRecord, SnapshotOutputRef, SnapshotStore, StorageError, SubmitOutcome, TerminalOutputRef,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit};
@@ -561,6 +561,7 @@ async fn process_one(inner: Arc<RuntimeInner>) -> WorkerProgress {
                 outcome.bundle_ref,
                 outcome.terminal_outputs,
                 outcome.profile_history_draft,
+                outcome.drift_report_draft,
             )
             .await;
         }
@@ -579,7 +580,7 @@ async fn process_one(inner: Arc<RuntimeInner>) -> WorkerProgress {
                 )
             };
             finish_claimed(
-                &inner, &job, &run, run_state, job_state, failure, None, None, None, None,
+                &inner, &job, &run, run_state, job_state, failure, None, None, None, None, None,
             )
             .await;
         }
@@ -593,6 +594,7 @@ struct ExecutionOutcome {
     bundle_ref: Option<Uuid>,
     terminal_outputs: Option<Vec<TerminalOutputRef>>,
     profile_history_draft: Option<ProfileHistoryDraft>,
+    drift_report_draft: Option<DriftReportDraft>,
 }
 
 async fn execute_claimed(
@@ -673,6 +675,7 @@ async fn execute_claimed(
                     bundle_ref,
                     terminal_outputs: None,
                     profile_history_draft: None,
+                    drift_report_draft: None,
                 })
             }
             Some(operation) => match operation.descriptor.clone() {
@@ -729,6 +732,7 @@ async fn execute_claimed(
                             committed: true,
                         }]),
                         profile_history_draft: None,
+                        drift_report_draft: None,
                     })
                 }
                 OperationDescriptorV1::Verification {
@@ -846,6 +850,7 @@ async fn execute_claimed(
                             members,
                         }]),
                         profile_history_draft: None,
+                        drift_report_draft: None,
                     })
                 }
                 OperationDescriptorV1::Profile {
@@ -1050,6 +1055,7 @@ async fn execute_claimed(
                             },
                         ]),
                         profile_history_draft: Some(profile_history_draft),
+                        drift_report_draft: None,
                     })
                 }
                 OperationDescriptorV1::Export {
@@ -1120,6 +1126,165 @@ async fn execute_claimed(
                             state: stillflow_core::ArtifactRefState::Committed,
                         }]),
                         profile_history_draft: None,
+                        drift_report_draft: None,
+                    })
+                }
+                OperationDescriptorV1::Drift { comparison } => {
+                    let deadline = context.deadline().ok_or(JobRuntimeError::ResolverTimeout)?;
+                    let result = tokio::select! {
+                        _ = inner.shutdown.cancelled() => Err(JobRuntimeError::Shutdown),
+                        result = time::timeout_at(deadline, inner.engine.drift_history_with_permit(
+                            &inner.control_plane,
+                            comparison,
+                            context.clone(),
+                        )) => match result {
+                            Ok(Ok(result)) => Ok(result),
+                            Ok(Err(error)) => Err(JobRuntimeError::Engine(error)),
+                            Err(_) => Err(JobRuntimeError::Engine(EngineError::Timeout)),
+                        },
+                    }?;
+                    let comparison_key = parse_digest_hex(
+                        &result.canonical_input_digest,
+                        "drift comparison key is invalid",
+                    )?;
+                    let existing = if comparison_key == [0; 32] {
+                        None
+                    } else {
+                        match inner.control_plane.get_drift_comparison(comparison_key) {
+                            Ok(record) => Some(record),
+                            Err(StorageError::InvalidDraft(_)) => None,
+                            Err(error) => return Err(JobRuntimeError::Storage(error)),
+                        }
+                    };
+                    if let Some(existing) = existing {
+                        let outcome = result
+                            .report
+                            .as_ref()
+                            .map_or(DriftOutcome::Complete, |report| report.outcome);
+                        return Ok(ExecutionOutcome {
+                            snapshot_ref: None,
+                            bundle_ref: None,
+                            terminal_outputs: Some(vec![TerminalOutputRef::DriftComparison {
+                                workspace_id: job.workspace_id,
+                                run_id: run.id,
+                                dataset_id: existing.dataset_id,
+                                candidate_history_id: existing.candidate_history_id,
+                                baseline_history_id: Some(existing.baseline_history_id),
+                                outcome,
+                                report_artifact_id: Some(existing.report_artifact_id),
+                                report_digest: Some(digest_hex_bytes(&existing.report_digest)),
+                            }]),
+                            profile_history_draft: None,
+                            drift_report_draft: None,
+                        });
+                    }
+                    let Some(report) = result.report else {
+                        return Ok(ExecutionOutcome {
+                            snapshot_ref: None,
+                            bundle_ref: None,
+                            terminal_outputs: Some(vec![TerminalOutputRef::DriftComparison {
+                                workspace_id: job.workspace_id,
+                                run_id: run.id,
+                                dataset_id: comparison.dataset_id,
+                                candidate_history_id: comparison.candidate_history_id,
+                                baseline_history_id: result.baseline_history_id,
+                                outcome: result.outcome,
+                                report_artifact_id: None,
+                                report_digest: None,
+                            }]),
+                            profile_history_draft: None,
+                            drift_report_draft: None,
+                        });
+                    };
+                    let baseline_history_id = result.baseline_history_id.ok_or(
+                        JobRuntimeError::Invalid("drift report has no resolved baseline"),
+                    )?;
+                    let report_body = result.canonical_body.ok_or(JobRuntimeError::Invalid(
+                        "drift report has no canonical body",
+                    ))?;
+                    let report_digest_text = result.canonical_digest.ok_or(
+                        JobRuntimeError::Invalid("drift report has no canonical digest"),
+                    )?;
+                    let report_digest = parse_digest_hex(
+                        &report_digest_text,
+                        "drift report digest is invalid",
+                    )?;
+                    let candidate = inner
+                        .control_plane
+                        .get_profile_history(
+                            comparison.workspace_id,
+                            comparison.dataset_id,
+                            comparison.candidate_history_id,
+                        )
+                        .map_err(JobRuntimeError::Storage)?;
+                    let created_at = at_least(inner, run.started_at);
+                    let report_artifact_id = inner.identity.next_id();
+                    let metadata = serde_json::json!({
+                        "artifactType": "drift_report",
+                        "artifactBodyVersion": 1,
+                        "canonicalDigest": report_digest_text,
+                        "canonicalInputDigest": result.canonical_input_digest,
+                        "workspaceId": job.workspace_id,
+                        "datasetId": comparison.dataset_id,
+                        "runId": run.id,
+                        "baselineHistoryId": baseline_history_id,
+                        "candidateHistoryId": comparison.candidate_history_id,
+                        "outcome": report.outcome,
+                        "reportContractVersion": comparison.report_contract_version,
+                        "thresholdPolicyVersion": comparison.threshold_policy_version,
+                    });
+                    inner.control_plane.create_artifact_ref_with_body(
+                        ArtifactRefDraft {
+                            workspace_id: job.workspace_id,
+                            run_id: run.id,
+                            artifact_id: report_artifact_id,
+                            artifact_kind: ArtifactKind::DriftReport,
+                            external_ref_kind: ExternalRefKind::Artifact,
+                            external_ref_id: candidate.profile_artifact_id,
+                            content_digest: report_digest,
+                            metadata: metadata.clone(),
+                            created_at,
+                        },
+                        report_body.clone(),
+                    )?;
+                    Ok(ExecutionOutcome {
+                        snapshot_ref: None,
+                        bundle_ref: None,
+                        terminal_outputs: Some(vec![
+                            TerminalOutputRef::DriftComparison {
+                                workspace_id: job.workspace_id,
+                                run_id: run.id,
+                                dataset_id: comparison.dataset_id,
+                                candidate_history_id: comparison.candidate_history_id,
+                                baseline_history_id: Some(baseline_history_id),
+                                outcome: report.outcome,
+                                report_artifact_id: Some(report_artifact_id),
+                                report_digest: Some(digest_hex_bytes(&report_digest)),
+                            },
+                            TerminalOutputRef::Artifact {
+                                workspace_id: job.workspace_id,
+                                run_id: run.id,
+                                artifact_id: report_artifact_id,
+                                artifact_kind: ArtifactKind::DriftReport,
+                                artifact_version: 1,
+                                content_digest: report_digest,
+                                state: stillflow_core::ArtifactRefState::Committed,
+                            },
+                        ]),
+                        profile_history_draft: None,
+                        drift_report_draft: Some(DriftReportDraft {
+                            comparison_key,
+                            workspace_id: job.workspace_id,
+                            dataset_id: comparison.dataset_id,
+                            baseline_history_id,
+                            candidate_history_id: comparison.candidate_history_id,
+                            report_artifact_id,
+                            producing_run_id: run.id,
+                            report_digest,
+                            metadata,
+                            body: report_body,
+                            created_at,
+                        }),
                     })
                 }
             },
@@ -1262,6 +1427,7 @@ async fn finish_claimed(
     bundle_ref: Option<Uuid>,
     terminal_outputs: Option<Vec<TerminalOutputRef>>,
     profile_history_draft: Option<ProfileHistoryDraft>,
+    drift_report_draft: Option<DriftReportDraft>,
 ) {
     let at = at_least(inner, run.started_at.max(job.queued_at));
     let request_id = format!("job-runtime:terminal:{}", job.id);
@@ -1285,17 +1451,31 @@ async fn finish_claimed(
     let typed_outputs = terminal_outputs
         .or_else(|| (job.operation.is_some() || run.operation.is_some()).then(Vec::new));
     let result = match typed_outputs {
-        Some(outputs) => inner
-            .control_plane
-            .finish_run_and_job_with_terminal_outputs(
-                run.id,
-                run_state,
-                job_state,
-                outputs,
-                run_terminal_event,
-                job_terminal_event,
-                failure,
-            ),
+        Some(outputs) => match drift_report_draft {
+            Some(draft) => inner
+                .control_plane
+                .finish_run_and_job_with_terminal_outputs_and_drift_report(
+                    run.id,
+                    run_state,
+                    job_state,
+                    outputs,
+                    draft,
+                    run_terminal_event,
+                    job_terminal_event,
+                    failure,
+                ),
+            None => inner
+                .control_plane
+                .finish_run_and_job_with_terminal_outputs(
+                    run.id,
+                    run_state,
+                    job_state,
+                    outputs,
+                    run_terminal_event,
+                    job_terminal_event,
+                    failure,
+                ),
+        },
         None => inner.control_plane.finish_run_and_job_with_outputs(
             run.id,
             run_state,

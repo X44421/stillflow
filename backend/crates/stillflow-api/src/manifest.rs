@@ -207,6 +207,13 @@ pub const E5_A1_ROUTES: &[RouteSpec] = &[
         "DatasetView",
     ),
     route(
+        "profile.history.list",
+        "GET",
+        "/v1/datasets/{datasetId}/profile-history",
+        "ListProfileHistoryRequest",
+        "ProfileHistoryPageView",
+    ),
+    route(
         "plan.create",
         "POST",
         "/v1/plans",
@@ -291,6 +298,13 @@ pub const E5_A1_ROUTES: &[RouteSpec] = &[
         "JobView",
     ),
     route(
+        "drift.compare",
+        "POST",
+        "/v1/drift/comparisons",
+        "SubmitDriftComparisonRequest",
+        "JobView",
+    ),
+    route(
         "job.read",
         "GET",
         "/v1/jobs/{objectId}",
@@ -353,6 +367,27 @@ pub const E5_A1_ROUTES: &[RouteSpec] = &[
         "ArtifactContentRequest",
         "ArtifactContentPage",
     ),
+    route(
+        "drift.report.read",
+        "GET",
+        "/v1/drift-reports/{artifactId}",
+        "ObjectIdRequest",
+        "ReportView",
+    ),
+    route(
+        "quality.report.read",
+        "GET",
+        "/v1/quality-reports/{artifactId}",
+        "ObjectIdRequest",
+        "ReportView",
+    ),
+    route(
+        "report.findings.list",
+        "GET",
+        "/v1/reports/{artifactId}/findings",
+        "ListFindingsRequest",
+        "FindingPageView",
+    ),
 ];
 
 pub const E5_A1_SCHEMAS: &[SchemaSpec] = &[
@@ -380,6 +415,9 @@ pub const E5_A1_SCHEMAS: &[SchemaSpec] = &[
     schema("PreviewView"),
     schema("CreateDatasetRequest"),
     schema("DatasetView"),
+    schema("ListProfileHistoryRequest"),
+    schema("ProfileHistoryEntryView"),
+    schema("ProfileHistoryPageView"),
     schema("CreatePlanRequest"),
     schema("PlanView"),
     schema("SavePlanVersionRequest"),
@@ -394,6 +432,7 @@ pub const E5_A1_SCHEMAS: &[SchemaSpec] = &[
     schema("EnginePreviewRequest"),
     schema("EnginePreviewView"),
     schema("SubmitJobRequest"),
+    schema("SubmitDriftComparisonRequest"),
     schema("JobOperation"),
     schema("OperationKind"),
     schema("OperationDescriptorV1"),
@@ -422,6 +461,9 @@ pub const E5_A1_SCHEMAS: &[SchemaSpec] = &[
     schema("ArtifactPageView"),
     schema("ArtifactContentRequest"),
     schema("ArtifactContentPage"),
+    schema("ReportView"),
+    schema("ListFindingsRequest"),
+    schema("FindingPageView"),
     schema("Vec<SourceAssetView>"),
     schema("ObjectList<SessionView>"),
     schema("ObjectList<SourceConnectionView>"),

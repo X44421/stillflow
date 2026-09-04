@@ -17,17 +17,19 @@ use chrono::{DateTime, TimeZone, Utc};
 use stillflow_api::{
     ApiRequest, ApiService, CancelJobRequest, CreateDatasetRequest, CreatePlanRequest,
     CreateSessionRequest, DiscoverAssetsRequest, HandshakeRequest, InspectAssetRequest,
-    ListArtifactsRequest, ListEventsRequest, ListJobsRequest, ListRunsRequest, ObjectIdRequest,
-    PreviewAssetRequest, PublishPlanVersionRequest, RegisterSourceConnectionRequest,
-    RequestMetadata, SavePlanVersionRequest, SubmitJobRequest,
+    ListArtifactsRequest, ListEventsRequest, ListFindingsRequest, ListJobsRequest,
+    ListProfileHistoryRequest, ListRunsRequest, ObjectIdRequest, PreviewAssetRequest,
+    PublishPlanVersionRequest, RegisterSourceConnectionRequest, RequestMetadata,
+    SavePlanVersionRequest, SubmitDriftComparisonRequest, SubmitJobRequest,
 };
 use stillflow_connector_local_tabular::LocalTabularConnector;
 use stillflow_connectors::{ConnectorRegistry, SourceConnectorRef};
 use stillflow_core::{
     ArtifactKind, ArtifactRefState, ConnectorKind, ControlPlaneEventType, CredentialRef,
-    EventStreamKind, ExportDestinationV1, ExportFormat, ExportShape, JobOperation, JobState,
-    MaterializePolicyV1, OperationDescriptorV1, ProfileColumnsV1, ProfileRequestV1, RequestContext,
-    RunState, SourceAsset, SourceConnection, VerificationPolicyV1,
+    DriftBaselineMode, DriftComparisonRequest, EventStreamKind, ExportDestinationV1, ExportFormat,
+    ExportShape, JobOperation, JobState, MaterializePolicyV1, OperationDescriptorV1,
+    ProfileColumnsV1, ProfileRequestV1, RequestContext, RunState, SourceAsset, SourceConnection,
+    VerificationPolicyV1,
 };
 use stillflow_engine::{ExecutionEngine, JobExecutionSpec, JobResolution, JobRuntime};
 use stillflow_plan::{LogicalPlan, PlanNode, PlanNodeId, PlanNodeKind};
@@ -669,6 +671,22 @@ fn profile_op(snapshot: stillflow_core::SnapshotRef) -> JobOperation {
     .expect("profile operation validates")
 }
 
+fn drift_op(
+    workspace_id: Uuid,
+    dataset_id: Uuid,
+    candidate_history_id: Uuid,
+) -> DriftComparisonRequest {
+    DriftComparisonRequest {
+        workspace_id,
+        dataset_id,
+        candidate_history_id,
+        baseline: DriftBaselineMode::LatestEligible,
+        threshold_policy_version: stillflow_core::DRIFT_THRESHOLD_POLICY_VERSION,
+        observation_window: None,
+        report_contract_version: stillflow_core::PROFILE_HISTORY_DRIFT_CONTRACT_VERSION,
+    }
+}
+
 fn export_op(snapshot: stillflow_core::SnapshotRef, root: &std::path::Path) -> JobOperation {
     JobOperation::try_new(
         stillflow_core::OperationKind::Export,
@@ -841,6 +859,273 @@ async fn csv_full_lifecycle_verify_profile_export() {
         assert_eq!(run.outputs, job.outputs);
         assert_eq!(run.operation, job.operation);
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn q_a1_profile_history_drift_api_uses_one_e5_lifecycle() {
+    let stack = GateStack::local_stack().await;
+    write_csv(stack.fixture_dir.path(), "q-a1-rows.csv");
+    let connection_id = stack.register_local("q-a1-csv");
+    let asset = stack.discover_one(connection_id).await;
+    let inspected = stack
+        .service
+        .inspect_source_asset(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: InspectAssetRequest {
+                connection_id,
+                asset_id: asset.id,
+                timeout_seconds: None,
+            },
+        })
+        .await
+        .expect("inspect")
+        .body;
+    let projection = inspected
+        .schema
+        .fields
+        .iter()
+        .map(|field| field.id)
+        .collect::<Vec<_>>();
+    let (plan_id, version_id) = stack.save_plan(asset.id, projection, 1);
+    let dataset_id = stack.create_dataset(asset.id);
+    let materialized = stack
+        .submit_and_wait(
+            materialize_op(stack.workspace_id, connection_id, asset.id),
+            plan_id,
+            version_id,
+            "q-a1-materialize",
+        )
+        .await;
+    let snapshot = snapshot_ref_of(&materialized);
+    let first_profile = stack
+        .submit_and_wait(
+            profile_op(snapshot.clone()),
+            plan_id,
+            version_id,
+            "q-a1-profile-1",
+        )
+        .await;
+    assert_eq!(first_profile.state, JobState::Succeeded);
+    let second_profile = stack
+        .submit_and_wait(profile_op(snapshot), plan_id, version_id, "q-a1-profile-2")
+        .await;
+    assert_eq!(second_profile.state, JobState::Succeeded);
+    let histories = {
+        let mut last = Vec::new();
+        for _ in 0..200 {
+            last = stack
+                .store
+                .list_profile_history(stack.workspace_id, dataset_id, None, None, 100)
+                .expect("profile history")
+                .entries;
+            if last.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            last.len() >= 2,
+            "ProfileHistory publication did not finish: {last:?}"
+        );
+        last
+    };
+    assert!(
+        histories.len() >= 2,
+        "two ProfileHistory entries are durable: first={first_profile:?}, second={second_profile:?}, histories={histories:?}"
+    );
+    let history_page = stack
+        .service
+        .list_profile_history(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ListProfileHistoryRequest {
+                dataset_id,
+                state: None,
+                columns: Vec::new(),
+                limit: 1,
+                cursor: None,
+            },
+        })
+        .expect("list ProfileHistory page")
+        .body;
+    assert_eq!(history_page.entries.len(), 1);
+    let history_cursor = history_page
+        .next
+        .clone()
+        .expect("ProfileHistory continuation");
+    let history_page_2 = stack
+        .service
+        .list_profile_history(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ListProfileHistoryRequest {
+                dataset_id,
+                state: None,
+                columns: Vec::new(),
+                limit: 1,
+                cursor: Some(history_cursor),
+            },
+        })
+        .expect("continue ProfileHistory page")
+        .body;
+    assert_eq!(history_page_2.entries.len(), 1);
+    assert_ne!(
+        history_page.entries[0].history_id,
+        history_page_2.entries[0].history_id
+    );
+    let candidate_history_id = histories[0].history_id;
+    let quality_id = first_profile
+        .outputs
+        .iter()
+        .find_map(|output| match output {
+            TerminalOutputRef::Artifact {
+                artifact_id,
+                artifact_kind: ArtifactKind::QualityReport,
+                ..
+            } => Some(*artifact_id),
+            _ => None,
+        })
+        .expect("Profile QualityReport output");
+    let quality = stack
+        .service
+        .read_quality_report(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ObjectIdRequest {
+                object_id: quality_id,
+            },
+        })
+        .expect("read QualityReport")
+        .body;
+    assert_eq!(quality.body["artifact_type"], "quality_report");
+    assert_eq!(quality.body["artifact_body_version"], 1);
+    let quality_findings = stack
+        .service
+        .list_report_findings(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ListFindingsRequest {
+                artifact_id: quality_id,
+                limit: 100,
+                cursor: None,
+                severity: None,
+                category: None,
+                origin: None,
+                kind: None,
+                column_name: None,
+            },
+        })
+        .expect("read QualityReport findings")
+        .body;
+    assert_eq!(quality_findings.artifact_id, quality_id);
+    let comparison = drift_op(stack.workspace_id, dataset_id, candidate_history_id);
+    let drift_job_id = Uuid::new_v4();
+    stack
+        .service
+        .submit_drift_comparison(ApiRequest {
+            meta: meta_with_key(stack.workspace_id),
+            body: SubmitDriftComparisonRequest {
+                session_id: stack.session_id,
+                plan_version_id: version_id,
+                plan_id: Some(plan_id),
+                job_id: drift_job_id,
+                comparison,
+                execution_policy: serde_json::json!({"deadlineSeconds": 300}),
+                output_policy: serde_json::json!({}),
+                queued_at: at(30),
+                event_id: Uuid::new_v4(),
+                correlation_id: "q-a1-drift".to_owned(),
+                actor_ref: "actor:q-a1".to_owned(),
+            },
+        })
+        .expect("submit Drift comparison");
+    let drift_job = stack.wait_terminal(drift_job_id).await;
+    assert_eq!(
+        drift_job.state,
+        JobState::Succeeded,
+        "failure: {:?}",
+        drift_job.failure
+    );
+    let report_id = match &drift_job.outputs[..] {
+        [TerminalOutputRef::DriftComparison {
+            outcome: stillflow_core::DriftOutcome::Complete | stillflow_core::DriftOutcome::Partial,
+            report_artifact_id: Some(report_id),
+            ..
+        }, TerminalOutputRef::Artifact {
+            artifact_id,
+            artifact_kind: ArtifactKind::DriftReport,
+            state: ArtifactRefState::Committed,
+            ..
+        }] if report_id == artifact_id => *report_id,
+        outputs => panic!("unexpected Q-A1 Drift outputs: {outputs:?}"),
+    };
+    let report = stack
+        .service
+        .read_drift_report(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: ObjectIdRequest {
+                object_id: report_id,
+            },
+        })
+        .expect("read DriftReport")
+        .body;
+    assert_eq!(report.body["artifact_type"], "drift_report.v1");
+    let findings = stack
+        .service
+        .list_report_findings(ApiRequest {
+            meta: meta(stack.workspace_id),
+            body: stillflow_api::ListFindingsRequest {
+                artifact_id: report_id,
+                limit: 100,
+                cursor: None,
+                severity: None,
+                category: None,
+                origin: None,
+                kind: None,
+                column_name: None,
+            },
+        })
+        .expect("read Drift findings")
+        .body;
+    assert_eq!(findings.artifact_id, report_id);
+    let run_id = drift_job.run_id.expect("Drift run");
+    let events = run_events(&stack, run_id);
+    assert!(events
+        .iter()
+        .any(|event| event.event_type == ControlPlaneEventType::ArtifactCommitted));
+    assert_eq!(
+        events.last().map(|event| event.event_type),
+        Some(ControlPlaneEventType::RunSucceeded)
+    );
+
+    // A fresh idempotency key and Job still reuse the canonical Q-D1 result;
+    // the second terminal output has no new Artifact or comparison row.
+    let replay_job_id = Uuid::new_v4();
+    stack
+        .service
+        .submit_drift_comparison(ApiRequest {
+            meta: meta_with_key(stack.workspace_id),
+            body: SubmitDriftComparisonRequest {
+                session_id: stack.session_id,
+                plan_version_id: version_id,
+                plan_id: Some(plan_id),
+                job_id: replay_job_id,
+                comparison,
+                execution_policy: serde_json::json!({"deadlineSeconds": 300}),
+                output_policy: serde_json::json!({}),
+                queued_at: at(31),
+                event_id: Uuid::new_v4(),
+                correlation_id: "q-a1-drift-replay".to_owned(),
+                actor_ref: "actor:q-a1".to_owned(),
+            },
+        })
+        .expect("submit replay Drift comparison");
+    let replay = stack.wait_terminal(replay_job_id).await;
+    assert_eq!(replay.state, JobState::Succeeded);
+    assert_eq!(replay.outputs.len(), 1);
+    assert!(matches!(
+        replay.outputs[0],
+        TerminalOutputRef::DriftComparison {
+            report_artifact_id: Some(id),
+            ..
+        } if id == report_id
+    ));
 }
 
 fn job_events(stack: &GateStack, job_id: Uuid) -> Vec<stillflow_api::EventView> {

@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -820,6 +820,107 @@ impl ControlPlaneStore {
             .map_err(|_| StorageError::database("commit ProfileHistory tombstone"))?;
         Ok(entry)
     }
+}
+
+/// Commits a Q-D1 report inside an already-open E5 terminal transaction.
+/// This is intentionally crate-visible: JobRuntime must publish the report,
+/// comparison identity, ArtifactCommitted event, and terminal state together.
+pub(crate) fn commit_drift_report_tx(
+    transaction: &Transaction<'_>,
+    draft: &DriftReportDraft,
+    event: &EventDraft,
+    expected_job_id: Uuid,
+) -> Result<DriftComparisonRecord, StorageError> {
+    validate_drift_report_draft(draft, event)?;
+    if event.job_id != expected_job_id {
+        return Err(StorageError::InvalidDraft(
+            "drift report ArtifactCommitted event belongs to another Job",
+        ));
+    }
+    if drift_comparison_by_transaction(transaction, draft.comparison_key)?.is_some() {
+        return Err(StorageError::InvalidDraft(
+            "drift comparison was committed concurrently",
+        ));
+    }
+    let (baseline, candidate) = ensure_history_pair(
+        transaction,
+        draft.workspace_id,
+        draft.dataset_id,
+        draft.baseline_history_id,
+        draft.candidate_history_id,
+    )?;
+    if baseline.state != ProfileHistoryState::Active
+        || candidate.state != ProfileHistoryState::Active
+    {
+        return Err(StorageError::InvalidDraft(
+            "drift report inputs must be active at publication",
+        ));
+    }
+    ensure_profile_artifact(transaction, &baseline)?;
+    ensure_profile_artifact(transaction, &candidate)?;
+    validate_report_body_identity(draft, &baseline, &candidate)?;
+
+    let (run_workspace, run_job, run_state, run_started_at, operation_kind): (
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+    ) = transaction
+        .query_row(
+            "SELECT workspace_id, job_id, state, started_at_utc, operation_kind
+             FROM cp_runs WHERE id = ?1",
+            params![draft.producing_run_id.to_string()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| StorageError::database("read terminal drift report Run"))?
+        .ok_or(StorageError::NotFound(draft.producing_run_id))?;
+    if run_workspace != draft.workspace_id.to_string()
+        || parse_uuid(&run_job)? != expected_job_id
+        || run_state != "running"
+        || operation_kind.as_deref() != Some("drift")
+    {
+        return Err(StorageError::InvalidDraft(
+            "typed Drift report publication requires its running E5 Run",
+        ));
+    }
+    let run_started_at = parse_timestamp(&run_started_at, "Run start timestamp")?;
+    if draft.created_at < run_started_at || event.occurred_at < draft.created_at {
+        return Err(StorageError::InvalidTimestampOrder(
+            "terminal drift report publication",
+        ));
+    }
+    let created_at = timestamp(&draft.created_at);
+    transaction
+        .execute(
+            "INSERT INTO qd1_drift_comparisons
+             (comparison_key, workspace_id, dataset_id, baseline_history_id,
+              candidate_history_id, report_artifact_id, producing_run_id,
+              report_digest, created_at_utc)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                digest_hex(&draft.comparison_key),
+                draft.workspace_id.to_string(),
+                draft.dataset_id.to_string(),
+                draft.baseline_history_id.to_string(),
+                draft.candidate_history_id.to_string(),
+                draft.report_artifact_id.to_string(),
+                draft.producing_run_id.to_string(),
+                digest_hex(&draft.report_digest),
+                created_at,
+            ],
+        )
+        .map_err(|error| map_constraint(error, draft.report_artifact_id))?;
+    drift_comparison_from_transaction(transaction, draft.comparison_key)
 }
 
 fn validate_drift_report_draft(
