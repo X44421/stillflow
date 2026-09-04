@@ -12,6 +12,7 @@ pub mod envelope;
 pub mod error;
 pub mod limits;
 pub mod manifest;
+pub mod observability;
 pub mod service;
 pub mod version;
 
@@ -30,6 +31,9 @@ pub use limits::ApiLimits;
 pub use manifest::{
     openapi_representation, RouteManifest, RouteSpec, SchemaSpec, BOOTSTRAP_MANIFEST,
     E5_A1_MANIFEST, E5_A1_ROUTES, E5_A1_SCHEMAS,
+};
+pub use observability::{
+    EmptyRequest, HealthCheck, HealthStatus, HealthView, MetricsView, ReadinessDependencies,
 };
 pub use service::*;
 pub use version::{ApiVersion, API_V1, SUPPORTED_API_VERSIONS};

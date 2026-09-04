@@ -19,10 +19,11 @@ use stillflow_connectors::ConnectorRegistry;
 use stillflow_core::{
     AssetKind, AssetLocator, AssetMetadata, ConnectionStatus, ConnectorKind, ControlPlaneEventType,
     ControlPlaneInput, DatasetState, DiscoverRequest, DriftComparisonRequest, EventStreamKind,
-    ExportRequestV1, ExportShape, InspectRequest, JobOperation, JobState, LogicalSchema,
-    OperationDescriptorV1, OperationKind, PreviewRequest, RequestContext, RunState,
+    ExportRequestV1, ExportShape, InspectRequest, JobOperation, JobState, LogLevel, LogicalSchema,
+    MetricName, OperationDescriptorV1, OperationKind, PreviewRequest, RequestContext, RunState,
     SamplingStrategy, SessionState, SnapshotRef, SourceAsset, SourceConnection,
-    SourceConnectionState, TestConnectionRequest,
+    SourceConnectionState, Telemetry, TelemetryComponent, TelemetryLabels, TelemetryOperation,
+    TelemetryOutcome, TestConnectionRequest,
 };
 use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePreviewOpRequest};
 use stillflow_plan::{LogicalPlan, PlanNodeId};
@@ -40,6 +41,10 @@ use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::authorization::AuthorizationGate;
+use crate::observability::{
+    health_view, liveness_view, metrics_view, readiness_view, EmptyRequest, HealthView,
+    MetricsView, ReadinessDependencies,
+};
 use crate::{
     ApiError, ApiLimits, ApiRequest, ApiResponse, ApiResult, ApiVersion, AuthorizationMode,
     Capability, RequestPrincipal, RequestPrincipalKind, RouteManifest, BOOTSTRAP_MANIFEST,
@@ -983,6 +988,7 @@ pub struct ArtifactContentPage {
 pub struct ApiService {
     control_plane: Arc<ControlPlaneStore>,
     authorization: AuthorizationGate,
+    telemetry: Telemetry,
     connectors: Option<Arc<ConnectorRegistry>>,
     engine: Option<Arc<ExecutionEngine>>,
     runtime: Option<Arc<JobRuntime>>,
@@ -1009,6 +1015,7 @@ impl ApiService {
         Self {
             authorization: AuthorizationGate::new(Arc::clone(&control_plane)),
             control_plane,
+            telemetry: Telemetry::noop(),
             connectors: None,
             engine: None,
             runtime: None,
@@ -1042,6 +1049,15 @@ impl ApiService {
         self
     }
 
+    pub fn with_telemetry(mut self, telemetry: Telemetry) -> Self {
+        self.telemetry = telemetry;
+        self
+    }
+
+    pub fn telemetry(&self) -> Telemetry {
+        self.telemetry.clone()
+    }
+
     pub fn with_authorization_mode(mut self, mode: AuthorizationMode) -> Self {
         self.authorization = self.authorization.clone().with_mode(mode);
         self
@@ -1057,6 +1073,73 @@ impl ApiService {
 
     pub fn limits(&self) -> ApiLimits {
         self.limits
+    }
+
+    pub fn liveness(
+        &self,
+        request: ApiRequest<EmptyRequest>,
+    ) -> ApiResult<ApiResponse<HealthView>> {
+        self.validate_meta_unscoped(&request, false)?;
+        self.telemetry.counter(
+            MetricName::ApiRequestsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Api)
+                .operation(TelemetryOperation::Health)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
+        Ok(ApiResponse::new(request.meta.request_id, liveness_view()))
+    }
+
+    pub fn readiness(
+        &self,
+        request: ApiRequest<EmptyRequest>,
+    ) -> ApiResult<ApiResponse<HealthView>> {
+        self.validate_meta_unscoped(&request, false)?;
+        let dependencies = ReadinessDependencies {
+            control_plane: true,
+            connectors: self.connectors.is_some(),
+            engine: self.engine.is_some(),
+            runtime: self.runtime.is_some(),
+            snapshot_store: self.snapshot_store.is_some(),
+        };
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            readiness_view(dependencies),
+        ))
+    }
+
+    pub fn health(&self, request: ApiRequest<EmptyRequest>) -> ApiResult<ApiResponse<HealthView>> {
+        self.validate_meta_unscoped(&request, false)?;
+        let dependencies = ReadinessDependencies {
+            control_plane: true,
+            connectors: self.connectors.is_some(),
+            engine: self.engine.is_some(),
+            runtime: self.runtime.is_some(),
+            snapshot_store: self.snapshot_store.is_some(),
+        };
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            health_view(dependencies),
+        ))
+    }
+
+    pub fn metrics(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<MetricsView>> {
+        self.validate_meta(&request, false)?;
+        self.scope_workspace(request.body.object_id, request.meta.workspace_id)?;
+        let queue_depth = self.control_plane.queue_depth(request.meta.workspace_id)?;
+        self.telemetry.gauge(
+            MetricName::QueueDepth,
+            TelemetryLabels::new().component(TelemetryComponent::Queue),
+            queue_depth,
+        );
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            metrics_view(self.telemetry.snapshot(), queue_depth),
+        ))
     }
 
     pub fn handshake(
@@ -1548,6 +1631,9 @@ impl ApiService {
         &self,
         request: ApiRequest<TestSourceConnectionRequest>,
     ) -> ApiResult<ApiResponse<ConnectionStatus>> {
+        let _span = self
+            .telemetry
+            .span("connector.test", &request.meta.request_id.to_string());
         self.validate_meta(&request, false)?;
         self.require_capability(&request, Capability::ConnectorTest)?;
         let connection_record = self
@@ -1567,6 +1653,15 @@ impl ApiService {
             )
             .await
             .map_err(ApiError::from)?;
+        self.telemetry.counter(
+            MetricName::ConnectorCallsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Connector)
+                .operation(TelemetryOperation::Test)
+                .outcome(TelemetryOutcome::Success)
+                .connector(connection_record.kind),
+            1,
+        );
         Ok(ApiResponse::new(request.meta.request_id, result))
     }
 
@@ -2113,6 +2208,9 @@ impl ApiService {
         &self,
         request: ApiRequest<SubmitJobRequest>,
     ) -> ApiResult<ApiResponse<JobView>> {
+        let _span = self
+            .telemetry
+            .span("job.submit", &request.meta.request_id.to_string());
         self.validate_meta(&request, true)?;
         if request
             .body
@@ -2185,6 +2283,22 @@ impl ApiService {
         let job = match outcome {
             SubmitOutcome::Created(job) | SubmitOutcome::Replayed(job) => job,
         };
+        self.telemetry.counter(
+            MetricName::JobOperationsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Job)
+                .operation(TelemetryOperation::Submit)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
+        self.telemetry.counter(
+            MetricName::EngineOperationsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Engine)
+                .operation(TelemetryOperation::Dispatch)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
         Ok(ApiResponse::new(request.meta.request_id, job_view(job)))
     }
 
@@ -2784,6 +2898,14 @@ impl ApiService {
         self.validate_meta(&request, false)?;
         let record = self.control_plane.get_job(request.body.object_id)?;
         self.ensure_scope(record.workspace_id, request.meta.workspace_id)?;
+        self.telemetry.counter(
+            MetricName::JobOperationsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Job)
+                .operation(TelemetryOperation::Read)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
         Ok(ApiResponse::new(request.meta.request_id, job_view(record)))
     }
 
@@ -2808,6 +2930,14 @@ impl ApiService {
         let page = self
             .control_plane
             .list_jobs(request.meta.workspace_id, cursor, limit)?;
+        self.telemetry.counter(
+            MetricName::JobOperationsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Job)
+                .operation(TelemetryOperation::Read)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
         Ok(ApiResponse::new(
             request.meta.request_id,
             job_page_view(page),
@@ -2821,6 +2951,14 @@ impl ApiService {
         self.validate_meta(&request, false)?;
         let record = self.control_plane.get_run(request.body.object_id)?;
         self.ensure_scope(record.workspace_id, request.meta.workspace_id)?;
+        self.telemetry.counter(
+            MetricName::RunOperationsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Run)
+                .operation(TelemetryOperation::Read)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
         Ok(ApiResponse::new(request.meta.request_id, run_view(record)))
     }
 
@@ -2845,6 +2983,14 @@ impl ApiService {
         let page = self
             .control_plane
             .list_runs(request.meta.workspace_id, cursor, limit)?;
+        self.telemetry.counter(
+            MetricName::RunOperationsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Run)
+                .operation(TelemetryOperation::Read)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
         Ok(ApiResponse::new(
             request.meta.request_id,
             run_page_view(page),
@@ -3023,6 +3169,33 @@ impl ApiService {
                 }
             }
         }
+        let operation = if mutation {
+            TelemetryOperation::Write
+        } else {
+            TelemetryOperation::Read
+        };
+        self.telemetry.counter(
+            MetricName::ApiRequestsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Api)
+                .operation(operation)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
+        self.telemetry.counter(
+            MetricName::StorageOperationsTotal,
+            TelemetryLabels::new()
+                .component(TelemetryComponent::Storage)
+                .operation(operation)
+                .outcome(TelemetryOutcome::Success),
+            1,
+        );
+        self.telemetry.log(
+            LogLevel::Debug,
+            "api.request.accepted",
+            &request.meta.request_id.to_string(),
+            [("mutation".to_owned(), mutation.to_string())],
+        );
         Ok(())
     }
 
@@ -3041,11 +3214,28 @@ impl ApiService {
         request: &ApiRequest<T>,
         capability: Capability,
     ) -> ApiResult<()> {
-        self.authorization.authorize(
+        let result = self.authorization.authorize(
             request.meta.workspace_id,
             request.meta.principal,
             capability,
-        )
+        );
+        if result.is_err() {
+            self.telemetry.counter(
+                MetricName::ApiErrorsTotal,
+                TelemetryLabels::new()
+                    .component(TelemetryComponent::Api)
+                    .operation(TelemetryOperation::Request)
+                    .outcome(TelemetryOutcome::Rejected),
+                1,
+            );
+            self.telemetry.log(
+                LogLevel::Warn,
+                "api.authorization.rejected",
+                &request.meta.request_id.to_string(),
+                [("capability".to_owned(), capability.as_str().to_owned())],
+            );
+        }
+        result
     }
 
     fn page_limit(&self, requested: usize) -> ApiResult<usize> {

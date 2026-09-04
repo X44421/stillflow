@@ -15,6 +15,7 @@ pub mod export;
 pub mod expression;
 pub mod job_operation;
 pub mod logical;
+pub mod observability;
 pub mod request;
 pub mod stream;
 pub mod verification;
@@ -74,6 +75,14 @@ pub use job_operation::{
 pub use logical::{
     ColumnId, LogicalError, LogicalField, LogicalSchema, LogicalType, TimeUnit,
     LOGICAL_SCHEMA_VERSION, MAX_SCHEMA_FIELDS, MAX_SCHEMA_NESTING_DEPTH, MAX_SCHEMA_TEXT_BYTES,
+};
+pub use observability::{
+    redact_telemetry_value, ExportingTelemetrySink, InMemoryTelemetry, LogLevel, MetricKind,
+    MetricName, MetricPoint, NoopTelemetrySink, SpanRecord, StructuredLog, Telemetry,
+    TelemetryComponent, TelemetryEvent, TelemetryExportError, TelemetryExporter, TelemetryLabels,
+    TelemetryOperation, TelemetryOutcome, TelemetrySink, TelemetrySnapshot, TelemetrySpan,
+    MAX_CORRELATION_ID_BYTES, MAX_TELEMETRY_EVENTS, MAX_TELEMETRY_LABELS, MAX_TELEMETRY_METRICS,
+    MAX_TELEMETRY_TEXT_BYTES, REDACTED,
 };
 pub use request::RequestContext;
 pub use stream::{attach_request_context, BatchItem, BatchStream};
