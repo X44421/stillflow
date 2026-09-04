@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 311,
+  "revision": 312,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -307,9 +307,53 @@
       "result_head": "2fa900607d01a820aeb197658392cc4de2e9f10a",
       "ci_url": "https://github.com/X44421/stillflow/actions/runs/33748370957",
       "completion_note": "Q-D1 implementation accepted and merged as 24ed2051f341c0f18374df8cb4744e266ea51e1f; exact-head CI 33748370957 and post-merge CI 33752096458 both passed 6/6; no API or JobOperation expansion; PR 238 independent acceptance receipt 5525291958."
+    },
+    {
+      "id": "Q-A1-PROFILE-QUALITY-DRIFT-API",
+      "title": "[Q-A1] Profile / Quality / Drift API integration",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 239,
+      "target_branch": "agent/issue-239-q-a1-profile-quality-drift-api",
+      "expected_base": "24ed2051f341c0f18374df8cb4744e266ea51e1f",
+      "locks": [
+        "branch:agent/issue-239-q-a1-profile-quality-drift-api",
+        "core:job-operation-drift",
+        "engine:job-runtime-drift",
+        "storage:drift-publication",
+        "api:profile-quality-drift"
+      ],
+      "paths": [
+        "backend/crates/stillflow-core/src/job_operation.rs",
+        "backend/crates/stillflow-core/src/lib.rs",
+        "backend/crates/stillflow-engine/src/drift.rs",
+        "backend/crates/stillflow-engine/src/job_runtime.rs",
+        "backend/crates/stillflow-engine/src/lib.rs",
+        "backend/crates/stillflow-storage/src/control_plane.rs",
+        "backend/crates/stillflow-storage/src/profile_history.rs",
+        "backend/crates/stillflow-storage/src/lib.rs",
+        "backend/crates/stillflow-api/src/manifest.rs",
+        "backend/crates/stillflow-api/src/service.rs",
+        "backend/crates/stillflow-api/src/error.rs",
+        "backend/crates/stillflow-api/src/limits.rs",
+        "backend/crates/stillflow-api/src/lib.rs",
+        "backend/crates/stillflow-api/tests/q_a1_api.rs"
+      ],
+      "shared_paths": [
+        "backend/Cargo.lock",
+        "backend/crates/stillflow-api/Cargo.toml"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-04T00:20:37Z",
+      "updated_at": "2026-09-04T00:20:37Z",
+      "registered_by": "agent-q-a1-239"
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-03T11:58:24Z",
+  "updated_at": "2026-09-04T00:20:37Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
