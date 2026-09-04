@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 317,
+  "revision": 318,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -391,9 +391,45 @@
       "not_planned_by": "agent-q-g1-governance",
       "not_planned_reason": "GitHub Issue #241 is CLOSED/NOT_PLANNED; standalone Q-G1 is skipped and X-A1 is the next product task.",
       "completion_note": "Q-G1 not planned; no implementation, claim, lease, or lock authorized."
+    },
+    {
+      "id": "X-A1-EXPORT-JOB-API",
+      "title": "[X-A1] Export Job/API integration",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 242,
+      "target_branch": "agent/issue-242-x-a1-export-job-api",
+      "expected_base": "0455b68bc646c04283099820be16cbdaac222df9",
+      "locks": [
+        "branch:agent/issue-242-x-a1-export-job-api",
+        "api:export-job",
+        "storage:export-read-gc"
+      ],
+      "paths": [
+        "backend/crates/stillflow-api/src/manifest.rs",
+        "backend/crates/stillflow-api/src/service.rs",
+        "backend/crates/stillflow-api/src/error.rs",
+        "backend/crates/stillflow-api/tests/*",
+        "backend/crates/stillflow-storage/src/export.rs",
+        "backend/crates/stillflow-storage/src/store.rs",
+        "backend/crates/stillflow-storage/src/manifest.rs"
+      ],
+      "shared_paths": [
+        "backend/Cargo.lock",
+        "backend/crates/stillflow-api/Cargo.toml",
+        "docs/architecture/adr-004-export-and-output-artifacts.md"
+      ],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-04T03:13:20Z",
+      "updated_at": "2026-09-04T03:13:20Z",
+      "registered_by": "agent-x-a1-242"
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-04T03:06:38Z",
+  "updated_at": "2026-09-04T03:13:20Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
