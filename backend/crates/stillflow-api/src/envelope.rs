@@ -5,6 +5,36 @@ use uuid::Uuid;
 
 use crate::{ApiError, ApiErrorCode, ApiResult, ApiVersion, API_V1};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RequestPrincipalKind {
+    Member,
+    ServiceAccount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPrincipal {
+    pub kind: RequestPrincipalKind,
+    pub id: Uuid,
+}
+
+impl RequestPrincipal {
+    pub fn member(id: Uuid) -> Self {
+        Self {
+            kind: RequestPrincipalKind::Member,
+            id,
+        }
+    }
+
+    pub fn service_account(id: Uuid) -> Self {
+        Self {
+            kind: RequestPrincipalKind::ServiceAccount,
+            id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestMetadata {
@@ -13,6 +43,8 @@ pub struct RequestMetadata {
     pub workspace_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<RequestPrincipal>,
 }
 
 impl RequestMetadata {
@@ -22,7 +54,13 @@ impl RequestMetadata {
             request_id,
             workspace_id,
             idempotency_key: None,
+            principal: None,
         }
+    }
+
+    pub fn with_principal(mut self, principal: RequestPrincipal) -> Self {
+        self.principal = Some(principal);
+        self
     }
 }
 
