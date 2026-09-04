@@ -7,6 +7,7 @@
 //! The `event-stream` feature is intentionally off by default. E5-E1 owns the
 //! implementation file and its tests after stacking on the API bootstrap.
 
+pub mod authorization;
 pub mod envelope;
 pub mod error;
 pub mod limits;
@@ -19,8 +20,10 @@ pub mod event_stream {
     include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/event_stream.rs"));
 }
 
+pub use authorization::{AuthorizationMode, Capability};
 pub use envelope::{
-    ApiErrorBody, ApiErrorResponse, ApiRequest, ApiResponse, RequestMetadata, ResponseMetadata,
+    ApiErrorBody, ApiErrorResponse, ApiRequest, ApiResponse, RequestMetadata, RequestPrincipal,
+    RequestPrincipalKind, ResponseMetadata,
 };
 pub use error::{ApiError, ApiErrorCode, ApiResult};
 pub use limits::ApiLimits;

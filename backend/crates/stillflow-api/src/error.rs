@@ -57,6 +57,10 @@ impl ApiError {
         Self::new(ApiErrorCode::Conflict, message)
     }
 
+    pub fn unauthorized() -> Self {
+        Self::new(ApiErrorCode::Unauthorized, "authorization failed")
+    }
+
     pub fn limit(message: impl Into<String>) -> Self {
         Self::new(ApiErrorCode::LimitExceeded, message)
     }
@@ -70,9 +74,12 @@ impl From<StorageError> for ApiError {
     fn from(error: StorageError) -> Self {
         match error {
             StorageError::NotFound(_) => Self::not_found(),
-            StorageError::AlreadyExists(_) | StorageError::ExportDestinationExists(_) => {
+            StorageError::AlreadyExists(_)
+            | StorageError::IdentityAlreadyExists
+            | StorageError::ExportDestinationExists(_) => {
                 Self::conflict("object already exists or the request conflicts with current state")
             }
+            StorageError::IdentityNotFound => Self::not_found(),
             StorageError::Busy(_) => Self::limit("the operation is temporarily busy or bounded"),
             StorageError::EnvelopeLimitExceeded { .. }
             | StorageError::PartitionLimitExceeded { .. }
@@ -97,8 +104,6 @@ impl From<StorageError> for ApiError {
             | StorageError::ExportStagingExists(_)
             | StorageError::ExportNotCommitted(_)
             | StorageError::Snapshot(_)
-            | StorageError::IdentityNotFound
-            | StorageError::IdentityAlreadyExists
             | StorageError::Identity(_)
             | StorageError::ArithmeticOverflow(_)
             | StorageError::Integrity { .. }

@@ -568,6 +568,12 @@ impl IdentityStore {
         self.role_from_connection(&connection, workspace_id, role_id)
     }
 
+    pub fn get_role(&self, workspace_id: Uuid, role_id: Uuid) -> Result<RoleRecord, StorageError> {
+        let _activity = acquire_activity(&self.inner, ActivityKind::Reader)?;
+        let connection = open_connection(&self.inner)?;
+        self.role_from_connection(&connection, workspace_id, role_id)
+    }
+
     pub fn set_role_capabilities(
         &self,
         workspace_id: Uuid,

@@ -28,18 +28,22 @@ use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePrev
 use stillflow_plan::{LogicalPlan, PlanNodeId};
 use stillflow_storage::{
     ArtifactCursor, ArtifactPage, ArtifactRefRecord, ArtifactSectionId, ControlPlaneStore,
-    DatasetRecord, EventCursor, EventPage, ExportManifest, ExportManifestFile, ExternalRefKind,
-    GarbageCollectionReport, JobCursor, JobPage, JobRecord, JobSubmission, PlanRecord,
-    PlanVersionDraft, PlanVersionRecord, ProfileHistoryCursor, ProfileHistoryEntry,
-    ProfileHistoryState, RunCursor, RunPage, RunRecord, SessionRecord, SnapshotStore,
-    SourceAssetRecord, SourceConnectionRecord, SubmitOutcome, TerminalOutputRef, WorkspaceRecord,
+    CredentialOwner, CredentialRefDraft, CredentialRefRecord, CredentialState, DatasetRecord,
+    EventCursor, EventPage, ExportManifest, ExportManifestFile, ExternalRefKind,
+    GarbageCollectionReport, IdentityState, JobCursor, JobPage, JobRecord, JobSubmission,
+    MemberRecord, PlanRecord, PlanVersionDraft, PlanVersionRecord, PrincipalKind,
+    ProfileHistoryCursor, ProfileHistoryEntry, ProfileHistoryState, RoleRecord, RunCursor, RunPage,
+    RunRecord, ServiceAccountRecord, SessionRecord, SnapshotStore, SourceAssetRecord,
+    SourceConnectionRecord, SubmitOutcome, TerminalOutputRef, WorkspaceRecord,
 };
 use tokio::time::Instant;
 use uuid::Uuid;
 
+use crate::authorization::AuthorizationGate;
 use crate::{
-    ApiError, ApiLimits, ApiRequest, ApiResponse, ApiResult, ApiVersion, RouteManifest,
-    BOOTSTRAP_MANIFEST, SUPPORTED_API_VERSIONS,
+    ApiError, ApiLimits, ApiRequest, ApiResponse, ApiResult, ApiVersion, AuthorizationMode,
+    Capability, RequestPrincipal, RequestPrincipalKind, RouteManifest, BOOTSTRAP_MANIFEST,
+    SUPPORTED_API_VERSIONS,
 };
 
 /// A version negotiation request.
@@ -64,6 +68,67 @@ pub struct WorkspaceView {
     pub state: stillflow_core::WorkspaceState,
     pub created_at: DateTime<Utc>,
     pub archived_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberView {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub subject_ref: String,
+    pub state: IdentityState,
+    pub created_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleView {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub capabilities: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleAssignmentView {
+    pub workspace_id: Uuid,
+    pub member_id: Uuid,
+    pub role_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceAccountView {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub state: IdentityState,
+    pub created_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrincipalView {
+    pub kind: RequestPrincipalKind,
+    pub id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialRefView {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub owner: PrincipalView,
+    pub provider_kind: String,
+    pub credential_ref: String,
+    pub state: CredentialState,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub revoked_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +355,109 @@ pub struct ObjectIdRequest {
 pub struct ArchiveWorkspaceRequest {
     pub workspace_id: Uuid,
     pub archived_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMemberRequest {
+    pub member_id: Uuid,
+    pub subject_ref: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeMemberRequest {
+    pub member_id: Uuid,
+    pub revoked_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRoleRequest {
+    pub role_id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRoleCapabilitiesRequest {
+    pub role_id: Uuid,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignRoleRequest {
+    pub member_id: Uuid,
+    pub role_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateServiceAccountRequest {
+    pub service_account_id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeServiceAccountRequest {
+    pub service_account_id: Uuid,
+    pub revoked_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialRefDraftRequest {
+    pub id: Uuid,
+    pub owner: RequestPrincipal,
+    pub provider_kind: String,
+    pub credential_ref: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterCredentialReferenceRequest {
+    pub credential_id: Uuid,
+    pub owner: RequestPrincipal,
+    pub provider_kind: String,
+    pub credential_ref: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeginCredentialRotationRequest {
+    pub credential_id: Uuid,
+    pub started_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteCredentialRotationRequest {
+    pub old_credential_id: Uuid,
+    pub replacement: CredentialRefDraftRequest,
+    pub rotated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeCredentialRequest {
+    pub credential_id: Uuid,
+    pub revoked_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverCredentialRequest {
+    pub credential_id: Uuid,
+    pub recovered_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -814,6 +982,7 @@ pub struct ArtifactContentPage {
 
 pub struct ApiService {
     control_plane: Arc<ControlPlaneStore>,
+    authorization: AuthorizationGate,
     connectors: Option<Arc<ConnectorRegistry>>,
     engine: Option<Arc<ExecutionEngine>>,
     runtime: Option<Arc<JobRuntime>>,
@@ -826,6 +995,7 @@ impl std::fmt::Debug for ApiService {
         formatter
             .debug_struct("ApiService")
             .field("limits", &self.limits)
+            .field("authorization_mode", &self.authorization.mode())
             .field("connectors_configured", &self.connectors.is_some())
             .field("engine_configured", &self.engine.is_some())
             .field("runtime_configured", &self.runtime.is_some())
@@ -837,6 +1007,7 @@ impl std::fmt::Debug for ApiService {
 impl ApiService {
     pub fn new(control_plane: Arc<ControlPlaneStore>) -> Self {
         Self {
+            authorization: AuthorizationGate::new(Arc::clone(&control_plane)),
             control_plane,
             connectors: None,
             engine: None,
@@ -871,6 +1042,19 @@ impl ApiService {
         self
     }
 
+    pub fn with_authorization_mode(mut self, mode: AuthorizationMode) -> Self {
+        self.authorization = self.authorization.clone().with_mode(mode);
+        self
+    }
+
+    pub fn with_server_authorization(self) -> Self {
+        self.with_authorization_mode(AuthorizationMode::Server)
+    }
+
+    pub fn authorization_mode(&self) -> AuthorizationMode {
+        self.authorization.mode()
+    }
+
     pub fn limits(&self) -> ApiLimits {
         self.limits
     }
@@ -879,7 +1063,7 @@ impl ApiService {
         &self,
         request: ApiRequest<HandshakeRequest>,
     ) -> ApiResult<ApiResponse<HandshakeResponse>> {
-        self.validate_meta(&request, false)?;
+        self.validate_meta_unscoped(&request, false)?;
         let requested = request.body.requested_version;
         if !requested.is_supported() {
             return Err(ApiError::unsupported_version(requested.value()));
@@ -898,13 +1082,29 @@ impl ApiService {
         &self,
         request: ApiRequest<CreateWorkspaceRequest>,
     ) -> ApiResult<ApiResponse<WorkspaceView>> {
-        self.validate_meta(&request, true)?;
+        self.validate_meta_unscoped(&request, true)?;
+        if !self.authorization.is_local_trusted() {
+            return Err(ApiError::unauthorized());
+        }
         if request.meta.workspace_id != request.body.workspace_id {
             return Err(ApiError::invalid("workspace request identity mismatch"));
         }
         let record = self
             .control_plane
             .create_workspace(request.body.workspace_id, request.body.created_at)?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            workspace_view(record),
+        ))
+    }
+
+    pub fn read_workspace(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<WorkspaceView>> {
+        self.validate_meta(&request, false)?;
+        let record = self.control_plane.get_workspace(request.body.object_id)?;
+        self.ensure_scope(record.id, request.meta.workspace_id)?;
         Ok(ApiResponse::new(
             request.meta.request_id,
             workspace_view(record),
@@ -923,6 +1123,307 @@ impl ApiService {
         Ok(ApiResponse::new(
             request.meta.request_id,
             workspace_view(record),
+        ))
+    }
+
+    pub fn create_member(
+        &self,
+        request: ApiRequest<CreateMemberRequest>,
+    ) -> ApiResult<ApiResponse<MemberView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::IdentityManage)?;
+        let record = self.control_plane.identity().create_member(
+            request.meta.workspace_id,
+            request.body.member_id,
+            &request.body.subject_ref,
+            request.body.created_at,
+        )?;
+        self.authorization
+            .invalidate_workspace(request.meta.workspace_id);
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            member_view(record),
+        ))
+    }
+
+    pub fn read_member(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<MemberView>> {
+        self.validate_meta(&request, false)?;
+        let record = self
+            .control_plane
+            .identity()
+            .get_member(request.meta.workspace_id, request.body.object_id)?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            member_view(record),
+        ))
+    }
+
+    pub fn revoke_member(
+        &self,
+        request: ApiRequest<RevokeMemberRequest>,
+    ) -> ApiResult<ApiResponse<MemberView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::IdentityManage)?;
+        let record = self.control_plane.identity().revoke_member(
+            request.meta.workspace_id,
+            request.body.member_id,
+            request.body.revoked_at,
+        )?;
+        self.authorization
+            .invalidate_workspace(request.meta.workspace_id);
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            member_view(record),
+        ))
+    }
+
+    pub fn create_role(
+        &self,
+        request: ApiRequest<CreateRoleRequest>,
+    ) -> ApiResult<ApiResponse<RoleView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::IdentityManage)?;
+        let record = self.control_plane.identity().create_role(
+            request.meta.workspace_id,
+            request.body.role_id,
+            &request.body.name,
+            request.body.created_at,
+        )?;
+        self.authorization
+            .invalidate_workspace(request.meta.workspace_id);
+        Ok(ApiResponse::new(request.meta.request_id, role_view(record)))
+    }
+
+    pub fn read_role(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<RoleView>> {
+        self.validate_meta(&request, false)?;
+        let record = self
+            .control_plane
+            .identity()
+            .get_role(request.meta.workspace_id, request.body.object_id)?;
+        Ok(ApiResponse::new(request.meta.request_id, role_view(record)))
+    }
+
+    pub fn set_role_capabilities(
+        &self,
+        request: ApiRequest<SetRoleCapabilitiesRequest>,
+    ) -> ApiResult<ApiResponse<RoleView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::IdentityManage)?;
+        let capabilities = validated_capabilities(&request.body.capabilities)?;
+        let record = self.control_plane.identity().set_role_capabilities(
+            request.meta.workspace_id,
+            request.body.role_id,
+            &capabilities,
+        )?;
+        self.authorization
+            .invalidate_workspace(request.meta.workspace_id);
+        Ok(ApiResponse::new(request.meta.request_id, role_view(record)))
+    }
+
+    pub fn assign_role(
+        &self,
+        request: ApiRequest<AssignRoleRequest>,
+    ) -> ApiResult<ApiResponse<RoleAssignmentView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::IdentityManage)?;
+        self.control_plane.identity().assign_role(
+            request.meta.workspace_id,
+            request.body.member_id,
+            request.body.role_id,
+        )?;
+        self.authorization
+            .invalidate_workspace(request.meta.workspace_id);
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            RoleAssignmentView {
+                workspace_id: request.meta.workspace_id,
+                member_id: request.body.member_id,
+                role_id: request.body.role_id,
+            },
+        ))
+    }
+
+    pub fn create_service_account(
+        &self,
+        request: ApiRequest<CreateServiceAccountRequest>,
+    ) -> ApiResult<ApiResponse<ServiceAccountView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::IdentityManage)?;
+        let record = self.control_plane.identity().create_service_account(
+            request.meta.workspace_id,
+            request.body.service_account_id,
+            &request.body.name,
+            request.body.created_at,
+        )?;
+        self.authorization
+            .invalidate_workspace(request.meta.workspace_id);
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            service_account_view(record),
+        ))
+    }
+
+    pub fn read_service_account(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<ServiceAccountView>> {
+        self.validate_meta(&request, false)?;
+        let record = self
+            .control_plane
+            .identity()
+            .get_service_account(request.meta.workspace_id, request.body.object_id)?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            service_account_view(record),
+        ))
+    }
+
+    pub fn revoke_service_account(
+        &self,
+        request: ApiRequest<RevokeServiceAccountRequest>,
+    ) -> ApiResult<ApiResponse<ServiceAccountView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::IdentityManage)?;
+        let record = self.control_plane.identity().revoke_service_account(
+            request.meta.workspace_id,
+            request.body.service_account_id,
+            request.body.revoked_at,
+        )?;
+        self.authorization
+            .invalidate_workspace(request.meta.workspace_id);
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            service_account_view(record),
+        ))
+    }
+
+    pub fn register_credential_reference(
+        &self,
+        request: ApiRequest<RegisterCredentialReferenceRequest>,
+    ) -> ApiResult<ApiResponse<CredentialRefView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::CredentialManage)?;
+        let record = self
+            .control_plane
+            .identity()
+            .register_credential_reference(CredentialRefDraft {
+                id: request.body.credential_id,
+                workspace_id: request.meta.workspace_id,
+                owner: credential_owner(request.body.owner),
+                provider_kind: request.body.provider_kind.clone(),
+                credential_ref: stillflow_core::CredentialRef::new(
+                    request.body.credential_ref.clone(),
+                )
+                .map_err(ApiError::from)?,
+                created_at: request.body.created_at,
+                expires_at: request.body.expires_at,
+            })?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            credential_ref_view(record),
+        ))
+    }
+
+    pub fn read_credential_reference(
+        &self,
+        request: ApiRequest<ObjectIdRequest>,
+    ) -> ApiResult<ApiResponse<CredentialRefView>> {
+        self.validate_meta(&request, false)?;
+        self.require_capability(&request, Capability::CredentialManage)?;
+        let record = self
+            .control_plane
+            .identity()
+            .get_credential_reference(request.meta.workspace_id, request.body.object_id)?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            credential_ref_view(record),
+        ))
+    }
+
+    pub fn begin_credential_rotation(
+        &self,
+        request: ApiRequest<BeginCredentialRotationRequest>,
+    ) -> ApiResult<ApiResponse<CredentialRefView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::CredentialManage)?;
+        let record = self.control_plane.identity().begin_credential_rotation(
+            request.meta.workspace_id,
+            request.body.credential_id,
+            request.body.started_at,
+        )?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            credential_ref_view(record),
+        ))
+    }
+
+    pub fn complete_credential_rotation(
+        &self,
+        request: ApiRequest<CompleteCredentialRotationRequest>,
+    ) -> ApiResult<ApiResponse<CredentialRefView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::CredentialManage)?;
+        let replacement = &request.body.replacement;
+        let record = self.control_plane.identity().complete_credential_rotation(
+            request.meta.workspace_id,
+            request.body.old_credential_id,
+            CredentialRefDraft {
+                id: replacement.id,
+                workspace_id: request.meta.workspace_id,
+                owner: credential_owner(replacement.owner),
+                provider_kind: replacement.provider_kind.clone(),
+                credential_ref: stillflow_core::CredentialRef::new(
+                    replacement.credential_ref.clone(),
+                )
+                .map_err(ApiError::from)?,
+                created_at: replacement.created_at,
+                expires_at: replacement.expires_at,
+            },
+            request.body.rotated_at,
+        )?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            credential_ref_view(record),
+        ))
+    }
+
+    pub fn revoke_credential(
+        &self,
+        request: ApiRequest<RevokeCredentialRequest>,
+    ) -> ApiResult<ApiResponse<CredentialRefView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::CredentialManage)?;
+        let record = self.control_plane.identity().revoke_credential(
+            request.meta.workspace_id,
+            request.body.credential_id,
+            request.body.revoked_at,
+        )?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            credential_ref_view(record),
+        ))
+    }
+
+    pub fn recover_credential(
+        &self,
+        request: ApiRequest<RecoverCredentialRequest>,
+    ) -> ApiResult<ApiResponse<CredentialRefView>> {
+        self.validate_meta(&request, true)?;
+        self.require_capability(&request, Capability::CredentialManage)?;
+        let record = self.control_plane.identity().recover_credential(
+            request.meta.workspace_id,
+            request.body.credential_id,
+            request.body.recovered_at,
+        )?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            credential_ref_view(record),
         ))
     }
 
@@ -1048,6 +1549,7 @@ impl ApiService {
         request: ApiRequest<TestSourceConnectionRequest>,
     ) -> ApiResult<ApiResponse<ConnectionStatus>> {
         self.validate_meta(&request, false)?;
+        self.require_capability(&request, Capability::ConnectorTest)?;
         let connection_record = self
             .control_plane
             .get_source_connection(request.body.connection_id)?;
@@ -1612,6 +2114,14 @@ impl ApiService {
         request: ApiRequest<SubmitJobRequest>,
     ) -> ApiResult<ApiResponse<JobView>> {
         self.validate_meta(&request, true)?;
+        if request
+            .body
+            .operation
+            .as_ref()
+            .is_some_and(|operation| operation.operation_kind == OperationKind::Export)
+        {
+            self.require_capability(&request, Capability::ExportWrite)?;
+        }
         let idempotency_key = request
             .meta
             .idempotency_key
@@ -2410,6 +2920,7 @@ impl ApiService {
         request: ApiRequest<ArtifactContentRequest>,
     ) -> ApiResult<ApiResponse<ArtifactContentPage>> {
         self.validate_meta(&request, false)?;
+        self.require_capability(&request, Capability::ArtifactDownload)?;
         if request.body.max_rows == 0 || request.body.max_rows > self.limits.max_rows_per_page {
             return Err(ApiError::limit("artifact row page exceeds the API bound"));
         }
@@ -2495,7 +3006,7 @@ impl ApiService {
         ))
     }
 
-    fn validate_meta<T>(&self, request: &ApiRequest<T>, mutation: bool) -> ApiResult<()> {
+    fn validate_meta_unscoped<T>(&self, request: &ApiRequest<T>, mutation: bool) -> ApiResult<()> {
         request.validate_version()?;
         if request.meta.request_id.is_nil() || request.meta.workspace_id.is_nil() {
             return Err(ApiError::invalid(
@@ -2513,6 +3024,28 @@ impl ApiService {
             }
         }
         Ok(())
+    }
+
+    fn validate_meta<T>(&self, request: &ApiRequest<T>, mutation: bool) -> ApiResult<()> {
+        self.validate_meta_unscoped(request, mutation)?;
+        let capability = if mutation {
+            Capability::WorkspaceWrite
+        } else {
+            Capability::WorkspaceRead
+        };
+        self.require_capability(request, capability)
+    }
+
+    fn require_capability<T>(
+        &self,
+        request: &ApiRequest<T>,
+        capability: Capability,
+    ) -> ApiResult<()> {
+        self.authorization.authorize(
+            request.meta.workspace_id,
+            request.meta.principal,
+            capability,
+        )
     }
 
     fn page_limit(&self, requested: usize) -> ApiResult<usize> {
@@ -2923,6 +3456,82 @@ fn digest_hex(bytes: &[u8; 32]) -> String {
         write!(&mut result, "{byte:02x}").expect("writing to String cannot fail");
     }
     result
+}
+
+fn validated_capabilities(values: &[String]) -> ApiResult<Vec<&str>> {
+    let mut validated = Vec::with_capacity(values.len());
+    for value in values {
+        if Capability::parse(value).is_none() {
+            return Err(ApiError::invalid("unknown capability"));
+        }
+        if validated.contains(&value.as_str()) {
+            return Err(ApiError::invalid("duplicate capability"));
+        }
+        validated.push(value.as_str());
+    }
+    Ok(validated)
+}
+
+fn credential_owner(principal: RequestPrincipal) -> CredentialOwner {
+    CredentialOwner {
+        kind: match principal.kind {
+            RequestPrincipalKind::Member => PrincipalKind::Member,
+            RequestPrincipalKind::ServiceAccount => PrincipalKind::ServiceAccount,
+        },
+        id: principal.id,
+    }
+}
+
+fn member_view(record: MemberRecord) -> MemberView {
+    MemberView {
+        id: record.id,
+        workspace_id: record.workspace_id,
+        subject_ref: record.subject_ref,
+        state: record.state,
+        created_at: record.created_at,
+        revoked_at: record.revoked_at,
+    }
+}
+
+fn role_view(record: RoleRecord) -> RoleView {
+    RoleView {
+        id: record.id,
+        workspace_id: record.workspace_id,
+        name: record.name,
+        capabilities: record.capabilities,
+        created_at: record.created_at,
+    }
+}
+
+fn service_account_view(record: ServiceAccountRecord) -> ServiceAccountView {
+    ServiceAccountView {
+        id: record.id,
+        workspace_id: record.workspace_id,
+        name: record.name,
+        state: record.state,
+        created_at: record.created_at,
+        revoked_at: record.revoked_at,
+    }
+}
+
+fn credential_ref_view(record: CredentialRefRecord) -> CredentialRefView {
+    CredentialRefView {
+        id: record.id,
+        workspace_id: record.workspace_id,
+        owner: PrincipalView {
+            kind: match record.owner.kind {
+                PrincipalKind::Member => RequestPrincipalKind::Member,
+                PrincipalKind::ServiceAccount => RequestPrincipalKind::ServiceAccount,
+            },
+            id: record.owner.id,
+        },
+        provider_kind: record.provider_kind,
+        credential_ref: record.credential_ref.as_str().to_owned(),
+        state: record.state,
+        created_at: record.created_at,
+        expires_at: record.expires_at,
+        revoked_at: record.revoked_at,
+    }
 }
 
 fn workspace_view(record: WorkspaceRecord) -> WorkspaceView {
@@ -3538,5 +4147,263 @@ mod tests {
             .await
             .expect_err("unknown Job must fail closed before runtime lookup");
         assert_eq!(error.code, crate::ApiErrorCode::NotFound);
+    }
+
+    #[test]
+    fn server_rbac_is_workspace_scoped_and_cache_invalidates() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(ControlPlaneStore::open(root.path()).expect("store"));
+        let workspace_id = Uuid::from_u128(200);
+        let other_workspace_id = Uuid::from_u128(201);
+        let member_id = Uuid::from_u128(202);
+        let role_id = Uuid::from_u128(203);
+        let at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let bootstrap = ApiService::new(Arc::clone(&store));
+        for id in [workspace_id, other_workspace_id] {
+            bootstrap
+                .create_workspace(ApiRequest {
+                    meta: crate::RequestMetadata::new(Uuid::new_v4(), id),
+                    body: CreateWorkspaceRequest {
+                        workspace_id: id,
+                        created_at: at,
+                    },
+                })
+                .expect("workspace");
+        }
+        bootstrap
+            .create_member(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: CreateMemberRequest {
+                    member_id,
+                    subject_ref: "user:sec-a1".to_owned(),
+                    created_at: at,
+                },
+            })
+            .expect("member");
+        bootstrap
+            .create_role(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: CreateRoleRequest {
+                    role_id,
+                    name: "operator".to_owned(),
+                    created_at: at,
+                },
+            })
+            .expect("role");
+        bootstrap
+            .set_role_capabilities(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: SetRoleCapabilitiesRequest {
+                    role_id,
+                    capabilities: vec![
+                        "workspace:read".to_owned(),
+                        "workspace:write".to_owned(),
+                        "identity:manage".to_owned(),
+                    ],
+                },
+            })
+            .expect("capabilities");
+        bootstrap
+            .assign_role(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: AssignRoleRequest { member_id, role_id },
+            })
+            .expect("assignment");
+
+        let server = ApiService::new(Arc::clone(&store)).with_server_authorization();
+        let principal = RequestPrincipal::member(member_id);
+        let request_meta = |request_id, workspace_id| {
+            crate::RequestMetadata::new(request_id, workspace_id).with_principal(principal)
+        };
+        server
+            .read_workspace(ApiRequest {
+                meta: request_meta(Uuid::from_u128(204), workspace_id),
+                body: ObjectIdRequest {
+                    object_id: workspace_id,
+                },
+            })
+            .expect("authorized workspace read");
+        let service_account = server
+            .create_service_account(ApiRequest {
+                meta: request_meta(Uuid::from_u128(209), workspace_id),
+                body: CreateServiceAccountRequest {
+                    service_account_id: Uuid::from_u128(210),
+                    name: "managed-worker".to_owned(),
+                    created_at: at,
+                },
+            })
+            .expect("service account create");
+        assert_eq!(service_account.body.state, IdentityState::Active);
+        server
+            .read_service_account(ApiRequest {
+                meta: request_meta(Uuid::from_u128(211), workspace_id),
+                body: ObjectIdRequest {
+                    object_id: Uuid::from_u128(210),
+                },
+            })
+            .expect("service account read");
+        let revoked_service_account = server
+            .revoke_service_account(ApiRequest {
+                meta: request_meta(Uuid::from_u128(212), workspace_id),
+                body: RevokeServiceAccountRequest {
+                    service_account_id: Uuid::from_u128(210),
+                    revoked_at: at + chrono::Duration::seconds(1),
+                },
+            })
+            .expect("service account revoke");
+        assert_eq!(revoked_service_account.body.state, IdentityState::Revoked);
+        let cross_workspace = server
+            .read_workspace(ApiRequest {
+                meta: request_meta(Uuid::from_u128(205), workspace_id),
+                body: ObjectIdRequest {
+                    object_id: other_workspace_id,
+                },
+            })
+            .expect_err("cross-workspace object must be hidden");
+        assert_eq!(cross_workspace.code, crate::ApiErrorCode::NotFound);
+        let missing_principal = server
+            .read_workspace(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::from_u128(206), workspace_id),
+                body: ObjectIdRequest {
+                    object_id: workspace_id,
+                },
+            })
+            .expect_err("server mode requires a principal");
+        assert_eq!(missing_principal.code, crate::ApiErrorCode::Unauthorized);
+
+        server
+            .set_role_capabilities(ApiRequest {
+                meta: request_meta(Uuid::from_u128(207), workspace_id),
+                body: SetRoleCapabilitiesRequest {
+                    role_id,
+                    capabilities: vec!["workspace:write".to_owned(), "identity:manage".to_owned()],
+                },
+            })
+            .expect("role update");
+        let after_invalidation = server
+            .read_workspace(ApiRequest {
+                meta: request_meta(Uuid::from_u128(208), workspace_id),
+                body: ObjectIdRequest {
+                    object_id: workspace_id,
+                },
+            })
+            .expect_err("role update must invalidate cached read capability");
+        assert_eq!(after_invalidation.code, crate::ApiErrorCode::Unauthorized);
+    }
+
+    #[test]
+    fn credential_permissions_are_separate_and_unknown_capabilities_fail_closed() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(ControlPlaneStore::open(root.path()).expect("store"));
+        let workspace_id = Uuid::from_u128(210);
+        let member_id = Uuid::from_u128(211);
+        let role_id = Uuid::from_u128(212);
+        let credential_id = Uuid::from_u128(213);
+        let at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let bootstrap = ApiService::new(Arc::clone(&store));
+        bootstrap
+            .create_workspace(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: CreateWorkspaceRequest {
+                    workspace_id,
+                    created_at: at,
+                },
+            })
+            .expect("workspace");
+        bootstrap
+            .create_member(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: CreateMemberRequest {
+                    member_id,
+                    subject_ref: "user:credential-test".to_owned(),
+                    created_at: at,
+                },
+            })
+            .expect("member");
+        bootstrap
+            .create_role(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: CreateRoleRequest {
+                    role_id,
+                    name: "reader".to_owned(),
+                    created_at: at,
+                },
+            })
+            .expect("role");
+        bootstrap
+            .set_role_capabilities(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: SetRoleCapabilitiesRequest {
+                    role_id,
+                    capabilities: vec![
+                        "workspace:read".to_owned(),
+                        "workspace:write".to_owned(),
+                        "identity:manage".to_owned(),
+                    ],
+                },
+            })
+            .expect("capabilities");
+        bootstrap
+            .assign_role(ApiRequest {
+                meta: crate::RequestMetadata::new(Uuid::new_v4(), workspace_id),
+                body: AssignRoleRequest { member_id, role_id },
+            })
+            .expect("assignment");
+        let server = ApiService::new(Arc::clone(&store)).with_server_authorization();
+        let principal = RequestPrincipal::member(member_id);
+        let request_meta = |request_id| {
+            crate::RequestMetadata::new(request_id, workspace_id).with_principal(principal)
+        };
+        let denied = server
+            .register_credential_reference(ApiRequest {
+                meta: request_meta(Uuid::from_u128(214)),
+                body: RegisterCredentialReferenceRequest {
+                    credential_id,
+                    owner: principal,
+                    provider_kind: "external".to_owned(),
+                    credential_ref: "cred://external/reference".to_owned(),
+                    created_at: at,
+                    expires_at: None,
+                },
+            })
+            .expect_err("credential permission is not implicit");
+        assert_eq!(denied.code, crate::ApiErrorCode::Unauthorized);
+        let invalid = server
+            .set_role_capabilities(ApiRequest {
+                meta: request_meta(Uuid::from_u128(215)),
+                body: SetRoleCapabilitiesRequest {
+                    role_id,
+                    capabilities: vec!["future:permission".to_owned()],
+                },
+            })
+            .expect_err("unknown policy state must fail closed");
+        assert_eq!(invalid.code, crate::ApiErrorCode::InvalidRequest);
+        server
+            .set_role_capabilities(ApiRequest {
+                meta: request_meta(Uuid::from_u128(216)),
+                body: SetRoleCapabilitiesRequest {
+                    role_id,
+                    capabilities: vec![
+                        "workspace:read".to_owned(),
+                        "workspace:write".to_owned(),
+                        "credential:manage".to_owned(),
+                    ],
+                },
+            })
+            .expect("credential capability");
+        let credential = server
+            .register_credential_reference(ApiRequest {
+                meta: request_meta(Uuid::from_u128(217)),
+                body: RegisterCredentialReferenceRequest {
+                    credential_id,
+                    owner: principal,
+                    provider_kind: "external".to_owned(),
+                    credential_ref: "cred://external/reference".to_owned(),
+                    created_at: at,
+                    expires_at: None,
+                },
+            })
+            .expect("opaque credential ref");
+        assert_eq!(credential.body.credential_ref, "cred://external/reference");
     }
 }
