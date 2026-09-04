@@ -5,6 +5,7 @@
 //! errors. It depends on no other workspace crate, and Apache Arrow is the
 //! interchange protocol at its boundary.
 
+pub mod automation;
 pub mod batch;
 pub mod control_plane;
 pub mod domain;
@@ -23,6 +24,10 @@ pub mod verification;
 #[cfg(test)]
 mod serde_tests;
 
+pub use automation::{
+    AutomationSchedule, AutomationScheduleError, AUTOMATION_SCHEDULE_VERSION,
+    MAX_SCHEDULE_PERIOD_SECONDS, MAX_TIMEZONE_NAME_BYTES,
+};
 pub use batch::{
     logical_schema_from_arrow, logical_schema_to_arrow, BatchEnvelope, BatchEnvelopeFactory,
     BatchError, LogicalSchemaFingerprint, BATCH_ENVELOPE_VERSION,
