@@ -6,6 +6,7 @@
 pub mod artifact;
 pub mod audit;
 pub mod automation;
+pub mod automation_api;
 pub mod backup;
 pub mod bundle;
 pub mod control_plane;
@@ -36,6 +37,11 @@ pub use automation::{
     AutomationScheduleDraft, AutomationScheduleRecord, AutomationScheduleState, AutomationTrigger,
     AutomationTriggerLease, DEFAULT_AUTOMATION_CLAIM_LEASE_SECONDS,
     MAX_AUTOMATION_SUBMISSION_ATTEMPTS, MAX_AUTOMATION_TEMPLATE_BYTES,
+};
+pub use automation_api::{
+    AutomationExecutionCreateOutcome, AutomationExecutionCursor, AutomationExecutionDraft,
+    AutomationExecutionRecord, AutomationExecutionState, AutomationScheduleCursor,
+    MAX_AUTOMATION_HISTORY_PAGE_SIZE, MAX_AUTOMATION_NAME_BYTES, MAX_AUTOMATION_TRIGGER_KEY_BYTES,
 };
 pub use backup::{BackupFile, BackupManifest, BACKUP_FORMAT_VERSION, BACKUP_MANIFEST_FILE};
 pub use bundle::{
