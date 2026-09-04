@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `355`
-- Updated: `2026-09-04T12:55:13Z`
+- Registry revision: `356`
+- Updated: `2026-09-04T12:55:37Z`
 - Source main snapshot: `ca18a092552a0037e33ef4945c8c2d99ae487b38`
 - Legacy/inactive rows retained in JSON for migration compatibility: `18`
 
@@ -15,13 +15,15 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `E5-A1` | L3 | **queued** | `—` | #228 | `agent/issue-228-e5-a1-versioned-api` | api:bootstrap, api:objects, storage:control-plane-api, storage:artifact-read |
 | `E5-E1` | L3 | **queued** | `—` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
-| `AUD-A1` | L3 | **queued** | `—` | #263 | `agent/issue-263-aud-a1-audit-lineage-api` | branch:agent/issue-263-aud-a1-audit-lineage-api, audit:events, api:audit |
+| `AUD-A1` | L3 | **running** | `codex-aud-a1-20260904` | #263 | `agent/issue-263-aud-a1-audit-lineage-api` | branch:agent/issue-263-aud-a1-audit-lineage-api, audit:events, api:audit |
 
 ## Active locks
 
 | Lock | Task | Owner | Lease expires |
 | --- | --- | --- | --- |
-| — | — | — | — |
+| `api:audit` | `AUD-A1` | `codex-aud-a1-20260904` | `2026-09-04T16:55:37Z` |
+| `audit:events` | `AUD-A1` | `codex-aud-a1-20260904` | `2026-09-04T16:55:37Z` |
+| `branch:agent/issue-263-aud-a1-audit-lineage-api` | `AUD-A1` | `codex-aud-a1-20260904` | `2026-09-04T16:55:37Z` |
 
 ## L2/L3 protocol
 
