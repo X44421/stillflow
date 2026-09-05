@@ -14,6 +14,7 @@ mod lookup;
 mod lower;
 mod memory;
 mod predict;
+mod predict_metrics;
 mod preflight;
 pub(crate) mod preview;
 mod profile;
@@ -355,6 +356,9 @@ mod test_alloc {
 #[cfg(test)]
 #[global_allocator]
 static TEST_ALLOC: test_alloc::PhasedAlloc = test_alloc::PhasedAlloc;
+
+#[cfg(test)]
+mod predict_metrics_tests;
 
 #[cfg(test)]
 mod tests;

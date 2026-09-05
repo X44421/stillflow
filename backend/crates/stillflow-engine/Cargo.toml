@@ -6,6 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# Measurement-only predictor instrumentation (issue #284). Inert when
+# disabled; adds process-global atomics/timers around predict.rs when enabled.
+predict-metrics = []
+
 [dependencies]
 arrow-array = { workspace = true, features = ["ffi"] }
 arrow-buffer = "59"
