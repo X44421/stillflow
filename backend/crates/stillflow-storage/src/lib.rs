@@ -16,6 +16,7 @@ mod error;
 pub mod export;
 pub mod identity;
 mod manifest;
+pub mod metrics;
 pub mod profile_history;
 pub mod retention;
 mod store;

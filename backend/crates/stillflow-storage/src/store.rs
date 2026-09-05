@@ -811,8 +811,11 @@ fn final_partition_path(
 pub(crate) fn open_connection(inner: &StoreInner) -> Result<Connection, StorageError> {
     let database_path = inner.root.join("metadata.sqlite3");
     reject_symlink_if_present(&database_path, "inspect metadata database")?;
+    let open_started = crate::metrics::start();
     let connection = Connection::open(&database_path)
         .map_err(|_| StorageError::database("open metadata database"))?;
+    let open_ns = crate::metrics::elapsed_ns(open_started);
+    let configure_started = crate::metrics::start();
     connection
         .busy_timeout(Duration::from_millis(SQLITE_BUSY_TIMEOUT_MILLIS))
         .map_err(|_| StorageError::database("configure SQLite busy timeout"))?;
@@ -823,6 +826,14 @@ pub(crate) fn open_connection(inner: &StoreInner) -> Result<Connection, StorageE
              PRAGMA synchronous = FULL;",
         )
         .map_err(|_| StorageError::database("configure SQLite connection"))?;
+    let configure_ns = crate::metrics::elapsed_ns(configure_started);
+    crate::metrics::record(crate::metrics::Event::ConnectionOpen {
+        open_ns,
+        configure_ns,
+        // foreign_keys, journal_mode, synchronous — applied to every new
+        // connection by the frozen PRAGMA batch above.
+        pragma_count: 3,
+    });
     Ok(connection)
 }
 
@@ -1792,10 +1803,16 @@ fn insert_publication(
     snapshot_id: Uuid,
     started_at: &DateTime<Utc>,
 ) -> Result<(), StorageError> {
+    let op_started = crate::metrics::start();
+    let open_started = crate::metrics::start();
     let mut connection = open_connection(inner)?;
+    let open_ns = crate::metrics::elapsed_ns(open_started);
+    let txn_started = crate::metrics::start();
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|_| StorageError::database("begin publication transaction"))?;
+    let txn_begin_ns = crate::metrics::elapsed_ns(txn_started);
+    let stmt_started = crate::metrics::start();
     // Symmetric identity reservation (contract 10.5): the snapshot id maps to
     // a `partitions/<id>` directory, so it must also be free of any bundle
     // claim — pending journal rows and committed bundles alike — in addition
@@ -1831,9 +1848,21 @@ fn insert_publication(
             params![snapshot_id.to_string(), format_timestamp(started_at)],
         )
         .map_err(|_| StorageError::database("insert publication journal"))?;
+    let stmt_ns = crate::metrics::elapsed_ns(stmt_started);
+    let commit_started = crate::metrics::start();
     transaction
         .commit()
-        .map_err(|_| StorageError::database("commit publication journal"))
+        .map_err(|_| StorageError::database("commit publication journal"))?;
+    crate::metrics::record(crate::metrics::Event::DbOp {
+        op: crate::metrics::DbOpKind::PublicationJournal,
+        open_ns,
+        txn_begin_ns,
+        stmt_ns,
+        commit_ns: crate::metrics::elapsed_ns(commit_started),
+        opens: 1,
+        wall_ns: crate::metrics::elapsed_ns(op_started),
+    });
+    Ok(())
 }
 
 fn write_partition(
@@ -1848,20 +1877,31 @@ fn write_partition(
 
 /// Encodes one envelope as an immutable Parquet partition file and returns
 /// its row count, encoded byte length, and SHA-256 file digest.
+///
+/// The production sequence is unchanged: create the staged file, encode with
+/// the Arrow writer, `sync_all`, stat the stored byte length, rewind, and
+/// reread the full file once for the SHA-256 digest. When the opt-in
+/// `storage-metrics` feature is enabled, each phase is timed and one
+/// [`crate::metrics::Event::ParquetWrite`] observation records the bytes
+/// written and the logical reread bytes/passes for issue #286 attribution.
 pub(crate) fn write_envelope_parquet(
     path: &Path,
     envelope: &BatchEnvelope,
 ) -> Result<(u64, u64, ContentDigest), StorageError> {
+    let write_total = crate::metrics::start();
+    let create_started = crate::metrics::start();
     let file = OpenOptions::new()
         .create_new(true)
         .read(true)
         .write(true)
         .open(path)
         .map_err(|error| StorageError::io("create staged Parquet partition", &error))?;
+    let create_ns = crate::metrics::elapsed_ns(create_started);
     let properties = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
         .set_max_row_group_row_count(Some(MAX_BATCH_ROWS))
         .build();
+    let encode_started = crate::metrics::start();
     let mut writer = ArrowWriter::try_new(file, envelope.payload().schema(), Some(properties))
         .map_err(|_| StorageError::parquet("initialize Parquet partition"))?;
     writer
@@ -1870,15 +1910,37 @@ pub(crate) fn write_envelope_parquet(
     let mut file = writer
         .into_inner()
         .map_err(|_| StorageError::parquet("finalize Parquet partition"))?;
+    let encode_ns = crate::metrics::elapsed_ns(encode_started);
+    let fsync_started = crate::metrics::start();
     file.sync_all()
         .map_err(|error| StorageError::io("sync staged Parquet partition", &error))?;
+    let fsync_ns = crate::metrics::elapsed_ns(fsync_started);
+    let stat_started = crate::metrics::start();
     let stored_byte_count = file
         .metadata()
         .map_err(|error| StorageError::io("inspect staged Parquet partition", &error))?
         .len();
+    let stat_ns = crate::metrics::elapsed_ns(stat_started);
+    let rewind_started = crate::metrics::start();
     file.seek(SeekFrom::Start(0))
         .map_err(|error| StorageError::io("rewind staged Parquet partition", &error))?;
+    let rewind_ns = crate::metrics::elapsed_ns(rewind_started);
+    let digest_started = crate::metrics::start();
     let digest = digest_file(&mut file)?;
+    let digest_ns = crate::metrics::elapsed_ns(digest_started);
+    crate::metrics::record(crate::metrics::Event::ParquetWrite {
+        bytes_written: stored_byte_count,
+        create_ns,
+        encode_ns,
+        fsync_ns,
+        stat_ns,
+        rewind_ns,
+        digest_ns,
+        // One full logical read pass over exactly the stored bytes.
+        digest_reread_bytes: stored_byte_count,
+        digest_reread_passes: 1,
+        total_ns: crate::metrics::elapsed_ns(write_total),
+    });
     let row_count = u64::try_from(envelope.row_count())
         .map_err(|_| StorageError::ArithmeticOverflow("partition row count"))?;
     Ok((row_count, stored_byte_count, digest))
@@ -1899,17 +1961,34 @@ fn install_partitions(
     manifest: &SnapshotManifest,
 ) -> Result<(), StorageError> {
     let final_dir = final_snapshot_dir(inner, snapshot_id);
+    let install_started = crate::metrics::start();
+    let mut rename_ns = 0_u64;
+    let mut rename_count = 0_u32;
     for partition in manifest.partitions() {
         let staged = staged_partition_path(
             &staging_snapshot_dir(inner, snapshot_id),
             partition.sequence(),
         );
         let final_path = final_partition_path(inner, snapshot_id, partition);
+        let rename_started = crate::metrics::start();
         fs::rename(staged, final_path)
             .map_err(|error| StorageError::io("install immutable Parquet partition", &error))?;
+        rename_ns = rename_ns.saturating_add(crate::metrics::elapsed_ns(rename_started));
+        rename_count = rename_count.saturating_add(1);
     }
+    let dir_fsync_started = crate::metrics::start();
     sync_directory(&final_dir)?;
-    sync_directory(&partitions_root(inner))
+    sync_directory(&partitions_root(inner))?;
+    let dir_fsync_ns = crate::metrics::elapsed_ns(dir_fsync_started);
+    crate::metrics::record(crate::metrics::Event::PartitionInstall {
+        rename_count,
+        rename_ns,
+        // The final snapshot directory and the partitions root.
+        dir_fsync_count: 2,
+        dir_fsync_ns,
+        wall_ns: crate::metrics::elapsed_ns(install_started),
+    });
+    Ok(())
 }
 
 fn create_final_snapshot_directory(
@@ -1938,14 +2017,32 @@ pub(crate) fn sync_directory(_path: &Path) -> Result<(), StorageError> {
 }
 
 fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<(), StorageError> {
+    let op_started = crate::metrics::start();
+    let open_started = crate::metrics::start();
     let mut connection = open_connection(inner)?;
+    let open_ns = crate::metrics::elapsed_ns(open_started);
+    let txn_started = crate::metrics::start();
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|_| StorageError::database("begin manifest transaction"))?;
+    let txn_begin_ns = crate::metrics::elapsed_ns(txn_started);
+    let stmt_started = crate::metrics::start();
     insert_visible_snapshot(&transaction, manifest, true)?;
+    let stmt_ns = crate::metrics::elapsed_ns(stmt_started);
+    let commit_started = crate::metrics::start();
     transaction
         .commit()
-        .map_err(|_| StorageError::database("commit visible snapshot manifest"))
+        .map_err(|_| StorageError::database("commit visible snapshot manifest"))?;
+    crate::metrics::record(crate::metrics::Event::DbOp {
+        op: crate::metrics::DbOpKind::ManifestCommit,
+        open_ns,
+        txn_begin_ns,
+        stmt_ns,
+        commit_ns: crate::metrics::elapsed_ns(commit_started),
+        opens: 1,
+        wall_ns: crate::metrics::elapsed_ns(op_started),
+    });
+    Ok(())
 }
 
 /// Inserts one visible snapshot manifest plus its partitions and completes
@@ -2062,7 +2159,11 @@ pub(crate) fn load_manifest_inner(
     inner: &StoreInner,
     snapshot_id: Uuid,
 ) -> Result<SnapshotManifest, StorageError> {
+    let op_started = crate::metrics::start();
+    let open_started = crate::metrics::start();
     let connection = open_connection(inner)?;
+    let open_ns = crate::metrics::elapsed_ns(open_started);
+    let stmt_started = crate::metrics::start();
     let raw: Option<RawSnapshotRow> = connection
         .query_row(
             "SELECT version, dataset_id, session_id, source_asset_id,
@@ -2191,7 +2292,19 @@ pub(crate) fn load_manifest_inner(
             ));
         }
     }
-    SnapshotManifest::try_new(snapshot, partitions)
+    let manifest = SnapshotManifest::try_new(snapshot, partitions);
+    if manifest.is_ok() {
+        crate::metrics::record(crate::metrics::Event::DbOp {
+            op: crate::metrics::DbOpKind::LoadManifest,
+            open_ns,
+            txn_begin_ns: 0,
+            stmt_ns: crate::metrics::elapsed_ns(stmt_started),
+            commit_ns: 0,
+            opens: 1,
+            wall_ns: crate::metrics::elapsed_ns(op_started),
+        });
+    }
+    manifest
 }
 
 pub(crate) fn read_partition(
@@ -2244,7 +2357,16 @@ pub(crate) fn read_partition(
 
     let mut file = File::open(&path)
         .map_err(|error| integrity_from_io(snapshot.id(), partition.sequence(), &error))?;
+    let verify_started = crate::metrics::start();
     let digest = digest_file(&mut file)?;
+    let verify_ns = crate::metrics::elapsed_ns(verify_started);
+    crate::metrics::record(crate::metrics::Event::VerifyDigestReread {
+        // Logical bytes reread for corruption detection: one full pass over
+        // the stored file before the Parquet decode pass.
+        bytes: metadata.len(),
+        passes: 1,
+        ns: verify_ns,
+    });
     if digest != partition.digest() {
         return Err(integrity_error(
             snapshot.id(),
@@ -2690,13 +2812,27 @@ fn delete_publication(inner: &StoreInner, snapshot_id: Uuid) -> Result<(), Stora
 }
 
 fn abort_publication(inner: &StoreInner, snapshot_id: Uuid) {
+    let op_started = crate::metrics::start();
+    let open_started = crate::metrics::start();
     let Ok(connection) = open_connection(inner) else {
         return;
     };
+    let open_ns = crate::metrics::elapsed_ns(open_started);
+    let stmt_started = crate::metrics::start();
     let _ = connection.execute(
         "DELETE FROM publications WHERE snapshot_id = ?1",
         params![snapshot_id.to_string()],
     );
+    let stmt_ns = crate::metrics::elapsed_ns(stmt_started);
+    crate::metrics::record(crate::metrics::Event::DbOp {
+        op: crate::metrics::DbOpKind::PublicationAbort,
+        open_ns,
+        txn_begin_ns: 0,
+        stmt_ns,
+        commit_ns: 0,
+        opens: 1,
+        wall_ns: crate::metrics::elapsed_ns(op_started),
+    });
 }
 
 /// Best-effort removal of one bundle publication journal row.

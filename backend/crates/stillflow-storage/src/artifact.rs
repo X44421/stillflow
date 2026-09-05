@@ -475,6 +475,19 @@ impl Preimage {
 /// bytes depend only on the logical schema and values — never on the producer's
 /// validity-buffer allocation, offsets, or padding (issue #176, D1).
 pub(crate) fn canonical_batch_bytes(batch: &RecordBatch) -> Result<Vec<u8>, StorageError> {
+    let started = crate::metrics::start();
+    let result = canonical_batch_bytes_inner(batch);
+    if let Ok(canonical) = &result {
+        crate::metrics::record(crate::metrics::Event::CanonicalBatch {
+            input_bytes: batch.get_array_memory_size() as u64,
+            canonical_bytes: canonical.len() as u64,
+            ns: crate::metrics::elapsed_ns(started),
+        });
+    }
+    result
+}
+
+fn canonical_batch_bytes_inner(batch: &RecordBatch) -> Result<Vec<u8>, StorageError> {
     const CONTINUATION_MARKER: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
     let normalized = canonical_batch_layout(batch)?;
     let mut buffer = Vec::new();
