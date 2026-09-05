@@ -273,6 +273,10 @@ pub(crate) struct PreparedReader {
     max_rows: Option<usize>,
     rows_emitted: usize,
     sequence: u64,
+    /// O1-J1 (#296) runtime routing for JSON reads: assemble projected rows
+    /// directly instead of the generic DOM reconstruction. Decided once per
+    /// read from the connection config; `false` is today's behavior.
+    json_direct_projected: bool,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -522,6 +526,7 @@ pub(crate) fn prepare_reader(
         max_rows,
         rows_emitted: 0,
         sequence: 0,
+        json_direct_projected: config.json_direct_projected_writer,
         warnings,
     })
 }
@@ -738,44 +743,51 @@ impl PreparedReader {
                 }
                 let mut encoded = Vec::new();
                 let mut count = 0_usize;
-                // E24-JSON-A2 direct projected writer (private feature, issue
-                // #158): the assembler owns only per-batch scratch (escaped key
-                // prefixes, projected-name slots, per-row slot states) and dies
-                // at the end of this frame; nothing accumulates across rows or
+                // O1-J1 (#296, contract section 3): the routing decision is
+                // whole-read. The assembler is attempted once per frame; a
+                // construction failure (Internal-class, practically
+                // unreachable) degrades the entire read to the generic DOM
+                // path — fail-open to identical behavior, never a mid-stream
+                // switch. E24-JSON-A2 memory shape (issue #158): the assembler
+                // owns only per-batch scratch (escaped key prefixes,
+                // projected-name slots, per-row slot states) and dies at the
+                // end of this frame; nothing accumulates across rows or
                 // batches beyond the shared `encoded` target below.
-                #[cfg(feature = "json-direct-projected-writer")]
-                let mut assembler =
-                    crate::direct_projected::ProjectedRowAssembler::new(&self.projection.names)?;
+                let mut assembler = if self.json_direct_projected {
+                    crate::direct_projected::ProjectedRowAssembler::new(&self.projection.names).ok()
+                } else {
+                    None
+                };
                 while count < rows {
                     self.context.ensure_active()?;
                     let Some(raw) = reader.next_raw_object(&self.context)? else {
                         break;
                     };
-                    #[cfg(not(feature = "json-direct-projected-writer"))]
-                    {
-                        let object = parse_projected_object(
+                    match assembler.as_mut() {
+                        Some(assembler) => assembler.encode_row(
                             &raw,
                             &self.full_schema,
-                            &self.projection.names,
                             reader.row_number(),
-                        )?;
-                        serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(
-                            |_| {
-                                source_error(
-                                    ErrorCategory::Internal,
-                                    false,
-                                    "projected JSON row could not be encoded for Polars",
-                                )
-                            },
-                        )?;
+                            &mut encoded,
+                        )?,
+                        None => {
+                            let object = parse_projected_object(
+                                &raw,
+                                &self.full_schema,
+                                &self.projection.names,
+                                reader.row_number(),
+                            )?;
+                            serde_json::to_writer(&mut encoded, &Value::Object(object)).map_err(
+                                |_| {
+                                    source_error(
+                                        ErrorCategory::Internal,
+                                        false,
+                                        "projected JSON row could not be encoded for Polars",
+                                    )
+                                },
+                            )?;
+                        }
                     }
-                    #[cfg(feature = "json-direct-projected-writer")]
-                    assembler.encode_row(
-                        &raw,
-                        &self.full_schema,
-                        reader.row_number(),
-                        &mut encoded,
-                    )?;
                     encoded.push(b'\n');
                     count += 1;
                 }
@@ -1074,14 +1086,13 @@ fn reorder_frame(frame: DataFrame, names: &[String]) -> ConnectorResult<DataFram
 
 // Generic projected-object path: the exact default production path, retained
 // verbatim. The E24-JSON-A2 direct projected writer replaces only this
-// selected-field Value/Map intermediate.
-#[cfg(not(feature = "json-direct-projected-writer"))]
+// selected-field Value/Map intermediate; O1-J1 (#296) compiles BOTH paths and
+// routes between them at runtime (contract sections 1/3/6).
 struct ProjectedObjectSeed<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
 }
 
-#[cfg(not(feature = "json-direct-projected-writer"))]
 impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
     type Value = Map<String, Value>;
 
@@ -1096,13 +1107,11 @@ impl<'de> DeserializeSeed<'de> for ProjectedObjectSeed<'_> {
     }
 }
 
-#[cfg(not(feature = "json-direct-projected-writer"))]
 struct ProjectedObjectVisitor<'a> {
     schema: &'a LogicalSchema,
     selected: &'a BTreeSet<&'a str>,
 }
 
-#[cfg(not(feature = "json-direct-projected-writer"))]
 impl<'de> Visitor<'de> for ProjectedObjectVisitor<'_> {
     type Value = Map<String, Value>;
 
@@ -1372,7 +1381,6 @@ impl<'de> Visitor<'de> for LogicalValueVisitor<'_> {
     }
 }
 
-#[cfg(not(feature = "json-direct-projected-writer"))]
 fn parse_projected_object(
     raw: &[u8],
     schema: &LogicalSchema,

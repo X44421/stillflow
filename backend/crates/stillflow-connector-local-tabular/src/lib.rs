@@ -22,12 +22,15 @@ mod preview;
 mod read;
 mod schema;
 
-// E24-JSON-A2 direct projected NDJSON writer (issue #158). Private, never
-// enabled by default; the former #151 temporal enablement blocker was fixed
-// connector-side (PR #225) and revalidated under issue #283. Default
-// enablement remains a separate productionization decision. See the module
-// docs in `direct_projected.rs`.
-#[cfg(feature = "json-direct-projected-writer")]
+// E24-JSON-A2 direct projected NDJSON writer (issue #158), productionized by
+// O1-J1 (issue #296): both projected-row paths are always compiled and the
+// runtime routing switch is the per-connection config key
+// `jsonDirectProjectedWriter` (default `false` = the generic DOM path, which
+// is the rollback point). The former #151 temporal enablement blocker was
+// fixed connector-side (PR #225) and revalidated under issue #283. Default
+// enablement remains a separate productionization decision. See
+// docs/issues/issue-296-o1-j1-json-direct-read-path-contract.md and the
+// module docs in `direct_projected.rs`.
 mod direct_projected;
 
 /// Polars-backed local tabular connector.

@@ -28,7 +28,7 @@ polars = { version = "0.46", default-features = false, features = [
 ] }
 polars-arrow = "0.46"
 serde.workspace = true
-serde_json = { workspace = true, features = ["preserve_order"] }
+serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
 stillflow-connectors.workspace = true
 stillflow-core.workspace = true
 uuid.workspace = true
@@ -49,19 +49,9 @@ tokio-util.workspace = true
 # test-binary dump side channel only. No dependency and no behavior change.
 [features]
 io-metrics = []
-# Private E24-JSON-A2 direct projected writer path (issue #158, continuing the
-# accepted #148 experiment). Never enabled by default and never enabled through
-# production configuration. Capability-only: enabling it turns on serde_json's
-# `raw_value` capability so selected JSON values are captured as borrowed raw
-# slices instead of a generic `serde_json::Value` tree. With the feature off,
-# the crate builds and behaves exactly as before; no dependency or version
-# changes (features are not recorded in Cargo.lock). The former default
-# enablement blocker (#151 temporal upstream boundary,
-# `TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM`) was resolved by the connector-side
-# temporal fix in PR #225: declared timestamp units, timezone epoch semantics
-# and pre-1970 values are normalized identically on the generic and this
-# direct projected path before the shared Polars JsonReader (revalidated with
-# parity and performance evidence under issue #283). Enabling it as the
-# default remains a separate productionization decision; this feature stays
-# measurement-only until then.
-json-direct-projected-writer = ["serde_json/raw_value"]
+# The E24-JSON-A2 direct projected writer path (issue #158) is productionized
+# by O1-J1 (issue #296): both projected-row paths are always compiled and the
+# routing is a runtime connection-config key (`jsonDirectProjectedWriter`,
+# default `false` = the generic DOM path). See
+# docs/issues/issue-296-o1-j1-json-direct-read-path-contract.md. Default
+# enablement remains a separate decision gated on combined-regression evidence.
