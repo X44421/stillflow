@@ -3,7 +3,7 @@
 - Version: 1
 - Date: 2026-09-05
 - Issue: #297 (`[O1-P1] Predictor variable-width scan optimization`)
-- Exact measured head: `MEASURED_HEAD` (branch
+- Exact measured head: `e895a9a7a60c237c01d8439c2016261d27215f7f` (branch
   `agent/issue-297-o1-p1-predictor-widening`; the implementation commit). The
   only post-measurement commit on this branch is this evidence note itself.
 - Baseline: `main@0af8f38a28dce5dccbe357f77bbb3e2048e36982`, measured in the
