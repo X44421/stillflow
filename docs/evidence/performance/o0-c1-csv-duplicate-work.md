@@ -8,10 +8,21 @@ path (Polars decode + lockstep `csv`-crate row validation) on the exact
 dispatched head, distinguishes full from bounded/prefix reads, and evaluates
 candidate future designs analytically.
 
-- **Exact measured head:** `main@f61e0853b67ff5ca7bedb0bddb707befb922baff`
+- **Production baseline:** `main@f61e0853b67ff5ca7bedb0bddb707befb922baff`
   (= dispatched base = `origin/main` at dispatch; branch
   `agent/issue-285-o0-c1-csv-dup-work`, working tree clean at f61e085 before
-  the instrumentation commit).
+  the instrumentation commit). The `O0_C1_HEAD` stamp in the probe commands
+  records this production attribution, not the harness commit.
+- **Instrumentation/test-program commits:** `ac9e321` (feature-gated
+  `io-metrics` stage-attribution counters in `src/read.rs`) and `91785b0`
+  (the `o0_c1_csv_dup_work` measurement harness). The instrumented and parity
+  runs necessarily executed on a branch working tree carrying these commits,
+  not on the bare dispatch base; with `io-metrics` off, production behavior is
+  unchanged. The dispatch base alone therefore does not describe the full
+  measurement source.
+- **Delivery:** PR #295. Branch commits after the measurement runs are the
+  evidence note itself and clippy-only fixes with no measurement-behavior
+  change.
 - **Raw machine-readable records:** [`o0-c1-records.jsonl`](./o0-c1-records.jsonl)
   (fixture identities, one record per case and per parity run; counter
   percentiles across reps).
