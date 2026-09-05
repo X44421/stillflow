@@ -8,6 +8,11 @@
 - Exact measured head: `f61e0853b67ff5ca7bedb0bddb707befb922baff`
   (dispatched base == measured head; `origin/main` at dispatch time was the
   same commit, so all numbers below are from one exact head)
+- Measurement-only harness commit (branch `agent/issue-282-o0-b1-baseline`):
+  `a1add90` adds `tests/o0_b1_baseline.rs` plus dev-dependencies only — no
+  production file is touched, so production content at every run equals the
+  measured head above; the runs executed with this harness present (tree at or
+  after `a1add90`), which the dispatch base alone does not describe.
 - Branch: `agent/issue-282-o0-b1-baseline`
 - Measurement date: 2026-09-05
 - Raw per-case records (machine-readable, one JSON record per case):
@@ -300,7 +305,7 @@ share. **Nothing here authorizes implementation.**
 | Parquet per-chunk reader rebuild — O0-D0 C3 | 27 reader constructions / 26 batch finishes confirm the rebuild exists; its cost share is not isolated (parquet ingest 100c/100k = 5.16 s includes decode itself). | **INCONCLUSIVE** |
 | Engine predictor / schema-clone cost — O0-D0 H1 | Rule/expression deltas (+226 ms / +466 ms P50) bound the whole rules path, but predict cost specifically is not isolated here. | **INCONCLUSIVE** (dedicated predictor-cost measurement task O0-P1 is separately dispatched) |
 | Snapshot write-path single-I/O — O0-D0 S2/H3 | Write path measured only inside E2E (§5); the write-path digest re-read and read-side double logical read are not separately isolated here. | **INCONCLUSIVE** |
-| JSON direct-projected writer default enablement | Policy-forbidden (temporal boundary #151 unresolved). The §5 timestamp-override success is a behavioral observation, not enablement evidence. | **NO-GO** |
+| JSON direct-projected writer default enablement | Out of scope for this baseline: a measurement-only task, and nothing here authorizes enablement. The §5 timestamp-override success is a behavioral observation, not enablement evidence. Since dispatch, issue #151 has closed (connector-side fix in PR #225) and the O0-J1 revalidation (issue #283, PR #294) judges the old #151 blocker obsolete for this path; default enablement remains a separate decision, not a product of this note. | **NO-GO** |
 | Lowering-cache revival (based on old #152 results) | Policy-forbidden; #152-era results are not admissible against this head. | **NO-GO** |
 | Predictor optimization | Policy-forbidden by this task; measurement-only follow-up (O0-P1) authorized separately. | **NO-GO** |
 | Persistence-format change | Contract surface; not measured here. | **NO-GO** |
