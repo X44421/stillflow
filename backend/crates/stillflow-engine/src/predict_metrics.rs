@@ -128,7 +128,7 @@ impl PredictMetricsSnapshot {
     }
 
     /// Stable JSON projection used by the measurement fixtures.
-    pub(crate) fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(self) -> serde_json::Value {
         let pairs: [(&str, u64); 43] = [
             ("lfk_calls", self.lfk_calls),
             ("lfk_wall_ns", self.lfk_wall_ns),

@@ -48,9 +48,9 @@ const INSTRUMENTED: bool = cfg!(feature = "predict-metrics");
 /// Timed repetitions per fixture/row-count (>= 5 per the measurement policy).
 const MEASUREMENT_RUNS: usize = 7;
 
-/// The counters are process-global, so concurrent tests (including unrelated
-/// engine tests that run the predictor) must not overlap a measurement window;
-/// every metrics test takes the engine test lock.
+// The counters are process-global, so concurrent tests (including unrelated
+// engine tests that run the predictor) must not overlap a measurement window;
+// every metrics test takes the engine test lock.
 
 // ---------------------------------------------------------------------------
 // Shared helpers (self-contained; does not reach into tests.rs fixtures)
@@ -677,13 +677,13 @@ fn print_run_line(
 fn print_summary_line(
     fixture: &str,
     rows: usize,
-    e2e: &mut Vec<u64>,
-    pred: &mut Vec<u64>,
-    share: &mut Vec<f64>,
+    e2e: &mut [u64],
+    pred: &mut [u64],
+    share: &mut [f64],
 ) {
     e2e.sort_unstable();
     pred.sort_unstable();
-    let mut share_sorted = share.clone();
+    let mut share_sorted = share.to_vec();
     share_sorted.sort_by(|a, b| a.partial_cmp(b).expect("finite shares"));
     let e2e_p50 = percentile(e2e, 50.0);
     let e2e_p95 = percentile(e2e, 95.0);
@@ -724,7 +724,7 @@ async fn measure_materialize(
     let _guard = crate::tests::exclusive_test_lock().lock().await;
     let expected_rows = envelopes
         .iter()
-        .map(|envelope| envelope.row_count() as usize)
+        .map(|envelope| envelope.row_count())
         .sum::<usize>();
     assert_eq!(expected_rows, rows, "fixture envelope rows must add up");
     let engine = fixture_engine(schema.clone(), envelopes);
