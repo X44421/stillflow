@@ -13,6 +13,7 @@ and info lines are reproduced verbatim so the evidence note can cite them.
 
 import json
 import math
+import statistics
 import sys
 from collections import defaultdict
 
