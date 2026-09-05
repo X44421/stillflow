@@ -3174,6 +3174,7 @@ dependencies = [
  "polars-arrow",
  "serde",
  "serde_json",
+ "sha2",
  "stillflow-connectors",
  "stillflow-core",
  "tempfile",

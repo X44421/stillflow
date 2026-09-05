@@ -35,8 +35,9 @@ use crate::schema::{
 
 const INTERNAL_ROWS: usize = 4_096;
 
-/// Measurement-only instrumentation for the E24-B2BASE ingestion baseline
-/// (private feature `io-metrics`). Counters are additive, compared-and-swap
+/// Measurement-only instrumentation for the E24-B2BASE ingestion baseline and
+/// the O0-C1 CSV duplicate-work attribution (issue #285; private feature
+/// `io-metrics`). Counters are additive, compared-and-swap
 /// free (relaxed atomics), and never alter parsing, buffering, validation,
 /// allocation, error timing, row order, or envelope boundaries. With the
 /// feature disabled this module does not exist and the crate is bit-identical
@@ -58,6 +59,17 @@ pub(crate) mod io_metrics {
     static JSON_POLARS_DECODE_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
     static PARQUET_READER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
     static PARQUET_BATCH_FINISHES: AtomicU64 = AtomicU64::new(0);
+    // O0-C1 (issue #285) stage-attribution counters: rows decoded by Polars,
+    // which stage raised a failure, and wall nanoseconds spent inside the
+    // inspect / delimited-prepare / decode / validate phases. All are pure
+    // observations recorded after the measured work has already happened.
+    static CSV_ROWS_DECODED: AtomicU64 = AtomicU64::new(0);
+    static CSV_FAIL_DECODE: AtomicU64 = AtomicU64::new(0);
+    static CSV_FAIL_VALIDATE: AtomicU64 = AtomicU64::new(0);
+    static INGEST_INSPECT_NANOS: AtomicU64 = AtomicU64::new(0);
+    static INGEST_PREPARE_NANOS: AtomicU64 = AtomicU64::new(0);
+    static INGEST_DECODE_NANOS: AtomicU64 = AtomicU64::new(0);
+    static INGEST_VALIDATE_NANOS: AtomicU64 = AtomicU64::new(0);
 
     pub(crate) fn add_validator_read_bytes(n: u64) {
         VALIDATOR_READ_BYTES.fetch_add(n, Ordering::Relaxed);
@@ -107,6 +119,38 @@ pub(crate) mod io_metrics {
         PARQUET_BATCH_FINISHES.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub(crate) fn add_csv_rows_decoded(n: u64) {
+        CSV_ROWS_DECODED.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_csv_fail_decode() {
+        CSV_FAIL_DECODE.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_csv_fail_validate() {
+        CSV_FAIL_VALIDATE.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn add_nanos(counter: &AtomicU64, nanos: u128) {
+        counter.fetch_add(nanos.min(u64::MAX as u128) as u64, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_ingest_inspect_nanos(nanos: u128) {
+        add_nanos(&INGEST_INSPECT_NANOS, nanos);
+    }
+
+    pub(crate) fn add_ingest_prepare_nanos(nanos: u128) {
+        add_nanos(&INGEST_PREPARE_NANOS, nanos);
+    }
+
+    pub(crate) fn add_ingest_decode_nanos(nanos: u128) {
+        add_nanos(&INGEST_DECODE_NANOS, nanos);
+    }
+
+    pub(crate) fn add_ingest_validate_nanos(nanos: u128) {
+        add_nanos(&INGEST_VALIDATE_NANOS, nanos);
+    }
+
     /// Exact logical bytes pulled from a wrapped file handle through `Read`.
     /// Labels: validator pass (CSV), framing pass (JSON). Decoder handles
     /// (CSV polars decode, Parquet) are passed unwrapped because polars may
@@ -148,7 +192,8 @@ pub(crate) mod io_metrics {
     }
 
     /// Cumulative counter snapshot. The E24 benchmark test reads this via the
-    /// dump file and computes per-case deltas itself.
+    /// dump file and computes per-case deltas itself. O0-C1 labels are appended
+    /// so the positional label/value pairing of the E24 prefixes is unchanged.
     pub(crate) fn snapshot_labels() -> &'static [&'static str] {
         &[
             "validator_read_bytes",
@@ -163,6 +208,13 @@ pub(crate) mod io_metrics {
             "json_polars_decode_invocations",
             "parquet_reader_constructions",
             "parquet_batch_finishes",
+            "csv_rows_decoded",
+            "csv_fail_decode",
+            "csv_fail_validate",
+            "ingest_inspect_nanos",
+            "ingest_prepare_nanos",
+            "ingest_decode_nanos",
+            "ingest_validate_nanos",
         ]
     }
 
@@ -180,6 +232,13 @@ pub(crate) mod io_metrics {
             JSON_POLARS_DECODE_INVOCATIONS.load(Ordering::Relaxed),
             PARQUET_READER_CONSTRUCTIONS.load(Ordering::Relaxed),
             PARQUET_BATCH_FINISHES.load(Ordering::Relaxed),
+            CSV_ROWS_DECODED.load(Ordering::Relaxed),
+            CSV_FAIL_DECODE.load(Ordering::Relaxed),
+            CSV_FAIL_VALIDATE.load(Ordering::Relaxed),
+            INGEST_INSPECT_NANOS.load(Ordering::Relaxed),
+            INGEST_PREPARE_NANOS.load(Ordering::Relaxed),
+            INGEST_DECODE_NANOS.load(Ordering::Relaxed),
+            INGEST_VALIDATE_NANOS.load(Ordering::Relaxed),
         ]
     }
 
@@ -269,7 +328,13 @@ pub(crate) fn prepare_reader(
     } = options;
     context.ensure_active()?;
     let inspection_opened = roots.open_asset(asset)?;
+    // O0-C1: inspection (bounded schema inference) is its own ingestion stage;
+    // its wall time is recorded after the call returns.
+    #[cfg(feature = "io-metrics")]
+    let inspect_start = std::time::Instant::now();
     let metadata = inspect_opened_asset(inspection_opened, asset, config, context)?;
+    #[cfg(feature = "io-metrics")]
+    io_metrics::add_ingest_inspect_nanos(inspect_start.elapsed().as_nanos());
     let source_schema = metadata.schema.clone();
     let full_schema = if let Some(override_schema) = schema_override {
         validate_override_against_source(override_schema, &source_schema)?;
@@ -303,6 +368,8 @@ pub(crate) fn prepare_reader(
             ReaderKind::Empty
         }
         TabularFormat::Csv | TabularFormat::Tsv => {
+            #[cfg(feature = "io-metrics")]
+            let prepare_start = std::time::Instant::now();
             let (separator, quote, has_header) = if opened.format == TabularFormat::Csv {
                 (
                     config.csv_delimiter,
@@ -369,6 +436,8 @@ pub(crate) fn prepare_reader(
                 .into_reader_with_file_handle(file)
                 .batched(None)
                 .map_err(polars_open_error)?;
+            #[cfg(feature = "io-metrics")]
+            io_metrics::add_ingest_prepare_nanos(prepare_start.elapsed().as_nanos());
             ReaderKind::Csv(Box::new(CsvState {
                 decoder,
                 validator,
@@ -573,11 +642,42 @@ impl PreparedReader {
             ReaderKind::Csv(reader) => {
                 #[cfg(feature = "io-metrics")]
                 io_metrics::add_csv_decoder_invocation();
+                #[cfg(not(feature = "io-metrics"))]
                 if let Some(frames) = reader.decoder.next_batches(1).map_err(polars_data_error)? {
                     for frame in frames {
                         reader.validate_rows(frame.height(), &self.context)?;
                         self.pending
                             .push_back(reorder_frame(frame, &self.projection.names)?);
+                    }
+                }
+                // O0-C1 (issue #285): the instrumented branch is behaviorally
+                // identical to the branch above; the timers only observe the
+                // lockstep decode/validation handoff, the row counter only
+                // tallies decoded heights, and the fail counters only record
+                // which stage produced the error after it was produced.
+                #[cfg(feature = "io-metrics")]
+                {
+                    let decode_start = std::time::Instant::now();
+                    let decoded = reader.decoder.next_batches(1).map_err(polars_data_error);
+                    io_metrics::add_ingest_decode_nanos(decode_start.elapsed().as_nanos());
+                    if decoded.is_err() {
+                        io_metrics::add_csv_fail_decode();
+                    }
+                    if let Some(frames) = decoded? {
+                        for frame in frames {
+                            io_metrics::add_csv_rows_decoded(frame.height() as u64);
+                            let validate_start = std::time::Instant::now();
+                            let validated = reader.validate_rows(frame.height(), &self.context);
+                            io_metrics::add_ingest_validate_nanos(
+                                validate_start.elapsed().as_nanos(),
+                            );
+                            if validated.is_err() {
+                                io_metrics::add_csv_fail_validate();
+                            }
+                            validated?;
+                            self.pending
+                                .push_back(reorder_frame(frame, &self.projection.names)?);
+                        }
                     }
                 }
             }
