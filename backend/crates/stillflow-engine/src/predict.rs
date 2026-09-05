@@ -5,6 +5,7 @@ use stillflow_core::{
 use stillflow_plan::Rule;
 
 use crate::error::EngineError;
+use crate::predict_metrics::{self, CloneSite, RuleKind};
 use crate::types::fixed_slot_bytes;
 use crate::{
     MAX_BOOL_UTF8_BYTES, MAX_FLOAT_UTF8_BYTES, MAX_INT_UTF8_BYTES, UTF8_OFFSET_SLOT_BYTES,
@@ -51,6 +52,7 @@ impl PredictedSchema {
     }
 
     pub(crate) fn to_logical_schema(&self) -> Result<LogicalSchema, EngineError> {
+        predict_metrics::record_to_logical_schema();
         let fields = self
             .columns
             .iter()
@@ -100,10 +102,15 @@ pub(crate) fn predict(
     schema: &PredictedSchema,
     steps: &[crate::preflight::CompiledStep],
 ) -> Result<usize, EngineError> {
+    predict_metrics::record_predict_probe();
+    let _probe_timer = predict_metrics::scoped_timer(predict_metrics::add_predict_wall);
     if k == 0 {
         return Ok(0);
     }
-    let mut working = schema.clone();
+    let mut working = {
+        predict_metrics::record_clone_site(CloneSite::WorkingInit);
+        schema.clone()
+    };
     refresh_source_widths(&mut working, arrays, offset, k)?;
     let mut peak = 0_usize;
     let mut live_before = column_physical_sum(&working, arrays, offset, k)?;
@@ -147,6 +154,8 @@ pub(crate) fn largest_feasible_k(
     schema: &PredictedSchema,
     steps: &[crate::preflight::CompiledStep],
 ) -> Result<usize, EngineError> {
+    predict_metrics::record_lfk_call();
+    let _lfk_timer = predict_metrics::scoped_timer(predict_metrics::add_lfk_wall);
     let remaining = row_count.saturating_sub(offset);
     if remaining == 0 {
         return Ok(0);
@@ -175,13 +184,18 @@ fn refresh_source_widths(
     offset: usize,
     k: usize,
 ) -> Result<(), EngineError> {
+    predict_metrics::record_refresh_source_widths();
+    let _refresh_timer = predict_metrics::scoped_timer(predict_metrics::add_refresh_wall);
+    let mut refreshed = 0_u64;
     for column in &mut schema.columns {
         if let ColumnOrigin::Source { ordinal } = column.origin {
             let array = arrays.get(ordinal).ok_or(EngineError::Ffi)?;
             column.max_value_bytes =
                 max_variable_width(array.as_ref(), offset, k, &column.data_type)?;
+            refreshed += 1;
         }
     }
+    predict_metrics::record_source_columns_refreshed(refreshed);
     Ok(())
 }
 
@@ -191,6 +205,8 @@ fn column_physical_sum(
     offset: usize,
     k: usize,
 ) -> Result<usize, EngineError> {
+    predict_metrics::record_column_physical_sum(schema.columns.len());
+    let _sum_timer = predict_metrics::scoped_timer(predict_metrics::add_sum_wall);
     let mut total = 0_usize;
     for column in &schema.columns {
         total = total.saturating_add(column_physical_bytes(column, arrays, offset, k)?);
@@ -204,6 +220,7 @@ fn column_physical_bytes(
     offset: usize,
     k: usize,
 ) -> Result<usize, EngineError> {
+    predict_metrics::record_column_physical_bytes();
     match (&column.origin, fixed_slot_bytes(&column.data_type)) {
         (ColumnOrigin::Source { ordinal }, Some(slot)) => Ok(fixed_physical_bytes(k, slot).max(
             slice_validity_bytes(arrays.get(*ordinal).map(|array| array.as_ref()), offset, k),
@@ -230,6 +247,7 @@ fn predict_step(
 ) -> Result<(usize, usize, PredictedSchema), EngineError> {
     match step {
         crate::preflight::CompiledStep::Project { columns } => {
+            predict_metrics::record_clone_site(CloneSite::Project);
             let mut next = working.clone();
             next.columns.retain(|column| columns.contains(&column.id));
             next.columns.sort_by_key(|column| {
@@ -238,10 +256,12 @@ fn predict_step(
                     .position(|id| *id == column.id)
                     .unwrap_or(usize::MAX)
             });
+            predict_metrics::record_project_full_recompute();
             let live_after = column_physical_sum(&next, arrays, offset, k)?;
             Ok((0, live_after, next))
         }
         crate::preflight::CompiledStep::Filter { .. } => {
+            predict_metrics::record_clone_site(CloneSite::Filter);
             Ok((live_before, live_before, working.clone()))
         }
         crate::preflight::CompiledStep::Rules { rules } => {
@@ -261,6 +281,7 @@ fn predict_rule(
     live_before: usize,
     rule: &Rule,
 ) -> Result<(usize, usize, PredictedSchema), EngineError> {
+    predict_metrics::record_clone_site(CloneSite::Rule);
     let mut next = working.clone();
     match rule {
         Rule::Rename { column, to } => {
@@ -269,6 +290,7 @@ fn predict_rule(
         }
         Rule::DropColumn { column } => {
             next.columns.retain(|item| item.id != *column);
+            predict_metrics::record_rule_full_recompute(RuleKind::DropColumn);
             let live_after = column_physical_sum(&next, arrays, offset, k)?;
             Ok((0, live_after, next))
         }
@@ -279,6 +301,7 @@ fn predict_rule(
             }
             let temporary = utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes));
             next.column_mut(*column)?.origin = ColumnOrigin::Derived;
+            predict_metrics::record_rule_full_recompute(RuleKind::Trim);
             let live_after = column_physical_sum(&next, arrays, offset, k)?;
             Ok((temporary, live_after, next))
         }
@@ -308,6 +331,7 @@ fn predict_rule(
                 origin: ColumnOrigin::Derived,
             };
             let temporary = column_physical_bytes(&new_column, arrays, offset, k)?;
+            predict_metrics::record_derive_temp_bytes();
             next.columns.push(new_column);
             let live_after = live_before.saturating_add(temporary);
             Ok((temporary, live_after, next))
@@ -322,6 +346,7 @@ fn predict_rule(
             match (to, &current.data_type) {
                 (ScalarValue::Null, _) => {
                     current.nullable = true;
+                    predict_metrics::record_rule_full_recompute(RuleKind::ReplaceLiteral);
                     let live_after = column_physical_sum(&next, arrays, offset, k)?;
                     Ok((k.div_ceil(8), live_after, next))
                 }
@@ -329,6 +354,7 @@ fn predict_rule(
                     current.max_value_bytes = current.max_value_bytes.max(value.len());
                     let temporary =
                         utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes));
+                    predict_metrics::record_rule_full_recompute(RuleKind::ReplaceLiteral);
                     let live_after = column_physical_sum(&next, arrays, offset, k)?;
                     Ok((temporary, live_after, next))
                 }
@@ -339,6 +365,7 @@ fn predict_rule(
                     let temporary = fixed_slot_bytes(&current.data_type)
                         .map(|slot| fixed_physical_bytes(k, slot))
                         .unwrap_or(0);
+                    predict_metrics::record_rule_full_recompute(RuleKind::ReplaceLiteral);
                     let live_after = column_physical_sum(&next, arrays, offset, k)?;
                     Ok((temporary, live_after, next))
                 }
@@ -359,6 +386,7 @@ fn predict_rule(
                     current.max_value_bytes = current.max_value_bytes.max(value.len());
                     let temporary =
                         utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes));
+                    predict_metrics::record_rule_full_recompute(RuleKind::FillNull);
                     let live_after = column_physical_sum(&next, arrays, offset, k)?;
                     Ok((temporary, live_after, next))
                 }
@@ -367,6 +395,7 @@ fn predict_rule(
                     let temporary = fixed_slot_bytes(&current.data_type)
                         .map(|slot| fixed_physical_bytes(k, slot))
                         .unwrap_or(0);
+                    predict_metrics::record_rule_full_recompute(RuleKind::FillNull);
                     let live_after = column_physical_sum(&next, arrays, offset, k)?;
                     Ok((temporary, live_after, next))
                 }
@@ -417,6 +446,7 @@ fn predict_rule(
                 Some(slot) => fixed_physical_bytes(k, slot),
                 None => utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes)),
             };
+            predict_metrics::record_rule_full_recompute(RuleKind::Cast);
             let live_after = column_physical_sum(&next, arrays, offset, k)?;
             Ok((temporary, live_after, next))
         }
@@ -480,16 +510,20 @@ fn predict_export_transition(
     offset: usize,
     k: usize,
 ) -> Result<usize, EngineError> {
+    let _export_timer = predict_metrics::scoped_timer(predict_metrics::add_export_wall);
+    let mut column_byte_calls = 0_usize;
     let mut total_polars_bytes = 0_usize;
     for col in &schema.columns {
         total_polars_bytes =
             total_polars_bytes.saturating_add(column_physical_bytes(col, arrays, offset, k)?);
+        column_byte_calls += 1;
     }
     let mut max_transition_peak = total_polars_bytes;
     let mut finished_arrow = 0_usize;
     let mut remaining_polars = total_polars_bytes;
     for col in &schema.columns {
         let col_bytes = column_physical_bytes(col, arrays, offset, k)?;
+        column_byte_calls += 1;
         remaining_polars = remaining_polars.saturating_sub(col_bytes);
         let builder_transient = col_bytes.saturating_mul(2);
         let current_transition = remaining_polars
@@ -499,6 +533,7 @@ fn predict_export_transition(
         finished_arrow = finished_arrow.saturating_add(col_bytes);
     }
     max_transition_peak = max_transition_peak.max(finished_arrow);
+    predict_metrics::record_export_transition(schema.columns.len(), column_byte_calls);
     Ok(max_transition_peak)
 }
 
@@ -527,6 +562,7 @@ fn list_physical_bytes(
     k: usize,
     inner: &LogicalType,
 ) -> Result<usize, EngineError> {
+    predict_metrics::record_list_scan();
     let list = array
         .as_any()
         .downcast_ref::<ListArray>()
@@ -548,6 +584,7 @@ fn struct_physical_bytes(
     k: usize,
     fields: &[LogicalField],
 ) -> Result<usize, EngineError> {
+    predict_metrics::record_struct_scan();
     let structure = array
         .as_any()
         .downcast_ref::<StructArray>()
@@ -575,9 +612,13 @@ fn max_variable_width(
     }
     let end = offset.saturating_add(k).min(array.len());
     let mut max = 0_usize;
+    let mut value_bytes = 0_u64;
     for index in offset..end {
-        max = max.max(value_width(array, index));
+        let width = value_width(array, index);
+        value_bytes = value_bytes.saturating_add(width as u64);
+        max = max.max(width);
     }
+    predict_metrics::record_max_variable_width_scan(end.saturating_sub(offset) as u64, value_bytes);
     Ok(max)
 }
 
@@ -585,17 +626,21 @@ fn variable_data_bytes(array: &dyn Array, offset: usize, k: usize) -> Result<usi
     let end = offset.saturating_add(k).min(array.len());
     if let Some(utf8) = array.as_any().downcast_ref::<StringArray>() {
         if k == 0 || end <= offset {
+            predict_metrics::record_variable_data_bytes(0, 0);
             return Ok(0);
         }
         let offsets = utf8.value_offsets();
         let start = offsets[offset] as usize;
         let stop = offsets[end] as usize;
-        return Ok(stop.saturating_sub(start));
+        let span = stop.saturating_sub(start);
+        predict_metrics::record_variable_data_bytes(end.saturating_sub(offset) as u64, span as u64);
+        return Ok(span);
     }
     let mut total = 0_usize;
     for index in offset..end {
         total = total.saturating_add(value_width(array, index));
     }
+    predict_metrics::record_variable_data_bytes(end.saturating_sub(offset) as u64, total as u64);
     Ok(total)
 }
 

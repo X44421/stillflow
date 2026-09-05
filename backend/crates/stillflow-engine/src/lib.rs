@@ -14,6 +14,7 @@ mod lookup;
 mod lower;
 mod memory;
 mod predict;
+mod predict_metrics;
 mod preflight;
 pub(crate) mod preview;
 mod profile;

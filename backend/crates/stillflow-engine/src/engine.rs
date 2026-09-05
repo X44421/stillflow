@@ -364,15 +364,22 @@ fn consume_envelope(
 ) -> Result<(), EngineError> {
     let mut offset = 0_usize;
     let row_count = envelope.payload().num_rows();
+    let _loop_timer =
+        crate::predict_metrics::site_loop_scoped(crate::predict_metrics::Site::Ingest);
     while offset < row_count {
         context.ensure_active().map_err(map_context_error)?;
-        let k = largest_feasible_k(
-            row_count,
-            offset,
-            envelope.payload().columns(),
-            predicted,
-            &prepared.steps,
-        )?;
+        let k = {
+            crate::predict_metrics::record_site_predict_call(crate::predict_metrics::Site::Ingest);
+            let _predict_timer =
+                crate::predict_metrics::site_predict_scoped(crate::predict_metrics::Site::Ingest);
+            largest_feasible_k(
+                row_count,
+                offset,
+                envelope.payload().columns(),
+                predicted,
+                &prepared.steps,
+            )?
+        };
         let batch = {
             let _polars_phase = crate::memory::enter_phase(crate::memory::AllocatorPhase::Polars);
             let slice = envelope.payload().slice(offset, k);

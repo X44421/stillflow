@@ -194,15 +194,25 @@ pub(crate) async fn preview(
 
         let mut offset = 0_usize;
         let rows = consumed.payload().num_rows();
+        let _loop_timer =
+            crate::predict_metrics::site_loop_scoped(crate::predict_metrics::Site::Preview);
         while offset < rows {
             context.ensure_active().map_err(map_context_error)?;
-            let k = largest_feasible_k(
-                rows,
-                offset,
-                consumed.payload().columns(),
-                &predicted,
-                &prepared.target_steps,
-            )?;
+            let k = {
+                crate::predict_metrics::record_site_predict_call(
+                    crate::predict_metrics::Site::Preview,
+                );
+                let _predict_timer = crate::predict_metrics::site_predict_scoped(
+                    crate::predict_metrics::Site::Preview,
+                );
+                largest_feasible_k(
+                    rows,
+                    offset,
+                    consumed.payload().columns(),
+                    &predicted,
+                    &prepared.target_steps,
+                )?
+            };
             let (batch, consumed_rows) = lower_chunk(
                 consumed.payload().slice(offset, k),
                 &prepared,
