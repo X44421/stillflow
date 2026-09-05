@@ -7,11 +7,11 @@
   Gate = dispatch base = origin/main at dispatch time). Every measurement and
   both test suites ran at this exact commit; no production commit landed
   between base and measurement. Branch: `agent/issue-283-o0-j1-json-direct-writer`.
-- Reference baseline: O0-B1 (#282). The feature-OFF arm of this note IS the
-  default production path measured at the identical exact head, so every
-  OFF number below is an exact-head baseline; absolute values should be
-  cross-read against #282 (PR was not yet open when this note was finalized;
-  both tasks measure at base `f61e085…`).
+- Reference baseline: O0-B1 (issue #282, delivered as PR #293). The
+  feature-OFF arm of this note IS the default production path measured at the
+  identical exact head, so every OFF number below is an exact-head baseline;
+  absolute values should be cross-read against PR #293 (the PR was not yet
+  open when this note was finalized; both tasks measure at base `f61e085…`).
 - Scope: measurement/compatibility only. The production default, routing,
   public contracts, dependencies, persistence formats and JSON parser
   architecture are unchanged. The only repo text change is the stale
@@ -340,9 +340,9 @@ hardware before flipping any default; this note does not change any default.
   e24-JSON-A2 evidence harness (`tests/e24_json_a2_prod_evidence.rs`) was
   reused verbatim for the original five perf cells and the two batch-size
   memory cells.
-- PR #282 (O0-B1) had not been opened when this note was finalized; the
-  feature-OFF arm here is the exact-head default-path baseline, so all
-  deltas are self-contained and cross-readable against #282 at
+- O0-B1 (issue #282) had not yet been opened as PR #293 when this note was
+  finalized; the feature-OFF arm here is the exact-head default-path baseline,
+  so all deltas are self-contained and cross-readable against PR #293 at
   `f61e0853b67ff5ca7bedb0bddb707befb922baff`.
 - The `pmixed` digest initially appeared to differ cross-mode because an
   earlier harness revision hashed Debug-rendered Arrow types (which embed
