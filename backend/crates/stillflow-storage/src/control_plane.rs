@@ -603,7 +603,11 @@ impl ControlPlaneStore {
         let name = name.into();
         validate_safe_text(&name, "Dataset name")?;
         let _activity = self.write_activity()?;
+        let op_started = crate::metrics::start();
+        let open_started = crate::metrics::start();
         let connection = open_connection(&self.inner)?;
+        let open_ns = crate::metrics::elapsed_ns(open_started);
+        let stmt_started = crate::metrics::start();
         ensure_workspace_active_connection(&connection, workspace_id)?;
         ensure_session_workspace(&connection, workspace_id, session_id)?;
         ensure_asset_workspace(&connection, workspace_id, source_asset_id)?;
@@ -622,7 +626,21 @@ impl ControlPlaneStore {
                 ],
             )
             .map_err(|error| map_constraint(error, dataset_id))?;
-        self.dataset_from_connection(&connection, dataset_id)
+        let record = self.dataset_from_connection(&connection, dataset_id);
+        let stmt_ns = crate::metrics::elapsed_ns(stmt_started);
+        // No explicit transaction: every statement autocommits under
+        // `synchronous = FULL`, so the per-statement commit/fsync cost is
+        // included in `stmt_ns` (issue #286 Part B attribution).
+        crate::metrics::record(crate::metrics::Event::DbOp {
+            op: crate::metrics::DbOpKind::CreateDataset,
+            open_ns,
+            txn_begin_ns: 0,
+            stmt_ns,
+            commit_ns: 0,
+            opens: 1,
+            wall_ns: crate::metrics::elapsed_ns(op_started),
+        });
+        record
     }
 
     pub fn get_dataset(&self, dataset_id: Uuid) -> Result<DatasetRecord, StorageError> {

@@ -23,3 +23,9 @@ uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[features]
+# Opt-in measurement-only instrumentation (issue #286, O0-S1). Disabled by
+# default; when off, the metrics module compiles to no-ops and storage
+# behavior is unchanged.
+storage-metrics = []
