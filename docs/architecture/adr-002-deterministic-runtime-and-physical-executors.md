@@ -8,6 +8,9 @@
 > Supersedes: only the precisely quoted ADR-001 statements in the
 > [Supersession map](#9-supersession-map). [ADR-001](adr-001-logical-physical-and-storage-boundaries.md)
 > otherwise remains Accepted historical authority.
+> Task-ID registry: [`xr-task-id-reconciliation.md`](xr-task-id-reconciliation.md)
+> (#287) is the canonical mapping for all XR-series identifiers; §10 identifiers
+> XR-B1/XR-P1/XR-E1 were renamed from the PR #98 draft IDs XR-D1/XR-S1/XR-A1.
 
 Citation discipline for this document:
 
@@ -196,7 +199,7 @@ uninterruptible region. Because a synchronous region cannot be interrupted
 mid-flight (XR-D0 §5: checks occur between cascades), every run whose deadline
 expired or cancel fired during an uninterruptible region must disclose the
 overshoot in its result metadata rather than swallow it. Overshoot magnitude
-measurement is owned by XR-D1 (§10, Open questions).
+measurement is owned by XR-B1 (§10, Open questions).
 
 **Memory, concurrency, and size bounds** **[Decision]**: the issue-046 §14.1
 law generalizes verbatim — live columnar payloads ≤ `MAX_LIVE_COLUMNAR_PAYLOADS = 3`,
@@ -235,7 +238,7 @@ governed by §6 versioning — planner contract version, executor identifier and
 version, the capability-declaration snapshot used, fragment boundaries,
 fallback events, and adaptation events. Current gap, stated plainly: the
 materialize path computes no plan fingerprint and persists none
-(XR-D0 §2.3, §5). Closing that gap is XR-S1 scope; XR-R0 must not change any
+(XR-D0 §2.3, §5). Closing that gap is XR-P1 scope; XR-R0 must not change any
 persisted artifact.
 
 ## 5. Semantic equivalence levels
@@ -247,7 +250,7 @@ without naming a level and citing its evidence fails architecture review
 | Level | Name | Meaning | Evidence required before claiming |
 | --- | --- | --- | --- |
 | L0 | Plan portability | The target executor accepts the plan: validation, typing, and lowering succeed without unsupported errors. | Structural pass of the XR-R1 conformance suite section for accepted shapes; no behavioral claim implied. |
-| L1 | Logical-result equivalence | For fixed inputs, plan, `batch_size`, and injected identities: identical ordered logical rows and identical output `LogicalSchema`, including null-comparison truth tables, cast-failure sets, and Trim codepoint sets, invariant to input partitioning (the issue-046 §13 determinism law, generalized beyond one executor). | Differential matrix against the reference outputs covering the XR-D1 corpus: pinned null truth tables, cast failure sets, NaN/signed-zero survival, Trim codepoints, timestamp/timezone retention. Today none of these fixtures exist (XR-D0 §6.4 gaps 2–5); L1 is therefore unclaimable until XR-D1 lands. |
+| L1 | Logical-result equivalence | For fixed inputs, plan, `batch_size`, and injected identities: identical ordered logical rows and identical output `LogicalSchema`, including null-comparison truth tables, cast-failure sets, and Trim codepoint sets, invariant to input partitioning (the issue-046 §13 determinism law, generalized beyond one executor). | Differential matrix against the reference outputs covering the XR-B1 corpus: pinned null truth tables, cast failure sets, NaN/signed-zero survival, Trim codepoints, timestamp/timezone retention. Today none of these fixtures exist (XR-D0 §6.4 gaps 2–5); L1 is therefore unclaimable until XR-B1 lands. |
 | L2 | Canonical-artifact equivalence | L1 plus identical canonical rebatched output: same envelope boundaries, sequences, schema metadata, and fingerprint inputs under fixed `batch_size` — the generalization of `t02_two_input_partitionings_yield_equal_rows_and_stats` and `t03_fixed_batch_size_yields_equal_output_envelope_boundaries`. | XR-R1 differential runs comparing canonical envelopes byte-for-byte at the envelope level across partitionings, plus manifest statistics equality. |
 | L3 | Byte identity | Identical persisted Parquet partition bytes and digests for identical inputs, identities, and pinned encoder/storage versions. | Golden fixtures proving digest equality across repeated runs and across both executors' full stacks, including NaN bit-pattern and `-0.0` survival through conversion and `write_envelope_parquet` (gap 2). Requires pinning encoder versions in the claim. |
 
@@ -366,12 +369,17 @@ PR neither creates nor dispatches it.
 
 ## 10. Delivery gates
 
-Ordering: XR-R0 first; XR-D1 and XR-R1 follow; XR-S1 next; XR-A1 independent;
-XR-G1 last **[Decision]**. Scope note: no charter for XR-A1, XR-S1, or XR-D1
-exists anywhere on `main` (the repository tree contains no XR task definitions
-beyond the merged inventory); the scopes below are therefore assigned by this
-ADR as decisions, and each task's charter PR must match or supersede by
-explicit reference.
+Ordering: XR-R0 first; XR-B1 and XR-R1 follow; XR-P1 next; XR-E1 independent;
+XR-G1 last **[Decision]**. Scope note: as merged in PR #98, this section
+assigned the identifiers XR-A1, XR-S1, and XR-D1 to the three scopes below.
+Those identifiers were already defined, with different deliverables, by the
+accepted program documents (#93, #81, checklist); the collision is resolved
+by [XR task-ID reconciliation](xr-task-id-reconciliation.md) (#287), which
+renames this section's three nodes to XR-B1, XR-P1, and XR-E1 (alias map in
+its §4) and keeps XR-A1 (Arrow-native pilot), XR-S1 (SQL pushdown), and
+XR-D1 (DuckDB physical executor integration) chartered by umbrella #93.
+The scopes below are assigned by this ADR as decisions, and each task's
+charter PR must match or supersede by explicit reference.
 
 ### XR-R0 — zero-observable-change extraction
 
@@ -388,9 +396,9 @@ explicit reference.
   fixtures; identical error categories.
 - Stop conditions: any public-surface or Cargo change; any behavioral delta;
   any attempt to add selection logic, a second executor, or provenance fields
-  (those belong to XR-S1).
+  (those belong to XR-P1).
 
-### XR-D1 — danger-matrix differential corpus
+### XR-B1 — danger-matrix differential corpus
 
 - Entry: XR-R0 merged.
 - Outcome: turn XR-D0 §6.4 gaps 2–9 into executable, deterministic fixtures and
@@ -405,7 +413,7 @@ explicit reference.
 
 ### XR-R1 — executor conformance harness
 
-- Entry: XR-R0 merged; XR-D1 corpus merged (or co-delivered and green).
+- Entry: XR-R0 merged; XR-B1 corpus merged (or co-delivered and green).
 - Outcome: test-only harness that drives a candidate executor over the corpus
   and emits per-level (L0–L3) evidence reports with the executor version and
   fixture list, so equivalence claims become citable artifacts. No production
@@ -413,9 +421,9 @@ explicit reference.
 - Stop conditions: harness requiring production API changes; flaky or
   environment-dependent results; evidence emitted without version pinning.
 
-### XR-S1 — selection, fallback, and provenance
+### XR-P1 — selection, fallback, and provenance
 
-- Entry: XR-R1 harness available; XR-D1 corpus green; this ADR Approved.
+- Entry: XR-R1 harness available; XR-B1 corpus green; this ADR Approved.
 - Outcome: implement the §3 eligibility/selection/fallback machinery and the §4
   provenance record behind `PROVENANCE_RECORD_VERSION`, closing the
   materialize-path plan-fingerprint gap (XR-D0 §5) as the first gated
@@ -424,7 +432,7 @@ explicit reference.
   (XR-G1 scope); any silent-downgrade path; provenance lacking version fields;
   persisting internal plan forms.
 
-### XR-A1 — typed effect/worker boundary
+### XR-E1 — typed effect/worker boundary
 
 - Entry: this ADR Approved; contract note per the AGENTS risk gates.
 - Outcome: freeze and then implement the §8 typed effect/worker contract with
@@ -437,7 +445,7 @@ explicit reference.
 ### XR-G1 — automatic-selection gate
 
 - Entry: at least two executors registered, each holding unexpired XR-R1
-  evidence at its claimed levels; XR-S1 shipped; XR-D1 corpus green at those
+  evidence at its claimed levels; XR-P1 shipped; XR-B1 corpus green at those
   levels.
 - All of the following must hold before automatic selection may be enabled
   **[Decision]**: a property test proves the §3 selection function is pure and
@@ -455,14 +463,14 @@ Stated, owned, and blocked on evidence — none is resolved by assumption in
 this ADR:
 
 1. Deadline/cancel overshoot magnitude inside a synchronous transform is
-   unmeasured (XR-D0 §6.4 gap 6). Owned by XR-D1; §4 requires disclosure
+   unmeasured (XR-D0 §6.4 gap 6). Owned by XR-B1; §4 requires disclosure
    regardless of magnitude.
-2. Memory attribution under genuinely concurrent runs (gap 7). Owned by XR-D1;
+2. Memory attribution under genuinely concurrent runs (gap 7). Owned by XR-B1;
    until measured, per-executor phase attribution extends, and does not relax,
    the issue-046 §14.1 law.
 3. Actual values of the unpinned semantic surfaces — null truth tables, Trim
    codepoints, non-UTC/DST retention, NaN/-0.0 round-trips (gaps 2–5). Owned
-   by XR-D1; §7 treats them as unpinned today.
+   by XR-B1; §7 treats them as unpinned today.
 4. Final checked-arithmetic semantics for unpausing (contract text exists in
    issue-046 §11.5 with no implementation, XR-D0 §4). Decision deferred to the
    task that unpauses, gated by §7 row 2.
@@ -495,7 +503,7 @@ this ADR:
   if plurality ever arrives.
 - Four new version counters and expiry rules demand discipline from every
   touched PR.
-- The conformance corpus (XR-D1/XR-R1) is permanent maintenance surface.
+- The conformance corpus (XR-B1/XR-R1) is permanent maintenance surface.
 - Equivalence claims now expire on version bumps, forcing re-evidence runs.
 - AGENTS.md rule 5 wording lags this ADR until the governance-alignment task
   lands; until then this document and the frozen rule coexist under the
@@ -541,6 +549,6 @@ Mechanically checkable enforcement for this ADR's own acceptance:
   issue numbers (#97, #93, #81, #95, #54, #91, #80, #9, #10) match their
   subjects as stated in the charter and architecture doc.
 - Future gates inherit mechanical checks: XR-R0 by the unchanged-test battery
-  listed above; XR-D1/XR-R1 by deterministic fixtures; XR-S1 by provenance
+  listed above; XR-B1/XR-R1 by deterministic fixtures; XR-P1 by provenance
   field-presence assertions; XR-G1 by the selection-function property test and
   fail-closed version unit tests.
