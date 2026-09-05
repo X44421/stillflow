@@ -3,9 +3,18 @@
 - Version: 1.0.0
 - Date: 2026-09-05
 - Issue: #284 ([O0-P1])
-- Measured head: `main@f61e0853b67ff5ca7bedb0bddb707befb922baff` (dispatch base; no
-  production commits landed between base and measurement)
-- Instrumentation branch: `agent/issue-284-o0-p1-predictor-cost`
+- Production baseline: `main@f61e0853b67ff5ca7bedb0bddb707befb922baff` (dispatch
+  base; no production commit landed between base and measurement, so production
+  content is identical at the base and at every measurement run)
+- Instrumentation/test-program commits (branch
+  `agent/issue-284-o0-p1-predictor-cost`): `7f4fcef` (feature-gated predictor
+  instrumentation), `badb0bc` (neutrality/attribution tests). The instrumented
+  runs necessarily executed on a branch working tree carrying these commits,
+  not on the bare dispatch base; the dispatch base alone therefore does not
+  describe the full measurement source. With `predict-metrics` off, production
+  behavior is unchanged (output-neutrality evidence, §2.3).
+- Delivery: PR #292. Branch commits after the measurement runs are the evidence
+  note itself and clippy-only fixes with no measurement-behavior change.
 - Reference baseline: O0-B1 (#282). Fixture E2E times here come from the
   instrumented test harness (scripted connector + tempdir snapshot store), not
   the #282 harness; absolute E2E should be cross-read against #282, while the
