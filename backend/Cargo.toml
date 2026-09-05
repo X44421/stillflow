@@ -40,26 +40,26 @@ arrow-ipc = "59"
 arrow-schema = "59"
 arrow-select = "59"
 async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 calamine = { version = "=0.35.0", features = ["chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 futures = "0.3"
 fs2 = "0.4"
-object_store = { version = "=0.12.5", default-features = false, features = ["aws", "fs"] }
+object_store = { version = "=0.14.1", default-features = false, features = ["aws", "fs"] }
 parquet = { version = "59", default-features = false, features = ["arrow", "snap"] }
-quick-xml = "=0.39.4"
-rusqlite = { version = "=0.32.1", features = ["bundled"] }
+quick-xml = "=0.41.0"
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 tempfile = "3"
-thiserror = "1"
+thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
-zip = { version = "=7.0.0", default-features = false, features = ["deflate"] }
+zip = { version = "=7.2.0", default-features = false, features = ["deflate"] }
 
 # Full DWARF in the test profile makes `cargo test --workspace` link
 # Polars/Arrow with multi-GB peak RAM. Line-less debuginfo plus fewer
