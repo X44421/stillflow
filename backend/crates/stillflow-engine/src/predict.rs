@@ -1,4 +1,6 @@
-use arrow_array::{Array, ListArray, StringArray, StructArray};
+use arrow_array::{
+    Array, BinaryArray, LargeBinaryArray, LargeStringArray, ListArray, StringArray, StructArray,
+};
 use stillflow_core::{
     ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue, MAX_BATCH_BYTES,
 };
@@ -611,10 +613,13 @@ fn max_variable_width(
         return Ok(0);
     }
     let end = offset.saturating_add(k).min(array.len());
+    // O1-P1 (#297): the concrete-array type decision is loop-invariant, so it
+    // is resolved once per scan instead of once per row.
+    let widths = WidthSource::resolve(array);
     let mut max = 0_usize;
     let mut value_bytes = 0_u64;
     for index in offset..end {
-        let width = value_width(array, index);
+        let width = widths.width_at(index);
         value_bytes = value_bytes.saturating_add(width as u64);
         max = max.max(width);
     }
@@ -636,37 +641,80 @@ fn variable_data_bytes(array: &dyn Array, offset: usize, k: usize) -> Result<usi
         predict_metrics::record_variable_data_bytes(end.saturating_sub(offset) as u64, span as u64);
         return Ok(span);
     }
+    let widths = WidthSource::resolve(array);
     let mut total = 0_usize;
     for index in offset..end {
-        total = total.saturating_add(value_width(array, index));
+        total = total.saturating_add(widths.width_at(index));
     }
     predict_metrics::record_variable_data_bytes(end.saturating_sub(offset) as u64, total as u64);
     Ok(total)
 }
 
-fn value_width(array: &dyn Array, index: usize) -> usize {
-    if array.is_null(index) {
-        return 0;
+/// The loop-invariant width accessor for one variable-width scan (O1-P1
+/// #297): the concrete array type is resolved once per array and every row
+/// asks the resolved source. Semantics are byte-identical to the former
+/// per-row `value_width`: null → 0, an unlisted concrete type → 0 (the
+/// conservative default, so a newly added variable-width array type degrades
+/// to the old behavior and cannot silently change the prediction).
+enum WidthSource<'a> {
+    Utf8(&'a StringArray),
+    LargeUtf8(&'a LargeStringArray),
+    Binary(&'a BinaryArray),
+    LargeBinary(&'a LargeBinaryArray),
+    None,
+}
+
+impl<'a> WidthSource<'a> {
+    fn resolve(array: &'a dyn Array) -> Self {
+        if let Some(values) = array.as_any().downcast_ref::<StringArray>() {
+            return Self::Utf8(values);
+        }
+        if let Some(values) = array.as_any().downcast_ref::<LargeStringArray>() {
+            return Self::LargeUtf8(values);
+        }
+        if let Some(values) = array.as_any().downcast_ref::<BinaryArray>() {
+            return Self::Binary(values);
+        }
+        if let Some(values) = array.as_any().downcast_ref::<LargeBinaryArray>() {
+            return Self::LargeBinary(values);
+        }
+        Self::None
     }
-    if let Some(utf8) = array.as_any().downcast_ref::<arrow_array::StringArray>() {
-        return utf8.value(index).len();
+
+    #[inline]
+    fn width_at(&self, index: usize) -> usize {
+        match self {
+            Self::Utf8(values) => {
+                if values.is_null(index) {
+                    0
+                } else {
+                    values.value(index).len()
+                }
+            }
+            Self::LargeUtf8(values) => {
+                if values.is_null(index) {
+                    0
+                } else {
+                    values.value(index).len()
+                }
+            }
+            Self::Binary(values) => {
+                if values.is_null(index) {
+                    0
+                } else {
+                    values.value(index).len()
+                }
+            }
+            Self::LargeBinary(values) => {
+                if values.is_null(index) {
+                    0
+                } else {
+                    values.value(index).len()
+                }
+            }
+            Self::None => 0,
+        }
     }
-    if let Some(utf8) = array
-        .as_any()
-        .downcast_ref::<arrow_array::LargeStringArray>()
-    {
-        return utf8.value(index).len();
-    }
-    if let Some(binary) = array.as_any().downcast_ref::<arrow_array::BinaryArray>() {
-        return binary.value(index).len();
-    }
-    if let Some(binary) = array
-        .as_any()
-        .downcast_ref::<arrow_array::LargeBinaryArray>()
-    {
-        return binary.value(index).len();
-    }
-    0
 }
 
 fn slice_validity_bytes(array: Option<&dyn Array>, offset: usize, k: usize) -> usize {
