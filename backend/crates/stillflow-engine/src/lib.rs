@@ -358,4 +358,7 @@ mod test_alloc {
 static TEST_ALLOC: test_alloc::PhasedAlloc = test_alloc::PhasedAlloc;
 
 #[cfg(test)]
+mod predict_metrics_tests;
+
+#[cfg(test)]
 mod tests;
