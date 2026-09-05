@@ -23,8 +23,10 @@ mod read;
 mod schema;
 
 // E24-JSON-A2 direct projected NDJSON writer (issue #158). Private, never
-// enabled by default; default enablement is blocked on the #151 temporal
-// upstream boundary. See the module docs in `direct_projected.rs`.
+// enabled by default; the former #151 temporal enablement blocker was fixed
+// connector-side (PR #225) and revalidated under issue #283. Default
+// enablement remains a separate productionization decision. See the module
+// docs in `direct_projected.rs`.
 #[cfg(feature = "json-direct-projected-writer")]
 mod direct_projected;
 
