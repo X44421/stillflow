@@ -54,9 +54,13 @@ io-metrics = []
 # `raw_value` capability so selected JSON values are captured as borrowed raw
 # slices instead of a generic `serde_json::Value` tree. With the feature off,
 # the crate builds and behaves exactly as before; no dependency or version
-# changes (features are not recorded in Cargo.lock). Default enablement is
-# blocked on the #151 temporal upstream boundary (`TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM`):
-# this path retains the shared Polars JsonReader unchanged and adds no
-# timestamp compensation, so it must not become the default until the affected
-# timestamp surface is routed around, fail-closed, or fixed upstream.
+# changes (features are not recorded in Cargo.lock). The former default
+# enablement blocker (#151 temporal upstream boundary,
+# `TIMESTAMP_ROOT_CAUSE_POLARS_UPSTREAM`) was resolved by the connector-side
+# temporal fix in PR #225: declared timestamp units, timezone epoch semantics
+# and pre-1970 values are normalized identically on the generic and this
+# direct projected path before the shared Polars JsonReader (revalidated with
+# parity and performance evidence under issue #283). Enabling it as the
+# default remains a separate productionization decision; this feature stays
+# measurement-only until then.
 json-direct-projected-writer = ["serde_json/raw_value"]
