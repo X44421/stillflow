@@ -105,7 +105,8 @@ is never the source of domain semantics (per #93).
    reload `PlanVersion` → locate the `Scan` node's `source_asset_id` → load
    asset + connection records → rebuild `SourceConnection`/`SourceAsset` from
    stored `safe_config`/`safe_locator` only → locate the dataset bound to that
-   asset by paging `list_datasets` (cap 1024, fail-closed if absent) →
+   asset by paging `list_datasets` (cap 1000, the storage page bound,
+   fail-closed if absent) →
    `batch_size` from the operation descriptor (`Materialize` → materialize
    policy, `Verification` → verification policy, otherwise 1024). All reads are
    durable-store reads; no process-local dispatch state crosses the boundary.
@@ -120,9 +121,10 @@ is never the source of domain semantics (per #93).
 - Binary: `stillflow-server --config <path> [--bind-host H] [--bind-port P]
   [--port-file <path>]`.
 - Config file (JSON, camelCase) wraps the frozen `ServiceConfig` verbatim plus
-  process-level fields: `authorizationMode` (`local-trusted` | `server`),
-  optional `workspaceId`. Config files must never carry credentials — only
-  `credential://` refs pass `ServiceConfig` validation.
+  process-level fields: `authorizationMode` (`local-trusted` | `server`) and a
+  **required** `workspaceId` (UUID) — the process serves exactly that
+  workspace. Config files must never carry credentials — only `credential://`
+  refs pass `ServiceConfig` validation.
 - Ready announcement: exactly one JSON line on stdout
   `{"event":"ready","pid":…,"bindHost":…,"port":…,"apiVersion":1,
   "transport":"desktop-local"}`; `--port-file` additionally writes that object
@@ -133,12 +135,13 @@ is never the source of domain semantics (per #93).
 ### 4.3 Workspace binding (single-workspace invariant)
 
 `JobRuntime` is constructed with one workspace id. SVC-A1 therefore serves
-**exactly one workspace per process** (DesktopLocal): at startup the process
-requires the store to hold exactly that workspace — zero workspaces: create it
-(bootstrap, using `workspaceId` from config, or a fresh UUID announced on the
-ready line); one matching workspace: adopt it; one mismatching or multiple
-workspaces: refuse to start. Multi-workspace / WebRemote serving is out of
-scope and must be chartered separately.
+**exactly one workspace per process** (DesktopLocal): the configured
+`workspaceId` must exist or be creatable at startup — absent: bootstrap-create
+and announce on the ready line; present: adopt; creation conflicting with a
+different existing row or any storage error: fail-closed. `ControlPlaneStore`
+has no workspace listing API on `main` and adding one is a storage-surface
+change out of SVC-A1 scope, so broader multi-workspace detection/refusal and
+WebRemote serving must be chartered separately.
 
 ### 4.4 Shutdown and restart
 
@@ -178,7 +181,20 @@ scope and must be chartered separately.
 
 Delivery is staged: PR-1 lands the adapter, process binary, and T1–T7 with the
 client-loop route subset; SVC-A1 closes only at 100% manifest coverage (T7 over
-all 90 routes).
+the full manifest).
+
+**Staging note — typed-binary response views (2026-09-05, at PR-1).**
+`asset.preview`, `engine.preview`, and `artifact.content` are excluded from
+PR-1: their response views (`PreviewView`, `EnginePreviewView`,
+`ArtifactContentPage`) carry typed binary `Vec<BatchEnvelope>` payloads and are
+deliberately not `Serialize` (the API crate's own doc: preview is "typed binary
+data; not coerced into an unbounded JSON value"). Serving them over HTTP
+requires a binary wire-format decision — Arrow IPC framing per AGENTS rule 3/4
+— which is a contract-level change, not an adapter detail. The follow-up PR
+that closes SVC-A1 at 100% coverage must freeze that framing here first; the
+adapter must never invent a second envelope serialization. T2's artifact
+verification therefore uses `artifact.list`/`artifact.read` (metadata + digest)
+in PR-1.
 
 ## 7. Ordered checklist
 
@@ -202,7 +218,9 @@ all 90 routes).
 
 ## 8. New dependencies
 
-- `axum` (0.8.x, workspace-pinned), `tower` (0.5.x) — runtime.
+- `axum` (0.8.x, workspace-pinned), `tower` (0.5.x, features `limit` +
+  `timeout`), `tower-http` (0.6.x, feature `timeout` for the 408 request
+  timeout layer) — runtime.
 - Dev-only: `reqwest` (0.12, `default-features = false`, features `json`),
   `libc` (test signal delivery). `tempfile` reuses the workspace pin.
 - `tokio` gains the `signal` feature (additive feature unification).
