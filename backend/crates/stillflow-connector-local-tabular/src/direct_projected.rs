@@ -1,5 +1,7 @@
-//! E24-JSON-A2 — direct projected NDJSON writer (private feature
-//! `json-direct-projected-writer`, issues #148/#158).
+//! E24-JSON-A2 — direct projected NDJSON writer (issues #148/#158), reached
+//! at runtime through the per-connection `jsonDirectProjectedWriter` config
+//! key since O1-J1 (issue #296; contract
+//! `docs/issues/issue-296-o1-j1-json-direct-read-path-contract.md`).
 //!
 //! Replaces ONLY the selected-field generic `serde_json::Value` tree plus
 //! projected `Map<String, Value>` reconstruction of the projected NDJSON path
