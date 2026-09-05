@@ -330,11 +330,13 @@ fn field_names(cols: usize) -> Vec<String> {
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest.iter() {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 fn sha256_file(path: &Path) -> String {
@@ -766,7 +768,6 @@ async fn drain_early_drop(
         rows += item?.payload().num_rows() as u64;
         taken += 1;
     }
-    drop(stream);
     Ok(rows)
 }
 
@@ -846,7 +847,6 @@ async fn witness_batches(
             }
         }
     }
-    drop(stream);
     Ok(serde_json::json!({
         "kind": if early_drop { "early_drop_batches" } else { "ingest_batches" },
         "rows": rows,
@@ -1060,6 +1060,7 @@ fn counter_percentiles(samples: &[RunSample], quantile: f64) -> BTreeMap<String,
     map
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish_record(
     spec: &CaseSpec,
     head: &str,
