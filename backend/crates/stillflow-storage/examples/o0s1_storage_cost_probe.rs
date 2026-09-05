@@ -1189,7 +1189,12 @@ fn percentile(samples: &[u64], fraction: f64) -> u64 {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 fn emit_sample(scenario: &str, iteration: usize, sample: Map<String, Value>) {
