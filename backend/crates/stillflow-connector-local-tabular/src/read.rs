@@ -903,10 +903,14 @@ fn json_ingest_schema(
 
 impl CsvState {
     fn validate_rows(&mut self, count: usize, context: &RequestContext) -> ConnectorResult<()> {
-        let mut record = csv::StringRecord::new();
+        // O1-C2 (#299): byte-record validation. The record's UTF-8 validity is
+        // established before this loop in every reachable case (see
+        // `text_value`), so the validator works on borrowed bytes and converts
+        // individual cells only where its predicate needs text.
+        let mut record = csv::ByteRecord::new();
         for _ in 0..count {
             context.ensure_active()?;
-            let read = self.validator.read_record(&mut record).map_err(|_| {
+            let read = self.validator.read_byte_record(&mut record).map_err(|_| {
                 source_error(
                     ErrorCategory::InvalidData,
                     false,
@@ -950,29 +954,74 @@ impl CsvState {
     }
 }
 
-fn csv_value_matches(value: &str, field: &LogicalField) -> bool {
+fn csv_value_matches(value: &[u8], field: &LogicalField) -> bool {
     if value.is_empty() {
         return field.nullable || matches!(field.data_type, LogicalType::Null);
     }
     match &field.data_type {
         LogicalType::Null => false,
-        LogicalType::Boolean => matches!(value, "true" | "false"),
-        LogicalType::Int8 => value.parse::<i8>().is_ok(),
-        LogicalType::Int16 => value.parse::<i16>().is_ok(),
-        LogicalType::Int32 => value.parse::<i32>().is_ok(),
-        LogicalType::Int64 => value.parse::<i64>().is_ok(),
-        LogicalType::UInt8 => value.parse::<u8>().is_ok(),
-        LogicalType::UInt16 => value.parse::<u16>().is_ok(),
-        LogicalType::UInt32 => value.parse::<u32>().is_ok(),
-        LogicalType::UInt64 => value.parse::<u64>().is_ok(),
-        LogicalType::Float32 => value.parse::<f32>().is_ok_and(|number| number.is_finite()),
-        LogicalType::Float64 => value.parse::<f64>().is_ok_and(|number| number.is_finite()),
+        LogicalType::Boolean => matches!(value, b"true" | b"false"),
+        LogicalType::Int8 => int_fast_accept(value) || parse_integer::<i8>(value),
+        LogicalType::Int16 => int_fast_accept(value) || parse_integer::<i16>(value),
+        LogicalType::Int32 => int_fast_accept(value) || parse_integer::<i32>(value),
+        LogicalType::Int64 => int_fast_accept(value) || parse_integer::<i64>(value),
+        LogicalType::UInt8 => int_fast_accept(value) || parse_integer::<u8>(value),
+        LogicalType::UInt16 => int_fast_accept(value) || parse_integer::<u16>(value),
+        LogicalType::UInt32 => int_fast_accept(value) || parse_integer::<u32>(value),
+        LogicalType::UInt64 => int_fast_accept(value) || parse_integer::<u64>(value),
+        LogicalType::Float32 => numeric_fast_accept(value) || parse_finite_f32(value),
+        LogicalType::Float64 => numeric_fast_accept(value) || parse_finite_f64(value),
         LogicalType::Utf8 | LogicalType::Binary => true,
         LogicalType::Date32 | LogicalType::Timestamp { .. } => {
-            temporal_text_matches(value, &field.data_type)
+            text_value(value).is_some_and(|text| temporal_text_matches(text, &field.data_type))
         }
         LogicalType::List(_) | LogicalType::Struct(_) => false,
     }
+}
+
+/// O1-C2 (#299): lazy UTF-8 view for the predicate arms that need text. A
+/// non-UTF-8 record can never reach this point: inspection rejects invalid
+/// UTF-8 inside the bounded inference prefix and the strict decoder owns it
+/// beyond that (pinned by the accept-set corpus), so the `None` fallback is
+/// defense-in-depth only and must stay unreachable.
+fn text_value(value: &[u8]) -> Option<&str> {
+    std::str::from_utf8(value).ok()
+}
+
+fn parse_integer<T: std::str::FromStr>(value: &[u8]) -> bool {
+    text_value(value).is_some_and(|text| text.parse::<T>().is_ok())
+}
+
+fn parse_finite_f32(value: &[u8]) -> bool {
+    text_value(value).is_some_and(|text| text.parse::<f32>().is_ok_and(|number| number.is_finite()))
+}
+
+fn parse_finite_f64(value: &[u8]) -> bool {
+    text_value(value).is_some_and(|text| text.parse::<f64>().is_ok_and(|number| number.is_finite()))
+}
+
+/// O1-C2 (#299): the digit-only spellings the strict decoder fully owns.
+/// Every digit-only cell the decoder accepted is inside the type's range —
+/// out-of-range digit strings fail in the decoder first (pinned by the O1-C1
+/// suite and the accept-set corpus) — so the re-parse can only re-derive
+/// acceptance there and is skipped. Every other spelling falls through to the
+/// original predicate verbatim, which keeps the decoder-lenient class
+/// (leading-whitespace numerics) on the granular validator surface.
+fn int_fast_accept(value: &[u8]) -> bool {
+    value.iter().all(|byte| byte.is_ascii_digit())
+}
+
+/// O1-C2 (#299): float form of the same fast path. A short digit/dot-only
+/// cell is finite whenever the decoder accepted it (the length bound keeps
+/// the magnitude far below `f32::MAX`); overflow-to-infinity spellings are
+/// longer or exponent-bearing and keep the original parse+finite predicate.
+/// Degenerate dot forms the scan admits (`"."`, multi-dot) are decoder-first
+/// rejects (accept-set corpus), so the fast acceptance of them is unobservable.
+fn numeric_fast_accept(value: &[u8]) -> bool {
+    value.len() <= 32
+        && value
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || *byte == b'.')
 }
 
 fn temporal_text_matches(value: &str, data_type: &LogicalType) -> bool {
