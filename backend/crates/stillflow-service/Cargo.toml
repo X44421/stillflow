@@ -1,0 +1,37 @@
+[package]
+name = "stillflow-service"
+description = "Startable StillFlow service process: HTTP adapter over the transport-neutral API surface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "stillflow-server"
+path = "src/bin/stillflow-server.rs"
+
+[dependencies]
+stillflow-api = { workspace = true, features = ["event-stream"] }
+stillflow-connectors.workspace = true
+stillflow-connector-local-tabular.workspace = true
+stillflow-connector-object-store.workspace = true
+stillflow-connector-workbook.workspace = true
+stillflow-core.workspace = true
+stillflow-engine.workspace = true
+stillflow-plan.workspace = true
+stillflow-storage.workspace = true
+axum.workspace = true
+chrono.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "signal"] }
+tower.workspace = true
+tower-http.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+libc = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking"] }
+tempfile.workspace = true

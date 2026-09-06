@@ -9,6 +9,7 @@ members = [
     "crates/stillflow-core",
     "crates/stillflow-engine",
     "crates/stillflow-plan",
+    "crates/stillflow-service",
     "crates/stillflow-storage",
 ]
 
@@ -40,6 +41,7 @@ arrow-ipc = "59"
 arrow-schema = "59"
 arrow-select = "59"
 async-trait = "0.1"
+axum = "0.8"
 base64 = "0.22"
 bytes = "1"
 calamine = { version = "=0.35.0", features = ["chrono"] }
@@ -58,6 +60,8 @@ tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = "0.7"
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["timeout"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 zip = { version = "=7.0.0", default-features = false, features = ["deflate"] }
 
