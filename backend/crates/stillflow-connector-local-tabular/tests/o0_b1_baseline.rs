@@ -762,13 +762,22 @@ fn witness_envelopes(envelopes: &[BatchEnvelope]) -> Witness {
 // ---------------------------------------------------------------------------
 
 fn connection(root: &Path) -> SourceConnection {
+    // O1-R1 (#301): supplementary feature-path knob, measurement-only. When
+    // O0_B1_JSON_DIRECT=1, JSON/NDJSON reads route through the direct
+    // projected assembler (the O1-J1 runtime switch, default off in
+    // production). No-op for CSV/Parquet cases and when unset — the default
+    // campaign never sets it.
+    let mut config = serde_json::json!({
+        "allowedRoots": [root.to_str().expect("UTF-8 fixture path")],
+        "schemaInference": { "maxRows": 100, "maxBytes": 1048576 }
+    });
+    if std::env::var("O0_B1_JSON_DIRECT").as_deref() == Ok("1") {
+        config["jsonDirectProjectedWriter"] = serde_json::Value::Bool(true);
+    }
     SourceConnection::try_new(
         stillflow_core::ConnectorKind::LocalFile,
         "o0-b1 fixture root",
-        serde_json::json!({
-            "allowedRoots": [root.to_str().expect("UTF-8 fixture path")],
-            "schemaInference": { "maxRows": 100, "maxBytes": 1048576 }
-        }),
+        config,
         CredentialRef::new("cred://local/o0-b1").expect("credential reference"),
     )
     .expect("connection")
