@@ -110,3 +110,27 @@ at the production baseline head), so the 43.2% figure is attributable to the
 routing switch alone. Sparse/escape-dense/long-string scenarios keep the
 #294-disclosed small-gain boundary: the ≥30% gate is claimed ONLY for the
 wide-table main scenario measured here.
+
+## 6. Boundary addendum (O1-R1 supplement, 2026-09-06)
+
+The O1 combined-regression round re-ran the direct path at the final merged
+head (`o1-r1-combined-regression.md` §3; case-level interleaved A/B, 3
+rounds, `json_direct` arm flag in `o1-r1-records.jsonl`). Two shapes beyond
+the sparse/escape-dense/long-string list above measure on the wrong side of
+the default path:
+
+- JSON-array input (`ingest-json-array-anchor-10c-100k`): +135.0% median
+  (2599.0 vs 1106.0 ms), direct slower in all three rounds — the cleanest
+  negative shape.
+- Timestamp-dense NDJSON (`ingest-ndjson-timestamps-10c-100k`): +77.6%
+  median (538.0 vs 303.0 ms), with mixed round-level direction (direct
+  209/543/538 ms vs default 292/303/1263 ms; the default round-3 value is a
+  disclosed sibling-load outlier that the median discards). The boundary
+  call rests on the median gap; the per-round values are disclosed here
+  rather than smoothed over.
+
+The production default remains off, so both rows are characterization, not
+regression. Together with the existing list they bound the knob's win
+condition: the direct projected assembler pays off on wide NDJSON
+projections and loses on JSON-array and timestamp-dense input, which should
+stay on the default path.
