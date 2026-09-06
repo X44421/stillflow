@@ -257,7 +257,7 @@ async fn float64_accept_set_is_pinned() {
         &LogicalType::Float64,
     )
     .await;
-    let mut decoder_face = s(&["1.5 ", "1_000.5", "1.2.3", "0x1p3", "abc", ".", "1e", "e5"]);
+    let decoder_face = s(&["1.5 ", "1_000.5", "1.2.3", "0x1p3", "abc", ".", "1e", "e5"]);
     sweep(
         "float64/decoder",
         &decoder_face,
