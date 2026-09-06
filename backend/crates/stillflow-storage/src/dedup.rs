@@ -32,9 +32,17 @@ pub const MAX_DEDUP_KEY_BYTES: usize = 64 * 1024;
 pub const MAX_DEDUP_INDEX_DISK_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 /// Deterministic concurrency-test hook parked between `.lock` creation and
-/// flock. Test-only; always `None` in production builds.
+/// flock. Test-only; always `None` in production builds. The hook receives
+/// the caller's `.lock` path: the static is process-global, so every
+/// concurrent `open_dedup_index` in the test binary reaches it and a hook
+/// test must filter on its own path to leave unrelated opens untouched
+/// (#312: an unfiltered hook let another test's opener hijack the
+/// rendezvous, producing both a spurious probe failure and a CI hang).
 #[cfg(test)]
-pub(crate) static PRE_FLOCK_HOOK: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>> =
+type PreFlockHook = dyn Fn(&std::path::Path) + Send + Sync;
+
+#[cfg(test)]
+pub(crate) static PRE_FLOCK_HOOK: std::sync::Mutex<Option<std::sync::Arc<PreFlockHook>>> =
     std::sync::Mutex::new(None);
 
 /// Serializes tests that mutate the process-global pre-flock hook. The hook
@@ -296,7 +304,7 @@ fn open_dedup_index_inner(
             .as_ref()
             .cloned();
         if let Some(hook) = hook {
-            hook();
+            hook(lock_path);
         }
     }
     lock_file.try_lock_exclusive().map_err(|error| {
@@ -872,29 +880,46 @@ mod tests {
 
     /// Blocker D, exclusion half: while an opener is parked inside its
     /// critical section (guard held, `.lock` created, flock not yet taken),
-    /// the maintenance gate must be unavailable to recovery. Two independent
-    /// barriers make this exact: `entered` proves the opener sits inside
-    /// `PRE_FLOCK_HOOK` still holding its activity guard; `release` keeps it
-    /// parked there until the maintenance-gate probe has been recorded and
-    /// any guard it won has been dropped. Barrier synchronization only; no
-    /// sleep, timeout, or scheduling assumption.
+    /// the maintenance gate must be unavailable to recovery. The hook
+    /// filters on this test's exact `.lock` path — the static is
+    /// process-global, so an unfiltered hook lets another test's opener
+    /// hijack the rendezvous (#312) — and the rendezvous itself is
+    /// channel-based: `entered` proves the opener sits inside
+    /// `PRE_FLOCK_HOOK` still holding its activity guard; `release` keeps
+    /// it parked there until the maintenance-gate probe has been recorded
+    /// and any guard it won has been dropped. Both waits carry a fail-fast
+    /// bound — never a scheduling assumption on the honest path, but a lost
+    /// or early-failing opener now surfaces with its real outcome instead
+    /// of hanging the suite (#312).
     #[test]
     fn open_critical_section_excludes_recovery_via_activity_guard() {
+        const RENDEZVOUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
         let _test_serial = PRE_FLOCK_TEST_MUTEX.lock().expect("hook test mutex");
         let temp = TempDir::new().expect("temp");
         let store = store(&temp);
         let run_id = Uuid::from_u128(0xD066);
 
-        let entered = Arc::new(std::sync::Barrier::new(2));
-        let release = Arc::new(std::sync::Barrier::new(2));
-        let hook_entered = Arc::clone(&entered);
-        let hook_release = Arc::clone(&release);
-        *PRE_FLOCK_HOOK.lock().expect("hook") = Some(Arc::new(move || {
-            // Announce arrival inside the open window, then stay parked
-            // there until the driving test has probed the maintenance gate.
-            hook_entered.wait();
-            hook_release.wait();
-        }));
+        let expected_lock_path = dedup_lock_path(&store.inner, run_id);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        // mpsc receivers are not Sync; the hook is shared through an
+        // `Arc<dyn Fn + Send + Sync>`, so the release end waits behind a
+        // mutex (only the hook ever locks it).
+        let release_rx = std::sync::Mutex::new(release_rx);
+        *PRE_FLOCK_HOOK.lock().expect("hook") =
+            Some(Arc::new(move |candidate: &std::path::Path| {
+                if candidate != expected_lock_path.as_path() {
+                    return; // another test's open; never park or unlink it
+                }
+                // Announce arrival inside the open window, then stay parked
+                // there until the driving test has probed the maintenance
+                // gate (or until the bound proves the test thread is gone).
+                let _ = entered_tx.send(());
+                let _ = release_rx
+                    .lock()
+                    .expect("release mutex")
+                    .recv_timeout(RENDEZVOUS_TIMEOUT);
+            }));
 
         // Every synchronization and cleanup step below precedes the
         // assertions, so even a failing probe releases the opener, clears
@@ -905,18 +930,41 @@ mod tests {
             opener_store.open_dedup_index(run_id, Uuid::from_u128(1), at(1))
         });
 
-        entered.wait(); // opener holds the guard between .lock creation and flock
+        if entered_rx.recv_timeout(RENDEZVOUS_TIMEOUT).is_err() {
+            // The opener never announced the window: surface its real
+            // outcome instead of leaving the rendezvous ambiguous. A
+            // parked-in-hook opener (a send that lost the race with this
+            // timeout) unparks within its own bound, so the join stays
+            // bounded.
+            *PRE_FLOCK_HOOK.lock().expect("hook") = None;
+            let result = match handle.join() {
+                Ok(result) => result,
+                Err(payload) => panic!(
+                    "opener thread panicked before reaching the pre-flock window: {payload:?}"
+                ),
+            };
+            panic!(
+                "opener did not reach the pre-flock window within \
+                 {RENDEZVOUS_TIMEOUT:?}; open outcome: {:?}",
+                result.map(|_| ())
+            );
+        }
         let gate = crate::acquire_maintenance(&store.inner);
         let busy = matches!(gate, Err(StorageError::Busy(_)));
         drop(gate); // release any guard this probe may have won
 
-        release.wait(); // unpark the opener; it completes its open
+        let _ = release_tx.send(()); // unpark the opener; it completes its open
         *PRE_FLOCK_HOOK.lock().expect("hook") = None;
-        let result = handle.join().expect("opener thread");
+        let result = match handle.join() {
+            Ok(result) => result,
+            Err(payload) => panic!("opener thread panicked during its open: {payload:?}"),
+        };
 
         assert!(
             busy,
-            "recovery gate must be excluded while the open window is live"
+            "recovery gate must be excluded while the open window is live; \
+             open outcome: {:?}",
+            result.as_ref().map(|_| ())
         );
         let index = result.expect("index opens after the window");
         index
@@ -939,9 +987,13 @@ mod tests {
         let lock_path = dedup_lock_path(&store.inner, run_id);
 
         let unlink_lock = {
-            let lock_path = lock_path.clone();
-            move || {
-                let _ = std::fs::remove_file(&lock_path);
+            let hook_lock_path = lock_path.clone();
+            move |candidate: &std::path::Path| {
+                // The hook is process-global: only unlink this test's own
+                // `.lock`, never an unrelated concurrent open's (#312).
+                if candidate == hook_lock_path.as_path() {
+                    let _ = std::fs::remove_file(candidate);
+                }
             }
         };
         *PRE_FLOCK_HOOK.lock().expect("hook") = Some(Arc::new(unlink_lock));
