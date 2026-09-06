@@ -392,7 +392,7 @@ mod tests {
         // variant names only; each variant renames its own fields).
         let schema = logical_schema();
         let envelopes = vec![envelope_with(&schema, Uuid::new_v4(), 0, 1)];
-        let json = serde_json::to_value(&sample_metadata(&envelopes)).expect("json");
+        let json = serde_json::to_value(sample_metadata(&envelopes)).expect("json");
         assert_eq!(json["view"], "artifactContent");
         assert!(json.get("nextPartitionSequence").is_some());
         assert!(json.get("next_partition_sequence").is_none());
