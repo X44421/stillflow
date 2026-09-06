@@ -3,7 +3,7 @@
 //! pair remains the authoritative error contract and the status code is
 //! advisory.
 
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -36,6 +36,22 @@ pub fn ok_response<T: Serialize>(result: ApiResult<ApiResponse<T>>) -> Response 
         Ok(response) => (StatusCode::OK, axum::Json(response)).into_response(),
         Err(error) => error_response(Uuid::nil(), error),
     }
+}
+
+/// Success body for the typed-binary routes (contract §6.1): a raw Arrow IPC
+/// stream. Failures keep the §3.2 JSON mapping.
+pub fn binary_response(body: Vec<u8>) -> Response {
+    (
+        [(header::CONTENT_TYPE, crate::wire::ARROW_STREAM_MEDIA_TYPE)],
+        body,
+    )
+        .into_response()
+}
+
+/// Failure path shared by the typed-binary routes: the service errors carry
+/// no request identity of their own, mirroring `ok_response`.
+pub fn service_error(error: ApiError) -> Response {
+    error_response(Uuid::nil(), error)
 }
 
 fn object_body(body: Value) -> Result<Map<String, Value>, ApiError> {
@@ -127,10 +143,19 @@ fn loose_value(raw: String) -> Value {
     serde_json::from_str::<Value>(&raw).unwrap_or(Value::String(raw))
 }
 
-const META_KEYS: [&str; 4] = ["apiVersion", "requestId", "workspaceId", "idempotencyKey"];
+const META_KEYS: [&str; 5] = [
+    "apiVersion",
+    "requestId",
+    "workspaceId",
+    "idempotencyKey",
+    "principal",
+];
 
 /// Reassembles a typed `ApiRequest<T>` from GET query parameters: envelope
-/// meta keys plus top-level body fields (contract §3.3).
+/// meta keys plus top-level body fields (contract §3.3). An optional
+/// `principal` must be carried JSON-encoded (the serde form of
+/// `RequestPrincipal`); callers that cannot expose it in a URL must use a
+/// route whose manifest method carries a body.
 pub fn parse_query_envelope<T: DeserializeOwned>(
     query: Option<String>,
     path_params: Vec<(String, String)>,

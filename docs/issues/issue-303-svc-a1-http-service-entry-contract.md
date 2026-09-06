@@ -69,6 +69,11 @@ is never the source of domain semantics (per #93).
   (numbers, booleans, `null`, nested objects/arrays), otherwise taken as a raw
   string. Rationale: `fetch()` forbids GET bodies, so the Web client cannot use
   envelope bodies on GET; query reassembly keeps manifest ↔ handler mapping 1:1.
+  An optional `principal` is reassembled from its JSON-encoded form (the serde
+  form of `RequestPrincipal`); callers that must not expose a principal in a
+  URL should prefer routes whose manifest method carries a body. Under
+  `server` authorization a GET that cannot reassemble a principal fails closed
+  with 401 (`Unauthorized`), never a degraded local-trusted fallback.
 - API-version fail-closed behavior is the existing `ApiService` validation
   (unknown version → `unsupported_version`); the adapter adds no second
   version registry.
@@ -183,18 +188,91 @@ Delivery is staged: PR-1 lands the adapter, process binary, and T1–T7 with the
 client-loop route subset; SVC-A1 closes only at 100% manifest coverage (T7 over
 the full manifest).
 
-**Staging note — typed-binary response views (2026-09-05, at PR-1).**
-`asset.preview`, `engine.preview`, and `artifact.content` are excluded from
+**Staging note — typed-binary response views (2026-09-05, at PR-1; resolved by
+§6.1 in the closing PR, 2026-09-06).**
+`asset.preview`, `engine.preview`, and `artifact.content` were excluded from
 PR-1: their response views (`PreviewView`, `EnginePreviewView`,
 `ArtifactContentPage`) carry typed binary `Vec<BatchEnvelope>` payloads and are
 deliberately not `Serialize` (the API crate's own doc: preview is "typed binary
 data; not coerced into an unbounded JSON value"). Serving them over HTTP
-requires a binary wire-format decision — Arrow IPC framing per AGENTS rule 3/4
-— which is a contract-level change, not an adapter detail. The follow-up PR
-that closes SVC-A1 at 100% coverage must freeze that framing here first; the
-adapter must never invent a second envelope serialization. T2's artifact
-verification therefore uses `artifact.list`/`artifact.read` (metadata + digest)
-in PR-1.
+required a binary wire-format decision — Arrow IPC framing per AGENTS rule 3/4
+— which is a contract-level change, not an adapter detail. That framing is now
+frozen as §6.1; the closing PR wires the three routes to it and extends T7 to
+the full manifest. In PR-1, T2's artifact verification therefore used
+`artifact.list`/`artifact.read` (metadata + digest) only.
+
+### 6.1 Typed-binary response wire format (frozen 2026-09-06)
+
+Applies to exactly the three manifest routes whose response schema is
+`PreviewView`, `EnginePreviewView`, or `ArtifactContentPage` (`asset.preview`,
+`engine.preview`, `artifact.content`). Every other route keeps §3.1 JSON
+envelope semantics unchanged.
+
+Success response:
+
+- HTTP 200 with `Content-Type: application/vnd.apache.arrow.stream` (the IANA
+  media type of the Arrow IPC stream format).
+- The body is one Arrow IPC **stream**: exactly one schema message, then one
+  record-batch message per `BatchEnvelope` in the view's batch order, then the
+  end-of-stream marker. For the two preview views the stream schema is
+  `logical_schema_to_arrow(view.schema)`; for `artifact.content` it is the
+  payload schema shared by the page's batches (an empty schema message when
+  the page carries zero batches).
+- All StillFlow metadata rides the schema message's `custom_metadata` under
+  the single key `stillflow.wire.v1` — one UTF-8 JSON object (camelCase):
+
+  ```json
+  {
+    "wireVersion": 1,
+    "meta": { "apiVersion": 1, "requestId": "<uuid>" },
+    "envelope": {
+      "version": 1,
+      "schemaFingerprint": [<32 bytes>],
+      "sourceAssetId": "<uuid>"
+    },
+    "batches": [
+      { "sequence": 0, "rowCount": 100, "byteCount": 20480 }
+    ],
+    "view": { "…": "route-specific scalars below" }
+  }
+  ```
+
+  - `meta` is the serde JSON of `ApiResponse::meta` (`ResponseMetadata`):
+    the §3.1 envelope semantics are preserved verbatim on the binary path.
+  - `envelope` is the shared `BatchEnvelope` identity of every batch in the
+    response (`version`, `schemaFingerprint` as the serde JSON of
+    `LogicalSchemaFingerprint`, `sourceAssetId`); it is `null` for a
+    zero-batch view.
+  - `batches` is index-parallel to the record-batch messages; `byteCount` is
+    the authoritative envelope value, not re-derivable from the stream.
+  - `view` is exactly one of:
+    - `asset.preview` → `{"view":"assetPreview","rowsReturned":…,
+      "bytesReturned":…,"rowsTruncated":…,"bytesTruncated":…,
+      "warnings":[…],"schema":…}` where `"schema"` is the serde JSON of the
+      view's `LogicalSchema`.
+    - `engine.preview` → `{"view":"enginePreview","planFingerprint":"…",
+      "targetNodeId":"<uuid>","rowsReturned":…,"bytesReturned":…,
+      "sourceRowsScanned":…,"sourceBytesScanned":…,"rowsTruncated":…,
+      "bytesTruncated":…,"scanTruncated":…,"sourceExhausted":…,"schema":…}`
+      with the same `"schema"` member.
+    - `artifact.content` → `{"view":"artifactContent",
+      "nextPartitionSequence": <u32|null>}`.
+- Uniformity is fail-closed: all envelopes of one response must share
+  `version`, `schema_fingerprint`, and `source_asset_id`, and every payload
+  must match the stream schema. Divergence maps to `Internal` (500) before
+  any bytes are written — a response is never a partial stream.
+- Failures keep the §3.2 JSON `ApiErrorResponse` mapping; page bounds
+  (`max_rows`/`max_bytes`, preview row/byte limits) remain enforced upstream
+  by `ApiService` exactly as in-process, so §5 limits inheritance is
+  unchanged and the response body stays bounded by the same limits.
+- This is **not** a second envelope serialization: batches are never
+  JSON-encoded, and the metadata JSON carries only the scalar envelope/view
+  fields the in-process views already expose.
+- Reader rules (client contract): `batches[i].rowCount` must equal
+  `batch_message[i].num_rows()`, `batches.len()` must equal the number of
+  record-batch messages, `wireVersion` must be recognized, and the message
+  order defines sequence order. Any mismatch is transport corruption and must
+  fail closed.
 
 ## 7. Ordered checklist
 

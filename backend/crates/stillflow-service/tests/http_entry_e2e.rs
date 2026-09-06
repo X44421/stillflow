@@ -11,11 +11,14 @@ use uuid::Uuid;
 
 use stillflow_api::{ServiceConfig, BOOTSTRAP_MANIFEST, E5_A1_ROUTES};
 use stillflow_core::{
-    ColumnId, JobOperation, MaterializePolicyV1, OperationDescriptorV1, OperationKind,
-    SourceAssetRef,
+    ColumnId, JobOperation, MaterializePolicyV1, OperationDescriptorV1, OperationKind, SnapshotRef,
+    SourceAssetRef, VerificationPolicyV1,
 };
 use stillflow_plan::{LogicalPlan, PlanNode, PlanNodeId, PlanNodeKind};
+use stillflow_service::wire::{decode_stream, WireView};
 use stillflow_service::{start_service, AuthModeConfig, ProcessConfig, StartedService};
+
+const ARROW_STREAM_MEDIA_TYPE: &str = "application/vnd.apache.arrow.stream";
 
 fn timestamp() -> Value {
     json!(chrono::Utc::now().to_rfc3339())
@@ -109,7 +112,32 @@ async fn get_json(client: &reqwest::Client, base: &str, path: &str) -> reqwest::
         .expect("request sends")
 }
 
-fn scan_materialize_plan(asset_id: Uuid, projection: Vec<ColumnId>) -> LogicalPlan {
+/// Asserts a typed-binary success response: 200, the frozen Arrow IPC stream
+/// media type (contract §6.1), and a decodable stream with the §6.1 reader
+/// rules applied.
+async fn arrow_stream(
+    response: reqwest::Response,
+    what: &str,
+) -> stillflow_service::wire::DecodedStream {
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .expect("content type")
+        .to_owned();
+    let bytes = response.bytes().await.expect("body bytes");
+    assert_eq!(
+        status,
+        200,
+        "{what} succeeds: {}",
+        String::from_utf8_lossy(&bytes)
+    );
+    assert_eq!(content_type, ARROW_STREAM_MEDIA_TYPE, "{what} media type");
+    decode_stream(&bytes).unwrap_or_else(|error| panic!("{what} decodes: {error}"))
+}
+
+fn scan_materialize_plan(asset_id: Uuid, projection: Vec<ColumnId>) -> (LogicalPlan, PlanNodeId) {
     let scan = PlanNodeId::from_uuid(Uuid::new_v4());
     let root = PlanNodeId::from_uuid(Uuid::new_v4());
     let mut nodes = BTreeMap::new();
@@ -133,7 +161,7 @@ fn scan_materialize_plan(asset_id: Uuid, projection: Vec<ColumnId>) -> LogicalPl
             vec![scan],
         ),
     );
-    LogicalPlan::new(root, nodes).expect("plan validates")
+    (LogicalPlan::new(root, nodes).expect("plan validates"), scan)
 }
 
 async fn discover_and_project(
@@ -376,6 +404,44 @@ async fn t2_client_loop_materializes_over_real_tcp() {
     let (asset_id, projection) =
         discover_and_project(&client, &base, workspace_id, connection_id).await;
 
+    // Typed-binary connector preview over TCP (contract §6.1).
+    let decoded = arrow_stream(
+        post_json(
+            &client,
+            &base,
+            "/v1/assets/preview",
+            envelope(
+                workspace_id,
+                json!({
+                    "connectionId": connection_id,
+                    "assetId": asset_id,
+                    "rowLimit": 100,
+                    "byteLimit": 1048576,
+                    "timeoutSeconds": null,
+                }),
+            ),
+        )
+        .await,
+        "asset preview",
+    )
+    .await;
+    match decoded.metadata.view {
+        WireView::AssetPreview { rows_returned, .. } => {
+            assert!(rows_returned > 0, "preview returns rows")
+        }
+        other => panic!("asset.preview returns the assetPreview view, got {other:?}"),
+    }
+    let envelope_meta = decoded
+        .metadata
+        .envelope
+        .as_ref()
+        .expect("preview envelope");
+    assert_eq!(envelope_meta.source_asset_id, asset_id);
+    assert!(
+        !decoded.batches.is_empty(),
+        "preview batches ride the stream"
+    );
+
     let dataset_id = Uuid::new_v4();
     let response = post_json(
         &client,
@@ -409,7 +475,8 @@ async fn t2_client_loop_materializes_over_real_tcp() {
     .await;
     assert_eq!(response.status(), 200, "plan create");
 
-    let plan = scan_materialize_plan(asset_id, projection);
+    let (plan, scan_id) = scan_materialize_plan(asset_id, projection);
+    let plan_value = serde_json::to_value(&plan).expect("plan json");
     let response = post_json(
         &client,
         &base,
@@ -421,7 +488,7 @@ async fn t2_client_loop_materializes_over_real_tcp() {
                 "planVersionId": version_id,
                 "versionNumber": 1,
                 "parentVersionId": null,
-                "logicalPlan": serde_json::to_value(&plan).expect("plan json"),
+                "logicalPlan": plan_value.clone(),
                 "createdAt": timestamp(),
             }),
         ),
@@ -440,6 +507,36 @@ async fn t2_client_loop_materializes_over_real_tcp() {
     )
     .await;
     assert_eq!(response.status(), 200, "plan version publish");
+
+    // Typed-binary engine preview over TCP (contract §6.1): the published
+    // plan targets the Scan node without creating a Job or Run.
+    let decoded = arrow_stream(
+        post_json(
+            &client,
+            &base,
+            "/v1/engine/preview",
+            envelope(
+                workspace_id,
+                json!({
+                    "plan": plan_value,
+                    "targetNodeId": json!(scan_id),
+                    "connectionId": connection_id,
+                    "assetId": asset_id,
+                    "batchSize": 1024,
+                    "rowLimit": 100,
+                    "byteLimit": 1048576,
+                    "timeoutSeconds": 30,
+                }),
+            ),
+        )
+        .await,
+        "engine preview",
+    )
+    .await;
+    match decoded.metadata.view {
+        WireView::EnginePreview { .. } => {}
+        other => panic!("engine.preview returns the enginePreview view, got {other:?}"),
+    }
 
     let job_id = submit_materialize_job(
         &client,
@@ -483,9 +580,7 @@ async fn t2_client_loop_materializes_over_real_tcp() {
     );
 
     // The materialize product is exactly one committed Snapshot output
-    // reference, read over TCP. Artifact-kind metadata routes (profile /
-    // report / export artifacts) are exercised by the T7 registration pass;
-    // the typed-binary artifact content route awaits its wire-format stage.
+    // reference, read over TCP.
     let outputs = job["body"]["outputs"].as_array().expect("outputs");
     assert_eq!(outputs.len(), 1, "materialize publishes exactly one output");
     assert_eq!(outputs[0]["kind"], "snapshot", "output kind");
@@ -498,6 +593,102 @@ async fn t2_client_loop_materializes_over_real_tcp() {
         outputs[0]["version_digest"].as_str().is_some(),
         "snapshot version digest present"
     );
+
+    // Verification over the committed snapshot, then the typed-binary
+    // artifact content route over TCP (contract §6.1 + §6 T2).
+    let snapshot_ref: SnapshotRef = serde_json::from_value(json!({
+        "workspaceId": outputs[0]["workspace_id"],
+        "sessionId": outputs[0]["session_id"],
+        "datasetId": outputs[0]["dataset_id"],
+        "snapshotId": outputs[0]["snapshot_id"],
+        "versionDigest": outputs[0]["version_digest"],
+        "schemaFingerprint": outputs[0]["schema_fingerprint"],
+        "snapshotVersion": outputs[0]["snapshot_version"],
+    }))
+    .expect("snapshot ref from output view");
+    let verification = JobOperation::try_new(
+        OperationKind::Verification,
+        OperationDescriptorV1::Verification {
+            snapshot: snapshot_ref,
+            verification_policy: VerificationPolicyV1 {
+                batch_size: 1024,
+                publish_rejected_rows: true,
+            },
+        },
+    )
+    .expect("verification operation validates");
+    let verification_job_id = Uuid::new_v4();
+    let response = post_json(
+        &client,
+        &base,
+        "/v1/jobs",
+        envelope_with_key(
+            workspace_id,
+            json!({
+                "sessionId": session_id,
+                "planVersionId": version_id,
+                "planId": plan_id,
+                "jobId": verification_job_id,
+                "operation": serde_json::to_value(&verification).expect("operation json"),
+                "inputs": [serde_json::to_value(verification.input()).expect("inputs")],
+                "executionPolicy": {"deadlineSeconds": 300},
+                "outputPolicy": {},
+                "queuedAt": timestamp(),
+                "eventId": Uuid::new_v4(),
+                "correlationId": "svc-a1-verification",
+                "actorRef": "actor:svc-a1",
+            }),
+        ),
+    )
+    .await;
+    let status = response.status();
+    let text = response.text().await.expect("body");
+    assert_eq!(status, 200, "verification submit: {status} {text}");
+    let verification_job = wait_terminal(&client, &base, workspace_id, verification_job_id).await;
+    assert_eq!(
+        verification_job["body"]["state"], "succeeded",
+        "verification job succeeds: {verification_job}"
+    );
+    let verification_outputs = verification_job["body"]["outputs"]
+        .as_array()
+        .expect("verification outputs");
+    let bundle_output = verification_outputs
+        .iter()
+        .find(|output| output["kind"] == "verificationBundle")
+        .expect("verification bundle output");
+    let report_member = bundle_output["members"]
+        .as_array()
+        .expect("bundle members")
+        .iter()
+        .find(|member| member["artifactKind"] == "validationReport")
+        .expect("validation report member");
+    let bundle_id = bundle_output["bundle_id"].as_str().expect("bundle id");
+    let report_artifact_id = report_member["artifactId"].as_str().expect("artifact id");
+    // Closing-PR finding, documented: verification bundle artifacts carry
+    // Arrow sections in the snapshot store but no control-plane ArtifactRef
+    // is ever created for them (only Profile/Quality/Export/Drift artifacts
+    // get refs). The manifest-faithful `artifact.content` handler therefore
+    // fails closed with the §3.2 JSON mapping (`NotFound` → 404) for the only
+    // artifacts that own sections. Registering refs for verification
+    // artifacts is an engine-publication decision outside SVC-A1's
+    // additive-only scope (contract §2.5/§9); the §6.1 Arrow stream path is
+    // exercised end-to-end by the two preview routes above.
+    let content = get_json(
+        &client,
+        &base,
+        &format!(
+            "/v1/artifacts/content?bundleId={bundle_id}&artifactId={report_artifact_id}&sectionId=validation-rule-summary&maxRows=1000&maxBytes=1048576&workspaceId={workspace_id}"
+        ),
+    )
+    .await;
+    let status = content.status();
+    let text = content.text().await.expect("body");
+    assert_eq!(
+        status, 404,
+        "artifact content fails closed on the ref gap: {status} {text}"
+    );
+    let body: Value = serde_json::from_str(&text).expect("error json");
+    assert_eq!(body["error"]["code"], "notFound", "§3.2 mapping holds");
 
     service.shutdown().await.expect("shutdown");
 }
@@ -564,7 +755,7 @@ async fn t3_cancel_over_real_tcp() {
         ),
     )
     .await;
-    let plan = scan_materialize_plan(asset_id, projection);
+    let (plan, _scan_id) = scan_materialize_plan(asset_id, projection);
     post_json(
         &client,
         &base,
@@ -676,7 +867,7 @@ async fn t4_events_list_cursor_and_sse_over_real_tcp() {
         ),
     )
     .await;
-    let plan = scan_materialize_plan(asset_id, projection);
+    let (plan, _scan_id) = scan_materialize_plan(asset_id, projection);
     post_json(
         &client,
         &base,
@@ -770,63 +961,14 @@ async fn t4_events_list_cursor_and_sse_over_real_tcp() {
 async fn t7_manifest_routes_are_registered() {
     let root = tempfile::tempdir().expect("root");
     let (service, base, client) = start(process_config(root.path())).await;
-    // PR-1 client-loop subset (contract §6 staging): these manifest operations
-    // must be registered; everything else must NOT be (bare 404). The typed
-    // binary wire-format trio is pending its contract stage.
-    const PENDING_BINARY_WIRE_FORMAT: [&str; 3] =
-        ["asset.preview", "engine.preview", "artifact.content"];
-    const PR1_OPS: [&str; 48] = [
-        "handshake",
-        "health.liveness",
-        "health.readiness",
-        "health.read",
-        "metrics.read",
-        "workspace.create",
-        "workspace.archive",
-        "workspace.read",
-        "session.create",
-        "session.list",
-        "session.read",
-        "session.close",
-        "connection.test",
-        "connection.register",
-        "connection.list",
-        "connection.read",
-        "asset.list",
-        "asset.discover",
-        "asset.inspect",
-        "dataset.create",
-        "dataset.read",
-        "dataset.archive",
-        "plan.create",
-        "plan.load",
-        "plan.version.save",
-        "plan.version.read",
-        "plan.version.publish",
-        "plan.clone",
-        "plan.diff",
-        "plan.validate",
-        "job.submit",
-        "drift.compare",
-        "job.read",
-        "job.list",
-        "job.cancel",
-        "export.submit",
-        "export.read",
-        "export.cancel",
-        "export.manifest.read",
-        "export.files.list",
-        "export.download",
-        "export.tombstone",
-        "export.gc",
-        "run.read",
-        "run.list",
-        "event.list",
-        "artifact.read",
-        "artifact.list",
-    ];
+    // Contract §6 T7 at 100% manifest coverage (closing PR): every manifest
+    // (method, path) is registered. A bare 404 (empty body) or a 405 proves
+    // the route table diverged from the authoritative manifest; malformed
+    // probes still answer through the §3.2 JSON error mapping, so a 404 that
+    // carries an error body still proves registration. The route set stays a
+    // subset of the manifest by construction (routes.rs maps only
+    // E5_A1_ROUTES entries).
     for route in E5_A1_ROUTES {
-        let expected_registered = PR1_OPS.contains(&route.operation_id);
         let mut path = route.path.to_owned();
         while let Some(start) = path.find('{') {
             let Some(end) = path[start..].find('}') else {
@@ -846,41 +988,18 @@ async fn t7_manifest_routes_are_registered() {
         };
         let status = response.status().as_u16();
         let body = response.text().await.expect("body");
-        if expected_registered {
-            assert!(
-                status != 404 || !body.trim().is_empty(),
-                "PR-1 route {}/{} ({}) is not registered: bare 404",
-                route.method,
-                route.path,
-                route.operation_id
-            );
-            assert_ne!(
-                status, 405,
-                "PR-1 route {}/{} method mismatch",
-                route.method, route.path
-            );
-        } else if PENDING_BINARY_WIRE_FORMAT.contains(&route.operation_id) {
-            // These static-leaf paths may fall through to a sibling param
-            // route (400) while unregistered; they must simply produce no
-            // successful domain response.
-            assert!(
-                !(200..300).contains(&status),
-                "pending route {}/{} must not serve responses yet, got {status} {body}",
-                route.method,
-                route.path
-            );
-        } else {
-            // A path shape shared with a registered route (param names differ
-            // only) yields 405; anything else must be a bare 404. Both prove
-            // no domain handler is attached.
-            assert!(
-                status == 404 || status == 405,
-                "route {}/{} ({}) must not be registered yet, got {status} {body}",
-                route.method,
-                route.path,
-                route.operation_id
-            );
-        }
+        assert!(
+            status != 404 || !body.trim().is_empty(),
+            "route {}/{} ({}) is not registered: bare 404",
+            route.method,
+            route.path,
+            route.operation_id
+        );
+        assert_ne!(
+            status, 405,
+            "route {}/{} method mismatch",
+            route.method, route.path
+        );
     }
     service.shutdown().await.expect("shutdown");
 }
