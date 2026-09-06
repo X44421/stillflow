@@ -10,19 +10,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  frontend:
-    name: Frontend checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
-
   # Backend gates expose distinct evidence rather than duplicating the same
   # full suite across toolchains (DX-F0 #85, DX-T1 #204). Rust 1.85.0 is the
   # canonical fmt + lint + semantic-test authority; stable adds compatibility

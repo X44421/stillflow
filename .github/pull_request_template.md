@@ -34,8 +34,6 @@ Contract: `docs/issues/issue-NNN-implementation-contract.md`
 cd backend && cargo fmt --all -- --check
 cd backend && cargo clippy --workspace --all-targets -- -D warnings
 cd backend && cargo test --workspace
-npm run typecheck
-npm run build
 ```
 
 <!-- Record exact pass/fail/not-run result for each command. -->
@@ -62,4 +60,3 @@ npm run build
 - [ ] Dependency arrows remain valid.
 - [ ] No unbounded data operation or secret-bearing payload was added.
 - [ ] Deterministic contracts have serialization/invariant tests.
-- [ ] No unauthorized frontend layout/style/token change is included.

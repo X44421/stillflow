@@ -52,8 +52,6 @@ dependency may point from a lower layer back to a higher layer.
     or serialized API payloads. Persist `CredentialRef` values only.
 11. Do not add `clone`, `Arc`, or `Box` merely to suppress ownership errors.
     Explain material ownership choices in the Implementation Contract.
-12. Do not change frontend layout, components, CSS, or design tokens unless the
-    issue explicitly requests a UI change.
 
 ## Contract and risk gates
 
@@ -115,15 +113,14 @@ is intentionally deferred to a later contract.
 
 ## Required verification
 
-Run the checks relevant to touched files and report any unavailable tool as an
-environment limitation, never as a pass:
+The verification baseline is the Rust backend workspace; the repository has no
+frontend toolchain. Run the checks relevant to touched files and report any
+unavailable tool as an environment limitation, never as a pass:
 
 ```bash
 cd backend && cargo fmt --all -- --check
 cd backend && cargo clippy --workspace --all-targets -- -D warnings
 cd backend && cargo test --workspace
-npm run typecheck
-npm run build
 ```
 
 For contract or architecture-only changes, also verify links, issue numbers,
