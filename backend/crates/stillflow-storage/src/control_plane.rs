@@ -6125,6 +6125,66 @@ fn validate_verification_bundle_output(
             "VerificationBundle output digest does not match its committed provenance",
         ));
     }
+    // SVC-A2 (issue #314, contract §4): the staged report refs must exactly
+    // match the typed member set — count, identity, kind, digest, no
+    // duplicates, and no canonical JSON body (report content lives in the
+    // bundle sections, never in cp_artifact_bodies).
+    let staged_count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM cp_artifact_refs WHERE run_id = ?1 AND state = 'staged'",
+            params![run_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| StorageError::database("count staged bundle member ArtifactRefs"))?;
+    if usize::try_from(staged_count).unwrap_or(usize::MAX) != members.len() {
+        return Err(StorageError::InvalidDraft(
+            "staged ArtifactRefs do not exactly match the VerificationBundle member set",
+        ));
+    }
+    let mut staged_ids = BTreeSet::new();
+    for member in members {
+        if !staged_ids.insert(member.artifact_id) {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle members contain duplicate ArtifactRefs",
+            ));
+        }
+        let staged: Option<(String, String, String)> = transaction
+            .query_row(
+                "SELECT workspace_id, artifact_kind, content_digest
+                 FROM cp_artifact_refs
+                 WHERE id = ?1 AND run_id = ?2 AND state = 'staged'",
+                params![member.artifact_id.to_string(), run_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| StorageError::database("check staged bundle member ArtifactRef"))?;
+        let Some((staged_workspace, kind_json, digest)) = staged else {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle member ArtifactRef is missing or not staged",
+            ));
+        };
+        if parse_uuid(&staged_workspace)? != workspace_id
+            || parse_enum_json::<ArtifactKind>(&kind_json, "Artifact kind")? != member.artifact_kind
+            || parse_digest(&digest)? != member.content_digest
+        {
+            return Err(StorageError::InvalidDraft(
+                "staged VerificationBundle member identity does not match the typed member",
+            ));
+        }
+        let body: Option<i64> = transaction
+            .query_row(
+                "SELECT 1 FROM cp_artifact_bodies WHERE artifact_id = ?1",
+                params![member.artifact_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| StorageError::database("check bundle member Artifact body"))?;
+        if body.is_some() {
+            return Err(StorageError::InvalidDraft(
+                "VerificationBundle member ArtifactRef cannot carry a canonical JSON body",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -6271,77 +6331,112 @@ fn commit_staged_terminal_artifacts(
     run_event: &EventDraft,
 ) -> Result<(), StorageError> {
     for output in outputs {
-        let TerminalOutputRef::Artifact {
-            artifact_id,
-            artifact_kind,
-            ..
-        } = output
-        else {
-            continue;
-        };
-        let changed = transaction
-            .execute(
-                "UPDATE cp_artifact_refs
-                 SET state = 'committed', committed_at_utc = ?2
-                 WHERE id = ?1 AND run_id = ?3 AND state = 'staged'",
-                params![
-                    artifact_id.to_string(),
-                    timestamp(&run_event.occurred_at),
-                    run_id.to_string()
-                ],
-            )
-            .map_err(|_| StorageError::database("commit terminal ArtifactRef"))?;
-        if changed != 1 {
-            return Err(StorageError::InvalidDraft(
-                "staged ArtifactRef changed before terminal commit",
-            ));
+        match output {
+            TerminalOutputRef::Artifact {
+                artifact_id,
+                artifact_kind,
+                ..
+            } => {
+                commit_one_staged_artifact(
+                    transaction,
+                    run_id,
+                    job_id,
+                    run_event,
+                    *artifact_id,
+                    *artifact_kind,
+                )?;
+            }
+            // SVC-A2 (issue #314, contract §4): bundle report members are
+            // promoted with the same run-stream-owned discipline as the
+            // top-level Artifact outputs.
+            TerminalOutputRef::VerificationBundle { members, .. } => {
+                for member in members {
+                    commit_one_staged_artifact(
+                        transaction,
+                        run_id,
+                        job_id,
+                        run_event,
+                        member.artifact_id,
+                        member.artifact_kind,
+                    )?;
+                }
+            }
+            _ => {}
         }
-        let body_changed = transaction
-            .execute(
-                "UPDATE cp_artifact_bodies
-                 SET state = 'committed', committed_at_utc = ?2
-                 WHERE artifact_id = ?1 AND state = 'staged'",
-                params![artifact_id.to_string(), timestamp(&run_event.occurred_at)],
-            )
-            .map_err(|_| StorageError::database("commit terminal Artifact body"))?;
-        let body_required = matches!(
-            artifact_kind,
-            ArtifactKind::ProfileReport | ArtifactKind::QualityReport | ArtifactKind::DriftReport
-        );
-        if body_required && body_changed != 1 {
-            return Err(StorageError::InvalidDraft(
-                "report ArtifactRef has no staged canonical body",
-            ));
-        }
-        if !body_required && body_changed != 0 {
-            return Err(StorageError::InvalidDraft(
-                "non-report ArtifactRef cannot carry a canonical JSON body",
-            ));
-        }
-        let event_id = Uuid::new_v5(
-            &run_event.event_id,
-            format!("artifact-committed:{artifact_id}").as_bytes(),
-        );
-        append_event_tx(
-            transaction,
-            EventDraft::new(
-                event_id,
-                EventStreamKind::Run,
-                run_id,
-                job_id,
-                Some(run_id),
-                ControlPlaneEventType::ArtifactCommitted,
-                run_event.occurred_at,
-                run_event.request_id.clone(),
-                run_event.correlation_id.clone(),
-                run_event.actor_ref.clone(),
-                serde_json::json!({
-                    "state": "committed",
-                    "artifactId": artifact_id
-                }),
-            ),
-        )?;
     }
+    Ok(())
+}
+
+fn commit_one_staged_artifact(
+    transaction: &Transaction<'_>,
+    run_id: Uuid,
+    job_id: Uuid,
+    run_event: &EventDraft,
+    artifact_id: Uuid,
+    artifact_kind: ArtifactKind,
+) -> Result<(), StorageError> {
+    let changed = transaction
+        .execute(
+            "UPDATE cp_artifact_refs
+             SET state = 'committed', committed_at_utc = ?2
+             WHERE id = ?1 AND run_id = ?3 AND state = 'staged'",
+            params![
+                artifact_id.to_string(),
+                timestamp(&run_event.occurred_at),
+                run_id.to_string()
+            ],
+        )
+        .map_err(|_| StorageError::database("commit terminal ArtifactRef"))?;
+    if changed != 1 {
+        return Err(StorageError::InvalidDraft(
+            "staged ArtifactRef changed before terminal commit",
+        ));
+    }
+    let body_changed = transaction
+        .execute(
+            "UPDATE cp_artifact_bodies
+             SET state = 'committed', committed_at_utc = ?2
+             WHERE artifact_id = ?1 AND state = 'staged'",
+            params![artifact_id.to_string(), timestamp(&run_event.occurred_at)],
+        )
+        .map_err(|_| StorageError::database("commit terminal Artifact body"))?;
+    let body_required = matches!(
+        artifact_kind,
+        ArtifactKind::ProfileReport | ArtifactKind::QualityReport | ArtifactKind::DriftReport
+    );
+    if body_required && body_changed != 1 {
+        return Err(StorageError::InvalidDraft(
+            "report ArtifactRef has no staged canonical body",
+        ));
+    }
+    if !body_required && body_changed != 0 {
+        return Err(StorageError::InvalidDraft(
+            "non-report ArtifactRef cannot carry a canonical JSON body",
+        ));
+    }
+    let event_id = Uuid::new_v5(
+        &run_event.event_id,
+        format!("artifact-committed:{artifact_id}").as_bytes(),
+    );
+    append_event_tx(
+        transaction,
+        EventDraft::new(
+            event_id,
+            EventStreamKind::Run,
+            run_id,
+            job_id,
+            Some(run_id),
+            ControlPlaneEventType::ArtifactCommitted,
+            run_event.occurred_at,
+            run_event.request_id.clone(),
+            run_event.correlation_id.clone(),
+            run_event.actor_ref.clone(),
+            serde_json::json!({
+                "state": "committed",
+                "artifactId": artifact_id
+            }),
+        ),
+    )?;
     Ok(())
 }
 

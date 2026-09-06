@@ -664,28 +664,70 @@ async fn t2_client_loop_materializes_over_real_tcp() {
         .expect("validation report member");
     let bundle_id = bundle_output["bundle_id"].as_str().expect("bundle id");
     let report_artifact_id = report_member["artifactId"].as_str().expect("artifact id");
-    // Closing-PR finding, documented: verification bundle artifacts carry
-    // Arrow sections in the snapshot store but no control-plane ArtifactRef
-    // is ever created for them (only Profile/Quality/Export/Drift artifacts
-    // get refs). The manifest-faithful `artifact.content` handler therefore
-    // fails closed with the §3.2 JSON mapping (`NotFound` → 404) for the only
-    // artifacts that own sections. Registering refs for verification
-    // artifacts is an engine-publication decision outside SVC-A1's
-    // additive-only scope (contract §2.5/§9); the §6.1 Arrow stream path is
-    // exercised end-to-end by the two preview routes above.
-    let content = get_json(
+    // SVC-A2 (issue #314): verification bundle report artifacts now carry
+    // committed control-plane ArtifactRefs (contract §3/§4), so every bundle
+    // member is listed and the §6.1 Arrow stream content route is reachable
+    // for the only artifacts that own sections. Unknown artifact ids still
+    // fail closed with the §3.2 JSON mapping (`NotFound` → 404).
+    let run_id = verification_job["body"]["runId"].as_str().expect("run id");
+    let listed = get_json(
+        &client,
+        &base,
+        &format!("/v1/runs/{run_id}/artifacts?limit=50&workspaceId={workspace_id}"),
+    )
+    .await;
+    assert_eq!(listed.status(), 200, "artifact list succeeds");
+    let listed: Value = listed.json().await.expect("artifact list json");
+    let listed_artifacts = listed["body"]["artifacts"]
+        .as_array()
+        .expect("artifact page view");
+    for member in bundle_output["members"].as_array().expect("bundle members") {
+        let member_id = member["artifactId"].as_str().expect("member artifact id");
+        let row = listed_artifacts
+            .iter()
+            .find(|artifact| artifact["artifactId"] == member["artifactId"])
+            .unwrap_or_else(|| panic!("bundle member {member_id} is listed"));
+        assert_eq!(
+            row["artifactKind"], member["artifactKind"],
+            "listed kind matches the bundle member"
+        );
+        assert_eq!(row["state"], "committed", "listed ref is committed");
+    }
+    let decoded = arrow_stream(
+        get_json(
+            &client,
+            &base,
+            &format!(
+                "/v1/artifacts/content?bundleId={bundle_id}&artifactId={report_artifact_id}&sectionId=validation-rule-summary&maxRows=1000&maxBytes=1048576&workspaceId={workspace_id}"
+            ),
+        )
+        .await,
+        "artifact content",
+    )
+    .await;
+    assert!(
+        matches!(
+            decoded.metadata.view,
+            WireView::ArtifactContent {
+                next_partition_sequence: None
+            }
+        ),
+        "artifact content view shape"
+    );
+    let unknown_content = get_json(
         &client,
         &base,
         &format!(
-            "/v1/artifacts/content?bundleId={bundle_id}&artifactId={report_artifact_id}&sectionId=validation-rule-summary&maxRows=1000&maxBytes=1048576&workspaceId={workspace_id}"
+            "/v1/artifacts/content?bundleId={bundle_id}&artifactId={}&sectionId=validation-rule-summary&maxRows=1000&maxBytes=1048576&workspaceId={workspace_id}",
+            Uuid::new_v4()
         ),
     )
     .await;
-    let status = content.status();
-    let text = content.text().await.expect("body");
+    let status = unknown_content.status();
+    let text = unknown_content.text().await.expect("body");
     assert_eq!(
         status, 404,
-        "artifact content fails closed on the ref gap: {status} {text}"
+        "unknown artifact fails closed: {status} {text}"
     );
     let body: Value = serde_json::from_str(&text).expect("error json");
     assert_eq!(body["error"]["code"], "notFound", "§3.2 mapping holds");
