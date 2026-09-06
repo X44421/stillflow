@@ -13,6 +13,7 @@ pub mod process;
 pub mod resolver;
 pub mod routes;
 pub mod sse;
+pub mod wire;
 
 pub use config::{AuthModeConfig, ProcessConfig};
 pub use process::{start_service, ProcessError, StartedService};
