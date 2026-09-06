@@ -23,6 +23,11 @@ pub(crate) struct LocalTabularConfig {
     pub(crate) csv_quote: u8,
     pub(crate) csv_has_header: bool,
     pub(crate) tsv_has_header: bool,
+    /// O1-J1 (#296): route JSON/NDJSON batch reads through the direct
+    /// projected row assembler instead of the generic DOM reconstruction.
+    /// Default `false` — the generic path, byte-for-byte today's behavior;
+    /// the default is the rollback point (contract section 1).
+    pub(crate) json_direct_projected_writer: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +44,8 @@ struct RawConfig {
     csv: RawCsv,
     #[serde(default)]
     tsv: RawTsv,
+    #[serde(default)]
+    json_direct_projected_writer: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,6 +159,7 @@ impl LocalTabularConfig {
             csv_quote: quote,
             csv_has_header: raw.csv.has_header,
             tsv_has_header: raw.tsv.has_header,
+            json_direct_projected_writer: raw.json_direct_projected_writer,
         })
     }
 }
@@ -223,6 +231,15 @@ mod tests {
         .expect("default config");
         assert_eq!(parsed.max_discovery_depth, DEFAULT_MAX_DISCOVERY_DEPTH);
         assert_eq!(parsed.csv_delimiter, b',');
+        // O1-J1 (#296): the direct projected routing switch defaults to the
+        // generic path (rollback point, contract section 1).
+        assert!(!parsed.json_direct_projected_writer);
+        let direct = LocalTabularConfig::parse(&connection(serde_json::json!({
+            "allowedRoots": ["/data"],
+            "jsonDirectProjectedWriter": true
+        })))
+        .expect("direct-projected config");
+        assert!(direct.json_direct_projected_writer);
 
         for invalid in [
             serde_json::json!({"allowedRoots": []}),

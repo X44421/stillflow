@@ -31,10 +31,17 @@ use stillflow_core::{
     RequestContext, SourceConnection,
 };
 
-#[cfg(feature = "json-direct-projected-writer")]
-const MODE: &str = "on";
-#[cfg(not(feature = "json-direct-projected-writer"))]
-const MODE: &str = "off";
+/// O1-J1 (#296): the projected-row routing is a runtime connection-config
+/// key. The harness selects its arm via `E24_JSON_A2_MODE=on|off`
+/// (default `off`, today's production default) and records the arm in every
+/// emitted line, so both arms of the ≥30% ingest comparison run from one
+/// binary at one head.
+fn mode() -> &'static str {
+    match std::env::var("E24_JSON_A2_MODE").as_deref() {
+        Ok("on") => "on",
+        _ => "off",
+    }
+}
 
 const PRIMARY_ROWS: usize = 100_000;
 const PRIMARY_COLS: usize = 100;
@@ -214,14 +221,19 @@ fn drain_and_sample(
 ) {
     let (rss_start, _) = memory_snapshot();
     let started = Instant::now();
+    let mode = mode();
 
+    let mut config = serde_json::json!({
+        "allowedRoots": [fixture.parent().and_then(|p| p.to_str()).expect("fixture root")],
+        "schemaInference": { "maxRows": 1, "maxBytes": 8388608 }
+    });
+    if mode == "on" {
+        config["jsonDirectProjectedWriter"] = serde_json::Value::Bool(true);
+    }
     let connection = SourceConnection::try_new(
         ConnectorKind::LocalFile,
         "fixtures",
-        serde_json::json!({
-            "allowedRoots": [fixture.parent().and_then(|p| p.to_str()).expect("fixture root")],
-            "schemaInference": { "maxRows": 1, "maxBytes": 8388608 }
-        }),
+        config,
         CredentialRef::new("cred://local/e24-evidence").expect("credential reference"),
     )
     .expect("connection");
@@ -282,7 +294,7 @@ fn drain_and_sample(
     let elapsed = started.elapsed();
     let (rss_end, vmhwm) = memory_snapshot();
     println!(
-        "E24SAMPLE cell={cell} mode={MODE} batch={batch_size} rows={rows} envelopes={envelopes} elapsed_ns={} rss_start_kb={rss_start} rss_end_kb={rss_end} vmhwm_kb={vmhwm}",
+        "E24SAMPLE cell={cell} mode={mode} batch={batch_size} rows={rows} envelopes={envelopes} elapsed_ns={} rss_start_kb={rss_start} rss_end_kb={rss_end} vmhwm_kb={vmhwm}",
         elapsed.as_nanos()
     );
 }

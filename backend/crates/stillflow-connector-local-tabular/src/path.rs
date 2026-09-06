@@ -633,6 +633,7 @@ mod tests {
             csv_quote: b'"',
             csv_has_header: true,
             tsv_has_header: true,
+            json_direct_projected_writer: false,
         }
     }
 
