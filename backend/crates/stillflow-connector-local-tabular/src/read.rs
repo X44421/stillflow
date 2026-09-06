@@ -957,22 +957,52 @@ fn csv_value_matches(value: &str, field: &LogicalField) -> bool {
     match &field.data_type {
         LogicalType::Null => false,
         LogicalType::Boolean => matches!(value, "true" | "false"),
-        LogicalType::Int8 => value.parse::<i8>().is_ok(),
-        LogicalType::Int16 => value.parse::<i16>().is_ok(),
-        LogicalType::Int32 => value.parse::<i32>().is_ok(),
-        LogicalType::Int64 => value.parse::<i64>().is_ok(),
-        LogicalType::UInt8 => value.parse::<u8>().is_ok(),
-        LogicalType::UInt16 => value.parse::<u16>().is_ok(),
-        LogicalType::UInt32 => value.parse::<u32>().is_ok(),
-        LogicalType::UInt64 => value.parse::<u64>().is_ok(),
-        LogicalType::Float32 => value.parse::<f32>().is_ok_and(|number| number.is_finite()),
-        LogicalType::Float64 => value.parse::<f64>().is_ok_and(|number| number.is_finite()),
+        LogicalType::Int8 => int_fast_accept(value) || value.parse::<i8>().is_ok(),
+        LogicalType::Int16 => int_fast_accept(value) || value.parse::<i16>().is_ok(),
+        LogicalType::Int32 => int_fast_accept(value) || value.parse::<i32>().is_ok(),
+        LogicalType::Int64 => int_fast_accept(value) || value.parse::<i64>().is_ok(),
+        LogicalType::UInt8 => int_fast_accept(value) || value.parse::<u8>().is_ok(),
+        LogicalType::UInt16 => int_fast_accept(value) || value.parse::<u16>().is_ok(),
+        LogicalType::UInt32 => int_fast_accept(value) || value.parse::<u32>().is_ok(),
+        LogicalType::UInt64 => int_fast_accept(value) || value.parse::<u64>().is_ok(),
+        LogicalType::Float32 => {
+            numeric_fast_accept(value)
+                || value.parse::<f32>().is_ok_and(|number| number.is_finite())
+        }
+        LogicalType::Float64 => {
+            numeric_fast_accept(value)
+                || value.parse::<f64>().is_ok_and(|number| number.is_finite())
+        }
         LogicalType::Utf8 | LogicalType::Binary => true,
         LogicalType::Date32 | LogicalType::Timestamp { .. } => {
             temporal_text_matches(value, &field.data_type)
         }
         LogicalType::List(_) | LogicalType::Struct(_) => false,
     }
+}
+
+/// O1-C2 (#299): the digit-only spellings the strict decoder fully owns.
+/// Every digit-only cell the decoder accepted is inside the type's range —
+/// out-of-range digit strings fail in the decoder first (pinned by the O1-C1
+/// suite and the accept-set corpus) — so the re-parse can only re-derive
+/// acceptance there and is skipped. Every other spelling falls through to the
+/// original predicate verbatim, which keeps the decoder-lenient class
+/// (leading-whitespace numerics) on the granular validator surface.
+fn int_fast_accept(value: &str) -> bool {
+    value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// O1-C2 (#299): float form of the same fast path. A short digit/dot-only
+/// cell is finite whenever the decoder accepted it (the length bound keeps
+/// the magnitude far below `f32::MAX`); overflow-to-infinity spellings are
+/// longer or exponent-bearing and keep the original parse+finite predicate.
+/// Degenerate dot forms the scan admits (`"."`, multi-dot) are decoder-first
+/// rejects (accept-set corpus), so the fast acceptance of them is unobservable.
+fn numeric_fast_accept(value: &str) -> bool {
+    value.len() <= 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
 }
 
 fn temporal_text_matches(value: &str, data_type: &LogicalType) -> bool {
