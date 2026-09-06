@@ -171,13 +171,19 @@ impl SnapshotStore {
             ));
         }
         let activity = acquire_activity(&self.inner, ActivityKind::Publisher)?;
-        insert_publication(&self.inner, draft.id(), &started_at)?;
+        // O1-S1: one configured SQLite connection is owned by the whole
+        // publication operation. The journal insert below and the manifest
+        // commit at `commit` reuse it instead of each opening a fresh
+        // connection (the #291 measurement attributes ~0.4-1.1 ms of
+        // open+PRAGMA configuration per extra connection).
+        let mut connection = open_connection(&self.inner)?;
+        insert_publication(&mut connection, draft.id(), &started_at)?;
 
         let staging_dir = staging_snapshot_dir(&self.inner, draft.id());
         match create_exact_directory(&staging_dir, "create snapshot staging directory") {
             Ok(()) => {}
             Err(error) => {
-                abort_publication(&self.inner, draft.id());
+                abort_publication(&connection, draft.id());
                 return Err(error);
             }
         }
@@ -185,6 +191,7 @@ impl SnapshotStore {
         Ok(SnapshotWriter {
             inner: Arc::clone(&self.inner),
             _activity: Some(activity),
+            connection,
             draft,
             staging_dir,
             staged: Vec::new(),
@@ -494,9 +501,22 @@ pub(crate) fn snapshot_version_digest_inner(
     accepted_snapshot_manifest_digest(manifest.snapshot(), &canonical_partitions)
 }
 
+/// One in-flight snapshot publication: `begin_snapshot` -> `append`* ->
+/// `commit` (or drop-to-abort).
+///
+/// The writer owns exactly one SQLite connection for its whole lifetime
+/// (O1-S1 operation-scoped connection reuse). The publication journal insert
+/// (`begin_snapshot`), the visible-manifest commit (`commit`), and the
+/// best-effort abort (`Drop`) all reuse that single configured connection;
+/// no store call inside the operation opens another one. The connection is
+/// kept with no open transaction and no un-finalized statement between those
+/// steps, so WAL checkpoints and concurrent readers/writers are never blocked
+/// by the held connection. Ownership is exclusive to the writer (rusqlite
+/// `Connection` is `Send`, not `Sync`), matching the `&mut self` append API.
 pub struct SnapshotWriter {
     inner: Arc<StoreInner>,
     _activity: Option<ActivityGuard>,
+    connection: Connection,
     draft: SnapshotDraft,
     staging_dir: PathBuf,
     staged: Vec<SnapshotPartition>,
@@ -624,7 +644,7 @@ impl SnapshotWriter {
         create_final_snapshot_directory(&self.inner, self.draft.id())?;
         self.installed = true;
         install_partitions(&self.inner, self.draft.id(), &manifest)?;
-        commit_manifest(&self.inner, &manifest)?;
+        commit_manifest(&mut self.connection, &manifest)?;
         self.committed = true;
 
         let _ = remove_uuid_directory(
@@ -656,7 +676,7 @@ impl Drop for SnapshotWriter {
                 "abort installed snapshot directory",
             );
         }
-        abort_publication(&self.inner, self.draft.id());
+        abort_publication(&self.connection, self.draft.id());
     }
 }
 
@@ -1798,15 +1818,15 @@ pub(crate) fn acquire_maintenance(
     })
 }
 
+/// Inserts the publication journal row for a new snapshot inside an explicit
+/// IMMEDIATE transaction on the operation-owned connection (O1-S1 reuse: the
+/// connection was opened and configured once by `begin_snapshot`).
 fn insert_publication(
-    inner: &StoreInner,
+    connection: &mut Connection,
     snapshot_id: Uuid,
     started_at: &DateTime<Utc>,
 ) -> Result<(), StorageError> {
     let op_started = crate::metrics::start();
-    let open_started = crate::metrics::start();
-    let mut connection = open_connection(inner)?;
-    let open_ns = crate::metrics::elapsed_ns(open_started);
     let txn_started = crate::metrics::start();
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -1855,11 +1875,13 @@ fn insert_publication(
         .map_err(|_| StorageError::database("commit publication journal"))?;
     crate::metrics::record(crate::metrics::Event::DbOp {
         op: crate::metrics::DbOpKind::PublicationJournal,
-        open_ns,
+        // O1-S1 reuse: the operation's single connection open is attributed
+        // by the `ConnectionOpen` event; no open happens inside this sub-op.
+        open_ns: 0,
         txn_begin_ns,
         stmt_ns,
         commit_ns: crate::metrics::elapsed_ns(commit_started),
-        opens: 1,
+        opens: 0,
         wall_ns: crate::metrics::elapsed_ns(op_started),
     });
     Ok(())
@@ -2016,11 +2038,14 @@ pub(crate) fn sync_directory(_path: &Path) -> Result<(), StorageError> {
     Ok(())
 }
 
-fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<(), StorageError> {
+/// Commits the visible snapshot manifest inside an explicit IMMEDIATE
+/// transaction on the operation-owned connection (O1-S1 reuse). This is the
+/// publication visibility point and stays the last step of `commit`.
+fn commit_manifest(
+    connection: &mut Connection,
+    manifest: &SnapshotManifest,
+) -> Result<(), StorageError> {
     let op_started = crate::metrics::start();
-    let open_started = crate::metrics::start();
-    let mut connection = open_connection(inner)?;
-    let open_ns = crate::metrics::elapsed_ns(open_started);
     let txn_started = crate::metrics::start();
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -2035,11 +2060,13 @@ fn commit_manifest(inner: &StoreInner, manifest: &SnapshotManifest) -> Result<()
         .map_err(|_| StorageError::database("commit visible snapshot manifest"))?;
     crate::metrics::record(crate::metrics::Event::DbOp {
         op: crate::metrics::DbOpKind::ManifestCommit,
-        open_ns,
+        // O1-S1 reuse: no open inside this sub-op; the operation connection
+        // was opened once by `begin_snapshot`.
+        open_ns: 0,
         txn_begin_ns,
         stmt_ns,
         commit_ns: crate::metrics::elapsed_ns(commit_started),
-        opens: 1,
+        opens: 0,
         wall_ns: crate::metrics::elapsed_ns(op_started),
     });
     Ok(())
@@ -2811,13 +2838,12 @@ fn delete_publication(inner: &StoreInner, snapshot_id: Uuid) -> Result<(), Stora
         .map_err(|_| StorageError::database("delete publication journal"))
 }
 
-fn abort_publication(inner: &StoreInner, snapshot_id: Uuid) {
+/// Best-effort removal of the publication journal row on the abort path,
+/// reusing the operation-owned connection (O1-S1). Failures stay silent: a
+/// surviving journal row is cleaned by the next `recover` pass, exactly as
+/// when yesterday's fresh-connection open failed.
+fn abort_publication(connection: &Connection, snapshot_id: Uuid) {
     let op_started = crate::metrics::start();
-    let open_started = crate::metrics::start();
-    let Ok(connection) = open_connection(inner) else {
-        return;
-    };
-    let open_ns = crate::metrics::elapsed_ns(open_started);
     let stmt_started = crate::metrics::start();
     let _ = connection.execute(
         "DELETE FROM publications WHERE snapshot_id = ?1",
@@ -2826,11 +2852,12 @@ fn abort_publication(inner: &StoreInner, snapshot_id: Uuid) {
     let stmt_ns = crate::metrics::elapsed_ns(stmt_started);
     crate::metrics::record(crate::metrics::Event::DbOp {
         op: crate::metrics::DbOpKind::PublicationAbort,
-        open_ns,
+        // O1-S1 reuse: no open inside this sub-op.
+        open_ns: 0,
         txn_begin_ns: 0,
         stmt_ns,
         commit_ns: 0,
-        opens: 1,
+        opens: 0,
         wall_ns: crate::metrics::elapsed_ns(op_started),
     });
 }

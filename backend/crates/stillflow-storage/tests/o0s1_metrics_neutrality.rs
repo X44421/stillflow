@@ -12,7 +12,8 @@
 //! - with the feature enabled, one staged Parquet write produces exactly one
 //!   logical digest reread pass over exactly the stored byte count;
 //! - publication performs the frozen rename + directory-fsync phases;
-//! - `begin_snapshot` and commit each open exactly one connection and every
+//! - one publication opens exactly one connection (O1-S1 operation-scoped
+//!   reuse: journal insert, manifest commit, and abort share it) and that
 //!   connection applies the three frozen PRAGMAs;
 //! - a dropped writer aborts without any install/manifest-commit events;
 //! - a deliberately corrupted published byte still fails closed with
@@ -120,12 +121,14 @@ fn cost_metrics_observe_storage_without_changing_behavior() {
         .collect();
     assert_eq!(installs, vec![(1, 2)]);
 
-    // Part B: begin_snapshot (journal) and commit (manifest) each open
-    // exactly one connection; every connection applies the three PRAGMAs.
+    // Part B: one publication owns exactly one connection (O1-S1 reuse). The
+    // journal and manifest-commit sub-ops reuse it (opens = 0 recorded per
+    // sub-op) and the single connection applies the three frozen PRAGMAs.
+    // Before O1-S1 the same lifecycle opened two connections (6 PRAGMAs).
     let journal_ops = db_ops(&events, DbOpKind::PublicationJournal);
     let commit_ops = db_ops(&events, DbOpKind::ManifestCommit);
-    assert_eq!(journal_ops, vec![(1,)]);
-    assert_eq!(commit_ops, vec![(1,)]);
+    assert_eq!(journal_ops, vec![(0,)]);
+    assert_eq!(commit_ops, vec![(0,)]);
     let connection_opens: Vec<u32> = events
         .iter()
         .filter_map(|event| match event {
@@ -135,8 +138,8 @@ fn cost_metrics_observe_storage_without_changing_behavior() {
         .collect();
     assert_eq!(
         connection_opens,
-        vec![3, 3],
-        "every opened connection applies the frozen three-PRAGMA batch"
+        vec![3],
+        "one publication opens one connection with the frozen three-PRAGMA batch"
     );
 
     // Read path: verification rereads the stored bytes exactly once and the

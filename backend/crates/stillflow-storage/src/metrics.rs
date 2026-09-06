@@ -104,19 +104,28 @@ pub enum Event {
 
 /// The representative logical SQLite operations attributed by
 /// [`Event::DbOp`].
+///
+/// Since O1-S1, one snapshot publication owns a single SQLite connection that
+/// its journal insert, manifest commit, and abort reuse. Such sub-ops report
+/// `open_ns: 0` and `opens: 0`; the operation's one open is attributed by the
+/// [`Event::ConnectionOpen`] event alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DbOpKind {
     /// `insert_publication`: the `begin_snapshot` journal write (explicit
-    /// IMMEDIATE transaction).
+    /// IMMEDIATE transaction on the publication's operation-owned
+    /// connection).
     PublicationJournal,
-    /// `commit_manifest`: the visible-snapshot manifest transaction.
+    /// `commit_manifest`: the visible-snapshot manifest transaction (on the
+    /// publication's operation-owned connection).
     ManifestCommit,
-    /// `load_manifest_inner`: snapshot + partition manifest read.
+    /// `load_manifest_inner`: snapshot + partition manifest read (opens its
+    /// own connection; not part of a publication operation).
     LoadManifest,
     /// `ControlPlaneStore::create_dataset`: representative autocommit write
     /// (no explicit transaction; every statement commits independently).
     CreateDataset,
-    /// `abort_publication`: best-effort journal cleanup on the abort path.
+    /// `abort_publication`: best-effort journal cleanup on the abort path
+    /// (on the publication's operation-owned connection).
     PublicationAbort,
 }
 
