@@ -65,6 +65,7 @@ pub struct WireBatchEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "view", rename_all = "camelCase")]
 pub enum WireView {
+    #[serde(rename_all = "camelCase")]
     AssetPreview {
         rows_returned: usize,
         bytes_returned: usize,
@@ -72,6 +73,7 @@ pub enum WireView {
         bytes_truncated: bool,
         warnings: Vec<String>,
     },
+    #[serde(rename_all = "camelCase")]
     EnginePreview {
         plan_fingerprint: String,
         target_node_id: PlanNodeId,
@@ -84,6 +86,7 @@ pub enum WireView {
         scan_truncated: bool,
         source_exhausted: bool,
     },
+    #[serde(rename_all = "camelCase")]
     ArtifactContent {
         next_partition_sequence: Option<u32>,
     },
@@ -380,6 +383,21 @@ mod tests {
             decoded.metadata.batches[1].sequence,
             envelopes[1].sequence()
         );
+    }
+
+    #[test]
+    fn view_fields_serialize_camel_case() {
+        // Contract §6.1: metadata JSON is camelCase throughout — including the
+        // route-specific `view` scalars (serde's enum-level rename_all covers
+        // variant names only; each variant renames its own fields).
+        let schema = logical_schema();
+        let envelopes = vec![envelope_with(&schema, Uuid::new_v4(), 0, 1)];
+        let json = serde_json::to_value(&sample_metadata(&envelopes)).expect("json");
+        assert_eq!(json["view"], "artifactContent");
+        assert!(json.get("nextPartitionSequence").is_some());
+        assert!(json.get("next_partition_sequence").is_none());
+        assert_eq!(json["batches"][0]["rowCount"], 1);
+        assert!(json["batches"][0].get("row_count").is_none());
     }
 
     #[test]
