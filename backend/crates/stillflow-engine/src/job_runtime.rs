@@ -834,6 +834,41 @@ async fn execute_claimed(
                             rejected.provenance().content_digest,
                         ));
                     }
+                    // SVC-A2 (issue #314, contract §3): every bundle report
+                    // member receives a staged ArtifactRef so the §6.1
+                    // artifact.content route reaches the only artifacts that
+                    // own Arrow sections. The terminal commit promotes them
+                    // with the same run-stream-owned discipline as the
+                    // Profile/Quality/Export/Drift outputs.
+                    let created_at = at_least(inner, run.started_at);
+                    for member in &members {
+                        let artifact_type = match member.artifact_kind {
+                            ArtifactKind::ValidationReport => "validation_report",
+                            ArtifactKind::DeduplicationReport => "deduplication_report",
+                            ArtifactKind::RejectedRows => "rejected_rows",
+                            _ => unreachable!("bundle members are frozen report kinds"),
+                        };
+                        inner.control_plane.create_artifact_ref(ArtifactRefDraft {
+                            workspace_id: job.workspace_id,
+                            run_id: run.id,
+                            artifact_id: member.artifact_id,
+                            artifact_kind: member.artifact_kind,
+                            external_ref_kind: ExternalRefKind::Artifact,
+                            external_ref_id: bundle_id,
+                            content_digest: member.content_digest,
+                            metadata: serde_json::json!({
+                                "artifactType": artifact_type,
+                                "artifactBodyVersion": 1,
+                                "bundleId": bundle_id,
+                                "bundleVersionDigest": digest_hex_bytes(&version_digest),
+                                "verificationContractVersion": bundle
+                                    .provenance()
+                                    .draft
+                                    .verification_contract_version,
+                            }),
+                            created_at,
+                        })?;
+                    }
                     Ok(ExecutionOutcome {
                         snapshot_ref: None,
                         bundle_ref: None,
