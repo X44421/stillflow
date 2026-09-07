@@ -1,5 +1,13 @@
 # Frontend Target-Boundary Decision (F0-D0 Slice S0)
 
+> **SUPERSEDED — 2026-09-07.** This historical decision recorded retention of
+> the root Vite/React prototype at `main@7c5f163`; [PR #320](https://github.com/X44421/stillflow/pull/320)
+> later retired that prototype from the StillFlow repository. The current
+> repository boundary is the Rust backend/service; client UI work is owned by
+> [X44421/openship#1](https://github.com/X44421/openship/issues/1), and #318 is
+> the current hygiene authority. The rationale below is preserved as historical
+> evidence and is not a current implementation instruction.
+
 | Field | Value |
 | --- | --- |
 | Canonical tracker | [#79](https://github.com/X44421/stillflow/issues/79) — slice S0 of the F0-D0 plan |

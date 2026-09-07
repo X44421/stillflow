@@ -2,7 +2,10 @@
 
 > Status: Accepted
 > Scope: Backend and data contracts only
-> Last updated: 2026-08-15
+> Last updated: 2026-09-07
+> Current repository boundary: the root React/Vite prototype was retired by
+> [PR #320](https://github.com/X44421/stillflow/pull/320). Client UI work is
+> owned by [X44421/openship#1](https://github.com/X44421/openship/issues/1).
 
 ## 1. Decision summary
 
@@ -34,7 +37,9 @@ This architecture preserves the core DataCleaner OS rules:
 - Every imported source becomes an inspectable Object with Context, Relationships and Events.
 - The backend must not force document assets into a tabular DataFrame.
 - Phase 1 must not modify the existing Workspace layout, components, CSS or design tokens.
-- The existing frontend DuckDB WASM integration is a client-side capability, not the authoritative backend execution engine.
+- The retired root prototype's DuckDB WASM integration was client-side and was
+  never the authoritative backend execution engine. Any future client UI is
+  owned by Openship.
 
 ## 3. Goals
 
@@ -53,13 +58,14 @@ This architecture preserves the core DataCleaner OS rules:
 - Embedding Python document models into the Rust process through FFI.
 - Treating DuckDB and Polars as interchangeable execution engines.
 - Promising change-data-capture support in the first milestone.
-- Introducing new frontend navigation, panels or visual systems.
+- Introducing client navigation, panels or visual systems in this backend
+  repository; client UI work belongs to Openship.
 
 ## 5. High-level architecture
 
 ```mermaid
 flowchart TD
-    UI[Workspace UI] --> API[Ingestion API]
+    Client[Openship client UI] --> API[Ingestion API]
     API --> Engine[Execution Engine]
     Engine --> Plan[Logical Plan DAG]
     Engine --> Registry[Connector Registry]
@@ -419,7 +425,9 @@ backend/
     fixtures and end-to-end ingestion tests
 ```
 
-The frontend remains at the repository root during Phase 1. The backend is isolated under backend so the current Vite application can continue to build unchanged.
+The legacy root frontend was retired in [PR #320](https://github.com/X44421/stillflow/pull/320).
+The current repository is backend/service-only; client UI is developed in
+Openship and integrates through the StillFlow service boundary.
 
 ## 16. API boundary
 
@@ -522,7 +530,7 @@ SQL Connector #9 is explicitly Post-MVP and must not block Engine work.
 - Imports register Dataset and Snapshot objects with lineage and sanitized events.
 - Cancellation, timeouts and typed failures are covered by tests.
 - Credentials are absent from logs, events and persisted domain objects.
-- Backend tests and the existing frontend build pass.
+- Backend fmt, Clippy and workspace tests pass on the supported Rust toolchains.
 - No existing Workspace layout, component styling or design token changes are included.
 
 PostgreSQL, MySQL/MariaDB and SQLite discovery/preview are Post-MVP (#9) and

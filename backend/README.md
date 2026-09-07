@@ -49,6 +49,6 @@ cargo test --workspace -- --test-threads=1
 Tests must stay serial (`--test-threads=1`): Engine/storage fixtures rely on
 global-state discipline; do not introduce parallel test runners.
 
-The same gates run in CI (`.github/workflows/ci.yml`) as six independently
-identifiable backend checks — fmt / clippy / serial workspace tests × Rust
-1.85.0 / stable — alongside the existing frontend build.
+The same gates run in CI (`.github/workflows/ci.yml`) as independently
+identifiable backend checks for Rust 1.85.0 and stable. This repository has no
+root client build; client UI checks belong to the separate Openship repository.

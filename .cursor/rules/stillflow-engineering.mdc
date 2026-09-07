@@ -26,6 +26,7 @@ alwaysApply: true
 - Do not change UI layout, styling, or tokens unless the issue explicitly asks.
 - Public-contract, plan, streaming, persistence, or multi-crate changes require a
   frozen high-risk contract.
-- Run formatting, Clippy, Rust tests, frontend typecheck, and frontend build when
-  the environment provides the required tools. Report unavailable tools honestly.
+- Run formatting, Clippy, and Rust tests for this backend repository. There is no
+  root client toolchain; client checks belong to the owning client repository.
+  Report unavailable tools honestly.
 - End with the completion report required by `AGENTS.md`.

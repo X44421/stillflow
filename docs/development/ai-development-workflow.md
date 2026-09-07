@@ -3,6 +3,8 @@
 > Status: Accepted
 > Last updated: 2026-09-01
 
+> Repository boundary: the root React/Vite prototype was retired by [PR #320](https://github.com/X44421/stillflow/pull/320). This repository has no root Node project; client UI checks belong to [X44421/openship#1](https://github.com/X44421/openship/issues/1).
+
 This workflow separates architectural decisions from implementation so parallel
 or automated work cannot silently invent incompatible public contracts.
 
@@ -154,7 +156,7 @@ or silently fall back to text.
 | Engine | semantic parity, batch-size invariance, cancellation, memory-bound tests |
 | Storage | migrations, transaction tests, atomic publish/recovery tests |
 | API | schema tests, status/error mapping, deadline/cancellation tests |
-| Frontend touched | typecheck, build, affected interaction tests |
+| Client UI touched outside this repository | Use the owning client repository's typecheck, build and interaction tests |
 
 Standard repository checks:
 
@@ -162,9 +164,10 @@ Standard repository checks:
 cd backend && cargo fmt --all -- --check
 cd backend && cargo clippy --workspace --all-targets -- -D warnings
 cd backend && cargo test --workspace -- --skip total_output_cap_is_accepted_at_eight_gib_and_enforced_above
-npm run typecheck
-npm run build
 ```
+
+There is no root npm project or frontend gate in this repository. Do not run
+`npm` commands here; client UI checks are owned by Openship.
 
 When a local environment lacks a tool, mark that check **not run** and require the
 corresponding GitHub check before merge. An unavailable tool is never a passing

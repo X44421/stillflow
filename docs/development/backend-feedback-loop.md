@@ -123,7 +123,8 @@ The current PR CI backend matrix is therefore:
 - Rust 1.85.0: fmt + Clippy + routine workspace tests (the named physical
   8 GiB export boundary is delegated to the slow lane);
 - stable: workspace compatibility check + Clippy;
-- frontend: unchanged.
+- client UI: maintained outside this repository; this matrix contains backend
+  checks only.
 
 This policy reduces duplicated evidence; it does not reduce contract coverage.
 

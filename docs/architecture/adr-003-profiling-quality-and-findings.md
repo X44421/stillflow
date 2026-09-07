@@ -1,5 +1,11 @@
 # ADR-003: Profiling quality and findings contract
 
+> **Historical-input note — 2026-09-07.** References to the frontend,
+> React/Vite or DuckDB-WASM in this proposed ADR describe the retired root
+> prototype at the cited historical bases. They do not define a supported
+> current StillFlow product surface; client UI authority is
+> [X44421/openship#1](https://github.com/X44421/openship/issues/1).
+
 > Status: Proposed
 > Date: 2026-08-25
 > Decision owners: Stillflow maintainers
