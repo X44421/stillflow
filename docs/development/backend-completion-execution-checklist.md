@@ -1,5 +1,11 @@
 # StillFlow Backend Completion Execution Checklist
 
+> Current repository boundary (2026-09-07): the root React/Vite prototype and
+> GitHub Pages publication path were retired by [PR #320](https://github.com/X44421/stillflow/pull/320).
+> This checklist remains a completion-definition and historical-planning
+> document, not a live status mirror. Any frontend/build references later in
+> the historical sections are preserved evidence, not active repository gates.
+
 - Canonical roadmap: Epic #81 (roadmap/dependencies only; not a live execution-state mirror)
 - Original reconciliation: Issue #82 (B0-R0), branch
   `agent/issue-082-backend-roadmap-reconciliation` (historical snapshot)
@@ -1134,8 +1140,8 @@ modify any current completion definition.
 
 ### H3 — Product release gate
 
-- [ ] Rust 1.85.0 and stable toolchains pass fmt, clippy, workspace tests,
-  and frontend build in CI.
+- [ ] Rust 1.85.0 and stable toolchains pass backend fmt, clippy and workspace
+  tests in CI.
 - [ ] OpenAPI, generated contracts, and error taxonomy show no drift.
 - [ ] No placeholder endpoint, empty implementation crate, unresolved product
   marker, or unreviewed unsafe block remains.
