@@ -16,6 +16,7 @@ pub mod export;
 pub mod expression;
 pub mod job_operation;
 pub mod logical;
+pub mod node_graph;
 pub mod observability;
 pub mod request;
 pub mod stream;
@@ -80,6 +81,14 @@ pub use job_operation::{
 pub use logical::{
     ColumnId, LogicalError, LogicalField, LogicalSchema, LogicalType, TimeUnit,
     LOGICAL_SCHEMA_VERSION, MAX_SCHEMA_FIELDS, MAX_SCHEMA_NESTING_DEPTH, MAX_SCHEMA_TEXT_BYTES,
+};
+pub use node_graph::{
+    CastFailurePolicy, ConfigField, ConfigSchema, ConfigValueKind, NodeCatalogEntry, NodeConfig,
+    NodeDefinition, NodeEdge, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId,
+    NodeLoweringTarget, NodePort, NodeRegistry, NodeSupportStatus, PortId, ValidatedNodeConfig,
+    MAX_CONFIG_BYTES, MAX_EDGES, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_GRAPH_BYTES,
+    MAX_METADATA_BYTES, MAX_NESTING_DEPTH, MAX_NODES, MAX_RULES, MAX_RULES_PER_NODE,
+    MAX_STRING_BYTES, MAX_TOTAL_CONFIG_BYTES, NODE_GRAPH_VERSION,
 };
 pub use observability::{
     redact_telemetry_value, ExportingTelemetrySink, InMemoryTelemetry, LogLevel, MetricKind,
