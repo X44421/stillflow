@@ -559,6 +559,247 @@ async fn t_ng_a1_catalog_compile_preview_and_scope_fail_closed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t_ng_g1_compile_preview_plan_version_restart_and_snapshot() {
+    let root = tempfile::tempdir().expect("root");
+    let fixture = tempfile::tempdir().expect("fixtures");
+    std::fs::write(
+        fixture.path().join("rows.csv"),
+        b"id,label,ignored\n1, alpha ,x\n2,beta,y\n",
+    )
+    .expect("csv fixture");
+    let config = process_config(root.path());
+    let workspace_id = config.workspace_id;
+    let (service, base, client) = start(config.clone()).await;
+
+    let session_id = Uuid::new_v4();
+    let session = post_json(
+        &client,
+        &base,
+        "/v1/sessions",
+        envelope(
+            workspace_id,
+            json!({"sessionId": session_id, "createdAt": timestamp()}),
+        ),
+    )
+    .await;
+    assert_eq!(session.status(), 200, "session create");
+
+    let connection_id = Uuid::new_v4();
+    let connection = post_json(
+        &client,
+        &base,
+        "/v1/connections",
+        envelope(
+            workspace_id,
+            json!({
+                "connectionId": connection_id,
+                "kind": "localFile",
+                "name": "ng-g1-csv",
+                "safeConfig": {
+                    "allowedRoots": [fixture.path().to_str().expect("utf-8")],
+                    "schemaInference": {"maxRows": 100, "maxBytes": 1048576}
+                },
+                "credentialRef": "cred://ng-g1/local",
+                "createdAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(connection.status(), 200, "connection register");
+    let (asset_id, projection) =
+        discover_and_project(&client, &base, workspace_id, connection_id).await;
+    let graph = node_graph_json(asset_id, &projection, false);
+
+    let compile_request = || {
+        post_json(
+            &client,
+            &base,
+            "/v1/node-graphs/compile",
+            envelope(
+                workspace_id,
+                json!({
+                    "graph": graph,
+                    "connectionId": connection_id,
+                    "assetId": asset_id,
+                    "target": "execution",
+                    "timeoutSeconds": 30,
+                }),
+            ),
+        )
+    };
+    let first_compile = compile_request().await;
+    assert_eq!(first_compile.status(), 200, "first authoritative compile");
+    let first_body: Value = first_compile.json().await.expect("first compile json");
+    let second_compile = compile_request().await;
+    assert_eq!(
+        second_compile.status(),
+        200,
+        "repeated authoritative compile"
+    );
+    let second_body: Value = second_compile.json().await.expect("second compile json");
+    assert_eq!(
+        first_body["body"]["canonicalPlanDigest"], second_body["body"]["canonicalPlanDigest"],
+        "repeated compile keeps the canonical digest"
+    );
+    assert_eq!(
+        first_body["body"]["planFingerprint"], second_body["body"]["planFingerprint"],
+        "repeated compile keeps the plan fingerprint"
+    );
+    assert_eq!(
+        first_body["body"]["nodePlanIds"].as_object().unwrap().len(),
+        3,
+        "source, trim, and output are mapped"
+    );
+
+    let preview = post_json(
+        &client,
+        &base,
+        "/v1/node-graphs/preview",
+        envelope(
+            workspace_id,
+            json!({
+                "graph": graph,
+                "connectionId": connection_id,
+                "assetId": asset_id,
+                "targetNodeId": Uuid::from_u128(0x102),
+                "batchSize": 1024,
+                "rowLimit": 100,
+                "byteLimit": 1048576,
+                "timeoutSeconds": 30,
+            }),
+        ),
+    )
+    .await;
+    let decoded = arrow_stream(preview, "NG-G1 node graph preview").await;
+    assert!(matches!(
+        decoded.metadata.view,
+        WireView::EnginePreview { .. }
+    ));
+    assert!(!decoded.batches.is_empty(), "preview has typed rows");
+    let jobs = get_json(
+        &client,
+        &base,
+        &format!("/v1/jobs?limit=10&workspaceId={workspace_id}"),
+    )
+    .await;
+    assert_eq!(jobs.status(), 200, "preview job list");
+    let jobs_body: Value = jobs.json().await.expect("preview jobs json");
+    assert_eq!(jobs_body["body"]["jobs"].as_array().unwrap().len(), 0);
+
+    // The durable execution contract binds a discovered source asset to a
+    // Dataset before JobRuntime materializes a Snapshot. Preview itself does
+    // not create this durable object; the E2E gate creates the same binding a
+    // real publish flow would persist.
+    let dataset_id = Uuid::new_v4();
+    let dataset = post_json(
+        &client,
+        &base,
+        "/v1/datasets",
+        envelope(
+            workspace_id,
+            json!({
+                "datasetId": dataset_id,
+                "sessionId": session_id,
+                "sourceAssetId": asset_id,
+                "name": "ng-g1",
+                "createdAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(dataset.status(), 200, "dataset binding persists");
+
+    let plan_id = Uuid::new_v4();
+    let version_id = Uuid::new_v4();
+    let create_plan = post_json(
+        &client,
+        &base,
+        "/v1/plans",
+        envelope(
+            workspace_id,
+            json!({"planId": plan_id, "createdAt": timestamp()}),
+        ),
+    )
+    .await;
+    assert_eq!(create_plan.status(), 200, "plan create");
+    let save_version = post_json(
+        &client,
+        &base,
+        &format!("/v1/plans/{plan_id}/versions"),
+        envelope(
+            workspace_id,
+            json!({
+                "planId": plan_id,
+                "planVersionId": version_id,
+                "versionNumber": 1,
+                "parentVersionId": null,
+                "logicalPlan": first_body["body"]["logicalPlan"],
+                "createdAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(save_version.status(), 200, "compiled plan version save");
+    let saved_body: Value = save_version.json().await.expect("saved version json");
+    assert_eq!(
+        saved_body["body"]["canonicalPlanDigest"], first_body["body"]["canonicalPlanDigest"],
+        "PlanVersion keeps compiler canonical digest"
+    );
+    assert_eq!(
+        saved_body["body"]["planFingerprint"], first_body["body"]["planFingerprint"],
+        "PlanVersion keeps compiler fingerprint"
+    );
+    let publish = post_json(
+        &client,
+        &base,
+        &format!("/v1/plan-versions/{version_id}/publish"),
+        envelope(
+            workspace_id,
+            json!({
+                "planVersionId": version_id,
+                "expectedCurrentVersionId": null,
+                "publishedAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(publish.status(), 200, "compiled plan version publish");
+    service
+        .shutdown()
+        .await
+        .expect("shutdown after durable publish");
+
+    // Restart before submission: JobRuntime must resolve only the durable
+    // PlanVersion and source state; no NodeGraph or compiler process state is
+    // carried across the restart.
+    let (restarted, restarted_base, restarted_client) = start(config).await;
+    let job_id = submit_materialize_job(
+        &restarted_client,
+        &restarted_base,
+        &MaterializePlanFixture {
+            workspace_id,
+            session_id,
+            plan_id,
+            version_id,
+            connection_id,
+            asset_id,
+        },
+    )
+    .await;
+    let job = wait_terminal(&restarted_client, &restarted_base, workspace_id, job_id).await;
+    assert_eq!(
+        job["body"]["state"], "succeeded",
+        "durable job succeeds: {job}"
+    );
+    let outputs = job["body"]["outputs"].as_array().expect("job outputs");
+    assert_eq!(outputs.len(), 1, "materialize creates one output");
+    assert_eq!(outputs[0]["kind"], "snapshot");
+    assert_eq!(outputs[0]["committed"], true);
+    assert!(outputs[0]["snapshot_id"].as_str().is_some());
+    restarted.shutdown().await.expect("restart shutdown");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn t2_client_loop_materializes_over_real_tcp() {
     let root = tempfile::tempdir().expect("root");
     let fixture = tempfile::tempdir().expect("fixtures");
