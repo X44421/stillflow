@@ -6,6 +6,7 @@
 //! The service only validates wire bounds, enforces Workspace scoping, and
 //! maps those authorities to stable API DTOs.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,7 +27,10 @@ use stillflow_core::{
     TelemetryOutcome, TestConnectionRequest,
 };
 use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePreviewOpRequest};
-use stillflow_plan::{LogicalPlan, PlanNodeId};
+use stillflow_plan::{
+    AuthorizedSourceContext, CompileDiagnostic, CompileTarget, LogicalPlan, NodeGraphCompileError,
+    NodeGraphCompiler, PlanNodeId, NODE_GRAPH_COMPILER_VERSION,
+};
 use stillflow_storage::{
     ArtifactCursor, ArtifactPage, ArtifactRefRecord, ArtifactSectionId, AuditActorKind,
     AuditCursor, AuditEventRecord, AuditLineageEdge, AuditQuery, AuditRetentionState,
@@ -1063,6 +1067,64 @@ pub struct EnginePreviewView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum NodeGraphCompileTarget {
+    Execution,
+    Preview { node_id: stillflow_core::NodeId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeGraphCompileRequest {
+    pub graph: stillflow_core::NodeGraph,
+    pub connection_id: Uuid,
+    pub asset_id: Uuid,
+    pub target: NodeGraphCompileTarget,
+    pub timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeGraphPreviewRequest {
+    pub graph: stillflow_core::NodeGraph,
+    pub connection_id: Uuid,
+    pub asset_id: Uuid,
+    pub target_node_id: stillflow_core::NodeId,
+    pub batch_size: usize,
+    pub row_limit: usize,
+    pub byte_limit: usize,
+    pub timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeCatalogView {
+    pub compiler_version: String,
+    pub nodes: Vec<stillflow_core::NodeCatalogEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeGraphDiagnosticView {
+    pub code: String,
+    pub node_id: Option<stillflow_core::NodeId>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeGraphCompileView {
+    pub compiler_version: String,
+    pub logical_plan: LogicalPlan,
+    pub canonical_plan_digest: String,
+    pub plan_fingerprint: String,
+    pub output_schema: LogicalSchema,
+    pub node_plan_ids: BTreeMap<stillflow_core::NodeId, PlanNodeId>,
+    pub node_schemas: BTreeMap<stillflow_core::NodeId, LogicalSchema>,
+    pub diagnostics: Vec<NodeGraphDiagnosticView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArtifactContentRequest {
     pub bundle_id: Uuid,
     pub artifact_id: Uuid,
@@ -1253,6 +1315,20 @@ impl ApiService {
                 selected_version: requested,
                 supported_versions: SUPPORTED_API_VERSIONS.to_vec(),
                 manifest: BOOTSTRAP_MANIFEST,
+            },
+        ))
+    }
+
+    pub fn list_node_types(
+        &self,
+        request: ApiRequest<EmptyRequest>,
+    ) -> ApiResult<ApiResponse<NodeCatalogView>> {
+        self.validate_meta_unscoped(&request, false)?;
+        Ok(ApiResponse::new(
+            request.meta.request_id,
+            NodeCatalogView {
+                compiler_version: NODE_GRAPH_COMPILER_VERSION.to_owned(),
+                nodes: stillflow_core::NodeRegistry::new().catalog(),
             },
         ))
     }
@@ -2298,6 +2374,136 @@ impl ApiService {
                 source_exhausted: result.source_exhausted,
             },
         ))
+    }
+
+    pub async fn compile_node_graph(
+        &self,
+        request: ApiRequest<NodeGraphCompileRequest>,
+    ) -> ApiResult<ApiResponse<NodeGraphCompileView>> {
+        self.validate_meta(&request, false)?;
+        let request_id = request.meta.request_id;
+        let workspace_id = request.meta.workspace_id;
+        let NodeGraphCompileRequest {
+            graph,
+            connection_id,
+            asset_id,
+            target,
+            timeout_seconds,
+        } = request.body;
+        let (_, _, source_schema) = self
+            .authorized_node_graph_source(workspace_id, connection_id, asset_id, timeout_seconds)
+            .await?;
+        let source = AuthorizedSourceContext::new(asset_id, source_schema)
+            .map_err(node_graph_compile_error)?;
+        let target = match target {
+            NodeGraphCompileTarget::Execution => CompileTarget::Execution,
+            NodeGraphCompileTarget::Preview { node_id } => CompileTarget::Preview(node_id),
+        };
+        let compiled = NodeGraphCompiler::default()
+            .compile(&graph, &source, target)
+            .map_err(node_graph_compile_error)?;
+        Ok(ApiResponse::new(
+            request_id,
+            node_graph_compile_view(compiled)?,
+        ))
+    }
+
+    pub async fn preview_node_graph(
+        &self,
+        request: ApiRequest<NodeGraphPreviewRequest>,
+    ) -> ApiResult<ApiResponse<EnginePreviewView>> {
+        self.validate_meta(&request, false)?;
+        let request_id = request.meta.request_id;
+        let workspace_id = request.meta.workspace_id;
+        let NodeGraphPreviewRequest {
+            graph,
+            connection_id,
+            asset_id,
+            target_node_id,
+            batch_size,
+            row_limit,
+            byte_limit,
+            timeout_seconds,
+        } = request.body;
+        let (connection, asset, source_schema) = self
+            .authorized_node_graph_source(workspace_id, connection_id, asset_id, timeout_seconds)
+            .await?;
+        let source = AuthorizedSourceContext::new(asset_id, source_schema)
+            .map_err(node_graph_compile_error)?;
+        let compiled = NodeGraphCompiler::default()
+            .compile(&graph, &source, CompileTarget::Preview(target_node_id))
+            .map_err(node_graph_compile_error)?;
+        let plan_node_id = compiled
+            .preview_plan_node_id(target_node_id)
+            .map_err(node_graph_compile_error)?;
+        let expected_schema = compiled
+            .node_schemas
+            .get(&target_node_id)
+            .ok_or_else(ApiError::internal)?;
+        let engine = self
+            .engine
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("execution engine is not configured"))?;
+        let mut engine_request =
+            EnginePreviewOpRequest::new(compiled.plan, plan_node_id, connection, asset);
+        engine_request.batch_size = batch_size;
+        engine_request.row_limit = row_limit;
+        engine_request.byte_limit = byte_limit;
+        engine_request.context = self.request_context(timeout_seconds)?;
+        let result = engine.preview(engine_request).await?;
+        if result.schema != *expected_schema {
+            return Err(ApiError::internal());
+        }
+        Ok(ApiResponse::new(
+            request_id,
+            EnginePreviewView {
+                plan_fingerprint: result.plan_fingerprint.to_string(),
+                target_node_id: result.target_node_id,
+                schema: result.schema,
+                batches: result.batches,
+                rows_returned: result.rows_returned,
+                bytes_returned: result.bytes_returned,
+                source_rows_scanned: result.source_rows_scanned,
+                source_bytes_scanned: result.source_bytes_scanned,
+                rows_truncated: result.rows_truncated,
+                bytes_truncated: result.bytes_truncated,
+                scan_truncated: result.scan_truncated,
+                source_exhausted: result.source_exhausted,
+            },
+        ))
+    }
+
+    async fn authorized_node_graph_source(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+        asset_id: Uuid,
+        timeout_seconds: Option<u64>,
+    ) -> ApiResult<(SourceConnection, SourceAsset, LogicalSchema)> {
+        let connection_record = self.control_plane.get_source_connection(connection_id)?;
+        let asset_record = self.control_plane.get_source_asset(asset_id)?;
+        self.ensure_scope(connection_record.workspace_id, workspace_id)?;
+        self.ensure_scope(asset_record.workspace_id, workspace_id)?;
+        if asset_record.connection_id != connection_record.id {
+            return Err(ApiError::not_found());
+        }
+        let registry = self
+            .connectors
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("connector registry is not configured"))?;
+        let connection = source_connection_domain(&connection_record)?;
+        let asset = source_asset_domain(&asset_record)?;
+        let metadata = registry
+            .inspect(
+                &connection,
+                InspectRequest {
+                    context: self.request_context(timeout_seconds)?,
+                    asset: asset.clone(),
+                },
+            )
+            .await
+            .map_err(ApiError::from)?;
+        Ok((connection, asset, metadata.schema))
     }
 
     pub fn submit_job(
@@ -3837,6 +4043,61 @@ fn digest_hex(bytes: &[u8; 32]) -> String {
         write!(&mut result, "{byte:02x}").expect("writing to String cannot fail");
     }
     result
+}
+
+fn node_graph_compile_view(
+    compiled: stillflow_plan::CompiledNodeGraph,
+) -> ApiResult<NodeGraphCompileView> {
+    let canonical = compiled
+        .canonical_bytes()
+        .map_err(|_| ApiError::internal())?;
+    let fingerprint = compiled.fingerprint().map_err(|_| ApiError::internal())?;
+    Ok(NodeGraphCompileView {
+        compiler_version: NODE_GRAPH_COMPILER_VERSION.to_owned(),
+        logical_plan: compiled.plan,
+        canonical_plan_digest: digest_hex(&sha256(&canonical)),
+        plan_fingerprint: fingerprint.to_string(),
+        output_schema: compiled.output_schema,
+        node_plan_ids: compiled.node_plan_ids,
+        node_schemas: compiled.node_schemas,
+        diagnostics: compiled
+            .diagnostics
+            .into_iter()
+            .map(node_graph_diagnostic_view)
+            .collect(),
+    })
+}
+
+fn node_graph_diagnostic_view(diagnostic: CompileDiagnostic) -> NodeGraphDiagnosticView {
+    NodeGraphDiagnosticView {
+        code: diagnostic.code.as_str().to_owned(),
+        node_id: diagnostic.node_id,
+        message: diagnostic.message,
+    }
+}
+
+fn node_graph_compile_error(error: NodeGraphCompileError) -> ApiError {
+    match error.code() {
+        stillflow_core::NodeGraphErrorCode::LimitGraphBytes
+        | stillflow_core::NodeGraphErrorCode::LimitNodes
+        | stillflow_core::NodeGraphErrorCode::LimitEdges
+        | stillflow_core::NodeGraphErrorCode::LimitConfigBytes
+        | stillflow_core::NodeGraphErrorCode::LimitMetadataBytes
+        | stillflow_core::NodeGraphErrorCode::LimitStringBytes
+        | stillflow_core::NodeGraphErrorCode::LimitNestingDepth
+        | stillflow_core::NodeGraphErrorCode::LimitRulesPerNode
+        | stillflow_core::NodeGraphErrorCode::LimitRules
+        | stillflow_core::NodeGraphErrorCode::LimitCompileWork => {
+            ApiError::limit("node graph compilation exceeded a configured bound")
+        }
+        stillflow_core::NodeGraphErrorCode::Internal
+        | stillflow_core::NodeGraphErrorCode::PlanInvalid => ApiError::internal(),
+        stillflow_core::NodeGraphErrorCode::SourceBinding => ApiError::not_found(),
+        _ => ApiError::invalid(format!(
+            "node graph compilation rejected ({})",
+            error.code().as_str()
+        )),
+    }
 }
 
 fn validated_capabilities(values: &[String]) -> ApiResult<Vec<&str>> {

@@ -209,6 +209,59 @@ async fn discover_and_project(
     (asset_id, projection)
 }
 
+fn node_graph_json(asset_id: Uuid, projection: &[ColumnId], branch: bool) -> Value {
+    let source = Uuid::from_u128(0x101);
+    let transform = Uuid::from_u128(0x102);
+    let output = Uuid::from_u128(0x103);
+    let branch_node = Uuid::from_u128(0x104);
+    let mut nodes = vec![
+        json!({
+            "id": source,
+            "typeId": "stillflow.node.source",
+            "configVersion": 1,
+            "config": {"sourceAssetId": asset_id, "projection": projection},
+        }),
+        json!({
+            "id": transform,
+            "typeId": "stillflow.node.trim",
+            "configVersion": 1,
+            "config": {"column": projection[1]},
+        }),
+        json!({
+            "id": output,
+            "typeId": "stillflow.node.output",
+            "configVersion": 1,
+            "config": {"outputLabel": "ng-a1"},
+        }),
+    ];
+    let mut edges = vec![
+        json!({"from": {"nodeId": source, "port": "out"}, "to": {"nodeId": transform, "port": "in"}}),
+        json!({"from": {"nodeId": transform, "port": "out"}, "to": {"nodeId": output, "port": "in"}}),
+    ];
+    if branch {
+        nodes.insert(
+            2,
+            json!({
+                "id": branch_node,
+                "typeId": "stillflow.node.select",
+                "configVersion": 1,
+                "config": {"columns": [projection[0]]},
+            }),
+        );
+        edges.push(
+            json!({"from": {"nodeId": source, "port": "out"}, "to": {"nodeId": branch_node, "port": "in"}}),
+        );
+    }
+    json!({
+        "version": 1,
+        "graphId": Uuid::from_u128(0x110),
+        "sourceNodeId": source,
+        "outputNodeId": output,
+        "nodes": nodes,
+        "edges": edges,
+    })
+}
+
 fn materialize_op(workspace_id: Uuid, connection_id: Uuid, asset_id: Uuid) -> JobOperation {
     JobOperation::try_new(
         OperationKind::Materialize,
@@ -333,6 +386,175 @@ async fn t1_handshake_negotiates_over_real_tcp() {
     assert_eq!(rejected.status(), 400, "unknown version fails closed");
     let body: Value = rejected.json().await.expect("error json");
     assert_eq!(body["error"]["code"], "unsupportedVersion");
+    service.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t_ng_a1_catalog_compile_preview_and_scope_fail_closed() {
+    let root = tempfile::tempdir().expect("root");
+    let fixture = tempfile::tempdir().expect("fixtures");
+    std::fs::write(
+        fixture.path().join("rows.csv"),
+        b"id,label,ignored\n1,alpha,x\n2,beta,y\n",
+    )
+    .expect("csv fixture");
+    let (service, base, client) = start(process_config(root.path())).await;
+    let workspace_id = service.workspace_id;
+
+    let catalog = get_json(
+        &client,
+        &base,
+        &format!("/v1/node-types?workspaceId={workspace_id}"),
+    )
+    .await;
+    assert_eq!(catalog.status(), 200, "node catalog endpoint");
+    let catalog_body: Value = catalog.json().await.expect("catalog json");
+    assert_eq!(
+        catalog_body["body"]["compilerVersion"],
+        "ng-nodegraph-compiler-v1"
+    );
+    assert_eq!(catalog_body["body"]["nodes"].as_array().unwrap().len(), 11);
+
+    let connection_id = Uuid::new_v4();
+    let response = post_json(
+        &client,
+        &base,
+        "/v1/connections",
+        envelope(
+            workspace_id,
+            json!({
+                "connectionId": connection_id,
+                "kind": "localFile",
+                "name": "ng-a1-csv",
+                "safeConfig": {
+                    "allowedRoots": [fixture.path().to_str().expect("utf-8")],
+                    "schemaInference": {"maxRows": 100, "maxBytes": 1048576}
+                },
+                "credentialRef": "cred://ng-a1/local",
+                "createdAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(response.status(), 200, "connection register");
+    let (asset_id, projection) =
+        discover_and_project(&client, &base, workspace_id, connection_id).await;
+    let graph = node_graph_json(asset_id, &projection, false);
+
+    let compiled = post_json(
+        &client,
+        &base,
+        "/v1/node-graphs/compile",
+        envelope(
+            workspace_id,
+            json!({
+                "graph": graph,
+                "connectionId": connection_id,
+                "assetId": asset_id,
+                "target": "execution",
+                "timeoutSeconds": 30,
+            }),
+        ),
+    )
+    .await;
+    let compiled_status = compiled.status();
+    let compiled_text = compiled.text().await.expect("compile body");
+    assert_eq!(compiled_status, 200, "node graph compile: {compiled_text}");
+    let compiled_body: Value = serde_json::from_str(&compiled_text).expect("compile json");
+    assert_eq!(
+        compiled_body["body"]["outputSchema"]["fields"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        compiled_body["body"]["nodePlanIds"]
+            .as_object()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        compiled_body["body"]["canonicalPlanDigest"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+
+    let preview = post_json(
+        &client,
+        &base,
+        "/v1/node-graphs/preview",
+        envelope(
+            workspace_id,
+            json!({
+                "graph": graph,
+                "connectionId": connection_id,
+                "assetId": asset_id,
+                "targetNodeId": Uuid::from_u128(0x102),
+                "batchSize": 1024,
+                "rowLimit": 100,
+                "byteLimit": 1048576,
+                "timeoutSeconds": 30,
+            }),
+        ),
+    )
+    .await;
+    let decoded = arrow_stream(preview, "node graph preview").await;
+    assert!(matches!(
+        decoded.metadata.view,
+        WireView::EnginePreview { .. }
+    ));
+    assert!(!decoded.batches.is_empty(), "graph preview returns rows");
+    let jobs = get_json(
+        &client,
+        &base,
+        &format!("/v1/jobs?limit=10&workspaceId={workspace_id}"),
+    )
+    .await;
+    assert_eq!(jobs.status(), 200, "preview job list");
+    let jobs_body: Value = jobs.json().await.expect("jobs json");
+    assert_eq!(jobs_body["body"]["jobs"].as_array().unwrap().len(), 0);
+
+    let foreign = post_json(
+        &client,
+        &base,
+        "/v1/node-graphs/compile",
+        envelope(
+            Uuid::new_v4(),
+            json!({
+                "graph": graph,
+                "connectionId": connection_id,
+                "assetId": asset_id,
+                "target": "execution",
+                "timeoutSeconds": 30,
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(foreign.status(), 404, "foreign workspace is hidden");
+
+    let rejected = post_json(
+        &client,
+        &base,
+        "/v1/node-graphs/compile",
+        envelope(
+            workspace_id,
+            json!({
+                "graph": node_graph_json(asset_id, &projection, true),
+                "connectionId": connection_id,
+                "assetId": asset_id,
+                "target": "execution",
+                "timeoutSeconds": 30,
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(rejected.status(), 400, "branch graph rejected");
+    let rejected_body: Value = rejected.json().await.expect("rejection json");
+    assert_eq!(rejected_body["error"]["code"], "invalidRequest");
     service.shutdown().await.expect("shutdown");
 }
 

@@ -24,14 +24,15 @@ use stillflow_api::{
     InspectAssetRequest, ListArtifactsRequest, ListAuditEventsRequest,
     ListAutomationHistoryRequest, ListAutomationsRequest, ListEventsRequest,
     ListExportFilesRequest, ListFindingsRequest, ListJobsRequest, ListProfileHistoryRequest,
-    ListRequest, ListRunsRequest, ObjectIdRequest, PlanDiffRequest, PreviewAssetRequest,
-    PublishPlanVersionRequest, RecoverCredentialRequest, RegisterCredentialReferenceRequest,
-    RegisterSourceConnectionRequest, RetireSourceConnectionRequest, RevokeCredentialRequest,
-    RevokeMemberRequest, RevokeServiceAccountRequest, SavePlanVersionRequest,
-    SetRoleCapabilitiesRequest, SubmitDriftComparisonRequest, SubmitExportRequest,
-    SubmitJobRequest, TestSourceConnectionRequest, TombstoneExportRequest,
-    TransitionSourceConnectionRequest, TriggerAutomationRequest, UpdateAutomationRequest,
-    UpdateSourceConnectionRequest, ValidatePlanRequest,
+    ListRequest, ListRunsRequest, NodeGraphCompileRequest, NodeGraphPreviewRequest,
+    ObjectIdRequest, PlanDiffRequest, PreviewAssetRequest, PublishPlanVersionRequest,
+    RecoverCredentialRequest, RegisterCredentialReferenceRequest, RegisterSourceConnectionRequest,
+    RetireSourceConnectionRequest, RevokeCredentialRequest, RevokeMemberRequest,
+    RevokeServiceAccountRequest, SavePlanVersionRequest, SetRoleCapabilitiesRequest,
+    SubmitDriftComparisonRequest, SubmitExportRequest, SubmitJobRequest,
+    TestSourceConnectionRequest, TombstoneExportRequest, TransitionSourceConnectionRequest,
+    TriggerAutomationRequest, UpdateAutomationRequest, UpdateSourceConnectionRequest,
+    ValidatePlanRequest,
 };
 
 use stillflow_api::ListPlanVersionsRequest;
@@ -110,6 +111,7 @@ pub fn router(state: ServiceState) -> Router {
         .route("/v1/assets/discover", post(asset_discover))
         .route("/v1/assets/inspect", post(asset_inspect))
         .route("/v1/assets/preview", post(asset_preview))
+        .route("/v1/node-types", get(node_types))
         .route("/v1/datasets", post(dataset_create).get(dataset_list))
         .route("/v1/datasets/{objectId}", get(dataset_read))
         .route("/v1/datasets/{objectId}/archive", post(dataset_archive))
@@ -118,6 +120,8 @@ pub fn router(state: ServiceState) -> Router {
             get(dataset_profile_history),
         )
         .route("/v1/engine/preview", post(engine_preview))
+        .route("/v1/node-graphs/compile", post(node_graph_compile))
+        .route("/v1/node-graphs/preview", post(node_graph_preview))
         .route("/v1/audit/events", get(audit_events_list))
         .route("/v1/audit/lineage", get(audit_lineage_read))
         .route("/v1/audit/export", get(audit_export))
@@ -198,6 +202,13 @@ pub fn router(state: ServiceState) -> Router {
 async fn handshake(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<stillflow_api::HandshakeRequest>(&bytes, vec![]) {
         Ok(request) => adapter::ok_response(state.api.handshake(request)),
+        Err(response) => response,
+    }
+}
+
+async fn node_types(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
+    match adapter::parse_query_envelope::<stillflow_api::EmptyRequest>(query, vec![]) {
+        Ok(request) => adapter::ok_response(state.api.list_node_types(request)),
         Err(response) => response,
     }
 }
@@ -706,6 +717,29 @@ async fn engine_preview(State(state): State<ServiceState>, bytes: Bytes) -> Resp
             .and_then(wire::encode_engine_preview_view)
         {
             Ok(body) => adapter::binary_response(body),
+            Err(error) => adapter::service_error(error),
+        },
+        Err(response) => response,
+    }
+}
+
+async fn node_graph_compile(State(state): State<ServiceState>, bytes: Bytes) -> Response {
+    match adapter::parse_body::<NodeGraphCompileRequest>(&bytes, vec![]) {
+        Ok(request) => match state.api.compile_node_graph(request).await {
+            Ok(response) => adapter::ok_response(Ok(response)),
+            Err(error) => adapter::service_error(error),
+        },
+        Err(response) => response,
+    }
+}
+
+async fn node_graph_preview(State(state): State<ServiceState>, bytes: Bytes) -> Response {
+    match adapter::parse_body::<NodeGraphPreviewRequest>(&bytes, vec![]) {
+        Ok(request) => match state.api.preview_node_graph(request).await {
+            Ok(response) => match wire::encode_engine_preview_view(response) {
+                Ok(body) => adapter::binary_response(body),
+                Err(error) => adapter::service_error(error),
+            },
             Err(error) => adapter::service_error(error),
         },
         Err(response) => response,
