@@ -36,5 +36,5 @@ uuid.workspace = true
 
 [dev-dependencies]
 libc = "0.2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "blocking"] }
 tempfile.workspace = true
