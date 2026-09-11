@@ -132,9 +132,10 @@ later issue. `X` items are compatibility explicitly refused.
 | R-5 | §5.2, §6 | Expression type/nullability analysis and post-rule schema effects have one shared implementation that both the compiler and engine preflight call; the lower layer never depends on `stillflow-engine`. | NX-S1 | Behavior-preserving for previously successful plans. Inputs that compiled but were rejected by the engine may now be rejected at compile time with a typed diagnostic; this is recorded as an intentional error-surface change. | Differential corpus over all eleven nodes, executable expressions, and the paused set: both entry points produce the same schema or an equivalent rejection; version-1 canonical bytes and fingerprints are unchanged for every previously successful fixture. |
 | R-6 | §7 | Compile accounting gains an explicit schema/response cost surface so schema fan-out and response bytes are bounded before allocation. | NX-B1 | Tightening only, and measured before it is enforced. No engine or storage bound may be widened or replaced. | Boundary cases at and above each input/intermediate/output bound are rejected without panic or partial plans; before/after canonical bytes, schemas, errors, and actual results are identical for accepted graphs. |
 | R-7 | §8.1 | Diagnostics gain bounded safe location fields (`nodeId`, `columnId`, `fieldPath`, `expected`, `actual`) and the request ID is preserved in the error envelope. | NX-A1 | Additive on the wire. `code` and `message` keep their current meaning and casing; new fields are optional. | An authorized invalid request identifies the failing node and field and echoes the original `requestId`; foreign or unauthorized resources remain indistinguishable from absent ones. |
-| R-8 | §8.1 | Failure ordering, diagnostic count, and diagnostic byte budgets become explicit and testable. | NX-A1 | Additive. Ordering is deterministic for inputs that previously produced one error. | Repeated runs over permuted graphs produce byte-identical error payloads; diagnostics never exceed the count/byte caps. |
+| R-8 | §8.1 | Failure ordering becomes explicitly two-level: stage precedence is unchanged, and intra-stage fault order becomes canonical (graph-level before node-level; nodes by ascending `NodeId`; edges by endpoint tuple) instead of caller array order. Count and byte budgets become testable. | NX-A1 | A single-fault graph and every successful compile are unchanged; a multi-fault graph may report the smallest-`NodeId` fault instead of the first-array-order fault. This intentional error-ordering change is recorded here and must be listed with its minimal cases. | Repeated runs over permuted `nodes`/`edges` arrays produce byte-identical `code` and `diagnostics` given identical request metadata (`meta.requestId` is echoed input and is excluded or fixed); diagnostics never exceed the count/byte caps. |
 | R-9 | §2.3 | Catalog and configuration-constraint versioning is added alongside graph/config/compiler versioning. | NX-N1 | Additive. `NodeGraph.version` and `configVersion` stay exactly `1`; the catalog remains a version-1 surface. | Unknown catalog or constraint versions are rejected; a v1 client that ignores new catalog fields still compiles identical plans. |
 | R-10 | §7 | The pipeline order and the single-request deadline law are frozen explicitly (section 8), including the rule that no data source is inspected before pure-graph validation passes. | NX-A1 | Strictly better ordering. Success responses are unchanged; some previously invalid requests now fail earlier and cheaper. | For a decodable graph with an unknown node, a bad port, a bad topology, or a mismatched source binding, the connector inspect/read counters are zero. |
+| R-11 | §7 (engine bounds), §8.2 | The timeout law is frozen case by case: an explicit `timeoutSeconds` is accepted as given or rejected with `limitExceeded`, never clamped; an absent value uses the operation default, itself bounded by the strictest consumer cap (30 s for preview, 300 s otherwise). | NX-A1 | Two intentional error-surface changes: an absent preview timeout succeeds with a 30 s deadline instead of failing inside the engine; an explicit over-cap preview value is rejected up front as `limitExceeded`/413, not `invalidRequest`/400 after the source was inspected. `0` and above-ceiling values keep their current outcome, and no previously successful request changes. | The six table cases (absent, `0`, `30`, `31`, `300`, `301`) produce the frozen outcome on both the preview and compile paths; a boundary rejection performs zero connector calls; exactly one context is created per request and shared by all stages. |
 
 ### 2.3 Deferred (owned by a later issue, not decided here)
 
@@ -435,13 +436,16 @@ authority. Client-facing hints are advisory; the validator decides.
 ### 6.2 Frozen constraint vocabulary
 
 `ConfigField` gains machine-readable constraints sufficient to express what the
-hand-written validators express today. The vocabulary is frozen as:
+hand-written validators express today. `name`, `valueKind`, and `required` keep
+their current positions and meanings; the additional constraints are carried in
+a `constraints` object on the same field record, so the record stays additive.
+The vocabulary is frozen as:
 
 | Constraint | Meaning | Example in the built-in set |
 | --- | --- | --- |
 | `required` | Existing flag; a missing value fails | `stillflow.node.filter.predicate` |
-| `valueKind` | Existing discriminator; extended to name the accepted JSON shape | `ColumnId`, `Expr`, `LogicalType`, `ScalarValue`, `Uuid`, `String`, `Boolean`, `ColumnIdList`, `CastFailurePolicy` |
-| `enumValues` | Closed value set | `onFailure` (`SetNull`, `Error`) |
+| `valueKind` | Existing discriminator; extended to name the accepted JSON shape. Its value is a **catalog wire token**, not a Rust type name (see the wire table below) | `columnId`, `expression`, `logicalType`, `scalarValue`, `uuid`, `string`, `boolean`, `columnIdList`, `castFailurePolicy` |
+| `enumValues` | Closed value set, expressed in **wire values** (camelCase), not Rust variant names | `onFailure` → `["setNull", "error"]` |
 | `minLength` / `maxLength` | UTF-8 byte bounds on a string | node `to`, `name`, `outputLabel` |
 | `minItems` / `maxItems` | List length bounds | `projection`, `columns` |
 | `uniqueItems` | No duplicate entries | `columns`, `projection` |
@@ -449,6 +453,50 @@ hand-written validators express today. The vocabulary is frozen as:
 | `nonEmpty` | Rejects empty strings and empty lists after trimming rules | `to`, `outputLabel` |
 | `nonNull` | Rejects `null` even where the kind would allow it | `fill-null.value` |
 | `byteBound` | Per-value byte ceiling from the frozen limit table | strings, config objects |
+
+Wire tokens are frozen as the serde camelCase forms of the existing enums; the
+Rust type is named only for implementers:
+
+| Catalog `valueKind` wire token | Constrains (Rust) | Accepted JSON shape |
+| --- | --- | --- |
+| `uuid` | `Uuid` | UUID string |
+| `columnId` | `ColumnId` | UUID string |
+| `columnIdList` | `Vec<ColumnId>` | ordered array of UUID strings |
+| `string` | `String` | JSON string |
+| `boolean` | `bool` | JSON boolean |
+| `expression` | `Expr` | existing expression object |
+| `logicalType` | `LogicalType` | `{ "kind": <camelCase variant>, "value": … }`, e.g. `{"kind":"utf8"}` |
+| `scalarValue` | `ScalarValue` | existing scalar-literal shape |
+| `castFailurePolicy` | `CastFailurePolicy` | `"setNull"` or `"error"` |
+
+A serialized sample, so that a client cannot generate a config the validator
+rejects. Catalog entry (abridged) and the matching valid request node:
+
+```json
+{
+  "typeId": "stillflow.node.cast",
+  "configVersion": 1,
+  "configSchema": {
+    "fields": [
+      { "name": "column",    "valueKind": "columnId",          "required": true },
+      { "name": "dataType",  "valueKind": "logicalType",       "required": true },
+      { "name": "onFailure", "valueKind": "castFailurePolicy", "required": true,
+        "constraints": { "enumValues": ["setNull", "error"] } }
+    ],
+    "additionalProperties": false
+  }
+}
+```
+
+```json
+{ "id": "…", "typeId": "stillflow.node.cast", "configVersion": 1,
+  "config": { "column": "…", "dataType": { "kind": "utf8" }, "onFailure": "setNull" } }
+```
+
+The catalogue must be mechanically round-trippable: every value the constraints
+advertise must be accepted by the validator, and every rejection reason the
+validator produces must be expressible by a constraint. The positive/negative
+sample test for all eleven nodes is the enforcement of this rule.
 
 Constraint data is descriptive of the validator, not a substitute for it. A
 constraint that the validator does not enforce, or a validator rule the
@@ -562,9 +610,10 @@ failure classes. `diagnostics` is omitted when empty.
 
 ### 7.2 Ordering, count, and byte law
 
-Precedence is frozen. Within the compile entry point the current order is
-preserved, because changing it would change which error a multi-fault graph
-reports:
+Precedence is frozen at two levels: the stage order below is unchanged, and the
+intra-stage fault order becomes canonical.
+
+Stage precedence (a fault in an earlier stage always wins over a later stage):
 
 1. shape/work estimate bound (`check_shape_work`);
 2. authorized source-schema validity;
@@ -577,23 +626,39 @@ reports:
 8. per-node schema propagation and capability checks in path order;
 9. `LogicalPlan::new`, `canonical_bytes`, `fingerprint` (`NG_PLAN_INVALID`).
 
-The first failure in this order is the primary diagnostic. Stage 8 may not
-report a later node's failure ahead of an earlier node's failure along the path.
+Intra-stage fault order, frozen so that caller array order cannot select the
+reported error:
+
+- within a stage, a graph-level fault precedes a node-specific fault;
+- node-specific faults are ordered by ascending `NodeId` (UUID byte order), not
+  by position in the `nodes` array;
+- edge faults are ordered by `(from.nodeId, from.port, to.nodeId, to.port)`;
+- the primary diagnostic is the first fault in that order.
+
+This is a deliberate change. Today stage 3 iterates the caller's `nodes` array
+(`backend/crates/stillflow-core/src/node_graph.rs:464`–`:496`), so a multi-fault
+graph can report a different error when its array is permuted. The compatibility
+decision, recorded as R-8: a graph with exactly one fault, and every successful
+compile, is unchanged; a multi-fault graph may now report the smallest-`NodeId`
+fault instead of the first-array-order fault.
 
 - A failed compile returns exactly one primary diagnostic, and the compile
   result's `diagnostics` list contains exactly that entry.
 - A successful compile returns an empty diagnostics list.
 - If a later contract admits additional diagnostics, they are ordered
-  deterministically by (pipeline stage, path position, node ID, `code`,
-  `fieldPath`) — never by hash order, iteration order, or arrival order.
+  deterministically by the same intra-stage rule followed by `code` and
+  `fieldPath` — never by hash order, iteration order, or arrival order.
 - Count and size caps: at most `MAX_DIAGNOSTICS` (64) per response, at most
   `MAX_DIAGNOSTIC_BYTES` (1024) of diagnostic text per item, and the aggregate
   diagnostic payload stays within the existing response byte bound
   (`ApiLimits::max_response_bytes`, 2 MiB).
 - Caps are enforced before allocation, not after.
-- Two runs over the same logical graph with permuted `nodes`/`edges` arrays,
-  different map insertion order, and different process state must produce
-  byte-identical error payloads.
+- Determinism claim, stated precisely: two runs over the same logical graph with
+  permuted `nodes`/`edges` arrays, different map insertion order, and different
+  process state must produce byte-identical `code` and `diagnostics` payloads
+  **given identical request metadata**. `meta.requestId` is echoed from the
+  request, so a byte comparison either fixes the same request metadata or
+  excludes `meta.requestId`; it is never part of the diagnostic-ordering claim.
 
 ### 7.3 Sanitization law
 
@@ -659,7 +724,15 @@ Consequences, each mechanically testable:
 - Stage 4 binds the graph's source node to the request's `assetId`/`connectionId`
   before stage 5, so an unauthorized asset is rejected without an inspect call
   and without revealing existence.
-- Stage 5 resolves the authorized schema but must not read rows.
+- Stage 5 resolves the authorized schema through the existing `inspect` path and
+  must not call the execution read path (`Connector::read` / `read_batches`).
+  `inspect` is not a metadata-only operation for every format: text inspection
+  reads a bounded prefix to infer the schema
+  (`backend/crates/stillflow-connector-local-tabular/src/inspect.rs:44`,
+  `inference.rs:26`–`:36`), under the existing inference row/byte caps and the
+  request deadline, and reports truncation as an inspection finding; Parquet
+  inspection uses footer metadata only. The guarantee is therefore "no execution
+  read path", not "no sampling", and no new sampling bound is introduced here.
 - Stage 3 checks must not leak the existence of foreign resources; responses
   for foreign and absent objects stay identical.
 
@@ -667,8 +740,6 @@ Consequences, each mechanically testable:
 
 One request context is created per request and shared by every stage:
 
-- `timeoutSeconds` is validated once, against `ApiLimits::max_timeout_seconds`,
-  and the resulting deadline is absolute.
 - Sub-stages receive the remaining budget; a sub-stage must not create a fresh
   full-timeout context, reset the deadline, or multiply the budget.
 - Expiry is a typed timeout failure (`limitExceeded`), not an internal error,
@@ -685,20 +756,45 @@ remaining budget exceeds `PREVIEW_MAX_DEADLINE` (30 s,
 `backend/crates/stillflow-engine/src/lib.rs:123`, checked at
 `backend/crates/stillflow-engine/src/preview.rs:66`–`:75`), while
 `request_context` defaults to `ApiLimits::max_timeout_seconds` (300 s,
-`backend/crates/stillflow-api/src/service.rs:3645`–`:3653`). The frozen rule:
+`backend/crates/stillflow-api/src/service.rs:3645`–`:3653`).
 
-- the request deadline is `min(requested or defaulted timeout, the strictest
-  consumer cap for the requested operation)`;
-- an over-cap deadline is rejected up front with `limitExceeded`, using the
-  same failure class the engine already produces, instead of being discovered
-  inside the engine stage;
-- the resolved deadline is created once and shared by the inspect, compile, and
-  preview stages.
+Frozen timeout law — one behavior per case, with no silent clamping. An
+**explicit** value is either accepted as given or rejected; only an **absent**
+value is resolved from the operation default, and that default is itself bounded
+by the strictest consumer cap:
 
-Changing the defaulted-timeout outcome (for example clamping a default 300 s
-preview request to 30 s and therefore turning today's bound error into a
-success) is an intentional behavior change that NX-A1 must state explicitly in
-its PR and cover with a test; it must not happen silently.
+| `timeoutSeconds` | Node-graph preview | Compile / durable execution |
+| --- | --- | --- |
+| absent | 30 s (`min(ApiLimits::max_timeout_seconds, PREVIEW_MAX_DEADLINE)`) | 300 s (`ApiLimits::max_timeout_seconds`) |
+| `0` | reject `limitExceeded` | reject `limitExceeded` |
+| `30` | 30 s | 30 s |
+| `31` | reject `limitExceeded` (above the preview cap) | 31 s |
+| `300` | reject `limitExceeded` (above the preview cap) | 300 s |
+| `301` | reject `limitExceeded` (above the API ceiling) | reject `limitExceeded` |
+
+- The accepted value becomes one absolute deadline, created once and shared by
+  the inspect, compile, and preview stages.
+- Rejection happens during request validation, before stage 3 or 4, so a
+  boundary rejection performs no connector call at all.
+- The engine's own caps remain in force as defense in depth; a request that
+  reaches the engine must already satisfy them.
+
+Compatibility decisions, stated explicitly and owned by NX-A1:
+
+- An absent `timeoutSeconds` on preview currently produces a 300 s context that
+  the engine rejects as `EngineError::BoundExceeded` →
+  `invalidRequest`/400 ("engine rejected the request"). Under the frozen law it
+  succeeds with a 30 s deadline. This is an intentional change, and no
+  previously *successful* request is affected because the absent case never
+  succeeded.
+- An explicit over-cap preview value (for example `31`) is currently rejected
+  inside the engine as `invalidRequest`/400 **after** the source has already
+  been inspected. Under the frozen law it is rejected up front as
+  `limitExceeded`/413 with zero connector calls. The failure class changes, so
+  NX-A1 must record it as an error-surface change together with the R-8
+  ordering change.
+- `0` and values above the API ceiling keep their current `limitExceeded`
+  outcome.
 
 ### 8.3 Existing request bounds
 
@@ -757,7 +853,7 @@ below may contradict a stricter existing bound.
 | Bytes — diagnostics | ≤ 64 items, ≤ 1 KiB text per item, aggregate inside the response bound | NX-A1 |
 | Memory — compile | `O(nodes + edges + config bytes + expression nodes + schema fields)` with bounded auxiliary memory; schema fan-out charged before proportional allocation | NX-B1 |
 | Concurrency | No shared mutable compile state and no process-global registry mutation; per-request isolation only. Existing `max_concurrent_requests` (64) is unchanged and is not a compile budget. | NX-S1, NX-N1 |
-| Time | One absolute deadline per request, validated once and set to `min(requested or defaulted timeout, the strictest consumer cap)` — 30 s for preview today; sub-stages consume the remaining budget and never reset it | NX-A1 |
+| Time | One absolute deadline per request, resolved by the section 8.2 table: an explicit timeout is accepted or rejected with `limitExceeded` and never clamped; an absent timeout uses the operation default (30 s preview / 300 s otherwise); sub-stages consume the remaining budget and never reset it | NX-A1 |
 
 ## 10. Version-1 compatibility baseline for the eleven built-in nodes
 
@@ -845,20 +941,37 @@ Classification changes are permitted only for the R-5 divergence cases, and
 only in the direction "compiled successfully but could never execute → rejected
 at compile time", each listed with its minimal case in the owning PR.
 
-### 10.5 Baseline corpus and regeneration
+### 10.5 Baseline corpus, capture point, and regeneration
 
+- The corpus records **pre-change** behavior. It is captured at the frozen base
+  the first implementation issue branches from — for NX-S1 that is
+  `main@5bff563cc4d33ef11f0cff4935aec02e92985166`, or the then-current `main`
+  after an authorized rebind — **before** that issue modifies any authorized
+  file. It is never captured from a post-change head.
+- The capturing step records the base SHA, the exact command, the toolchain, and
+  the environment, and commits the resulting fixtures unchanged. The capture is
+  therefore reproducible by a reviewer from the same base.
+- A candidate implementation is compared against that captured baseline. A
+  difference is a compatibility event: the PR either fixes the candidate or
+  cites the contract clause that authorizes the change and states the migration
+  consequence. Regenerating a fixture from the candidate head is forbidden,
+  because it would record refactor output as the reference and make the
+  comparison vacuous.
+- New surfaces (new catalog fields, new diagnostic fields, additional
+  diagnostics or warnings) get their own expectation files, versioned separately
+  from the frozen v1 baseline, so the v1 files keep describing old behavior:
+  `backend/crates/stillflow-plan/tests/fixtures/nx-v1/` for frozen pre-change
+  behavior and `backend/crates/stillflow-plan/tests/fixtures/nx-next/` for new
+  surfaces. A v1 fixture may change only under a contract that explicitly
+  authorizes a change to version-1 execution identity, naming the reason and the
+  migration decision; NX-C0 authorizes none.
+- Corpus content, for every built-in node and for representative chains: the
+  normalized input graph, the authorized source schema, the expected canonical
+  plan bytes digest, the expected fingerprint, the expected per-node schemas,
+  and the expected error code for negative cases.
 - Corpus location: `backend/crates/stillflow-plan/tests/fixtures/nx-v1/`,
-  created by NX-S1 and extended (not rewritten) by later issues.
-- The corpus contains, for every built-in node and for representative chains:
-  the normalized input graph, the authorized source schema, the expected
-  canonical plan bytes digest, the expected fingerprint, the expected
-  per-node schemas, and the expected error code for negative cases.
-- A fixture may be regenerated only by a PR that states why execution identity
-  legitimately changed and which contract authorized it. Silent regeneration is
-  forbidden; a diff in a baseline fixture is a compatibility event.
-- The baseline is captured from the merged head of the owning implementation
-  PR, not from a local branch, and the capturing command and environment are
-  recorded in the PR body.
+  created by NX-S1 at the pre-change base and extended — never rewritten — by
+  later issues.
 
 ## 11. Downstream entry criteria
 
@@ -968,10 +1081,12 @@ the repository:
 | Module responsibilities and dependency direction are frozen, and a separate crate is evaluated without being mandated | Section 4 |
 | Shared semantic result, capability boundary, and divergence law are frozen without unlocking a paused operator | Section 5 |
 | Machine-readable config constraints, catalog support conditions, and versioning are frozen | Section 6 |
-| Safe diagnostic fields, ordering, count, byte caps, and secret law are frozen | Section 7 |
-| Pipeline order, single deadline, and the existing 2 MiB HTTP bound are stated correctly | Section 8 |
+| Catalog constraints are expressed in wire values and carry a round-trippable sample | Sections 6.2 and 6.5 |
+| Safe diagnostic fields, canonical intra-stage fault ordering, count, byte caps, and secret law are frozen | Section 7 |
+| Pipeline order, the case-by-case timeout table (absent, `0`, `30`, `31`, `300`, `301`), the single-deadline law, and the existing 2 MiB HTTP bound are stated with exactly one behavior per case | Section 8 |
 | Resource accounting boundaries are frozen without setting unmeasured numbers | Section 9 |
-| All eleven built-in nodes have byte/mapping/result/error baselines | Section 10 |
+| All eleven built-in nodes have byte/mapping/result/error baselines, captured at the pre-change base and compared against candidates | Section 10 |
+| New surfaces have separately versioned expectations, so the v1 baseline keeps describing old behavior | Section 10.5 |
 | NX-S1/NX-N1/NX-A1/NX-B1 have independently executable paths and test boundaries | Section 11 |
 | Docs-only scope is preserved | No Rust, dependency, lockfile, persistence, workflow, or client change in the #335 diff |
 
@@ -1007,6 +1122,7 @@ Known risks, each with its mitigation:
 | A new schema-amplification budget rejects graphs that are accepted today. | §9 requires measuring the merged baseline first and publishing the numbers; rejections must be deterministic, documented, and never replace a stricter engine bound. |
 | The catalog becomes a second execution authority. | §6.1: one definition source; the catalog describes, the validator decides, and a constraint the validator cannot express is a defect. |
 | Diagnostics leak caller values or third-party error text. | §7.3 field whitelist plus secret-sentinel tests in the owning PR. |
+| The v1 baseline is captured after the refactor, so it records the new behavior as the reference and cannot prove compatibility. | §10.5 captures the corpus at the frozen pre-change base, compares candidates against it, forbids regenerating a v1 fixture from a candidate head, and puts new surfaces in separately versioned `nx-next/` expectations. |
 | The contract text drifts from the merged implementation. | §1 cites the observed state with `path:line`; an implementation issue that finds a citation false must amend this contract before proceeding. |
 
 Stop and return to contract review when any of these occurs:
