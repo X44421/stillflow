@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 386,
+  "revision": 387,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1116,9 +1116,9 @@
       "id": "NX-B1",
       "title": "Constrain node-compile schema amplification and response resource cost",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-nx-b1-339",
       "target_issue": 339,
       "target_branch": "agent/issue-339-nx-b1",
       "expected_base": "e39f9922661c5ad16988dae7316b674030b066bb",
@@ -1134,13 +1134,29 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-12T09:35:27Z",
       "registered_at": "2026-09-12T08:01:34Z",
-      "updated_at": "2026-09-12T08:01:34Z",
-      "registered_by": "agent-nx-b1-339"
+      "updated_at": "2026-09-12T08:05:27Z",
+      "registered_by": "agent-nx-b1-339",
+      "started_at": "2026-09-12T08:05:27Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-12T08:05:11Z",
+  "locks": {
+    "branch:agent/issue-339-nx-b1": {
+      "task_id": "NX-B1",
+      "owner": "agent-nx-b1-339",
+      "expected_head": null,
+      "acquired_at": "2026-09-12T08:05:27Z",
+      "lease_expires_at": "2026-09-12T09:35:27Z"
+    },
+    "plan:compile-accounting": {
+      "task_id": "NX-B1",
+      "owner": "agent-nx-b1-339",
+      "expected_head": null,
+      "acquired_at": "2026-09-12T08:05:27Z",
+      "lease_expires_at": "2026-09-12T09:35:27Z"
+    }
+  },
+  "updated_at": "2026-09-12T08:05:27Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
