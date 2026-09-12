@@ -3,9 +3,9 @@
 //! different type id; it is compiled only under `cfg(test)` and never
 //! enters the production catalog (NX-N1 acceptance).
 
-use serde::Deserialize;
 #[cfg(test)]
 use crate::ColumnId;
+use serde::Deserialize;
 
 use super::definition::{
     config_field, executable_input, parse_config, validate_column, ConfigSchema, ConfigValueKind,
@@ -50,4 +50,3 @@ pub(super) fn definition() -> NodeDefinition {
         validate,
     )
 }
-
