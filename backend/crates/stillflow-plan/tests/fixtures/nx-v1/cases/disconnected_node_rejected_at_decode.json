@@ -1,0 +1,78 @@
+{
+  "expected": {
+    "error": {
+      "code": "NG_INVALID_TOPOLOGY",
+      "nodeId": null
+    },
+    "stage": "graph"
+  },
+  "graph": null,
+  "name": "disconnected_node_rejected_at_decode",
+  "sourceAssetId": "00000000-0000-0000-0000-0000000002bc",
+  "sourceSchema": {
+    "fields": [
+      {
+        "dataType": {
+          "kind": "utf8"
+        },
+        "id": "00000000-0000-0000-0000-000000000065",
+        "name": "name",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "int64"
+        },
+        "id": "00000000-0000-0000-0000-000000000066",
+        "name": "age",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "float64"
+        },
+        "id": "00000000-0000-0000-0000-000000000067",
+        "name": "score",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "boolean"
+        },
+        "id": "00000000-0000-0000-0000-000000000068",
+        "name": "active",
+        "nullable": false
+      },
+      {
+        "dataType": {
+          "kind": "binary"
+        },
+        "id": "00000000-0000-0000-0000-000000000069",
+        "name": "blob",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "date32"
+        },
+        "id": "00000000-0000-0000-0000-00000000006a",
+        "name": "created",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "timestamp",
+          "value": {
+            "timezone": null,
+            "unit": "second"
+          }
+        },
+        "id": "00000000-0000-0000-0000-00000000006b",
+        "name": "ts_sec",
+        "nullable": true
+      }
+    ],
+    "version": 1
+  },
+  "target": "execution"
+}
