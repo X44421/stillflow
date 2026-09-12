@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 384,
+  "revision": 385,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1081,9 +1081,9 @@
       "id": "NX-A1",
       "title": "Safe diagnostics, strict decoding, pipeline order and single deadline",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-nx-a1-338",
       "target_issue": 338,
       "target_branch": "agent/issue-338-nx-a1",
       "expected_base": "7a5174f0ccfd72573e19c058f90986fc122850b6",
@@ -1102,10 +1102,11 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-12T09:34:51Z",
       "registered_at": "2026-09-12T05:48:08Z",
-      "updated_at": "2026-09-12T05:48:08Z",
-      "registered_by": "agent-nx-a1-338"
+      "updated_at": "2026-09-12T08:04:51Z",
+      "registered_by": "agent-nx-a1-338",
+      "started_at": "2026-09-12T08:04:51Z"
     },
     {
       "id": "NX-B1",
@@ -1135,7 +1136,36 @@
       "registered_by": "agent-nx-b1-339"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-12T08:01:34Z",
+  "locks": {
+    "branch:agent/issue-338-nx-a1": {
+      "task_id": "NX-A1",
+      "owner": "agent-nx-a1-338",
+      "expected_head": null,
+      "acquired_at": "2026-09-12T08:04:51Z",
+      "lease_expires_at": "2026-09-12T09:34:51Z"
+    },
+    "core:node-graph-decoding": {
+      "task_id": "NX-A1",
+      "owner": "agent-nx-a1-338",
+      "expected_head": null,
+      "acquired_at": "2026-09-12T08:04:51Z",
+      "lease_expires_at": "2026-09-12T09:34:51Z"
+    },
+    "plan:compile-diagnostics": {
+      "task_id": "NX-A1",
+      "owner": "agent-nx-a1-338",
+      "expected_head": null,
+      "acquired_at": "2026-09-12T08:04:51Z",
+      "lease_expires_at": "2026-09-12T09:34:51Z"
+    },
+    "api:node-graph-error-envelope": {
+      "task_id": "NX-A1",
+      "owner": "agent-nx-a1-338",
+      "expected_head": null,
+      "acquired_at": "2026-09-12T08:04:51Z",
+      "lease_expires_at": "2026-09-12T09:34:51Z"
+    }
+  },
+  "updated_at": "2026-09-12T08:04:51Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
