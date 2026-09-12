@@ -99,6 +99,7 @@ impl fmt::Display for NodeGraphErrorCode {
 pub struct NodeGraphError {
     code: NodeGraphErrorCode,
     node_id: Option<NodeId>,
+    field_path: Option<String>,
     message: String,
 }
 
@@ -107,8 +108,16 @@ impl NodeGraphError {
         Self {
             code,
             node_id,
+            field_path: None,
             message: message.into(),
         }
+    }
+
+    /// Attaches the bounded config field path this failure is attributed to
+    /// (NX-C0 §7.1: structural paths only, never caller values).
+    fn with_field_path(mut self, field: impl Into<String>) -> Self {
+        self.field_path = Some(field.into());
+        self
     }
 
     pub const fn code(&self) -> NodeGraphErrorCode {
@@ -117,6 +126,10 @@ impl NodeGraphError {
 
     pub const fn node_id(&self) -> Option<NodeId> {
         self.node_id
+    }
+
+    pub fn field_path(&self) -> Option<&str> {
+        self.field_path.as_deref()
     }
 
     pub fn message(&self) -> &str {
@@ -201,14 +214,14 @@ impl fmt::Display for PortId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodePort {
     pub node_id: NodeId,
     pub port: PortId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodeEdge {
     pub from: NodePort,
     pub to: NodePort,
@@ -226,7 +239,7 @@ pub struct NodeConfig {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NodeConfigData {
     id: NodeId,
     type_id: String,
@@ -366,7 +379,7 @@ pub struct NodeGraph {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NodeGraphData {
     version: u16,
     graph_id: Uuid,
@@ -488,7 +501,11 @@ impl NodeGraph {
         let mut configs = BTreeMap::new();
         let mut source_count = 0_usize;
         let mut output_count = 0_usize;
-        for node in &self.nodes {
+        // Intra-stage fault order is canonical (NX-C0 §7.2, R-8): nodes are
+        // validated by ascending NodeId, never by caller array order.
+        let mut ordered_nodes: Vec<&NodeConfig> = self.nodes.iter().collect();
+        ordered_nodes.sort_by_key(|node| node.id());
+        for node in ordered_nodes {
             let definition = registry
                 .lookup(node.type_id(), node.config_version())
                 .map_err(|error| {
@@ -1143,6 +1160,38 @@ mod tests {
                 .code(),
             NodeGraphErrorCode::UnknownNodeType
         );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_at_every_envelope_level() {
+        let base = serde_json::to_value(graph()).expect("value");
+
+        // graph level
+        let mut value = base.clone();
+        value["extra"] = json!(true);
+        let error = serde_json::from_value::<NodeGraph>(value).expect_err("graph level");
+        assert!(error.to_string().contains("unknown field"), "{error}");
+
+        // node level
+        let mut value = base.clone();
+        value["nodes"][0]["extra"] = json!(true);
+        let error = serde_json::from_value::<NodeGraph>(value).expect_err("node level");
+        assert!(error.to_string().contains("unknown field"), "{error}");
+
+        // edge level
+        let mut value = base.clone();
+        value["edges"][0]["extra"] = json!(true);
+        let error = serde_json::from_value::<NodeGraph>(value).expect_err("edge level");
+        assert!(error.to_string().contains("unknown field"), "{error}");
+
+        // port level
+        let mut value = base.clone();
+        value["edges"][0]["from"]["extra"] = json!(true);
+        let error = serde_json::from_value::<NodeGraph>(value).expect_err("port level");
+        assert!(error.to_string().contains("unknown field"), "{error}");
+
+        // A graph without extra keys still decodes.
+        assert!(serde_json::from_value::<NodeGraph>(base).is_ok());
     }
 
     #[test]

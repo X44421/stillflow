@@ -28,6 +28,10 @@ pub enum ApiErrorCode {
 pub struct ApiError {
     pub code: ApiErrorCode,
     pub message: String,
+    /// Bounded safe diagnostics (NX-C0 §7.1). Empty for most failure
+    /// classes; the envelope omits the field when empty.
+    #[serde(default, skip_serializing)]
+    pub diagnostics: Vec<crate::NodeGraphDiagnosticView>,
 }
 
 impl ApiError {
@@ -35,7 +39,15 @@ impl ApiError {
         Self {
             code,
             message: message.into(),
+            diagnostics: Vec::new(),
         }
+    }
+
+    /// Attaches bounded diagnostics to this error (NX-C0 §7.1). The count
+    /// and byte caps are enforced by the producer of the diagnostics.
+    pub fn with_diagnostics(mut self, diagnostics: Vec<crate::NodeGraphDiagnosticView>) -> Self {
+        self.diagnostics = diagnostics;
+        self
     }
 
     pub fn unsupported_version(version: u16) -> Self {

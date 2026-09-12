@@ -121,6 +121,9 @@ pub struct ApiErrorResponse {
 pub struct ApiErrorBody {
     pub code: ApiErrorCode,
     pub message: String,
+    /// Bounded safe diagnostics; omitted when empty (NX-C0 §7.1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<crate::NodeGraphDiagnosticView>,
 }
 
 impl ApiErrorResponse {
@@ -133,6 +136,7 @@ impl ApiErrorResponse {
             error: ApiErrorBody {
                 code: error.code,
                 message: error.message,
+                diagnostics: error.diagnostics,
             },
         }
     }

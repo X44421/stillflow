@@ -477,6 +477,7 @@ pub(super) fn invalid_config(node: &NodeConfig, field: &str) -> NodeGraphError {
         Some(node.id()),
         format!("node config field {field} is missing or invalid"),
     )
+    .with_field_path(field)
 }
 
 pub(super) fn validate_name(
