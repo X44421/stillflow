@@ -21,6 +21,7 @@ mod profile;
 mod quality;
 mod remainder;
 mod scheduler;
+pub mod semantics;
 mod types;
 mod typing;
 mod verification;

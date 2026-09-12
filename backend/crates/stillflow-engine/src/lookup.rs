@@ -40,22 +40,14 @@ use crate::error::EngineError;
 /// Abstraction over `ColumnId -> field` resolution used by the preflight
 /// expression/type-resolution helpers.
 ///
-/// The default backend is the authoritative [`LogicalSchema`] itself, whose
-/// lookup is the unchanged linear scan over ordered fields. The indexed
-/// backend is an Engine-private ordinal index derived from an already-validated
-/// schema instance; both backends return the identical field for any valid
-/// schema because validated schemas have unique column ids. This trait stays
-/// private to the engine crate and never appears in public signatures.
-pub(crate) trait ColumnLookup {
-    fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField>;
-}
-
-impl ColumnLookup for LogicalSchema {
-    fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField> {
-        self.field(id)
-    }
-}
-
+/// Since NX-S1 (#336) the shared resolver trait is
+/// `stillflow_plan::semantics::ColumnResolver`; the authoritative
+/// [`LogicalSchema`] backend is implemented in `stillflow-plan`. The indexed
+/// backend below is an Engine-private ordinal index derived from an
+/// already-validated schema instance and returns the identical field for any
+/// valid schema because validated schemas have unique column ids. This
+/// module's resolver impls stay private to the engine crate and never appear
+/// in public signatures.
 /// Deterministic shape-only index policy.
 ///
 /// Linear resolution costs ~R·F/2 comparisons for R lookups over F fields;
@@ -160,8 +152,8 @@ impl<'a> AuthorizedLookup<'a> {
     }
 }
 
-impl ColumnLookup for AuthorizedLookup<'_> {
-    fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField> {
+impl stillflow_plan::semantics::ColumnResolver for AuthorizedLookup<'_> {
+    fn resolve_column(&self, id: ColumnId) -> Option<&LogicalField> {
         match self {
             Self::Linear(schema) => schema.field(id),
             Self::Indexed(index) => index.field(id),
@@ -308,8 +300,8 @@ impl WorkingSchema {
 }
 
 #[cfg(test)]
-impl ColumnLookup for WorkingSchema {
-    fn lookup_field(&self, id: ColumnId) -> Option<&LogicalField> {
+impl stillflow_plan::semantics::ColumnResolver for WorkingSchema {
+    fn resolve_column(&self, id: ColumnId) -> Option<&LogicalField> {
         match self {
             Self::Linear(schema) => schema.field(id),
             Self::Indexed(state) => state
@@ -329,6 +321,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use stillflow_core::LogicalType;
+    use stillflow_plan::semantics::ColumnResolver as _;
     use uuid::Uuid;
 
     #[allow(dead_code)] // kept for literal-tuple cases
@@ -483,8 +476,8 @@ mod tests {
                     for id in [1000u128, 1001, 1003, 1005, 1007] {
                         let id = ColumnId::from_uuid(Uuid::from_u128(id));
                         assert_eq!(
-                            linear.lookup_field(id).map(|f| f.name.clone()),
-                            indexed.lookup_field(id).map(|f| f.name.clone()),
+                            linear.resolve_column(id).map(|f| f.name.clone()),
+                            indexed.resolve_column(id).map(|f| f.name.clone()),
                             "lookup parity after mutation"
                         );
                     }
@@ -521,10 +514,10 @@ mod tests {
         // After swap, the index must resolve the new mapping and forget the
         // old schema's ids entirely.
         assert_eq!(
-            indexed.lookup_field(id(2003)).map(|f| f.name.as_str()),
+            indexed.resolve_column(id(2003)).map(|f| f.name.as_str()),
             Some("n3")
         );
-        assert_eq!(indexed.lookup_field(id(1000)), None);
+        assert_eq!(indexed.resolve_column(id(1000)), None);
     }
 
     #[test]

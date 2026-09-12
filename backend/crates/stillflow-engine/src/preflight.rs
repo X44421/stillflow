@@ -9,11 +9,12 @@ use stillflow_core::{
 use stillflow_plan::{LogicalPlan, PlanNodeId, PlanNodeKind, Rule};
 
 use crate::error::{deadline_too_long, map_context_error, EngineError};
-use crate::lookup::{AuthorizedLookup, ColumnLookup};
+use crate::lookup::AuthorizedLookup;
 use crate::{
     ENGINE_MAX_DEADLINE, MAX_COMPILED_PLAN_BYTES, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_PLAN_NODES,
     MAX_RULES_PER_NODE,
 };
+use stillflow_plan::semantics::ColumnResolver;
 
 #[derive(Debug, Clone)]
 pub(crate) enum CompiledStep {
@@ -326,7 +327,7 @@ async fn preflight_inner_with_schema(
         projection_served_lookups(&scan_projection, push_projection),
     );
     for id in &scan_projection {
-        if authorized_lookup.lookup_field(*id).is_none() {
+        if authorized_lookup.resolve_column(*id).is_none() {
             return Err(EngineError::UnknownColumn(*id));
         }
     }
@@ -653,8 +654,8 @@ pub(crate) fn project_schema(
     project_schema_with(&AuthorizedLookup::for_shape(schema, columns.len()), columns)
 }
 
-fn project_schema_with<L: ColumnLookup + ?Sized>(
-    lookup: &L,
+fn project_schema_with<R: ColumnResolver + ?Sized>(
+    lookup: &R,
     columns: &[ColumnId],
 ) -> Result<LogicalSchema, EngineError> {
     let mut fields = Vec::with_capacity(columns.len());
@@ -666,7 +667,7 @@ fn project_schema_with<L: ColumnLookup + ?Sized>(
             ));
         }
         let field = lookup
-            .lookup_field(*id)
+            .resolve_column(*id)
             .ok_or(EngineError::UnknownColumn(*id))?
             .clone();
         fields.push(field);
@@ -911,51 +912,16 @@ pub(crate) fn apply_rule_schema_legacy(
 }
 
 pub(crate) fn reject_paused_cast(from: &LogicalType, to: &LogicalType) -> Result<(), EngineError> {
-    if matches!(from, LogicalType::Date32 | LogicalType::Timestamp { .. })
-        && matches!(to, LogicalType::Utf8)
-    {
-        return Err(EngineError::TypeError(
-            "cast from date32 or timestamp to utf8 is paused",
-        ));
-    }
-    if (matches!(to, LogicalType::Binary) && !matches!(from, LogicalType::Binary))
-        || (matches!(from, LogicalType::Binary) && !matches!(to, LogicalType::Binary))
-    {
-        return Err(EngineError::TypeError(
-            "cast to/from binary is not authorized",
-        ));
-    }
-    Ok(())
+    stillflow_plan::semantics::capability::reject_paused_cast(from, to)
+        .map_err(crate::typing::semantic_error)
 }
 
-pub(crate) fn reject_paused_cast_in_expr<L: ColumnLookup + ?Sized>(
+pub(crate) fn reject_paused_cast_in_expr<R: ColumnResolver + ?Sized>(
     expr: &Expr,
-    schema: &L,
+    schema: &R,
 ) -> Result<(), EngineError> {
-    match expr {
-        Expr::Cast {
-            expression,
-            data_type,
-        } => {
-            let from = crate::typing::type_check_expr_in(expression, schema)?;
-            reject_paused_cast(&from, data_type)?;
-            reject_paused_cast_in_expr(expression, schema)
-        }
-        Expr::Unary { expression, .. } | Expr::IsNull { expression, .. } => {
-            reject_paused_cast_in_expr(expression, schema)
-        }
-        Expr::Binary { left, right, .. } => {
-            reject_paused_cast_in_expr(left, schema)?;
-            reject_paused_cast_in_expr(right, schema)
-        }
-        Expr::Coalesce { expressions } => {
-            for expr in expressions {
-                reject_paused_cast_in_expr(expr, schema)?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
+    stillflow_plan::semantics::capability::reject_paused_casts_in_expr(expr, schema)
+        .map_err(crate::typing::semantic_error)
 }
 
 pub(crate) fn validate_literal_for_column(
@@ -1077,73 +1043,16 @@ fn validate_plan_exprs_iterative(plan: &LogicalPlan) -> Result<(), EngineError> 
     Ok(())
 }
 
-pub(crate) fn validate_expr<L: ColumnLookup + ?Sized>(
+pub(crate) fn validate_expr<R: ColumnResolver + ?Sized>(
     expr: &Expr,
-    schema: &L,
+    schema: &R,
 ) -> Result<(), EngineError> {
-    expr.validate_shape()
-        .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
-    let mut nodes = 0_usize;
-    let mut max_depth = 0_usize;
-    let mut stack = vec![(expr, 1_usize)];
-    while let Some((current, depth)) = stack.pop() {
-        nodes += 1;
-        max_depth = max_depth.max(depth);
-        if nodes > MAX_EXPR_NODES || max_depth > MAX_EXPR_DEPTH {
-            return Err(EngineError::BoundExceeded(
-                "expression exceeds node or depth limits",
-            ));
-        }
-        match current {
-            Expr::Column(id) => {
-                if schema.lookup_field(*id).is_none() {
-                    return Err(EngineError::UnknownColumn(*id));
-                }
-            }
-            Expr::Unary { expression, .. }
-            | Expr::IsNull { expression, .. }
-            | Expr::Cast { expression, .. } => stack.push((expression, depth + 1)),
-            Expr::Binary { left, right, .. } => {
-                stack.push((left, depth + 1));
-                stack.push((right, depth + 1));
-            }
-            Expr::Coalesce { expressions } => {
-                for expr in expressions {
-                    stack.push((expr, depth + 1));
-                }
-            }
-            Expr::Literal(_) => {}
-        }
-    }
-    Ok(())
+    stillflow_plan::semantics::validate_expr_refs(expr, schema)
+        .map_err(crate::typing::semantic_error)
 }
-
-pub(crate) fn infer_nullability<L: ColumnLookup + ?Sized>(
+pub(crate) fn infer_nullability<R: ColumnResolver + ?Sized>(
     expr: &Expr,
-    schema: &L,
+    schema: &R,
 ) -> Result<bool, EngineError> {
-    Ok(match expr {
-        Expr::Column(id) => {
-            schema
-                .lookup_field(*id)
-                .ok_or(EngineError::UnknownColumn(*id))?
-                .nullable
-        }
-        Expr::Literal(ScalarValue::Null) => true,
-        Expr::Literal(_) => false,
-        Expr::Unary { expression, .. } | Expr::Cast { expression, .. } => {
-            infer_nullability(expression, schema)?
-        }
-        Expr::Binary { left, right, .. } => {
-            infer_nullability(left, schema)? || infer_nullability(right, schema)?
-        }
-        Expr::IsNull { .. } => false,
-        Expr::Coalesce { expressions } => {
-            let mut all_nullable = true;
-            for expr in expressions {
-                all_nullable &= infer_nullability(expr, schema)?;
-            }
-            all_nullable
-        }
-    })
+    crate::typing::analyze_expr(expr, schema).map(|(_, nullable)| nullable)
 }

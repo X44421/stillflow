@@ -6,6 +6,7 @@
 mod node_graph_compiler;
 mod plan;
 mod rule;
+pub mod semantics;
 
 pub use node_graph_compiler::{
     compile_node_graph, AuthorizedSourceContext, CompileDiagnostic, CompileTarget,
@@ -17,3 +18,7 @@ pub use plan::{
     PLAN_FINGERPRINT_ALGORITHM, PLAN_VERSION,
 };
 pub use rule::{CastFailurePolicy, Rule, RuleError, ValidationSeverity};
+pub use semantics::{
+    analyze_expr, capability, project_effect, rule_effect, validate_expr_refs, ColumnResolver,
+    ExprAnalysis, SemanticError, SemanticKind,
+};

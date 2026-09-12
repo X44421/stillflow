@@ -17,15 +17,12 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use stillflow_core::{
-    ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, NodeConfig, NodeEdge, NodeGraph,
-    NodeGraphError, NodeId, BinaryOperator, ScalarValue, TimeUnit, UnaryOperator,
+    BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, NodeConfig, NodeEdge,
+    NodeGraph, NodeGraphError, NodeId, ScalarValue, TimeUnit, UnaryOperator,
 };
 use stillflow_plan::{AuthorizedSourceContext, CompileTarget, NodeGraphCompiler};
 
-const FIXTURE_DIR_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/nx-v1/cases"
-);
+const FIXTURE_DIR_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/nx-v1/cases");
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(FIXTURE_DIR_PATH).join(format!("{name}.json"))
@@ -123,7 +120,11 @@ fn source_config(asset: u128) -> NodeConfig {
 }
 
 fn output_config() -> NodeConfig {
-    config(5, "stillflow.node.output", json!({"outputLabel": "cleaned"}))
+    config(
+        5,
+        "stillflow.node.output",
+        json!({"outputLabel": "cleaned"}),
+    )
 }
 
 fn select_config(id: u128, columns: &[u128]) -> NodeConfig {
@@ -135,14 +136,27 @@ fn select_config(id: u128, columns: &[u128]) -> NodeConfig {
 }
 
 fn filter_config(id: u128, predicate: &Expr) -> NodeConfig {
-    config(id, "stillflow.node.filter", json!({"predicate": serialized(predicate)}))
+    config(
+        id,
+        "stillflow.node.filter",
+        json!({"predicate": serialized(predicate)}),
+    )
 }
 
 fn trim_config(id: u128, column_value: u128) -> NodeConfig {
-    config(id, "stillflow.node.trim", json!({"column": column(column_value)}))
+    config(
+        id,
+        "stillflow.node.trim",
+        json!({"column": column(column_value)}),
+    )
 }
 
-fn cast_config(id: u128, column_value: u128, data_type: &LogicalType, on_failure: &str) -> NodeConfig {
+fn cast_config(
+    id: u128,
+    column_value: u128,
+    data_type: &LogicalType,
+    on_failure: &str,
+) -> NodeConfig {
     config(
         id,
         "stillflow.node.cast",
@@ -155,7 +169,11 @@ fn cast_config(id: u128, column_value: u128, data_type: &LogicalType, on_failure
 }
 
 fn rename_config(id: u128, column_value: u128, to: &str) -> NodeConfig {
-    config(id, "stillflow.node.rename", json!({"column": column(column_value), "to": to}))
+    config(
+        id,
+        "stillflow.node.rename",
+        json!({"column": column(column_value), "to": to}),
+    )
 }
 
 fn fill_null_config(id: u128, column_value: u128, value: &ScalarValue) -> NodeConfig {
@@ -166,7 +184,12 @@ fn fill_null_config(id: u128, column_value: u128, value: &ScalarValue) -> NodeCo
     )
 }
 
-fn replace_config(id: u128, column_value: u128, from: &ScalarValue, to: &ScalarValue) -> NodeConfig {
+fn replace_config(
+    id: u128,
+    column_value: u128,
+    from: &ScalarValue,
+    to: &ScalarValue,
+) -> NodeConfig {
     config(
         id,
         "stillflow.node.replace-literal",
@@ -175,7 +198,11 @@ fn replace_config(id: u128, column_value: u128, from: &ScalarValue, to: &ScalarV
 }
 
 fn drop_config(id: u128, column_value: u128) -> NodeConfig {
-    config(id, "stillflow.node.drop-column", json!({"column": column(column_value)}))
+    config(
+        id,
+        "stillflow.node.drop-column",
+        json!({"column": column(column_value)}),
+    )
 }
 
 fn derive_config(
@@ -248,11 +275,7 @@ fn execution(graph: Result<NodeGraph, NodeGraphError>, asset: u128) -> CaseInput
     }
 }
 
-fn preview_of(
-    graph: Result<NodeGraph, NodeGraphError>,
-    asset: u128,
-    target: u128,
-) -> CaseInput {
+fn preview_of(graph: Result<NodeGraph, NodeGraphError>, asset: u128, target: u128) -> CaseInput {
     CaseInput {
         graph,
         source: source(asset),
@@ -279,11 +302,7 @@ fn full_chain_nodes() -> Vec<NodeConfig> {
         cast_config(8, 102, &LogicalType::Int32, "error"),
         filter_config(
             9,
-            &binary(
-                BinaryOperator::GreaterThanOrEqual,
-                col(102),
-                lit_int(-128),
-            ),
+            &binary(BinaryOperator::GreaterThanOrEqual, col(102), lit_int(-128)),
         ),
         drop_config(10, 104),
         output_config(),
@@ -291,7 +310,17 @@ fn full_chain_nodes() -> Vec<NodeConfig> {
 }
 
 fn full_chain_edges() -> Vec<(u128, u128)> {
-    vec![(1, 2), (2, 3), (3, 4), (4, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 5)]
+    vec![
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (4, 6),
+        (6, 7),
+        (7, 8),
+        (8, 9),
+        (9, 10),
+        (10, 5),
+    ]
 }
 
 fn cases() -> Vec<Case> {
@@ -302,7 +331,11 @@ fn cases() -> Vec<Case> {
             build: || {
                 execution(
                     chain(
-                        vec![source_config(700), select_config(2, &[101, 102]), output_config()],
+                        vec![
+                            source_config(700),
+                            select_config(2, &[101, 102]),
+                            output_config(),
+                        ],
                         vec![(1, 2), (2, 5)],
                     ),
                     700,
@@ -585,9 +618,7 @@ fn cases() -> Vec<Case> {
         },
         Case {
             name: "full_chain_preview_midway",
-            build: || {
-                preview_of(chain(full_chain_nodes(), full_chain_edges()), 700, 7)
-            },
+            build: || preview_of(chain(full_chain_nodes(), full_chain_edges()), 700, 7),
         },
         Case {
             name: "array_order_permutation_same_bytes",
@@ -637,7 +668,11 @@ fn cases() -> Vec<Case> {
             build: || {
                 execution(
                     chain(
-                        vec![source_config(700), select_config(2, &[999]), output_config()],
+                        vec![
+                            source_config(700),
+                            select_config(2, &[999]),
+                            output_config(),
+                        ],
                         vec![(1, 2), (2, 5)],
                     ),
                     700,
@@ -665,7 +700,11 @@ fn cases() -> Vec<Case> {
             build: || {
                 execution(
                     chain(
-                        vec![source_config(700), rename_config(2, 999, "x"), output_config()],
+                        vec![
+                            source_config(700),
+                            rename_config(2, 999, "x"),
+                            output_config(),
+                        ],
                         vec![(1, 2), (2, 5)],
                     ),
                     700,
@@ -719,14 +758,7 @@ fn cases() -> Vec<Case> {
                     chain(
                         vec![
                             source_config(700),
-                            derive_config(
-                                2,
-                                108,
-                                "bad",
-                                &LogicalType::Int64,
-                                true,
-                                &col(999),
-                            ),
+                            derive_config(2, 108, "bad", &LogicalType::Int64, true, &col(999)),
                             output_config(),
                         ],
                         vec![(1, 2), (2, 5)],
@@ -856,7 +888,14 @@ fn cases() -> Vec<Case> {
                     chain(
                         vec![
                             source_config(700),
-                            derive_config(2, 108, "from_blob", &LogicalType::Utf8, true, &expression),
+                            derive_config(
+                                2,
+                                108,
+                                "from_blob",
+                                &LogicalType::Utf8,
+                                true,
+                                &expression,
+                            ),
                             output_config(),
                         ],
                         vec![(1, 2), (2, 5)],
@@ -874,7 +913,11 @@ fn cases() -> Vec<Case> {
                             source_config(700),
                             filter_config(
                                 2,
-                                &binary(BinaryOperator::Equal, binary(BinaryOperator::Add, col(102), lit_int(1)), lit_int(2)),
+                                &binary(
+                                    BinaryOperator::Equal,
+                                    binary(BinaryOperator::Add, col(102), lit_int(1)),
+                                    lit_int(2),
+                                ),
                             ),
                             output_config(),
                         ],
@@ -893,11 +936,7 @@ fn cases() -> Vec<Case> {
                             source_config(700),
                             filter_config(
                                 2,
-                                &binary(
-                                    BinaryOperator::Contains,
-                                    col(101),
-                                    lit_utf8("a"),
-                                ),
+                                &binary(BinaryOperator::Contains, col(101), lit_utf8("a")),
                             ),
                             output_config(),
                         ],
@@ -974,10 +1013,7 @@ fn cases() -> Vec<Case> {
                     chain(
                         vec![
                             source_config(700),
-                            filter_config(
-                                2,
-                                &binary(BinaryOperator::LessThan, col(101), col(101)),
-                            ),
+                            filter_config(2, &binary(BinaryOperator::LessThan, col(101), col(101))),
                             output_config(),
                         ],
                         vec![(1, 2), (2, 5)],
@@ -993,10 +1029,7 @@ fn cases() -> Vec<Case> {
                     chain(
                         vec![
                             source_config(700),
-                            filter_config(
-                                2,
-                                &binary(BinaryOperator::Equal, col(102), col(101)),
-                            ),
+                            filter_config(2, &binary(BinaryOperator::Equal, col(102), col(101))),
                             output_config(),
                         ],
                         vec![(1, 2), (2, 5)],
@@ -1203,7 +1236,12 @@ fn cases() -> Vec<Case> {
                     chain(
                         vec![
                             source_config(700),
-                            config_with_version(2, "stillflow.node.trim", 2, json!({"column": column(101)})),
+                            config_with_version(
+                                2,
+                                "stillflow.node.trim",
+                                2,
+                                json!({"column": column(101)}),
+                            ),
                             output_config(),
                         ],
                         vec![(1, 2), (2, 5)],
@@ -1216,10 +1254,7 @@ fn cases() -> Vec<Case> {
             name: "source_binding_mismatch",
             build: || {
                 execution(
-                    chain(
-                        vec![source_config(701), output_config()],
-                        vec![(1, 5)],
-                    ),
+                    chain(vec![source_config(701), output_config()], vec![(1, 5)]),
                     700,
                 )
             },
@@ -1302,11 +1337,7 @@ fn cases() -> Vec<Case> {
                     uuid(903),
                     node(1),
                     node(5),
-                    vec![
-                        source_config(700),
-                        trim_config(2, 101),
-                        output_config(),
-                    ],
+                    vec![source_config(700), trim_config(2, 101), output_config()],
                     vec![edge(1, 2), edge(2, 5), edge(5, 2)],
                     BTreeMap::new(),
                 );
@@ -1373,7 +1404,12 @@ fn observe(input: &CaseInput) -> Value {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(encoded, "{byte:02x}");
+    }
+    encoded
 }
 
 fn case_json(name: &str, input: &CaseInput) -> Value {
@@ -1423,16 +1459,18 @@ fn compare(expected: &Value, actual: &Value, path: &str) -> Vec<String> {
             for (key, expected_value) in expected {
                 match actual.get(key) {
                     Some(actual_value) => {
-                        diffs.extend(compare(expected_value, actual_value, &format!("{path}.{key}")));
+                        diffs.extend(compare(
+                            expected_value,
+                            actual_value,
+                            &format!("{path}.{key}"),
+                        ));
                     }
                     None => diffs.push(format!("{path}: missing key {key}")),
                 }
             }
             diffs
         }
-        _ => vec![format!(
-            "{path}: expected {expected}, actual {actual}"
-        )],
+        _ => vec![format!("{path}: expected {expected}, actual {actual}")],
     }
 }
 
@@ -1450,7 +1488,7 @@ fn v1_baseline_is_reproduced() {
             .find(|case| case.name == name.as_str())
             .unwrap_or_else(|| panic!("fixture {name} has no corpus case"));
         let input = (case.build)();
-        let normalized = case_json(&case.name, &input);
+        let normalized = case_json(case.name, &input);
         let diffs = compare(
             fixture.get("expected").expect("fixture expectation"),
             normalized.get("expected").expect("fresh observation"),
@@ -1485,7 +1523,8 @@ fn v1_metadata_does_not_change_plan_bytes() {
         .find(|(name, _)| name == "graph_and_node_metadata_present")
         .expect("metadata fixture");
     let plain_hex = plain
-        .1 .pointer("/expected/ok/canonicalBytesHex")
+        .1
+        .pointer("/expected/ok/canonicalBytesHex")
         .expect("plain bytes");
     let metadata_hex = with_metadata
         .1
@@ -1503,6 +1542,222 @@ fn capture_v1_baseline() {
         let input = (case.build)();
         let document = case_json(case.name, &input);
         let path = fixture_path(case.name);
-        fs::write(&path, format!("{}\n", serde_json::to_string_pretty(&document).expect("serializable"))).expect("fixture written");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&document).expect("serializable")
+            ),
+        )
+        .expect("fixture written");
     }
+}
+
+/// Differential replay over the full chain: the shared semantics module must
+/// reproduce every compiled per-node schema, proving the compiler consumes
+/// the shared analyzer rather than a parallel implementation.
+#[test]
+fn shared_semantics_replay_matches_compiled_node_schemas() {
+    use stillflow_plan::semantics::{self, SemanticKind};
+    use stillflow_plan::{CastFailurePolicy, Rule};
+
+    let graph = chain(full_chain_nodes(), full_chain_edges()).expect("graph");
+    let source = source(700);
+    let compiled = NodeGraphCompiler::default()
+        .compile(&graph, &source, CompileTarget::Execution)
+        .expect("compile");
+
+    let mut working = semantics::project_effect(
+        &source.schema,
+        &[
+            column(101),
+            column(102),
+            column(103),
+            column(104),
+            column(105),
+            column(106),
+            column(107),
+        ],
+    )
+    .expect("source projection");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(1)).expect("schema")
+    );
+
+    // select
+    working = semantics::project_effect(
+        &working,
+        &[column(101), column(102), column(103), column(104)],
+    )
+    .expect("select");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(2)).expect("schema")
+    );
+    // rename
+    working = semantics::rule_effect(
+        &working,
+        &Rule::Rename {
+            column: column(101),
+            to: "label".to_owned(),
+        },
+    )
+    .expect("rename");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(3)).expect("schema")
+    );
+    // trim
+    working = semantics::rule_effect(
+        &working,
+        &Rule::Trim {
+            column: column(101),
+        },
+    )
+    .expect("trim");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(4)).expect("schema")
+    );
+    // fill-null
+    working = semantics::rule_effect(
+        &working,
+        &Rule::FillNull {
+            column: column(102),
+            value: ScalarValue::Int64(0),
+        },
+    )
+    .expect("fill-null");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(6)).expect("schema")
+    );
+    // derive-column
+    working = semantics::rule_effect(
+        &working,
+        &Rule::DeriveColumn {
+            id: column(108),
+            name: "score_seen".to_owned(),
+            data_type: LogicalType::Boolean,
+            nullable: true,
+            expression: is_null(col(103)),
+        },
+    )
+    .expect("derive");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(7)).expect("schema")
+    );
+    // cast
+    working = semantics::rule_effect(
+        &working,
+        &Rule::Cast {
+            column: column(102),
+            data_type: LogicalType::Int32,
+            on_failure: CastFailurePolicy::Error,
+        },
+    )
+    .expect("cast");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(8)).expect("schema")
+    );
+    // filter (schema unchanged; predicate analyzed)
+    let analysis = semantics::analyze_expr(
+        &binary(BinaryOperator::GreaterThanOrEqual, col(102), lit_int(-128)),
+        &working,
+    )
+    .expect("predicate");
+    assert_eq!(analysis.data_type, LogicalType::Boolean);
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(9)).expect("schema")
+    );
+    // drop-column
+    working = semantics::rule_effect(
+        &working,
+        &Rule::DropColumn {
+            column: column(104),
+        },
+    )
+    .expect("drop");
+    assert_eq!(
+        &working,
+        compiled.node_schemas.get(&node(10)).expect("schema")
+    );
+    assert_eq!(&working, &compiled.output_schema);
+
+    // The shared failure kinds keep their frozen NG classification.
+    let error = semantics::rule_effect(
+        &working,
+        &Rule::FillNull {
+            column: column(102),
+            value: ScalarValue::Null,
+        },
+    )
+    .expect_err("fill-null null");
+    assert_eq!(error.code().as_str(), "NG_INVALID_CONFIG");
+    assert_eq!(error.kind(), SemanticKind::FillNullValueMustNotBeNull);
+}
+
+/// Expression bounds are part of the shared analysis.
+#[test]
+fn expression_bounds_are_shared_and_typed() {
+    use stillflow_plan::semantics::{self, SemanticKind};
+
+    let schema = source_schema();
+    let mut expression = col(101);
+    for _ in 0..70 {
+        expression = is_null(expression);
+    }
+    let error = semantics::analyze_expr(&expression, &schema).expect_err("depth bound");
+    assert_eq!(error.kind(), SemanticKind::ExprBounds);
+    assert_eq!(error.code().as_str(), "NG_LIMIT_NESTING_DEPTH");
+}
+
+/// The capability gate is the second frozen authority: the paused set is
+/// rejected with the compile-path classes (NX-C0 §5.2).
+#[test]
+fn capability_gate_rejects_the_paused_set() {
+    use stillflow_plan::semantics::{self, capability, SemanticKind};
+
+    let schema = source_schema();
+    let paused_types = vec![
+        LogicalType::List(Box::new(LogicalType::Int64)),
+        LogicalType::Struct(vec![]),
+        LogicalType::Timestamp {
+            unit: TimeUnit::Second,
+            timezone: None,
+        },
+    ];
+    for data_type in &paused_types {
+        let error = capability::reject_paused_type(data_type).expect_err("paused type");
+        assert_eq!(error.code().as_str(), "NG_INCOMPATIBLE_TYPE");
+    }
+
+    // date/timestamp → utf8 and any binary transition stay paused.
+    let error = capability::reject_paused_cast(&LogicalType::Date32, &LogicalType::Utf8)
+        .expect_err("date cast");
+    assert_eq!(error.kind(), SemanticKind::DateToUtf8CastPaused);
+    let error = capability::reject_paused_cast(&LogicalType::Binary, &LogicalType::Utf8)
+        .expect_err("from binary");
+    assert_eq!(error.kind(), SemanticKind::BinaryCastUnauthorized);
+    let error = capability::reject_paused_cast(&LogicalType::Int64, &LogicalType::Binary)
+        .expect_err("to binary");
+    assert_eq!(error.kind(), SemanticKind::BinaryCastUnauthorized);
+
+    // Paused casts inside expressions are rejected through the shared
+    // analyzer's capability points.
+    let expression = Expr::Cast {
+        expression: Box::new(col(105)),
+        data_type: LogicalType::Utf8,
+    };
+    let error = semantics::analyze_expr(&expression, &schema).expect_err("from binary cast");
+    assert_eq!(error.kind(), SemanticKind::BinaryCastUnauthorized);
+
+    // Schema nesting depth stays with the compile work estimation, not the
+    // capability gate; the gate must not reject a plain valid schema.
+    capability::reject_paused_type(&LogicalType::Int64).expect("valid type");
+    let _ = schema;
 }

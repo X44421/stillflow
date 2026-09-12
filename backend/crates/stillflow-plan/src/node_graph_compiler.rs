@@ -2,18 +2,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use stillflow_core::{
-    BinaryOperator, CastFailurePolicy as NodeCastFailurePolicy, ColumnId, Expr, LogicalField,
-    LogicalSchema, LogicalType, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId,
-    NodeRegistry, ScalarValue, TimeUnit, UnaryOperator, ValidatedNodeConfig, MAX_EXPR_DEPTH,
-    MAX_EXPR_NODES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH, MAX_NODES,
+    CastFailurePolicy as NodeCastFailurePolicy, ColumnId, Expr, LogicalField, LogicalSchema,
+    LogicalType, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId, NodeRegistry,
+    ValidatedNodeConfig, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH,
+    MAX_NODES,
 };
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    CastFailurePolicy, LogicalPlan, PlanError, PlanFingerprint, PlanNode, PlanNodeId, PlanNodeKind,
-    Rule,
+    semantics, CastFailurePolicy, LogicalPlan, PlanError, PlanFingerprint, PlanNode, PlanNodeId,
+    PlanNodeKind, Rule,
 };
+use semantics::SemanticError;
 
 pub const NODE_GRAPH_COMPILER_VERSION: &str = "ng-nodegraph-compiler-v1";
 pub const MAX_DIAGNOSTICS: usize = 64;
@@ -539,37 +540,56 @@ fn project_source_schema(
     let columns: Vec<ColumnId> = projection
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| schema.fields.iter().map(|field| field.id).collect());
-    project_schema(schema, &columns, node_id)
+    semantics::project_effect(&schema.clone(), &columns).map_err(|error| {
+        NodeGraphCompileError::new(error.code(), Some(node_id), error.compile_message())
+    })
 }
 
-fn project_schema(
-    schema: &LogicalSchema,
-    columns: &[ColumnId],
-    node_id: NodeId,
-) -> Result<LogicalSchema, NodeGraphCompileError> {
-    if columns.is_empty() {
-        return Err(invalid_config(
-            node_id,
-            "projection must contain at least one column",
-        ));
+fn product_rule(config: &ValidatedNodeConfig) -> Option<Rule> {
+    match config {
+        ValidatedNodeConfig::Rename { column, to } => Some(Rule::Rename {
+            column: *column,
+            to: to.clone(),
+        }),
+        ValidatedNodeConfig::Trim { column } => Some(Rule::Trim { column: *column }),
+        ValidatedNodeConfig::Cast {
+            column,
+            data_type,
+            on_failure,
+        } => Some(Rule::Cast {
+            column: *column,
+            data_type: data_type.clone(),
+            on_failure: match on_failure {
+                NodeCastFailurePolicy::Error => CastFailurePolicy::Error,
+                NodeCastFailurePolicy::SetNull => CastFailurePolicy::SetNull,
+            },
+        }),
+        ValidatedNodeConfig::ReplaceLiteral { column, from, to } => Some(Rule::ReplaceLiteral {
+            column: *column,
+            from: from.clone(),
+            to: to.clone(),
+        }),
+        ValidatedNodeConfig::FillNull { column, value } => Some(Rule::FillNull {
+            column: *column,
+            value: value.clone(),
+        }),
+        ValidatedNodeConfig::DropColumn { column } => Some(Rule::DropColumn { column: *column }),
+        ValidatedNodeConfig::DeriveColumn {
+            id,
+            name,
+            data_type,
+            nullable,
+            expression,
+        } => Some(Rule::DeriveColumn {
+            id: *id,
+            name: name.clone(),
+            data_type: data_type.clone(),
+            nullable: *nullable,
+            expression: expression.clone(),
+        }),
+        ValidatedNodeConfig::Select { .. } | ValidatedNodeConfig::Filter { .. } => None,
+        ValidatedNodeConfig::Source { .. } | ValidatedNodeConfig::Output { .. } => None,
     }
-    let mut seen = BTreeSet::new();
-    let mut fields = Vec::with_capacity(columns.len());
-    for column in columns {
-        if !seen.insert(*column) {
-            return Err(invalid_config(
-                node_id,
-                "projection contains duplicate columns",
-            ));
-        }
-        fields.push(
-            schema
-                .field(*column)
-                .cloned()
-                .ok_or_else(|| unknown_column(node_id))?,
-        );
-    }
-    rebuild_schema(schema, fields, node_id)
 }
 
 fn compile_transform(
@@ -577,518 +597,49 @@ fn compile_transform(
     config: &ValidatedNodeConfig,
     schema: &LogicalSchema,
 ) -> Result<(PlanNodeKind, LogicalSchema), NodeGraphCompileError> {
-    let (rule, next_schema) = match config {
+    if let Some(rule) = product_rule(config) {
+        let next_schema = semantics::rule_effect(schema, &rule)
+            .map_err(|error| semantic_error(error, node_id))?;
+        return Ok((PlanNodeKind::ApplyRules { rules: vec![rule] }, next_schema));
+    }
+    match config {
         ValidatedNodeConfig::Select { columns } => {
-            return Ok((
+            let next_schema = semantics::project_effect(schema, columns)
+                .map_err(|error| semantic_error(error, node_id))?;
+            Ok((
                 PlanNodeKind::Project {
                     columns: columns.clone(),
                 },
-                project_schema(schema, columns, node_id)?,
-            ));
+                next_schema,
+            ))
         }
         ValidatedNodeConfig::Filter { predicate } => {
-            let inferred = validate_and_infer_expr(predicate, schema, node_id)?;
-            if inferred != LogicalType::Boolean {
+            let analysis = semantics::analyze_expr(predicate, schema)
+                .map_err(|error| semantic_error(error, node_id))?;
+            if analysis.data_type != LogicalType::Boolean {
                 return Err(type_error(node_id, "filter predicate must be boolean"));
             }
-            return Ok((
+            Ok((
                 PlanNodeKind::Filter {
                     predicate: predicate.clone(),
                 },
                 schema.clone(),
-            ));
-        }
-        ValidatedNodeConfig::Rename { column, to } => {
-            let mut fields = schema.fields.clone();
-            fields
-                .iter_mut()
-                .find(|field| field.id == *column)
-                .ok_or_else(|| unknown_column(node_id))?
-                .name = to.clone();
-            (
-                Rule::Rename {
-                    column: *column,
-                    to: to.clone(),
-                },
-                rebuild_schema(schema, fields, node_id)?,
-            )
-        }
-        ValidatedNodeConfig::Trim { column } => {
-            let field = schema
-                .field(*column)
-                .ok_or_else(|| unknown_column(node_id))?;
-            if field.data_type != LogicalType::Utf8 {
-                return Err(type_error(node_id, "trim requires a utf8 column"));
-            }
-            (Rule::Trim { column: *column }, schema.clone())
-        }
-        ValidatedNodeConfig::Cast {
-            column,
-            data_type,
-            on_failure,
-        } => {
-            let field = schema
-                .field(*column)
-                .ok_or_else(|| unknown_column(node_id))?;
-            reject_paused_type(data_type, node_id)?;
-            reject_paused_cast(&field.data_type, data_type, node_id)?;
-            let mut fields = schema.fields.clone();
-            let output = fields
-                .iter_mut()
-                .find(|field| field.id == *column)
-                .ok_or_else(|| unknown_column(node_id))?;
-            output.data_type = data_type.clone();
-            if matches!(on_failure, NodeCastFailurePolicy::SetNull) {
-                output.nullable = true;
-            }
-            (
-                Rule::Cast {
-                    column: *column,
-                    data_type: data_type.clone(),
-                    on_failure: match on_failure {
-                        NodeCastFailurePolicy::Error => CastFailurePolicy::Error,
-                        NodeCastFailurePolicy::SetNull => CastFailurePolicy::SetNull,
-                    },
-                },
-                rebuild_schema(schema, fields, node_id)?,
-            )
-        }
-        ValidatedNodeConfig::ReplaceLiteral { column, from, to } => {
-            let field = schema
-                .field(*column)
-                .ok_or_else(|| unknown_column(node_id))?;
-            validate_literal_for_column(&field.data_type, from, node_id)?;
-            validate_literal_for_column(&field.data_type, to, node_id)?;
-            if field.data_type == LogicalType::Binary
-                && !matches!((from, to), (ScalarValue::Null, ScalarValue::Null))
-            {
-                return Err(type_error(
-                    node_id,
-                    "binary replace-literal only permits null-to-null",
-                ));
-            }
-            let next_schema = if matches!(to, ScalarValue::Null) {
-                let mut fields = schema.fields.clone();
-                fields
-                    .iter_mut()
-                    .find(|field| field.id == *column)
-                    .ok_or_else(|| unknown_column(node_id))?
-                    .nullable = true;
-                rebuild_schema(schema, fields, node_id)?
-            } else {
-                schema.clone()
-            };
-            (
-                Rule::ReplaceLiteral {
-                    column: *column,
-                    from: from.clone(),
-                    to: to.clone(),
-                },
-                next_schema,
-            )
-        }
-        ValidatedNodeConfig::FillNull { column, value } => {
-            let field = schema
-                .field(*column)
-                .ok_or_else(|| unknown_column(node_id))?;
-            if matches!(value, ScalarValue::Null) {
-                return Err(invalid_config(node_id, "fill-null value must not be null"));
-            }
-            if field.data_type == LogicalType::Binary {
-                return Err(type_error(node_id, "fill-null is not authorized on binary"));
-            }
-            validate_literal_for_column(&field.data_type, value, node_id)?;
-            let mut fields = schema.fields.clone();
-            fields
-                .iter_mut()
-                .find(|field| field.id == *column)
-                .ok_or_else(|| unknown_column(node_id))?
-                .nullable = false;
-            (
-                Rule::FillNull {
-                    column: *column,
-                    value: value.clone(),
-                },
-                rebuild_schema(schema, fields, node_id)?,
-            )
-        }
-        ValidatedNodeConfig::DropColumn { column } => {
-            if schema.fields.len() <= 1 {
-                return Err(invalid_config(
-                    node_id,
-                    "drop-column cannot remove the final field",
-                ));
-            }
-            if schema.field(*column).is_none() {
-                return Err(unknown_column(node_id));
-            }
-            let fields = schema
-                .fields
-                .iter()
-                .filter(|field| field.id != *column)
-                .cloned()
-                .collect();
-            (
-                Rule::DropColumn { column: *column },
-                rebuild_schema(schema, fields, node_id)?,
-            )
-        }
-        ValidatedNodeConfig::DeriveColumn {
-            id,
-            name,
-            data_type,
-            nullable,
-            expression,
-        } => {
-            let inferred = validate_and_infer_expr(expression, schema, node_id)?;
-            reject_paused_type(data_type, node_id)?;
-            if inferred != LogicalType::Null && inferred != *data_type {
-                return Err(type_error(
-                    node_id,
-                    "derived column type does not match the expression",
-                ));
-            }
-            if schema.field(*id).is_some() || schema.fields.iter().any(|field| field.name == *name)
-            {
-                return Err(invalid_config(
-                    node_id,
-                    "derived column id or name is not unique",
-                ));
-            }
-            reject_paused_casts_in_expr(expression, schema, node_id)?;
-            if !*nullable && infer_expr_nullability(expression, schema, node_id)? {
-                return Err(type_error(
-                    node_id,
-                    "derived column nullability is narrower than the expression",
-                ));
-            }
-            let mut fields = schema.fields.clone();
-            fields.push(
-                LogicalField::new(*id, name.clone(), data_type.clone(), *nullable)
-                    .map_err(|_| invalid_config(node_id, "derived field is invalid"))?,
-            );
-            (
-                Rule::DeriveColumn {
-                    id: *id,
-                    name: name.clone(),
-                    data_type: data_type.clone(),
-                    nullable: *nullable,
-                    expression: expression.clone(),
-                },
-                rebuild_schema(schema, fields, node_id)?,
-            )
+            ))
         }
         ValidatedNodeConfig::Source { .. } | ValidatedNodeConfig::Output { .. } => {
-            return Err(NodeGraphCompileError::new(
+            Err(NodeGraphCompileError::new(
                 NodeGraphErrorCode::InvalidTopology,
                 Some(node_id),
                 "source and output configs are not transform nodes",
-            ));
+            ))
         }
-    };
-    Ok((PlanNodeKind::ApplyRules { rules: vec![rule] }, next_schema))
-}
-
-fn rebuild_schema(
-    source: &LogicalSchema,
-    fields: Vec<LogicalField>,
-    node_id: NodeId,
-) -> Result<LogicalSchema, NodeGraphCompileError> {
-    LogicalSchema::from_parts(source.version, fields, source.metadata.clone())
-        .map_err(|_| invalid_config(node_id, "node produced an invalid logical schema"))
-}
-
-fn validate_and_infer_expr(
-    expr: &Expr,
-    schema: &LogicalSchema,
-    node_id: NodeId,
-) -> Result<LogicalType, NodeGraphCompileError> {
-    expr.validate_shape()
-        .map_err(|_| invalid_config(node_id, "expression shape is invalid"))?;
-    expression_shape(expr).map_err(|_| {
-        NodeGraphCompileError::new(
-            NodeGraphErrorCode::LimitNestingDepth,
-            Some(node_id),
-            "expression exceeds the contract limit",
-        )
-    })?;
-    infer_expr_type(expr, schema, node_id)
-}
-
-fn infer_expr_type(
-    expr: &Expr,
-    schema: &LogicalSchema,
-    node_id: NodeId,
-) -> Result<LogicalType, NodeGraphCompileError> {
-    match expr {
-        Expr::Column(id) => {
-            let field = schema.field(*id).ok_or_else(|| unknown_column(node_id))?;
-            reject_paused_type(&field.data_type, node_id)?;
-            Ok(field.data_type.clone())
-        }
-        Expr::Literal(ScalarValue::Boolean(_)) => Ok(LogicalType::Boolean),
-        Expr::Literal(ScalarValue::Int64(_)) => Ok(LogicalType::Int64),
-        Expr::Literal(ScalarValue::UInt64(_)) => Ok(LogicalType::UInt64),
-        Expr::Literal(ScalarValue::Float64(_)) => Ok(LogicalType::Float64),
-        Expr::Literal(ScalarValue::Utf8(_)) => Ok(LogicalType::Utf8),
-        Expr::Literal(ScalarValue::Null) => Ok(LogicalType::Null),
-        Expr::Unary {
-            operator: UnaryOperator::Not,
-            expression,
-        } => {
-            if infer_expr_type(expression, schema, node_id)? != LogicalType::Boolean {
-                return Err(type_error(node_id, "not requires a boolean expression"));
-            }
-            Ok(LogicalType::Boolean)
-        }
-        Expr::Unary {
-            operator: UnaryOperator::Negate,
-            ..
-        } => Err(type_error(node_id, "checked arithmetic is not authorized")),
-        Expr::IsNull { expression, .. } => {
-            let _ = infer_expr_type(expression, schema, node_id)?;
-            Ok(LogicalType::Boolean)
-        }
-        Expr::Cast {
-            expression,
-            data_type,
-        } => {
-            let from = infer_expr_type(expression, schema, node_id)?;
-            reject_paused_type(data_type, node_id)?;
-            reject_paused_cast(&from, data_type, node_id)?;
-            Ok(data_type.clone())
-        }
-        Expr::Binary {
-            left,
-            operator,
-            right,
-        } => {
-            let left_type = infer_expr_type(left, schema, node_id)?;
-            let right_type = infer_expr_type(right, schema, node_id)?;
-            match operator {
-                BinaryOperator::And | BinaryOperator::Or
-                    if left_type == LogicalType::Boolean && right_type == LogicalType::Boolean =>
-                {
-                    Ok(LogicalType::Boolean)
-                }
-                BinaryOperator::And | BinaryOperator::Or => {
-                    Err(type_error(node_id, "logical operands must be boolean"))
-                }
-                BinaryOperator::Contains => Err(type_error(node_id, "contains is not authorized")),
-                BinaryOperator::Add
-                | BinaryOperator::Subtract
-                | BinaryOperator::Multiply
-                | BinaryOperator::Divide
-                | BinaryOperator::Modulo => {
-                    Err(type_error(node_id, "checked arithmetic is not authorized"))
-                }
-                BinaryOperator::Equal | BinaryOperator::NotEqual => {
-                    comparable_pair(&left_type, &right_type, node_id)?;
-                    Ok(LogicalType::Boolean)
-                }
-                BinaryOperator::LessThan
-                | BinaryOperator::LessThanOrEqual
-                | BinaryOperator::GreaterThan
-                | BinaryOperator::GreaterThanOrEqual => {
-                    ordered_pair(&left_type, &right_type, node_id)?;
-                    Ok(LogicalType::Boolean)
-                }
-            }
-        }
-        Expr::Coalesce { expressions } => {
-            let first = expressions
-                .first()
-                .ok_or_else(|| invalid_config(node_id, "coalesce expression is empty"))?;
-            let mut joined = infer_expr_type(first, schema, node_id)?;
-            for expression in expressions.iter().skip(1) {
-                let next = infer_expr_type(expression, schema, node_id)?;
-                joined = joined.least_upper_bound(&next).map_err(|_| {
-                    NodeGraphCompileError::new(
-                        NodeGraphErrorCode::IncompatibleType,
-                        Some(node_id),
-                        "coalesce arms are not type-compatible",
-                    )
-                })?;
-            }
-            reject_paused_type(&joined, node_id)?;
-            Ok(joined)
-        }
+        // Every other validated config produces a rule and was handled above.
+        _ => unreachable!("product rule covered all rule-producing configs"),
     }
 }
 
-fn infer_expr_nullability(
-    expr: &Expr,
-    schema: &LogicalSchema,
-    node_id: NodeId,
-) -> Result<bool, NodeGraphCompileError> {
-    Ok(match expr {
-        Expr::Column(id) => {
-            schema
-                .field(*id)
-                .ok_or_else(|| unknown_column(node_id))?
-                .nullable
-        }
-        Expr::Literal(ScalarValue::Null) => true,
-        Expr::Literal(_) => false,
-        Expr::Unary { expression, .. } | Expr::Cast { expression, .. } => {
-            infer_expr_nullability(expression, schema, node_id)?
-        }
-        Expr::Binary { left, right, .. } => {
-            infer_expr_nullability(left, schema, node_id)?
-                || infer_expr_nullability(right, schema, node_id)?
-        }
-        Expr::IsNull { .. } => false,
-        Expr::Coalesce { expressions } => {
-            let mut nullable = true;
-            for expression in expressions {
-                nullable &= infer_expr_nullability(expression, schema, node_id)?;
-            }
-            nullable
-        }
-    })
-}
-
-fn reject_paused_casts_in_expr(
-    expr: &Expr,
-    schema: &LogicalSchema,
-    node_id: NodeId,
-) -> Result<(), NodeGraphCompileError> {
-    let mut pending = vec![expr];
-    while let Some(current) = pending.pop() {
-        match current {
-            Expr::Cast {
-                expression,
-                data_type,
-            } => {
-                let from = infer_expr_type(expression, schema, node_id)?;
-                reject_paused_cast(&from, data_type, node_id)?;
-                pending.push(expression);
-            }
-            Expr::Unary { expression, .. } | Expr::IsNull { expression, .. } => {
-                pending.push(expression)
-            }
-            Expr::Binary { left, right, .. } => {
-                pending.push(left);
-                pending.push(right);
-            }
-            Expr::Coalesce { expressions } => pending.extend(expressions),
-            Expr::Column(_) | Expr::Literal(_) => {}
-        }
-    }
-    Ok(())
-}
-
-fn comparable_pair(
-    left: &LogicalType,
-    right: &LogicalType,
-    node_id: NodeId,
-) -> Result<(), NodeGraphCompileError> {
-    left.least_upper_bound(right)
-        .map(|_| ())
-        .map_err(|_| type_error(node_id, "comparison operands are not comparable"))
-}
-
-fn ordered_pair(
-    left: &LogicalType,
-    right: &LogicalType,
-    node_id: NodeId,
-) -> Result<(), NodeGraphCompileError> {
-    let joined = left
-        .least_upper_bound(right)
-        .map_err(|_| type_error(node_id, "ordered comparison operands are not compatible"))?;
-    match joined {
-        LogicalType::Int8
-        | LogicalType::Int16
-        | LogicalType::Int32
-        | LogicalType::Int64
-        | LogicalType::UInt8
-        | LogicalType::UInt16
-        | LogicalType::UInt32
-        | LogicalType::UInt64
-        | LogicalType::Float32
-        | LogicalType::Float64
-        | LogicalType::Date32
-        | LogicalType::Timestamp { .. } => Ok(()),
-        _ => Err(type_error(
-            node_id,
-            "ordered comparison requires numeric or date values",
-        )),
-    }
-}
-
-fn reject_paused_type(
-    data_type: &LogicalType,
-    node_id: NodeId,
-) -> Result<(), NodeGraphCompileError> {
-    match data_type {
-        LogicalType::List(_) | LogicalType::Struct(_) => {
-            Err(type_error(node_id, "list and struct execution is paused"))
-        }
-        LogicalType::Timestamp {
-            unit: TimeUnit::Second,
-            ..
-        } => Err(type_error(node_id, "timestamp second unit is paused")),
-        _ => data_type
-            .validate()
-            .map_err(|_| type_error(node_id, "logical type is invalid")),
-    }
-}
-
-fn reject_paused_cast(
-    from: &LogicalType,
-    to: &LogicalType,
-    node_id: NodeId,
-) -> Result<(), NodeGraphCompileError> {
-    if matches!(from, LogicalType::Date32 | LogicalType::Timestamp { .. })
-        && matches!(to, LogicalType::Utf8)
-    {
-        return Err(type_error(
-            node_id,
-            "date or timestamp to utf8 cast is paused",
-        ));
-    }
-    if (matches!(to, LogicalType::Binary) && !matches!(from, LogicalType::Binary))
-        || (matches!(from, LogicalType::Binary) && !matches!(to, LogicalType::Binary))
-    {
-        return Err(type_error(
-            node_id,
-            "cast to or from binary is not authorized",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_literal_for_column(
-    column_type: &LogicalType,
-    value: &ScalarValue,
-    node_id: NodeId,
-) -> Result<(), NodeGraphCompileError> {
-    let compatible = matches!(
-        (column_type, value),
-        (_, ScalarValue::Null)
-            | (LogicalType::Boolean, ScalarValue::Boolean(_))
-            | (LogicalType::Int64, ScalarValue::Int64(_))
-            | (LogicalType::UInt64, ScalarValue::UInt64(_))
-            | (LogicalType::Float64, ScalarValue::Float64(_))
-            | (LogicalType::Utf8, ScalarValue::Utf8(_))
-            | (
-                LogicalType::Int8 | LogicalType::Int16 | LogicalType::Int32,
-                ScalarValue::Int64(_)
-            )
-            | (
-                LogicalType::UInt8 | LogicalType::UInt16 | LogicalType::UInt32,
-                ScalarValue::UInt64(_),
-            )
-            | (LogicalType::Float32, ScalarValue::Float64(_))
-    );
-    if compatible {
-        Ok(())
-    } else {
-        Err(type_error(
-            node_id,
-            "literal is not type-compatible with the column",
-        ))
-    }
+fn semantic_error(error: SemanticError, node_id: NodeId) -> NodeGraphCompileError {
+    NodeGraphCompileError::new(error.code(), Some(node_id), error.compile_message())
 }
 
 fn map_graph_error(error: NodeGraphError) -> NodeGraphCompileError {
@@ -1123,18 +674,6 @@ fn plan_error(_: PlanError) -> NodeGraphCompileError {
     )
 }
 
-fn unknown_column(node_id: NodeId) -> NodeGraphCompileError {
-    NodeGraphCompileError::new(
-        NodeGraphErrorCode::UnknownColumn,
-        Some(node_id),
-        "column is absent from the working schema",
-    )
-}
-
-fn invalid_config(node_id: NodeId, message: &'static str) -> NodeGraphCompileError {
-    NodeGraphCompileError::new(NodeGraphErrorCode::InvalidConfig, Some(node_id), message)
-}
-
 fn invalid_config_any(message: &'static str) -> NodeGraphCompileError {
     NodeGraphCompileError::new(NodeGraphErrorCode::InvalidConfig, None, message)
 }
@@ -1166,7 +705,9 @@ mod tests {
 
     use serde::Serialize;
     use serde_json::{json, Value};
-    use stillflow_core::{LogicalField, NodeConfig, NodeEdge, NodePort, PortId};
+    use stillflow_core::{
+        BinaryOperator, LogicalField, NodeConfig, NodeEdge, NodePort, PortId, ScalarValue,
+    };
 
     use super::*;
 
