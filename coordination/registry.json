@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 390,
+  "revision": 391,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1147,7 +1147,7 @@
       "id": "NX-N2",
       "title": "Implement bounded composite nodes and controlled declarative packages",
       "risk_level": "L3",
-      "status": "running",
+      "status": "done",
       "mode": "write",
       "owner": "agent-nx-n2-341",
       "target_issue": 341,
@@ -1167,36 +1167,17 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": "2026-09-12T13:23:09Z",
+      "lease_expires_at": null,
       "registered_at": "2026-09-12T09:16:27Z",
-      "updated_at": "2026-09-12T11:53:09Z",
+      "updated_at": "2026-09-12T11:53:25Z",
       "registered_by": "agent-nx-n2-341",
-      "started_at": "2026-09-12T11:53:09Z"
+      "started_at": "2026-09-12T11:53:09Z",
+      "completed_at": "2026-09-12T11:53:25Z",
+      "result_head": "0a29d83f495e9f5933b68c9fcf80e47b63fef03e",
+      "ci_url": "34691088359"
     }
   ],
-  "locks": {
-    "branch:agent/issue-341-nx-n2": {
-      "task_id": "NX-N2",
-      "owner": "agent-nx-n2-341",
-      "expected_head": null,
-      "acquired_at": "2026-09-12T11:53:09Z",
-      "lease_expires_at": "2026-09-12T13:23:09Z"
-    },
-    "core:composite-definitions": {
-      "task_id": "NX-N2",
-      "owner": "agent-nx-n2-341",
-      "expected_head": null,
-      "acquired_at": "2026-09-12T11:53:09Z",
-      "lease_expires_at": "2026-09-12T13:23:09Z"
-    },
-    "plan:composite-expansion": {
-      "task_id": "NX-N2",
-      "owner": "agent-nx-n2-341",
-      "expected_head": null,
-      "acquired_at": "2026-09-12T11:53:09Z",
-      "lease_expires_at": "2026-09-12T13:23:09Z"
-    }
-  },
-  "updated_at": "2026-09-12T11:53:09Z",
+  "locks": {},
+  "updated_at": "2026-09-12T11:53:25Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
