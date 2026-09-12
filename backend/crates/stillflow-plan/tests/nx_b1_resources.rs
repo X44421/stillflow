@@ -277,18 +277,59 @@ fn measure(name: &str, graph: &NodeGraph, schema: &LogicalSchema) -> Value {
 #[test]
 #[ignore = "measurement run; evidence is committed under docs/evidence/nodes/"]
 fn measure_baseline() {
+    // The 4096-field wide shape is now rejected by the frozen snapshot
+    // accounting before allocation (see boundary test below); its baseline
+    // numbers live in docs/evidence/nodes/nx-b1-compile-resources.md.
     let (typical, small) = typical_chain();
-    let (wide, wide_schema) = wide_chain(4096);
     let (wide_small, wide_small_schema) = wide_chain(64);
     let (deep, deep_schema) = deep_expression();
 
     let results = vec![
         measure("typical-chain-6n-3f", &typical, &small),
         measure("wide-chain-64n-64f", &wide_small, &wide_small_schema),
-        measure("wide-chain-64n-4096f", &wide, &wide_schema),
         measure("deep-expression-64", &deep, &deep_schema),
     ];
     for result in &results {
         println!("{}", serde_json::to_string_pretty(result).expect("json"));
     }
+}
+
+/// The frozen accounting rejects the measured amplification worst case
+/// (64 nodes × 4096 fields ≈ 32 MB of estimated snapshot bytes against the
+/// 2 MiB budget) with the existing `NG_LIMIT_COMPILE_WORK` class, before
+/// any snapshot is built, and the rejection is deterministic.
+#[test]
+fn schema_amplification_over_the_snapshot_budget_is_rejected_up_front() {
+    let (wide, wide_schema) = wide_chain(4096);
+    let source = AuthorizedSourceContext::new(uuid(700), wide_schema).expect("source");
+    let error = NodeGraphCompiler::default()
+        .compile(&wide, &source, CompileTarget::Execution)
+        .expect_err("amplifying graph rejected");
+    assert_eq!(
+        error.code().as_str(),
+        "NG_LIMIT_COMPILE_WORK",
+        "the frozen failure class is preserved"
+    );
+    // Deterministic across repeated compilation.
+    for _ in 0..3 {
+        let again = NodeGraphCompiler::default()
+            .compile(&wide, &source, CompileTarget::Execution)
+            .expect_err("amplifying graph rejected");
+        assert_eq!(again.code().as_str(), "NG_LIMIT_COMPILE_WORK");
+    }
+}
+
+/// Shapes under the budget keep compiling and stay byte-identical to the
+/// pre-accounting baseline (the v1 corpus covers the small shapes).
+#[test]
+fn shapes_under_the_snapshot_budget_are_unchanged() {
+    let (wide_small, wide_small_schema) = wide_chain(64);
+    let source = AuthorizedSourceContext::new(uuid(700), wide_small_schema).expect("source");
+    let compiled = NodeGraphCompiler::default()
+        .compile(&wide_small, &source, CompileTarget::Execution)
+        .expect("64-field chain compiles");
+    let fingerprint = compiled.fingerprint().expect("fingerprint").to_string();
+    assert!(!fingerprint.is_empty());
+    // 64 nodes × 64 fields × 128 = 512 KiB, under the 2 MiB budget.
+    assert_eq!(compiled.node_schemas.len(), 64);
 }

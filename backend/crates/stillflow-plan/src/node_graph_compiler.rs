@@ -21,6 +21,16 @@ pub const MAX_DIAGNOSTICS: usize = 64;
 pub const MAX_DIAGNOSTIC_BYTES: usize = 1024;
 pub const MAX_COMPILE_WORK: usize = 2_000_000;
 
+/// Frozen schema-snapshot accounting (NX-C0 §9, measured in
+/// `docs/evidence/nodes/nx-b1-compile-resources.md`): the estimated byte
+/// cost of one schema-field instance in the per-node snapshots, and the
+/// total snapshot budget. The estimate is charged in `check_compile_work`
+/// before the node loop builds any snapshot, so an amplifying graph is
+/// rejected with the existing `NG_LIMIT_COMPILE_WORK` class before the
+/// allocation it would bound.
+pub const SCHEMA_SNAPSHOT_FIELD_COST_BYTES: usize = 128;
+pub const MAX_SCHEMA_SNAPSHOT_ESTIMATE_BYTES: usize = 2 * 1024 * 1024;
+
 /// Authorized source identity and schema. No connector or credential crosses
 /// the graph compiler boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -502,6 +512,38 @@ fn check_compile_work(
         return Err(limit_error());
     }
     Ok(())
+}
+
+fn estimate_schema_snapshot_bytes(
+    graph: &NodeGraph,
+    configs: &BTreeMap<NodeId, ValidatedNodeConfig>,
+    schema: &LogicalSchema,
+) -> Result<usize, NodeGraphCompileError> {
+    let source_width = match configs.get(&graph.source_node_id) {
+        Some(ValidatedNodeConfig::Source {
+            projection: Some(columns),
+            ..
+        }) => columns.len(),
+        _ => schema.fields.len(),
+    };
+    let mut max_width = source_width;
+    let mut derive_count = 0_usize;
+    for config in configs.values() {
+        match config {
+            ValidatedNodeConfig::Select { columns } => {
+                max_width = max_width.max(columns.len());
+            }
+            ValidatedNodeConfig::DeriveColumn { .. } => derive_count += 1,
+            _ => {}
+        }
+    }
+    let worst_width = max_width.saturating_add(derive_count);
+    let field_instances = worst_width
+        .checked_mul(graph.nodes.len())
+        .ok_or_else(limit_error)?;
+    field_instances
+        .checked_mul(SCHEMA_SNAPSHOT_FIELD_COST_BYTES)
+        .ok_or_else(limit_error)
 }
 
 fn expression_shape(expr: &Expr) -> Result<(usize, usize), NodeGraphCompileError> {
