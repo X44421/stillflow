@@ -291,7 +291,7 @@ impl NodeGraphCompiler {
             }
         }
 
-        let node_plan_ids: BTreeMap<_, _> = path
+        let mut node_plan_ids: BTreeMap<_, _> = path
             .iter()
             .copied()
             .map(|node_id| (node_id, PlanNodeId::from_uuid(node_id.as_uuid())))
@@ -311,6 +311,40 @@ impl NodeGraphCompiler {
                     "validated node config is absent",
                 )
             })?;
+            if let ValidatedNodeConfig::Composite { steps } = config {
+                // Composite expansion (NX-C1 §3.2): each step lowers through
+                // the same per-config path, chained, under the derived
+                // internal ids; the product node previews its output
+                // boundary (the last internal node).
+                let mut previous_step = previous;
+                let mut last_internal = plan_id;
+                for (ordinal, step) in steps.iter().enumerate() {
+                    let internal = internal_plan_node_id(plan_id, ordinal as u16);
+                    if node_plan_ids.values().any(|id| *id == internal) {
+                        return Err(NodeGraphCompileError::new(
+                            NodeGraphErrorCode::InvalidConfig,
+                            Some(*node_id),
+                            "internal plan node id collides with a product node id",
+                        ));
+                    }
+                    let (kind, next_schema) = compile_transform(*node_id, step, &working_schema)?;
+                    plan_nodes.insert(
+                        internal,
+                        PlanNode::new(kind, previous_step.into_iter().collect()),
+                    );
+                    node_schemas.insert(
+                        stillflow_core::NodeId::from_uuid(internal.as_uuid()),
+                        next_schema.clone(),
+                    );
+                    working_schema = next_schema;
+                    previous_step = Some(internal);
+                    last_internal = internal;
+                }
+                node_plan_ids.insert(*node_id, last_internal);
+                node_schemas.insert(*node_id, working_schema.clone());
+                previous = Some(last_internal);
+                continue;
+            }
             let (kind, next_schema) = if *node_id == graph.source_node_id {
                 (
                     PlanNodeKind::Scan {
@@ -392,6 +426,16 @@ pub fn validate_node_graph(
             "declared source node did not resolve to a source config",
         )),
     }
+}
+
+/// The frozen internal plan-node identity (NX-C1 §4.2): the product node's
+/// UUID with its low 16 bits replaced by `0x8000 | ordinal`. Pure function
+/// of the product id and the step ordinal; collisions with product ids are
+/// detected at compile time and fail closed.
+pub fn internal_plan_node_id(product: PlanNodeId, ordinal: u16) -> PlanNodeId {
+    let bits =
+        (product.as_uuid().as_u128() & !0x0000_0000_0000_FFFF) | 0x8000 | u128::from(ordinal);
+    PlanNodeId::from_uuid(Uuid::from_u128(bits))
 }
 
 pub fn compile_node_graph(
@@ -491,6 +535,26 @@ fn check_compile_work(
                 expression: predicate,
                 ..
             } => expression_shape(predicate)?.0,
+            // The expanded form is what the accounting bounds (NX-C1 §8):
+            // each composite step counts as a node's worth of work.
+            ValidatedNodeConfig::Composite { steps } => {
+                let step_expressions = steps
+                    .iter()
+                    .map(|step| match step {
+                        ValidatedNodeConfig::Filter { predicate }
+                        | ValidatedNodeConfig::DeriveColumn {
+                            expression: predicate,
+                            ..
+                        } => expression_shape(predicate).map(|(nodes, _)| nodes),
+                        _ => Ok(0),
+                    })
+                    .sum::<Result<usize, NodeGraphCompileError>>()?;
+                let step_nodes = steps.len();
+                return total
+                    .checked_add(step_nodes)
+                    .and_then(|value| value.checked_add(step_expressions))
+                    .ok_or_else(limit_error);
+            }
             _ => 0,
         };
         total.checked_add(count).ok_or_else(limit_error)
@@ -753,6 +817,7 @@ fn product_rule(config: &ValidatedNodeConfig) -> Option<Rule> {
         }),
         ValidatedNodeConfig::Select { .. } | ValidatedNodeConfig::Filter { .. } => None,
         ValidatedNodeConfig::Source { .. } | ValidatedNodeConfig::Output { .. } => None,
+        ValidatedNodeConfig::Composite { .. } => None,
     }
 }
 
@@ -797,7 +862,12 @@ fn compile_transform(
                 "source and output configs are not transform nodes",
             ))
         }
-        // Every other validated config produces a rule and was handled above.
+        ValidatedNodeConfig::Composite { .. } => Err(NodeGraphCompileError::new(
+            NodeGraphErrorCode::InvalidTopology,
+            Some(node_id),
+            "composite nodes are expanded by the graph traversal",
+        )),
+        // Rule-producing configs returned through product_rule above.
         _ => unreachable!("product rule covered all rule-producing configs"),
     }
 }

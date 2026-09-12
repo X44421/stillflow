@@ -1365,7 +1365,7 @@ impl ApiService {
             request.meta.request_id,
             NodeCatalogView {
                 compiler_version: NODE_GRAPH_COMPILER_VERSION.to_owned(),
-                nodes: stillflow_core::NodeRegistry::new().catalog(),
+                nodes: stillflow_core::NodeRegistry::deployed().catalog(),
             },
         ))
     }
@@ -2441,8 +2441,12 @@ impl ApiService {
             .ok_or_else(|| ApiError::conflict("connector registry is not configured"))?;
         let _ = &registry;
         // Stage 4: pure-graph validation before any source inspection.
-        stillflow_plan::validate_node_graph(&graph, &stillflow_core::NodeRegistry::new(), asset_id)
-            .map_err(node_graph_compile_error)?;
+        stillflow_plan::validate_node_graph(
+            &graph,
+            &stillflow_core::NodeRegistry::deployed(),
+            asset_id,
+        )
+        .map_err(node_graph_compile_error)?;
         let source = AuthorizedSourceContext::new(
             asset_id,
             self.inspect_node_graph_source(registry, &connection, &asset, context)
@@ -2453,7 +2457,7 @@ impl ApiService {
             NodeGraphCompileTarget::Execution => CompileTarget::Execution,
             NodeGraphCompileTarget::Preview { node_id } => CompileTarget::Preview(node_id),
         };
-        let compiled = NodeGraphCompiler::default()
+        let compiled = NodeGraphCompiler::new(stillflow_core::NodeRegistry::deployed())
             .compile(&graph, &source, target)
             .map_err(node_graph_compile_error)?;
         Ok(ApiResponse::new(
@@ -2494,15 +2498,19 @@ impl ApiService {
             .as_ref()
             .ok_or_else(|| ApiError::conflict("connector registry is not configured"))?;
         // Stage 4: pure-graph validation before any source inspection.
-        stillflow_plan::validate_node_graph(&graph, &stillflow_core::NodeRegistry::new(), asset_id)
-            .map_err(node_graph_compile_error)?;
+        stillflow_plan::validate_node_graph(
+            &graph,
+            &stillflow_core::NodeRegistry::deployed(),
+            asset_id,
+        )
+        .map_err(node_graph_compile_error)?;
         let source = AuthorizedSourceContext::new(
             asset_id,
             self.inspect_node_graph_source(registry, &connection, &asset, context.clone())
                 .await?,
         )
         .map_err(node_graph_compile_error)?;
-        let compiled = NodeGraphCompiler::default()
+        let compiled = NodeGraphCompiler::new(stillflow_core::NodeRegistry::deployed())
             .compile(&graph, &source, CompileTarget::Preview(target_node_id))
             .map_err(node_graph_compile_error)?;
         let plan_node_id = compiled
