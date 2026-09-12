@@ -243,6 +243,7 @@ fn compile_request(
             asset_id: fixture.asset_id,
             target: NodeGraphCompileTarget::Execution,
             timeout_seconds,
+            schema_detail: Default::default(),
         },
     }
 }

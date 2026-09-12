@@ -1072,6 +1072,18 @@ pub enum NodeGraphCompileTarget {
     Preview { node_id: stillflow_core::NodeId },
 }
 
+/// Response schema detail for the node-graph compile view (NX-C0 §9.6).
+/// `Full` (the default) is today's response, byte for byte. `Compact`
+/// deduplicates identical per-node schemas behind digests so repeated wide
+/// schemas cost one copy plus references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeGraphSchemaDetail {
+    #[default]
+    Full,
+    Compact,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeGraphCompileRequest {
@@ -1080,6 +1092,8 @@ pub struct NodeGraphCompileRequest {
     pub asset_id: Uuid,
     pub target: NodeGraphCompileTarget,
     pub timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub schema_detail: NodeGraphSchemaDetail,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1118,6 +1132,13 @@ pub struct NodeGraphDiagnosticView {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeSchemaRef {
+    pub field_count: usize,
+    pub schema_digest: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeGraphCompileView {
@@ -1129,6 +1150,14 @@ pub struct NodeGraphCompileView {
     pub node_plan_ids: BTreeMap<stillflow_core::NodeId, PlanNodeId>,
     pub node_schemas: BTreeMap<stillflow_core::NodeId, LogicalSchema>,
     pub diagnostics: Vec<NodeGraphDiagnosticView>,
+    /// Compact mode only (NX-C0 §9.6): per-node schema references; omitted
+    /// in `Full` mode, where `nodeSchemas` carries every schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_schema_refs: Option<BTreeMap<stillflow_core::NodeId, NodeSchemaRef>>,
+    /// Compact mode only: the unique schemas behind the references, keyed by
+    /// the hex SHA-256 of each schema's canonical JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deduplicated_schemas: Option<BTreeMap<String, LogicalSchema>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2397,6 +2426,7 @@ impl ApiService {
             asset_id,
             target,
             timeout_seconds,
+            schema_detail,
         } = request.body;
         // One request context, created up front (§8.2): the timeout law
         // rejects before stages 3-5 run, so boundary rejections perform no
@@ -2428,7 +2458,7 @@ impl ApiService {
             .map_err(node_graph_compile_error)?;
         Ok(ApiResponse::new(
             request_id,
-            node_graph_compile_view(compiled)?,
+            node_graph_compile_view(compiled, schema_detail)?,
         ))
     }
 
@@ -4129,11 +4159,34 @@ fn digest_hex(bytes: &[u8; 32]) -> String {
 
 fn node_graph_compile_view(
     compiled: stillflow_plan::CompiledNodeGraph,
+    schema_detail: NodeGraphSchemaDetail,
 ) -> ApiResult<NodeGraphCompileView> {
     let canonical = compiled
         .canonical_bytes()
         .map_err(|_| ApiError::internal())?;
     let fingerprint = compiled.fingerprint().map_err(|_| ApiError::internal())?;
+    let (node_schemas, node_schema_refs, deduplicated_schemas) = match schema_detail {
+        NodeGraphSchemaDetail::Full => (compiled.node_schemas, None, None),
+        NodeGraphSchemaDetail::Compact => {
+            // Identical schemas collapse behind their digest: one copy plus
+            // per-node references (NX-C0 §9.6).
+            let mut unique: BTreeMap<String, LogicalSchema> = BTreeMap::new();
+            let mut refs = BTreeMap::new();
+            for (node_id, schema) in compiled.node_schemas {
+                let encoded = serde_json::to_vec(&schema).map_err(|_| ApiError::internal())?;
+                let digest = digest_hex(&sha256(&encoded));
+                refs.insert(
+                    node_id,
+                    NodeSchemaRef {
+                        field_count: schema.fields.len(),
+                        schema_digest: digest.clone(),
+                    },
+                );
+                unique.entry(digest).or_insert(schema);
+            }
+            (BTreeMap::new(), Some(refs), Some(unique))
+        }
+    };
     Ok(NodeGraphCompileView {
         compiler_version: NODE_GRAPH_COMPILER_VERSION.to_owned(),
         logical_plan: compiled.plan,
@@ -4141,12 +4194,14 @@ fn node_graph_compile_view(
         plan_fingerprint: fingerprint.to_string(),
         output_schema: compiled.output_schema,
         node_plan_ids: compiled.node_plan_ids,
-        node_schemas: compiled.node_schemas,
+        node_schemas,
         diagnostics: compiled
             .diagnostics
             .into_iter()
             .map(node_graph_diagnostic_view)
             .collect(),
+        node_schema_refs,
+        deduplicated_schemas,
     })
 }
 
