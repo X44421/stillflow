@@ -117,9 +117,9 @@ pub fn reject_duplicate_keys(bytes: &[u8]) -> Result<(), ApiError> {
 #[derive(Debug)]
 enum StrictJson {
     Null,
-    Bool(bool),
-    Number(serde_json::Number),
-    String(String),
+    Bool,
+    Number,
+    String,
     Array(Vec<StrictJson>),
     Object(Vec<(String, StrictJson)>),
 }
@@ -142,30 +142,24 @@ impl<'de> serde::de::Visitor<'de> for StrictJsonVisitor {
         formatter.write_str("any valid JSON value")
     }
 
-    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
-        Ok(StrictJson::Bool(value))
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(StrictJson::Bool)
     }
 
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
-        Ok(StrictJson::Number(value.into()))
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(StrictJson::Number)
     }
 
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-        Ok(StrictJson::Number(value.into()))
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(StrictJson::Number)
     }
 
-    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(StrictJson::Number(
-            serde_json::Number::from_f64(value)
-                .ok_or_else(|| serde::de::Error::custom("non-finite number"))?,
-        ))
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
+        Ok(StrictJson::Number)
     }
 
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
-        Ok(StrictJson::String(value.to_owned()))
+    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(StrictJson::String)
     }
 
     fn visit_unit<E>(self) -> Result<Self::Value, E> {
