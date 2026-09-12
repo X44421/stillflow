@@ -114,14 +114,11 @@ pub fn reject_duplicate_keys(bytes: &[u8]) -> Result<(), ApiError> {
         .map_err(|_| ApiError::invalid("request body contains duplicate object keys"))
 }
 
+/// A zero-storage marker: the visitor walks the whole JSON tree only to
+/// detect duplicate object keys, storing nothing.
 #[derive(Debug)]
 enum StrictJson {
-    Null,
-    Bool,
-    Number,
-    String,
-    Array(Vec<StrictJson>),
-    Object(Vec<(String, StrictJson)>),
+    Value,
 }
 
 impl<'de> Deserialize<'de> for StrictJson {
@@ -143,31 +140,31 @@ impl<'de> serde::de::Visitor<'de> for StrictJsonVisitor {
     }
 
     fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
-        Ok(StrictJson::Bool)
+        Ok(StrictJson::Value)
     }
 
     fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
-        Ok(StrictJson::Number)
+        Ok(StrictJson::Value)
     }
 
     fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
-        Ok(StrictJson::Number)
+        Ok(StrictJson::Value)
     }
 
     fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
-        Ok(StrictJson::Number)
+        Ok(StrictJson::Value)
     }
 
     fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
-        Ok(StrictJson::String)
+        Ok(StrictJson::Value)
     }
 
     fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(StrictJson::Null)
+        Ok(StrictJson::Value)
     }
 
     fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(StrictJson::Null)
+        Ok(StrictJson::Value)
     }
 
     fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -181,28 +178,25 @@ impl<'de> serde::de::Visitor<'de> for StrictJsonVisitor {
     where
         A: serde::de::SeqAccess<'de>,
     {
-        let mut items = Vec::new();
-        while let Some(item) = access.next_element::<StrictJson>()? {
-            items.push(item);
-        }
-        Ok(StrictJson::Array(items))
+        while let Some(StrictJson::Value) = access.next_element::<StrictJson>()? {}
+        Ok(StrictJson::Value)
     }
 
     fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut entries: Vec<(String, StrictJson)> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
         while let Some(key) = access.next_key::<String>()? {
-            if entries.iter().any(|(existing, _)| existing == &key) {
+            if seen.iter().any(|existing| existing == &key) {
                 return Err(serde::de::Error::custom(format!(
                     "duplicate object key {key}"
                 )));
             }
-            let value = access.next_value::<StrictJson>()?;
-            entries.push((key, value));
+            seen.push(key);
+            access.next_value::<StrictJson>()?;
         }
-        Ok(StrictJson::Object(entries))
+        Ok(StrictJson::Value)
     }
 }
 
