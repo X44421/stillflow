@@ -36,7 +36,9 @@ unsafe impl GlobalAlloc for CountingAlloc {
             // Wrapping arithmetic: deallocations of allocations made before
             // the measured window legitimately move CURRENT below its
             // baseline; the reported peak is seeded at the baseline.
-            let current = CURRENT.fetch_add(layout.size(), SeqCst).wrapping_add(layout.size());
+            let current = CURRENT
+                .fetch_add(layout.size(), SeqCst)
+                .wrapping_add(layout.size());
             TOTAL.fetch_add(layout.size(), SeqCst);
             PEAK.fetch_max(current, SeqCst);
         }
@@ -91,11 +93,19 @@ fn source_config(asset: u128) -> NodeConfig {
     // No projection: every schema field flows through, which is the
     // amplification worst case (a 4096-column projection would exceed the
     // 64 KiB config bound by itself).
-    config(1, "stillflow.node.source", json!({"sourceAssetId": uuid(asset)}))
+    config(
+        1,
+        "stillflow.node.source",
+        json!({"sourceAssetId": uuid(asset)}),
+    )
 }
 
 fn output_config() -> NodeConfig {
-    config(5, "stillflow.node.output", json!({"outputLabel": "measured"}))
+    config(
+        5,
+        "stillflow.node.output",
+        json!({"outputLabel": "measured"}),
+    )
 }
 
 /// The typical chain: source → trim → fill-null → rename → filter → output
@@ -154,7 +164,11 @@ fn wide_chain(fields: usize) -> (NodeGraph, LogicalSchema) {
     let mut edges = Vec::new();
     for index in 0..62u128 {
         let id = 0x10 + index;
-        nodes.push(config(id, "stillflow.node.trim", json!({"column": column(0x1000)})));
+        nodes.push(config(
+            id,
+            "stillflow.node.trim",
+            json!({"column": column(0x1000)}),
+        ));
         edges.push((if index == 0 { 1 } else { 0x0F + index }, id));
     }
     nodes.push(output_config());
@@ -241,7 +255,9 @@ fn measure(name: &str, graph: &NodeGraph, schema: &LogicalSchema) -> Value {
     // Warm, then measure a single compile. The baseline is the live
     // current-allocation value; PEAK is seeded with it so the reported peak
     // is relative to the baseline.
-    let _ = compiler.compile(graph, &source, CompileTarget::Execution).expect("warm compile");
+    let _ = compiler
+        .compile(graph, &source, CompileTarget::Execution)
+        .expect("warm compile");
     let baseline = CURRENT.load(SeqCst);
     TOTAL.store(0, SeqCst);
     PEAK.store(baseline, SeqCst);
@@ -254,11 +270,14 @@ fn measure(name: &str, graph: &NodeGraph, schema: &LogicalSchema) -> Value {
     let peak = PEAK.load(SeqCst).wrapping_sub(baseline);
 
     // Serialized response proxy: per-node schemas plus the compile outputs.
-    let schemas_bytes = serde_json::to_vec(&compiled.node_schemas).expect("schemas json").len() as u64;
+    let schemas_bytes = serde_json::to_vec(&compiled.node_schemas)
+        .expect("schemas json")
+        .len() as u64;
     let canonical = compiled.canonical_bytes().expect("canonical").len() as u64;
     let fingerprint = compiled.fingerprint().expect("fingerprint").to_string();
-    let output_schema_bytes =
-        serde_json::to_vec(&compiled.output_schema).expect("output schema json").len() as u64;
+    let output_schema_bytes = serde_json::to_vec(&compiled.output_schema)
+        .expect("output schema json")
+        .len() as u64;
 
     json!({
         "shape": name,

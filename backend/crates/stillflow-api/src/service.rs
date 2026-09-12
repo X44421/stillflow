@@ -1153,13 +1153,11 @@ pub struct NodeGraphCompileView {
     /// Compact mode only (NX-C0 §9.6): per-node schema references; omitted
     /// in `Full` mode, where `nodeSchemas` carries every schema.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_schema_refs:
-        Option<BTreeMap<stillflow_core::NodeId, NodeSchemaRef>>,
+    pub node_schema_refs: Option<BTreeMap<stillflow_core::NodeId, NodeSchemaRef>>,
     /// Compact mode only: the unique schemas behind the references, keyed by
     /// the hex SHA-256 of each schema's canonical JSON.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deduplicated_schemas:
-        Option<BTreeMap<String, LogicalSchema>>,
+    pub deduplicated_schemas: Option<BTreeMap<String, LogicalSchema>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4175,8 +4173,7 @@ fn node_graph_compile_view(
             let mut unique: BTreeMap<String, LogicalSchema> = BTreeMap::new();
             let mut refs = BTreeMap::new();
             for (node_id, schema) in compiled.node_schemas {
-                let encoded = serde_json::to_vec(&schema)
-                    .map_err(|_| ApiError::internal())?;
+                let encoded = serde_json::to_vec(&schema).map_err(|_| ApiError::internal())?;
                 let digest = digest_hex(&sha256(&encoded));
                 refs.insert(
                     node_id,

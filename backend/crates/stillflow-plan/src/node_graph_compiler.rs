@@ -499,6 +499,16 @@ fn check_compile_work(
         Some(schema) => schema_field_count(schema)?,
         None => 0,
     };
+    if let Some(schema) = schema {
+        // Schema-snapshot accounting (NX-B1): the estimate is conservative
+        // and order-independent — every node is charged the widest schema
+        // the chain can produce, so no path knowledge is required and the
+        // frozen stage order is preserved.
+        let estimate = estimate_schema_snapshot_bytes(graph, configs, schema)?;
+        if estimate > MAX_SCHEMA_SNAPSHOT_ESTIMATE_BYTES {
+            return Err(limit_error());
+        }
+    }
     let work = graph
         .nodes
         .len()
