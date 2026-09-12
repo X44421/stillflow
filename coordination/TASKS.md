@@ -4,8 +4,8 @@
 > lifecycle, head, CI, review, and merge state. This registry owns only
 > active L2/L3 writer/lock claims.
 
-- Registry revision: `382`
-- Updated: `2026-09-04T22:10:01Z`
+- Registry revision: `383`
+- Updated: `2026-09-12T05:48:08Z`
 - Source main snapshot: `ca18a092552a0037e33ef4945c8c2d99ae487b38`
 - Legacy/inactive rows retained in JSON for migration compatibility: `27`
 
@@ -15,6 +15,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `E5-A1` | L3 | **queued** | `—` | #228 | `agent/issue-228-e5-a1-versioned-api` | api:bootstrap, api:objects, storage:control-plane-api, storage:artifact-read |
 | `E5-E1` | L3 | **queued** | `—` | #229 | `agent/issue-229-e5-e1-event-stream` | api:event-stream |
+| `NX-A1` | L3 | **queued** | `—` | #338 | `agent/issue-338-nx-a1` | branch:agent/issue-338-nx-a1, core:node-graph-decoding, plan:compile-diagnostics, api:node-graph-error-envelope |
 
 ## Active locks
 
