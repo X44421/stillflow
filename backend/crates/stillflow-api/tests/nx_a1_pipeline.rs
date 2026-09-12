@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use stillflow_api::{
     ApiError, ApiErrorCode, ApiRequest, NodeGraphCompileRequest, NodeGraphCompileTarget,
-    NodeGraphPreviewRequest, RequestMetadata, ServiceConfig,
+    NodeGraphPreviewRequest, RequestMetadata,
 };
 use stillflow_connectors::{
     AssetMetadata, ConnectionStatus, ConnectorCapabilities, ConnectorKind, ConnectorRegistry,
@@ -21,7 +21,7 @@ use stillflow_connectors::{
 };
 use stillflow_core::{
     AssetKind, ColumnId, CredentialRef, LogicalField, LogicalSchema, LogicalType, NodeConfig,
-    NodeEdge, NodeGraph, NodeGraphErrorCode, NodeId, PortId,
+    NodeEdge, NodeGraph, NodeId, PortId,
 };
 use stillflow_storage::ControlPlaneStore;
 
@@ -265,7 +265,7 @@ async fn stage4_failures_perform_zero_connector_calls() {
 
     // Decodable but source binding mismatch: the graph points at a foreign
     // asset. The failure stays a not-found and the connector is untouched.
-    let foreign_asset = graph_json(uuid(0xDEAD), |value| {});
+    let foreign_asset = graph_json(uuid(0xDEAD), |_value| {});
     let error = fixture
         .service
         .compile_node_graph(compile_request(&fixture, foreign_asset, Some(30)))
@@ -340,7 +340,7 @@ async fn stage4_failures_perform_zero_connector_calls() {
     assert_eq!(fixture.connector.read_calls(), 0);
 
     // The valid graph still compiles and does reach the connector.
-    let valid = graph_json(fixture.asset_id, |value| {});
+    let valid = graph_json(fixture.asset_id, |_value| {});
     fixture
         .service
         .compile_node_graph(compile_request(&fixture, valid, Some(30)))
@@ -354,7 +354,7 @@ async fn timeout_law_is_accepted_or_rejected_never_clamped() {
     let fixture = fixture();
 
     // Compile path (§8.2 table, compile column).
-    let valid = graph_json(fixture.asset_id, |value| {});
+    let valid = graph_json(fixture.asset_id, |_value| {});
     for timeout in [None, Some(30), Some(300)] {
         fixture
             .service
@@ -381,7 +381,7 @@ async fn timeout_law_is_accepted_or_rejected_never_clamped() {
     let preview_request = |timeout: Option<u64>| ApiRequest {
         meta: meta(fixture.workspace_id, uuid(0xC002)),
         body: NodeGraphPreviewRequest {
-            graph: graph_json(fixture.asset_id, |value| {}),
+            graph: graph_json(fixture.asset_id, |_value| {}),
             connection_id: fixture.connection_id,
             asset_id: fixture.asset_id,
             target_node_id: node(1),
