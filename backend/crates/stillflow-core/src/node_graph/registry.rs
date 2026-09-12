@@ -3,6 +3,9 @@
 //! only: it never writes a node's rules, and duplicate
 //! `(typeId, configVersion)` registrations fail closed.
 
+use std::collections::BTreeMap;
+
+use super::composite::NodePackage;
 use super::definition::NodeDefinition;
 use super::{NodeCatalogEntry, NodeGraphError, NodeGraphErrorCode};
 
@@ -61,6 +64,68 @@ impl NodeRegistry {
 
     pub fn definitions(&self) -> &[NodeDefinition] {
         &self.definitions
+    }
+
+    /// Deploys declarative node packages on top of the current registry
+    /// (NX-C1 §6.2): explicit, additive, sorted, duplicate-refusing. The
+    /// production registry stays atomic-only; deployment is an operator
+    /// decision over audited packages.
+    pub fn with_packages(mut self, packages: Vec<NodePackage>) -> Result<Self, NodeGraphError> {
+        let mut definitions = Vec::with_capacity(packages.len());
+        let mut seen_versions: BTreeMap<(String, String, String), String> = BTreeMap::new();
+        for package in &packages {
+            super::composite::validate_package(package)?;
+            let key = (
+                package.namespace.clone(),
+                package.name.clone(),
+                package.version.clone(),
+            );
+            if let Some(existing) = seen_versions.get(&key) {
+                if existing != &package.content_digest {
+                    return Err(NodeGraphError::new(
+                        NodeGraphErrorCode::InvalidConfig,
+                        None,
+                        format!(
+                            "package content changed for {}/{}/{}@{}",
+                            package.namespace, package.name, package.version, existing
+                        ),
+                    ));
+                }
+            }
+            seen_versions.insert(key, package.content_digest.clone());
+            definitions.push(super::composite::package_definition(package));
+        }
+        self.definitions.extend(definitions);
+        self.definitions.sort_by(|left, right| {
+            left.type_id()
+                .cmp(right.type_id())
+                .then(left.config_version().cmp(&right.config_version()))
+        });
+        for pair in self.definitions.windows(2) {
+            if pair[0].type_id() == pair[1].type_id()
+                && pair[0].config_version() == pair[1].config_version()
+            {
+                return Err(NodeGraphError::new(
+                    NodeGraphErrorCode::InvalidConfig,
+                    None,
+                    format!(
+                        "node type {} is registered more than once for config version {}",
+                        pair[0].type_id(),
+                        pair[0].config_version()
+                    ),
+                ));
+            }
+        }
+        Ok(self)
+    }
+
+    /// The production registry with the deployed package manifest applied.
+    /// The static manifest is test-verified; a failure here is a build-time
+    /// defect, not a runtime condition.
+    pub fn deployed() -> Self {
+        Self::new()
+            .with_packages(super::composite::deployed_packages())
+            .expect("deployed packages are valid")
     }
 
     pub fn catalog(&self) -> Vec<NodeCatalogEntry> {

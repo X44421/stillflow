@@ -270,6 +270,14 @@ pub enum NodeRole {
 /// Adding a node type means adding one such record in its own module plus an
 /// entry in the registry's definition list — never a change to the generic
 /// graph traversal.
+/// The definition kind: an atomic node validates through its own function;
+/// a composite node resolves through its frozen expansion (NX-C1 §3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DefinitionKind {
+    Atomic(fn(&NodeConfig) -> Result<ValidatedNodeConfig, NodeGraphError>),
+    Composite(super::composite::CompositeStepList),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeDefinition {
     type_id: String,
@@ -283,7 +291,7 @@ pub struct NodeDefinition {
     support_status: NodeSupportStatus,
     support_conditions: Vec<PortSupportConditions>,
     role: NodeRole,
-    validate: fn(&NodeConfig) -> Result<ValidatedNodeConfig, NodeGraphError>,
+    kind: DefinitionKind,
 }
 
 impl NodeDefinition {
@@ -313,7 +321,47 @@ impl NodeDefinition {
             support_status: NodeSupportStatus::Supported,
             support_conditions,
             role,
-            validate,
+            kind: DefinitionKind::Atomic(validate),
+        }
+    }
+
+    /// The composite definition constructor (NX-C1 §3.1): the expansion is
+    /// data, resolved against the registry during traversal.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_composite(
+        type_id: &str,
+        config_version: u16,
+        display_name: &str,
+        description: &str,
+        config_schema: ConfigSchema,
+        input_ports: Vec<PortId>,
+        output_ports: Vec<PortId>,
+        lowering_target: NodeLoweringTarget,
+        support_conditions: Vec<PortSupportConditions>,
+        expansion: Vec<super::composite::CompositeStep>,
+    ) -> Self {
+        Self {
+            type_id: type_id.to_owned(),
+            config_version,
+            display_name: display_name.to_owned(),
+            description: description.to_owned(),
+            config_schema,
+            input_ports,
+            output_ports,
+            lowering_target,
+            support_status: NodeSupportStatus::Supported,
+            support_conditions,
+            role: NodeRole::Transform,
+            kind: DefinitionKind::Composite(super::composite::CompositeStepList {
+                steps: expansion,
+            }),
+        }
+    }
+
+    pub(crate) fn composite_expansion(&self) -> Option<&[super::composite::CompositeStep]> {
+        match &self.kind {
+            DefinitionKind::Atomic(_) => None,
+            DefinitionKind::Composite(expansion) => Some(&expansion.steps),
         }
     }
 
@@ -405,7 +453,17 @@ impl NodeDefinition {
                 ),
             ));
         }
-        (self.validate)(node)
+        match &self.kind {
+            DefinitionKind::Atomic(validate) => validate(node),
+            // The composite path needs the registry to resolve its steps, so
+            // the traversal calls it directly; reaching here means a caller
+            // bypassed the traversal.
+            DefinitionKind::Composite(_) => Err(NodeGraphError::new(
+                NodeGraphErrorCode::Internal,
+                Some(node.id()),
+                "composite definitions resolve through the graph traversal",
+            )),
+        }
     }
 }
 

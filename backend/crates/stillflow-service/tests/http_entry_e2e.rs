@@ -413,7 +413,13 @@ async fn t_ng_a1_catalog_compile_preview_and_scope_fail_closed() {
         catalog_body["body"]["compilerVersion"],
         "ng-nodegraph-compiler-v1"
     );
-    assert_eq!(catalog_body["body"]["nodes"].as_array().unwrap().len(), 11);
+    // The deployed package manifest adds the frozen composite sample
+    // (NX-N2): eleven atomic definitions plus one composite.
+    let catalog_nodes = catalog_body["body"]["nodes"].as_array().unwrap();
+    assert_eq!(catalog_nodes.len(), 12);
+    assert!(catalog_nodes
+        .iter()
+        .any(|node| node["typeId"] == "stillflow.composite.trim-clean"));
 
     let connection_id = Uuid::new_v4();
     let response = post_json(

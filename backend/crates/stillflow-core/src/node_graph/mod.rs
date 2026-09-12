@@ -8,10 +8,12 @@ use uuid::Uuid;
 
 use crate::{ensure_no_secret_fields, ColumnId, Expr, LogicalType, ScalarValue};
 
+pub(crate) mod composite;
 pub(crate) mod definition;
 pub(crate) mod definitions;
 mod registry;
 
+pub use composite::{deployed_packages, trim_clean_package, NodePackage};
 pub use definition::{
     ConfigConstraints, ConfigField, ConfigSchema, ConfigValueKind, NodeCatalogEntry,
     NodeDefinition, NodeLoweringTarget, NodeRole, NodeSupportStatus, PortSupportConditions,
@@ -511,7 +513,15 @@ impl NodeGraph {
                 .map_err(|error| {
                     NodeGraphError::new(error.code(), Some(node.id()), error.message())
                 })?;
-            let typed = definition.validate_node_config(node)?;
+            let typed = match definition.composite_expansion() {
+                Some(expansion) => composite::resolve_composite(
+                    node,
+                    expansion,
+                    definition.config_schema(),
+                    registry,
+                )?,
+                None => definition.validate_node_config(node)?,
+            };
             if definition.is_source() {
                 source_count += 1;
             }
@@ -859,6 +869,12 @@ impl NodeGraph {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidatedNodeConfig {
+    /// A composite product node, resolved into its ordered atomic steps at
+    /// validation time (NX-C1 §3.2); the compiler lowers each step through
+    /// the existing per-config path under the derived internal ids.
+    Composite {
+        steps: Vec<ValidatedNodeConfig>,
+    },
     Source {
         source_asset_id: Uuid,
         projection: Option<Vec<ColumnId>>,

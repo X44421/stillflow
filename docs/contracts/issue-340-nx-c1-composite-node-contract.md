@@ -263,7 +263,7 @@ here). A non-empty `dependsOn` fails closed at deployment.
 
 ## 7. The first composite sample (frozen for NX-N2)
 
-`namespace: "ops.clean"`, `name: "trim-clean"`, `version: "1.0.0"`,
+`namespace: "ops-clean"`, `name: "trim-clean"`, `version: "1.0.0"`,
 `typeId: "stillflow.composite.trim-clean"`, `configVersion: 1`.
 
 - Config: one required `column` (`valueKind: columnId`), no other fields.
