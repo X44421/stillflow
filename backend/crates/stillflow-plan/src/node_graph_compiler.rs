@@ -3,7 +3,7 @@ use std::fmt;
 
 use stillflow_core::{
     CastFailurePolicy as NodeCastFailurePolicy, ColumnId, Expr, LogicalField, LogicalSchema,
-    LogicalType, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId, NodeRegistry,
+    LogicalType, NodeEdge, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId, NodeRegistry,
     ValidatedNodeConfig, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH,
     MAX_NODES,
 };
@@ -66,7 +66,21 @@ pub enum CompileTarget {
 pub struct CompileDiagnostic {
     pub code: NodeGraphErrorCode,
     pub node_id: Option<NodeId>,
+    pub column_id: Option<ColumnId>,
+    pub field_path: Option<String>,
+    pub expected: Option<String>,
+    pub actual: Option<String>,
     pub message: String,
+}
+
+/// The bounded safe-location payload of NX-C0 §7.1, boxed so the error
+/// stays small on the compile path's hot `Result`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ErrorLocation {
+    pub column_id: Option<ColumnId>,
+    pub field_path: Option<String>,
+    pub expected: Option<String>,
+    pub actual: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -74,6 +88,7 @@ pub struct CompileDiagnostic {
 pub struct NodeGraphCompileError {
     code: NodeGraphErrorCode,
     node_id: Option<NodeId>,
+    location: Option<Box<ErrorLocation>>,
     message: String,
 }
 
@@ -86,8 +101,59 @@ impl NodeGraphCompileError {
         Self {
             code,
             node_id,
+            location: None,
             message: message.into(),
         }
+    }
+
+    /// Attaches the bounded safe-location fields of NX-C0 §7.1. Locations
+    /// name structural paths and identifiers; they never carry caller
+    /// values (§7.3).
+    pub fn with_location(
+        mut self,
+        column_id: Option<ColumnId>,
+        field_path: Option<String>,
+        expected: Option<String>,
+        actual: Option<String>,
+    ) -> Self {
+        if column_id.is_none() && field_path.is_none() && expected.is_none() && actual.is_none() {
+            return self;
+        }
+        self.location = Some(Box::new(ErrorLocation {
+            column_id,
+            field_path,
+            expected,
+            actual,
+        }));
+        self
+    }
+
+    pub fn location(&self) -> Option<&ErrorLocation> {
+        self.location.as_deref()
+    }
+
+    pub fn column_id(&self) -> Option<ColumnId> {
+        self.location
+            .as_ref()
+            .and_then(|location| location.column_id)
+    }
+
+    pub fn field_path(&self) -> Option<&str> {
+        self.location
+            .as_ref()
+            .and_then(|location| location.field_path.as_deref())
+    }
+
+    pub fn expected(&self) -> Option<&str> {
+        self.location
+            .as_ref()
+            .and_then(|location| location.expected.as_deref())
+    }
+
+    pub fn actual(&self) -> Option<&str> {
+        self.location
+            .as_ref()
+            .and_then(|location| location.actual.as_deref())
     }
 
     pub const fn code(&self) -> NodeGraphErrorCode {
@@ -182,7 +248,7 @@ impl NodeGraphCompiler {
         let configs = graph
             .validated_configs(&self.registry)
             .map_err(map_graph_error)?;
-        check_compile_work(graph, &configs, &source.schema)?;
+        check_compile_work(graph, &configs, Some(&source.schema))?;
         let path = unique_path(graph)?;
 
         let (source_asset_id, projection) = match configs.get(&graph.source_node_id) {
@@ -286,6 +352,38 @@ impl NodeGraphCompiler {
     }
 }
 
+/// Pure-graph validation (NX-C0 §8.1 stage 4): structural checks, registry
+/// lookup, config constraints, ports, topology, and the graph-to-request
+/// source binding — everything that needs no source schema and no connector.
+/// The API runs this before resolving the authorized source schema so a
+/// decodable graph that fails here performs zero connector calls.
+pub fn validate_node_graph(
+    graph: &NodeGraph,
+    registry: &NodeRegistry,
+    source_asset_id: Uuid,
+) -> Result<(), NodeGraphCompileError> {
+    check_shape_work(graph)?;
+    let configs = graph.validated_configs(registry).map_err(map_graph_error)?;
+    check_compile_work(graph, &configs, None)?;
+    unique_path(graph)?;
+    match configs.get(&graph.source_node_id) {
+        Some(ValidatedNodeConfig::Source {
+            source_asset_id: bound,
+            ..
+        }) if *bound == source_asset_id => Ok(()),
+        Some(ValidatedNodeConfig::Source { .. }) => Err(NodeGraphCompileError::new(
+            NodeGraphErrorCode::SourceBinding,
+            Some(graph.source_node_id),
+            "graph source asset is not the authorized source asset",
+        )),
+        _ => Err(NodeGraphCompileError::new(
+            NodeGraphErrorCode::InvalidTopology,
+            Some(graph.source_node_id),
+            "declared source node did not resolve to a source config",
+        )),
+    }
+}
+
 pub fn compile_node_graph(
     graph: &NodeGraph,
     registry: &NodeRegistry,
@@ -356,7 +454,7 @@ fn check_shape_work(graph: &NodeGraph) -> Result<(), NodeGraphCompileError> {
 fn check_compile_work(
     graph: &NodeGraph,
     configs: &BTreeMap<NodeId, ValidatedNodeConfig>,
-    schema: &LogicalSchema,
+    schema: Option<&LogicalSchema>,
 ) -> Result<(), NodeGraphCompileError> {
     let metadata_entries = graph
         .metadata
@@ -387,7 +485,10 @@ fn check_compile_work(
         };
         total.checked_add(count).ok_or_else(limit_error)
     })?;
-    let schema_fields = schema_field_count(schema)?;
+    let schema_fields = match schema {
+        Some(schema) => schema_field_count(schema)?,
+        None => 0,
+    };
     let work = graph
         .nodes
         .len()
@@ -487,7 +588,18 @@ fn schema_field_count(schema: &LogicalSchema) -> Result<usize, NodeGraphCompileE
 
 fn unique_path(graph: &NodeGraph) -> Result<Vec<NodeId>, NodeGraphCompileError> {
     let mut outgoing = BTreeMap::new();
-    for edge in &graph.edges {
+    // Edge faults are reported by ascending endpoint tuple, never by caller
+    // array order (NX-C0 §7.2, R-8).
+    let mut ordered_edges: Vec<&NodeEdge> = graph.edges.iter().collect();
+    ordered_edges.sort_by_key(|edge| {
+        (
+            edge.from.node_id,
+            edge.from.port.clone(),
+            edge.to.node_id,
+            edge.to.port.clone(),
+        )
+    });
+    for edge in ordered_edges {
         if outgoing
             .insert(edge.from.node_id, edge.to.node_id)
             .is_some()
@@ -663,7 +775,12 @@ fn map_graph_error(error: NodeGraphError) -> NodeGraphCompileError {
         NodeGraphErrorCode::LimitCompileWork => "compile work limit exceeded",
         _ => "graph validation failed",
     };
-    NodeGraphCompileError::new(error.code(), error.node_id(), message)
+    NodeGraphCompileError::new(error.code(), error.node_id(), message).with_location(
+        None,
+        error.field_path().map(str::to_owned),
+        None,
+        None,
+    )
 }
 
 fn plan_error(_: PlanError) -> NodeGraphCompileError {

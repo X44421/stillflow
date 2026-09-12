@@ -6,7 +6,7 @@
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
@@ -31,10 +31,12 @@ pub fn error_response(request_id: Uuid, error: ApiError) -> Response {
     (status, axum::Json(ApiErrorResponse::new(request_id, error))).into_response()
 }
 
-pub fn ok_response<T: Serialize>(result: ApiResult<ApiResponse<T>>) -> Response {
+pub fn ok_response<T: Serialize>(request_id: Uuid, result: ApiResult<ApiResponse<T>>) -> Response {
     match result {
         Ok(response) => (StatusCode::OK, axum::Json(response)).into_response(),
-        Err(error) => error_response(Uuid::nil(), error),
+        // NX-C0 §3.2 rule 5: the request id is echoed on typed-route failures
+        // whenever the envelope decoded.
+        Err(error) => error_response(request_id, error),
     }
 }
 
@@ -48,10 +50,10 @@ pub fn binary_response(body: Vec<u8>) -> Response {
         .into_response()
 }
 
-/// Failure path shared by the typed-binary routes: the service errors carry
-/// no request identity of their own, mirroring `ok_response`.
-pub fn service_error(error: ApiError) -> Response {
-    error_response(Uuid::nil(), error)
+/// Failure path shared by the typed-binary routes. The request id is
+/// echoed whenever the envelope decoded (NX-C0 §3.2 rule 5).
+pub fn service_error(request_id: Uuid, error: ApiError) -> Response {
+    error_response(request_id, error)
 }
 
 fn object_body(body: Value) -> Result<Map<String, Value>, ApiError> {
@@ -67,6 +69,9 @@ pub fn parse_body<T: DeserializeOwned>(
     bytes: &[u8],
     path_params: Vec<(String, String)>,
 ) -> Result<ApiRequest<T>, Response> {
+    if let Err(error) = reject_duplicate_keys(bytes) {
+        return Err(error_response(Uuid::nil(), error));
+    }
     let raw: ApiRequest<Value> = match serde_json::from_slice(bytes) {
         Ok(raw) => raw,
         Err(_) => {
@@ -93,6 +98,117 @@ pub fn parse_body<T: DeserializeOwned>(
             request_id,
             ApiError::invalid("request body does not match the manifest schema"),
         )),
+    }
+}
+
+/// Strict-decode gate (NX-C0 §7.5, R-1): serde_json collapses duplicate
+/// object keys with last-wins semantics, so the raw envelope is first
+/// deserialized through a duplicate-detecting value. Any duplicate key
+/// inside any JSON object of the request is a typed rejection. The gate only
+/// ever adds duplicate-key rejections; every other shape decision stays with
+/// serde_json.
+pub fn reject_duplicate_keys(bytes: &[u8]) -> Result<(), ApiError> {
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    StrictJson::deserialize(&mut deserializer)
+        .map(|_| ())
+        .map_err(|_| ApiError::invalid("request body contains duplicate object keys"))
+}
+
+#[derive(Debug)]
+enum StrictJson {
+    Null,
+    Bool(bool),
+    Number(serde_json::Number),
+    String(String),
+    Array(Vec<StrictJson>),
+    Object(Vec<(String, StrictJson)>),
+}
+
+impl<'de> Deserialize<'de> for StrictJson {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(StrictJsonVisitor)
+    }
+}
+
+struct StrictJsonVisitor;
+
+impl<'de> serde::de::Visitor<'de> for StrictJsonVisitor {
+    type Value = StrictJson;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("any valid JSON value")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(StrictJson::Bool(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(StrictJson::Number(value.into()))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(StrictJson::Number(value.into()))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(StrictJson::Number(
+            serde_json::Number::from_f64(value)
+                .ok_or_else(|| serde::de::Error::custom("non-finite number"))?,
+        ))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(StrictJson::String(value.to_owned()))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(StrictJson::Null)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(StrictJson::Null)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        StrictJson::deserialize(deserializer)
+    }
+
+    fn visit_seq<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let mut items = Vec::new();
+        while let Some(item) = access.next_element::<StrictJson>()? {
+            items.push(item);
+        }
+        Ok(StrictJson::Array(items))
+    }
+
+    fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut entries: Vec<(String, StrictJson)> = Vec::new();
+        while let Some(key) = access.next_key::<String>()? {
+            if entries.iter().any(|(existing, _)| existing == &key) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate object key {key}"
+                )));
+            }
+            let value = access.next_value::<StrictJson>()?;
+            entries.push((key, value));
+        }
+        Ok(StrictJson::Object(entries))
     }
 }
 

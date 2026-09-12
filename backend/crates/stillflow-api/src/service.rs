@@ -1107,6 +1107,14 @@ pub struct NodeCatalogView {
 pub struct NodeGraphDiagnosticView {
     pub code: String,
     pub node_id: Option<stillflow_core::NodeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column_id: Option<stillflow_core::ColumnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual: Option<String>,
     pub message: String,
 }
 
@@ -2390,11 +2398,27 @@ impl ApiService {
             target,
             timeout_seconds,
         } = request.body;
-        let (_, _, source_schema) = self
-            .authorized_node_graph_source(workspace_id, connection_id, asset_id, timeout_seconds)
+        // One request context, created up front (§8.2): the timeout law
+        // rejects before stages 3-5 run, so boundary rejections perform no
+        // connector call.
+        let context = self.request_context(timeout_seconds)?;
+        let (connection, asset) = self
+            .authorize_node_graph_source(workspace_id, connection_id, asset_id)
             .await?;
-        let source = AuthorizedSourceContext::new(asset_id, source_schema)
+        let registry = self
+            .connectors
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("connector registry is not configured"))?;
+        let _ = &registry;
+        // Stage 4: pure-graph validation before any source inspection.
+        stillflow_plan::validate_node_graph(&graph, &stillflow_core::NodeRegistry::new(), asset_id)
             .map_err(node_graph_compile_error)?;
+        let source = AuthorizedSourceContext::new(
+            asset_id,
+            self.inspect_node_graph_source(registry, &connection, &asset, context)
+                .await?,
+        )
+        .map_err(node_graph_compile_error)?;
         let target = match target {
             NodeGraphCompileTarget::Execution => CompileTarget::Execution,
             NodeGraphCompileTarget::Preview { node_id } => CompileTarget::Preview(node_id),
@@ -2425,11 +2449,29 @@ impl ApiService {
             byte_limit,
             timeout_seconds,
         } = request.body;
-        let (connection, asset, source_schema) = self
-            .authorized_node_graph_source(workspace_id, connection_id, asset_id, timeout_seconds)
+        // One request context (§8.2): created once, shared by the inspect
+        // and engine stages; the preview operation is capped by the
+        // engine's strictest consumer bound.
+        let context = self.request_context_capped(
+            timeout_seconds,
+            Some(stillflow_engine::PREVIEW_MAX_DEADLINE.as_secs()),
+        )?;
+        let (connection, asset) = self
+            .authorize_node_graph_source(workspace_id, connection_id, asset_id)
             .await?;
-        let source = AuthorizedSourceContext::new(asset_id, source_schema)
+        let registry = self
+            .connectors
+            .as_ref()
+            .ok_or_else(|| ApiError::conflict("connector registry is not configured"))?;
+        // Stage 4: pure-graph validation before any source inspection.
+        stillflow_plan::validate_node_graph(&graph, &stillflow_core::NodeRegistry::new(), asset_id)
             .map_err(node_graph_compile_error)?;
+        let source = AuthorizedSourceContext::new(
+            asset_id,
+            self.inspect_node_graph_source(registry, &connection, &asset, context.clone())
+                .await?,
+        )
+        .map_err(node_graph_compile_error)?;
         let compiled = NodeGraphCompiler::default()
             .compile(&graph, &source, CompileTarget::Preview(target_node_id))
             .map_err(node_graph_compile_error)?;
@@ -2449,7 +2491,7 @@ impl ApiService {
         engine_request.batch_size = batch_size;
         engine_request.row_limit = row_limit;
         engine_request.byte_limit = byte_limit;
-        engine_request.context = self.request_context(timeout_seconds)?;
+        engine_request.context = context;
         let result = engine.preview(engine_request).await?;
         if result.schema != *expected_schema {
             return Err(ApiError::internal());
@@ -2473,13 +2515,16 @@ impl ApiService {
         ))
     }
 
-    async fn authorized_node_graph_source(
+    /// Stage 3 (NX-C0 §8.1): authorization, workspace scoping, and the
+    /// connection/asset binding — everything that needs no source schema and
+    /// no connector. Foreign resources stay indistinguishable from absent
+    /// ones.
+    async fn authorize_node_graph_source(
         &self,
         workspace_id: Uuid,
         connection_id: Uuid,
         asset_id: Uuid,
-        timeout_seconds: Option<u64>,
-    ) -> ApiResult<(SourceConnection, SourceAsset, LogicalSchema)> {
+    ) -> ApiResult<(SourceConnection, SourceAsset)> {
         let connection_record = self.control_plane.get_source_connection(connection_id)?;
         let asset_record = self.control_plane.get_source_asset(asset_id)?;
         self.ensure_scope(connection_record.workspace_id, workspace_id)?;
@@ -2487,23 +2532,33 @@ impl ApiService {
         if asset_record.connection_id != connection_record.id {
             return Err(ApiError::not_found());
         }
-        let registry = self
-            .connectors
-            .as_ref()
-            .ok_or_else(|| ApiError::conflict("connector registry is not configured"))?;
-        let connection = source_connection_domain(&connection_record)?;
-        let asset = source_asset_domain(&asset_record)?;
+        Ok((
+            source_connection_domain(&connection_record)?,
+            source_asset_domain(&asset_record)?,
+        ))
+    }
+
+    /// Stage 5 (NX-C0 §8.1): the authorized schema resolution through the
+    /// existing `inspect` path. This never calls the execution read path;
+    /// text inspection samples a bounded prefix under the request deadline.
+    async fn inspect_node_graph_source(
+        &self,
+        registry: &stillflow_connectors::ConnectorRegistry,
+        connection: &SourceConnection,
+        asset: &SourceAsset,
+        context: RequestContext,
+    ) -> ApiResult<LogicalSchema> {
         let metadata = registry
             .inspect(
-                &connection,
+                connection,
                 InspectRequest {
-                    context: self.request_context(timeout_seconds)?,
+                    context,
                     asset: asset.clone(),
                 },
             )
             .await
             .map_err(ApiError::from)?;
-        Ok((connection, asset, metadata.schema))
+        Ok(metadata.schema)
     }
 
     pub fn submit_job(
@@ -3643,13 +3698,40 @@ impl ApiService {
     }
 
     fn request_context(&self, timeout_seconds: Option<u64>) -> ApiResult<RequestContext> {
-        let seconds = timeout_seconds.unwrap_or(self.limits.max_timeout_seconds);
-        if seconds == 0 || seconds > self.limits.max_timeout_seconds {
-            return Err(ApiError::limit("request timeout exceeds the API bound"));
+        self.request_context_capped(timeout_seconds, None)
+    }
+
+    /// The frozen timeout law (NX-C0 §8.2, R-11): an explicit value is
+    /// accepted as given or rejected with `limitExceeded`, never clamped; an
+    /// absent value resolves to the operation default, itself bounded by the
+    /// strictest consumer cap for the operation (`operation_cap`, e.g. the
+    /// 30 s preview cap). Rejection happens during request validation,
+    /// before any connector call.
+    fn request_context_capped(
+        &self,
+        timeout_seconds: Option<u64>,
+        operation_cap: Option<u64>,
+    ) -> ApiResult<RequestContext> {
+        let ceiling = self.limits.max_timeout_seconds;
+        let cap = operation_cap.unwrap_or(ceiling).min(ceiling);
+        match timeout_seconds {
+            Some(0) => Err(ApiError::limit("request timeout exceeds the API bound")),
+            Some(seconds) if seconds > cap => {
+                if cap < ceiling {
+                    Err(ApiError::limit(
+                        "request timeout exceeds the node-graph preview bound",
+                    ))
+                } else {
+                    Err(ApiError::limit("request timeout exceeds the API bound"))
+                }
+            }
+            Some(seconds) => Ok(RequestContext::with_deadline(
+                Instant::now() + Duration::from_secs(seconds),
+            )),
+            None => Ok(RequestContext::with_deadline(
+                Instant::now() + Duration::from_secs(cap),
+            )),
         }
-        Ok(RequestContext::with_deadline(
-            Instant::now() + Duration::from_secs(seconds),
-        ))
     }
 
     fn scope_workspace(&self, object_id: Uuid, workspace_id: Uuid) -> ApiResult<()> {
@@ -4072,7 +4154,23 @@ fn node_graph_diagnostic_view(diagnostic: CompileDiagnostic) -> NodeGraphDiagnos
     NodeGraphDiagnosticView {
         code: diagnostic.code.as_str().to_owned(),
         node_id: diagnostic.node_id,
+        column_id: diagnostic.column_id,
+        field_path: diagnostic.field_path,
+        expected: diagnostic.expected,
+        actual: diagnostic.actual,
         message: diagnostic.message,
+    }
+}
+
+fn node_graph_diagnostic_from_error(error: &NodeGraphCompileError) -> NodeGraphDiagnosticView {
+    NodeGraphDiagnosticView {
+        code: error.code().as_str().to_owned(),
+        node_id: error.node_id(),
+        column_id: error.column_id(),
+        field_path: error.field_path().map(str::to_owned),
+        expected: error.expected().map(str::to_owned),
+        actual: error.actual().map(str::to_owned),
+        message: error.message().to_owned(),
     }
 }
 
@@ -4098,6 +4196,7 @@ fn node_graph_compile_error(error: NodeGraphCompileError) -> ApiError {
             error.code().as_str()
         )),
     }
+    .with_diagnostics(vec![node_graph_diagnostic_from_error(&error)])
 }
 
 fn validated_capabilities(values: &[String]) -> ApiResult<Vec<&str>> {

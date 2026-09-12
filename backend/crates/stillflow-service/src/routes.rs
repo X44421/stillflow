@@ -201,21 +201,23 @@ pub fn router(state: ServiceState) -> Router {
 
 async fn handshake(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<stillflow_api::HandshakeRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.handshake(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.handshake(request)),
         Err(response) => response,
     }
 }
 
 async fn node_types(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<stillflow_api::EmptyRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_node_types(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.list_node_types(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn health_liveness(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<EmptyRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.liveness(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.liveness(request)),
         Err(response) => response,
     }
 }
@@ -225,28 +227,30 @@ async fn health_readiness(
     RawQuery(query): RawQuery,
 ) -> Response {
     match adapter::parse_query_envelope::<EmptyRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.readiness(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.readiness(request)),
         Err(response) => response,
     }
 }
 
 async fn health_read(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<EmptyRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.health(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.health(request)),
         Err(response) => response,
     }
 }
 
 async fn metrics_read(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ObjectIdRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.metrics(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.metrics(request)),
         Err(response) => response,
     }
 }
 
 async fn workspace_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreateWorkspaceRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_workspace(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.create_workspace(request))
+        }
         Err(response) => response,
     }
 }
@@ -260,7 +264,10 @@ async fn workspace_archive(
         &bytes,
         vec![("workspaceId".to_owned(), workspace_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.archive_workspace(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.archive_workspace(request),
+        ),
         Err(response) => response,
     }
 }
@@ -274,21 +281,27 @@ async fn workspace_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_workspace(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.read_workspace(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn session_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreateSessionRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_session(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.create_session(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn session_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_sessions(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.list_sessions(request))
+        }
         Err(response) => response,
     }
 }
@@ -302,7 +315,9 @@ async fn session_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_session(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.read_session(request))
+        }
         Err(response) => response,
     }
 }
@@ -316,21 +331,29 @@ async fn session_close(
         &bytes,
         vec![("sessionId".to_owned(), session_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.close_session(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.close_session(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn connection_test(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<TestSourceConnectionRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.test_source_connection(request).await),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.test_source_connection(request).await,
+        ),
         Err(response) => response,
     }
 }
 
 async fn connection_register(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<RegisterSourceConnectionRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.register_source_connection(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.register_source_connection(request),
+        ),
         Err(response) => response,
     }
 }
@@ -344,42 +367,59 @@ async fn connection_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_source_connection(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.read_source_connection(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn connection_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_source_connections(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_source_connections(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn asset_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_source_assets(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_source_assets(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn asset_discover(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<DiscoverAssetsRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.discover_source_assets(request).await),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.discover_source_assets(request).await,
+        ),
         Err(response) => response,
     }
 }
 
 async fn asset_inspect(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<InspectAssetRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.inspect_source_asset(request).await),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.inspect_source_asset(request).await,
+        ),
         Err(response) => response,
     }
 }
 
 async fn dataset_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreateDatasetRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_dataset(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.create_dataset(request))
+        }
         Err(response) => response,
     }
 }
@@ -393,7 +433,9 @@ async fn dataset_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_dataset(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.read_dataset(request))
+        }
         Err(response) => response,
     }
 }
@@ -404,35 +446,41 @@ async fn dataset_archive(
     bytes: Bytes,
 ) -> Response {
     match adapter::parse_body::<ObjectIdRequest>(&bytes, vec![("objectId".to_owned(), object_id)]) {
-        Ok(request) => adapter::ok_response(state.api.archive_dataset(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.archive_dataset(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn plan_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreatePlanRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_plan(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.create_plan(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn plan_clone(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<ClonePlanRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.clone_plan(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.clone_plan(request)),
         Err(response) => response,
     }
 }
 
 async fn plan_diff(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<PlanDiffRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.diff_plans(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.diff_plans(request)),
         Err(response) => response,
     }
 }
 
 async fn plan_validate(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<ValidatePlanRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.validate_plan(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.validate_plan(request))
+        }
         Err(response) => response,
     }
 }
@@ -446,7 +494,7 @@ async fn plan_load(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.load_plan(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.load_plan(request)),
         Err(response) => response,
     }
 }
@@ -460,7 +508,10 @@ async fn plan_version_save(
         &bytes,
         vec![("planId".to_owned(), plan_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.save_plan_version(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.save_plan_version(request),
+        ),
         Err(response) => response,
     }
 }
@@ -474,7 +525,10 @@ async fn plan_version_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.load_plan_version(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.load_plan_version(request),
+        ),
         Err(response) => response,
     }
 }
@@ -488,21 +542,24 @@ async fn plan_version_publish(
         &bytes,
         vec![("planVersionId".to_owned(), plan_version_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.publish_plan_version(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.publish_plan_version(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn job_submit(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<SubmitJobRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.submit_job(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.submit_job(request)),
         Err(response) => response,
     }
 }
 
 async fn job_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListJobsRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_jobs(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.list_jobs(request)),
         Err(response) => response,
     }
 }
@@ -516,7 +573,7 @@ async fn job_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_job(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.read_job(request)),
         Err(response) => response,
     }
 }
@@ -527,28 +584,38 @@ async fn job_cancel(
     bytes: Bytes,
 ) -> Response {
     match adapter::parse_body::<CancelJobRequest>(&bytes, vec![("jobId".to_owned(), job_id)]) {
-        Ok(request) => adapter::ok_response(state.api.cancel_job(request).await),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.cancel_job(request).await)
+        }
         Err(response) => response,
     }
 }
 
 async fn drift_compare(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<SubmitDriftComparisonRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.submit_drift_comparison(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.submit_drift_comparison(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn export_submit(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<SubmitExportRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.submit_export(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.submit_export(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn export_gc(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CollectExportGarbageRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.collect_export_garbage(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.collect_export_garbage(request),
+        ),
         Err(response) => response,
     }
 }
@@ -562,7 +629,9 @@ async fn export_read(
         query,
         vec![("jobId".to_owned(), job_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_export_job(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.read_export_job(request))
+        }
         Err(response) => response,
     }
 }
@@ -573,7 +642,10 @@ async fn export_cancel(
     bytes: Bytes,
 ) -> Response {
     match adapter::parse_body::<CancelJobRequest>(&bytes, vec![("jobId".to_owned(), job_id)]) {
-        Ok(request) => adapter::ok_response(state.api.cancel_export_job(request).await),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.cancel_export_job(request).await,
+        ),
         Err(response) => response,
     }
 }
@@ -587,7 +659,10 @@ async fn export_manifest_read(
         query,
         vec![("exportId".to_owned(), export_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_export_manifest(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.read_export_manifest(request),
+        ),
         Err(response) => response,
     }
 }
@@ -601,7 +676,10 @@ async fn export_files_list(
         query,
         vec![("exportId".to_owned(), export_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.list_export_files(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_export_files(request),
+        ),
         Err(response) => response,
     }
 }
@@ -615,7 +693,9 @@ async fn export_download(
         query,
         vec![("exportId".to_owned(), export_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.download_export(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.download_export(request))
+        }
         Err(response) => response,
     }
 }
@@ -629,14 +709,16 @@ async fn export_tombstone(
         &bytes,
         vec![("exportId".to_owned(), export_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.tombstone_export(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.tombstone_export(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn run_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListRunsRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_runs(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.list_runs(request)),
         Err(response) => response,
     }
 }
@@ -650,7 +732,7 @@ async fn run_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_run(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.read_run(request)),
         Err(response) => response,
     }
 }
@@ -664,14 +746,19 @@ async fn artifact_list(
         query,
         vec![("runId".to_owned(), run_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.list_artifact_metadata(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_artifact_metadata(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn event_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListEventsRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_events(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.list_events(request))
+        }
         Err(response) => response,
     }
 }
@@ -685,7 +772,10 @@ async fn artifact_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.get_artifact_metadata(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.get_artifact_metadata(request),
+        ),
         Err(response) => response,
     }
 }
@@ -695,53 +785,65 @@ async fn artifact_read(
 
 async fn asset_preview(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<PreviewAssetRequest>(&bytes, vec![]) {
-        Ok(request) => match state
-            .api
-            .preview_source_asset(request)
-            .await
-            .and_then(wire::encode_preview_view)
-        {
-            Ok(body) => adapter::binary_response(body),
-            Err(error) => adapter::service_error(error),
-        },
+        Ok(request) => {
+            let request_id = request.meta.request_id;
+            match state
+                .api
+                .preview_source_asset(request)
+                .await
+                .and_then(wire::encode_preview_view)
+            {
+                Ok(body) => adapter::binary_response(body),
+                Err(error) => adapter::service_error(request_id, error),
+            }
+        }
         Err(response) => response,
     }
 }
 
 async fn engine_preview(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<EnginePreviewRequest>(&bytes, vec![]) {
-        Ok(request) => match state
-            .api
-            .preview_plan(request)
-            .await
-            .and_then(wire::encode_engine_preview_view)
-        {
-            Ok(body) => adapter::binary_response(body),
-            Err(error) => adapter::service_error(error),
-        },
+        Ok(request) => {
+            let request_id = request.meta.request_id;
+            match state
+                .api
+                .preview_plan(request)
+                .await
+                .and_then(wire::encode_engine_preview_view)
+            {
+                Ok(body) => adapter::binary_response(body),
+                Err(error) => adapter::service_error(request_id, error),
+            }
+        }
         Err(response) => response,
     }
 }
 
 async fn node_graph_compile(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<NodeGraphCompileRequest>(&bytes, vec![]) {
-        Ok(request) => match state.api.compile_node_graph(request).await {
-            Ok(response) => adapter::ok_response(Ok(response)),
-            Err(error) => adapter::service_error(error),
-        },
+        Ok(request) => {
+            let request_id = request.meta.request_id;
+            match state.api.compile_node_graph(request).await {
+                Ok(response) => adapter::ok_response(request_id, Ok(response)),
+                Err(error) => adapter::service_error(request_id, error),
+            }
+        }
         Err(response) => response,
     }
 }
 
 async fn node_graph_preview(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<NodeGraphPreviewRequest>(&bytes, vec![]) {
-        Ok(request) => match state.api.preview_node_graph(request).await {
-            Ok(response) => match wire::encode_engine_preview_view(response) {
-                Ok(body) => adapter::binary_response(body),
-                Err(error) => adapter::service_error(error),
-            },
-            Err(error) => adapter::service_error(error),
-        },
+        Ok(request) => {
+            let request_id = request.meta.request_id;
+            match state.api.preview_node_graph(request).await {
+                Ok(response) => match wire::encode_engine_preview_view(response) {
+                    Ok(body) => adapter::binary_response(body),
+                    Err(error) => adapter::service_error(request_id, error),
+                },
+                Err(error) => adapter::service_error(request_id, error),
+            }
+        }
         Err(response) => response,
     }
 }
@@ -751,14 +853,17 @@ async fn artifact_content(
     RawQuery(query): RawQuery,
 ) -> Response {
     match adapter::parse_query_envelope::<ArtifactContentRequest>(query, vec![]) {
-        Ok(request) => match state
-            .api
-            .read_artifact_content(request)
-            .and_then(wire::encode_artifact_content)
-        {
-            Ok(body) => adapter::binary_response(body),
-            Err(error) => adapter::service_error(error),
-        },
+        Ok(request) => {
+            let request_id = request.meta.request_id;
+            match state
+                .api
+                .read_artifact_content(request)
+                .and_then(wire::encode_artifact_content)
+            {
+                Ok(body) => adapter::binary_response(body),
+                Err(error) => adapter::service_error(request_id, error),
+            }
+        }
         Err(response) => response,
     }
 }
@@ -767,7 +872,9 @@ async fn artifact_content(
 
 async fn member_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreateMemberRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_member(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.create_member(request))
+        }
         Err(response) => response,
     }
 }
@@ -781,7 +888,9 @@ async fn member_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_member(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.read_member(request))
+        }
         Err(response) => response,
     }
 }
@@ -795,7 +904,9 @@ async fn member_revoke(
         &bytes,
         vec![("memberId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.revoke_member(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.revoke_member(request))
+        }
         Err(response) => response,
     }
 }
@@ -807,14 +918,18 @@ async fn member_role_assign(
 ) -> Response {
     match adapter::parse_body::<AssignRoleRequest>(&bytes, vec![("memberId".to_owned(), object_id)])
     {
-        Ok(request) => adapter::ok_response(state.api.assign_role(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.assign_role(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn role_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreateRoleRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_role(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.create_role(request))
+        }
         Err(response) => response,
     }
 }
@@ -828,7 +943,7 @@ async fn role_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_role(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.read_role(request)),
         Err(response) => response,
     }
 }
@@ -842,14 +957,20 @@ async fn role_capabilities_set(
         &bytes,
         vec![("roleId".to_owned(), role_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.set_role_capabilities(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.set_role_capabilities(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn service_account_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreateServiceAccountRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_service_account(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.create_service_account(request),
+        ),
         Err(response) => response,
     }
 }
@@ -863,7 +984,10 @@ async fn service_account_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_service_account(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.read_service_account(request),
+        ),
         Err(response) => response,
     }
 }
@@ -877,7 +1001,10 @@ async fn service_account_revoke(
         &bytes,
         vec![("serviceAccountId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.revoke_service_account(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.revoke_service_account(request),
+        ),
         Err(response) => response,
     }
 }
@@ -886,7 +1013,10 @@ async fn service_account_revoke(
 
 async fn credential_register(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<RegisterCredentialReferenceRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.register_credential_reference(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.register_credential_reference(request),
+        ),
         Err(response) => response,
     }
 }
@@ -900,7 +1030,10 @@ async fn credential_read(
         query,
         vec![("objectId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_credential_reference(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.read_credential_reference(request),
+        ),
         Err(response) => response,
     }
 }
@@ -914,7 +1047,10 @@ async fn credential_rotation_begin(
         &bytes,
         vec![("credentialId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.begin_credential_rotation(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.begin_credential_rotation(request),
+        ),
         Err(response) => response,
     }
 }
@@ -928,7 +1064,10 @@ async fn credential_rotation_complete(
         &bytes,
         vec![("credentialId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.complete_credential_rotation(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.complete_credential_rotation(request),
+        ),
         Err(response) => response,
     }
 }
@@ -942,7 +1081,10 @@ async fn credential_revoke(
         &bytes,
         vec![("credentialId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.revoke_credential(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.revoke_credential(request),
+        ),
         Err(response) => response,
     }
 }
@@ -956,7 +1098,10 @@ async fn credential_recover(
         &bytes,
         vec![("credentialId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.recover_credential(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.recover_credential(request),
+        ),
         Err(response) => response,
     }
 }
@@ -972,7 +1117,10 @@ async fn connection_update(
         &bytes,
         vec![("connectionId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.update_source_connection(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.update_source_connection(request),
+        ),
         Err(response) => response,
     }
 }
@@ -986,7 +1134,10 @@ async fn connection_transition(
         &bytes,
         vec![("connectionId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.transition_source_connection(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.transition_source_connection(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1000,7 +1151,10 @@ async fn connection_retire(
         &bytes,
         vec![("connectionId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.retire_source_connection(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.retire_source_connection(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1016,7 +1170,10 @@ async fn dataset_profile_history(
         query,
         vec![("datasetId".to_owned(), object_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.list_profile_history(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_profile_history(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1026,7 +1183,10 @@ async fn audit_events_list(
     RawQuery(query): RawQuery,
 ) -> Response {
     match adapter::parse_query_envelope::<ListAuditEventsRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_audit_events(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_audit_events(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1036,14 +1196,20 @@ async fn audit_lineage_read(
     RawQuery(query): RawQuery,
 ) -> Response {
     match adapter::parse_query_envelope::<AuditLineageRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.get_audit_lineage(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.get_audit_lineage(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn audit_export(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListAuditEventsRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.export_audit_events(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.export_audit_events(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1057,7 +1223,10 @@ async fn drift_report_read(
         query,
         vec![("artifactId".to_owned(), artifact_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_drift_report(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.read_drift_report(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1071,7 +1240,10 @@ async fn quality_report_read(
         query,
         vec![("artifactId".to_owned(), artifact_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_quality_report(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.read_quality_report(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1085,7 +1257,10 @@ async fn report_findings_list(
         query,
         vec![("artifactId".to_owned(), artifact_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.list_report_findings(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_report_findings(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1094,14 +1269,19 @@ async fn report_findings_list(
 
 async fn automation_create(State(state): State<ServiceState>, bytes: Bytes) -> Response {
     match adapter::parse_body::<CreateAutomationRequest>(&bytes, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.create_automation(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.create_automation(request),
+        ),
         Err(response) => response,
     }
 }
 
 async fn automation_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListAutomationsRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_automations(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.list_automations(request))
+        }
         Err(response) => response,
     }
 }
@@ -1115,7 +1295,9 @@ async fn automation_read(
         query,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.read_automation(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.read_automation(request))
+        }
         Err(response) => response,
     }
 }
@@ -1129,7 +1311,10 @@ async fn automation_update(
         &bytes,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.update_automation(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.update_automation(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1143,7 +1328,9 @@ async fn automation_pause(
         &bytes,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.pause_automation(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.pause_automation(request))
+        }
         Err(response) => response,
     }
 }
@@ -1157,7 +1344,10 @@ async fn automation_resume(
         &bytes,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.resume_automation(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.resume_automation(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1171,7 +1361,10 @@ async fn automation_delete(
         &bytes,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.delete_automation(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.delete_automation(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1185,7 +1378,10 @@ async fn automation_next_run(
         query,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.next_automation_run(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.next_automation_run(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1199,7 +1395,10 @@ async fn automation_history(
         query,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.list_automation_history(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_automation_history(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1213,7 +1412,10 @@ async fn automation_trigger(
         &bytes,
         vec![("automationId".to_owned(), automation_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.trigger_automation(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.trigger_automation(request),
+        ),
         Err(response) => response,
     }
 }
@@ -1222,14 +1424,16 @@ async fn automation_trigger(
 
 async fn dataset_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_datasets(request)),
+        Ok(request) => {
+            adapter::ok_response(request.meta.request_id, state.api.list_datasets(request))
+        }
         Err(response) => response,
     }
 }
 
 async fn plan_list(State(state): State<ServiceState>, RawQuery(query): RawQuery) -> Response {
     match adapter::parse_query_envelope::<ListRequest>(query, vec![]) {
-        Ok(request) => adapter::ok_response(state.api.list_plans(request)),
+        Ok(request) => adapter::ok_response(request.meta.request_id, state.api.list_plans(request)),
         Err(response) => response,
     }
 }
@@ -1243,7 +1447,10 @@ async fn plan_version_list(
         query,
         vec![("planId".to_owned(), plan_id)],
     ) {
-        Ok(request) => adapter::ok_response(state.api.list_plan_versions(request)),
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_plan_versions(request),
+        ),
         Err(response) => response,
     }
 }

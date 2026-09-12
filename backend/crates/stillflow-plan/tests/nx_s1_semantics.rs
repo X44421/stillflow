@@ -1761,3 +1761,42 @@ fn capability_gate_rejects_the_paused_set() {
     capability::reject_paused_type(&LogicalType::Int64).expect("valid type");
     let _ = schema;
 }
+
+/// R-8 (NX-C0 §7.2): a multi-fault graph reports the smallest-`NodeId` fault
+/// regardless of the caller's array order, and the code/diagnostic payload is
+/// stable under permutation.
+#[test]
+fn multi_fault_ordering_is_canonical_under_permutation() {
+    // Two faulting select nodes: column 999 (node 2) and column 998 (node 3).
+    let build = |reverse: bool| {
+        let mut nodes = vec![
+            source_config(700),
+            select_config(2, &[999]),
+            select_config(3, &[998]),
+            output_config(),
+        ];
+        let mut edges = vec![(1, 2), (2, 3), (3, 5)];
+        if reverse {
+            nodes.remove(0);
+            nodes.reverse();
+            let source = source_config(700);
+            nodes.push(source);
+            edges.reverse();
+        }
+        chain(nodes, edges).expect("graph")
+    };
+    let first = NodeGraphCompiler::default()
+        .compile(&build(false), &source(700), CompileTarget::Execution)
+        .expect_err("multi-fault graph rejected");
+    let second = NodeGraphCompiler::default()
+        .compile(&build(true), &source(700), CompileTarget::Execution)
+        .expect_err("multi-fault graph rejected");
+    assert_eq!(first.code().as_str(), second.code().as_str());
+    assert_eq!(
+        first.node_id().map(|id| id.as_uuid()),
+        second.node_id().map(|id| id.as_uuid())
+    );
+    // The reported fault is the smallest NodeId (node 2), not the first in
+    // array order.
+    assert_eq!(first.node_id().map(|id| id.as_uuid()), Some(uuid(2)));
+}
