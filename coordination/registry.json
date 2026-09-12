@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 388,
+  "revision": 389,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1142,9 +1142,38 @@
       "completed_at": "2026-09-12T09:15:46Z",
       "result_head": "4e750e0e03597fe30ed710b70fc20c62ab22bcbb",
       "ci_url": "34684195864"
+    },
+    {
+      "id": "NX-N2",
+      "title": "Implement bounded composite nodes and controlled declarative packages",
+      "risk_level": "L3",
+      "status": "queued",
+      "mode": "write",
+      "owner": null,
+      "target_issue": 341,
+      "target_branch": "agent/issue-341-nx-n2",
+      "expected_base": "f43799da47892dfea2b634472e5f5eed84e2e17b",
+      "locks": [
+        "branch:agent/issue-341-nx-n2",
+        "core:composite-definitions",
+        "plan:composite-expansion"
+      ],
+      "paths": [
+        "backend/crates/stillflow-core/src/node_graph",
+        "backend/crates/stillflow-plan/src",
+        "backend/crates/stillflow-api/src",
+        "backend/crates/stillflow-service/src"
+      ],
+      "shared_paths": [],
+      "depends_on": [],
+      "conflicts_with": [],
+      "lease_expires_at": null,
+      "registered_at": "2026-09-12T09:16:27Z",
+      "updated_at": "2026-09-12T09:16:27Z",
+      "registered_by": "agent-nx-n2-341"
     }
   ],
   "locks": {},
-  "updated_at": "2026-09-12T09:15:46Z",
+  "updated_at": "2026-09-12T09:16:27Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
