@@ -1,9 +1,89 @@
-use stillflow_core::{
-    BinaryOperator, Expr, LogicalSchema, LogicalType, ScalarValue, TimeUnit, UnaryOperator,
-};
+use stillflow_core::{Expr, LogicalSchema, LogicalType};
 
 use crate::error::EngineError;
-use crate::lookup::ColumnLookup;
+use stillflow_plan::semantics::{self, ColumnResolver, SemanticError, SemanticKind};
+
+/// The frozen mapping from a shared semantic failure to the engine's error
+/// surface. The decision is made once by the shared analyzer; this mapping
+/// preserves the engine's current error classes and messages per decision.
+pub(crate) fn semantic_error(error: SemanticError) -> EngineError {
+    match error.kind() {
+        SemanticKind::ShapeInvalid => {
+            EngineError::InvalidPlan("expression failed shape validation")
+        }
+        SemanticKind::ExprBounds => {
+            EngineError::BoundExceeded("expression exceeds node or depth limits")
+        }
+        SemanticKind::UnknownColumn => EngineError::UnknownColumn(
+            error
+                .column_id()
+                .unwrap_or_else(|| stillflow_core::ColumnId::from_uuid(uuid::Uuid::nil())),
+        ),
+        SemanticKind::NotRequiresBoolean => EngineError::TypeError("predicate must be boolean"),
+        SemanticKind::LogicalOperandsMustBeBoolean => {
+            EngineError::TypeError("logical operands must be boolean")
+        }
+        SemanticKind::ContainsPaused => {
+            EngineError::TypeError("contains is paused until the regex polars feature is approved")
+        }
+        SemanticKind::CheckedArithmeticPaused => EngineError::TypeError(
+            "checked arithmetic is paused until overflow semantics are implemented",
+        ),
+        SemanticKind::ListStructPaused => {
+            EngineError::TypeError("list and struct execution is paused")
+        }
+        SemanticKind::TimestampSecondPaused => {
+            EngineError::TypeError("timestamp second unit is paused")
+        }
+        SemanticKind::InvalidLogicalType => EngineError::TypeError("logical type is invalid"),
+        SemanticKind::DateToUtf8CastPaused => {
+            EngineError::TypeError("cast from date32 or timestamp to utf8 is paused")
+        }
+        SemanticKind::BinaryCastUnauthorized => {
+            EngineError::TypeError("cast to/from binary is not authorized")
+        }
+        SemanticKind::ComparisonIncomparable => {
+            EngineError::TypeError("comparison operands are not comparable")
+        }
+        SemanticKind::OrderedComparisonIncompatible => {
+            EngineError::TypeError("ordered comparison operands are not compatible")
+        }
+        SemanticKind::OrderedComparisonRequiresNumeric => EngineError::TypeError(
+            "ordered comparison requires numeric, date32, or timestamp operands",
+        ),
+        SemanticKind::CoalesceArmsIncompatible => {
+            EngineError::TypeError("coalesce arms are not type-compatible")
+        }
+        // The rule-level kinds below never reach the typing entry (the
+        // engine's rule propagation is the IncrementalSchema layer); the
+        // fallback keeps the mapping total without inventing a decision.
+        SemanticKind::TrimRequiresUtf8
+        | SemanticKind::LiteralIncompatibleWithColumn
+        | SemanticKind::BinaryReplaceOnlyNullToNull
+        | SemanticKind::FillNullValueMustNotBeNull
+        | SemanticKind::FillNullNotAuthorizedOnBinary
+        | SemanticKind::DropLastRemainingField
+        | SemanticKind::DerivedTypeMismatch
+        | SemanticKind::DerivedIdentityNotUnique
+        | SemanticKind::DerivedNullabilityNarrower
+        | SemanticKind::DerivedFieldInvalid
+        | SemanticKind::ProjectionEmpty
+        | SemanticKind::ProjectionDuplicate
+        | SemanticKind::SchemaRebuildInvalid
+        | SemanticKind::RuleNotAdmitted => EngineError::InvalidPlan(error.kind().compile_message()),
+    }
+}
+
+/// Shared semantic analysis of one expression through the engine's error
+/// surface: result type and nullability in one pass (NX-S1, #336).
+pub(crate) fn analyze_expr<R: ColumnResolver + ?Sized>(
+    expr: &Expr,
+    resolver: &R,
+) -> Result<(LogicalType, bool), EngineError> {
+    semantics::analyze_expr(expr, resolver)
+        .map(|analysis| (analysis.data_type, analysis.nullable))
+        .map_err(semantic_error)
+}
 
 pub(crate) fn type_check_expr(
     expr: &Expr,
@@ -12,18 +92,16 @@ pub(crate) fn type_check_expr(
     type_check_expr_in(expr, schema)
 }
 
-pub(crate) fn type_check_expr_in<L: ColumnLookup + ?Sized>(
+pub(crate) fn type_check_expr_in<R: ColumnResolver + ?Sized>(
     expr: &Expr,
-    schema: &L,
+    schema: &R,
 ) -> Result<LogicalType, EngineError> {
-    expr.validate_shape()
-        .map_err(|_| EngineError::InvalidPlan("expression failed shape validation"))?;
-    infer_type(expr, schema)
+    analyze_expr(expr, schema).map(|(data_type, _)| data_type)
 }
 
-pub(crate) fn require_boolean_in<L: ColumnLookup + ?Sized>(
+pub(crate) fn require_boolean_in<R: ColumnResolver + ?Sized>(
     expr: &Expr,
-    schema: &L,
+    schema: &R,
 ) -> Result<(), EngineError> {
     match type_check_expr_in(expr, schema)? {
         LogicalType::Boolean => Ok(()),
@@ -32,222 +110,13 @@ pub(crate) fn require_boolean_in<L: ColumnLookup + ?Sized>(
 }
 
 pub(crate) fn reject_paused_expr(expr: &Expr) -> Result<(), EngineError> {
-    match expr {
-        Expr::Unary {
-            operator: UnaryOperator::Negate,
-            ..
-        } => Err(EngineError::TypeError(
-            "checked arithmetic is paused until overflow semantics are implemented",
-        )),
-        Expr::Unary { expression, .. } | Expr::IsNull { expression, .. } => {
-            reject_paused_expr(expression)
-        }
-        Expr::Cast {
-            expression,
-            data_type,
-        } => {
-            reject_paused_type(data_type)?;
-            reject_paused_expr(expression)
-        }
-        Expr::Binary {
-            left,
-            operator,
-            right,
-        } => {
-            match operator {
-                BinaryOperator::Contains => {
-                    return Err(EngineError::TypeError(
-                        "contains is paused until the regex polars feature is approved",
-                    ));
-                }
-                BinaryOperator::Add
-                | BinaryOperator::Subtract
-                | BinaryOperator::Multiply
-                | BinaryOperator::Divide
-                | BinaryOperator::Modulo => {
-                    return Err(EngineError::TypeError(
-                        "checked arithmetic is paused until overflow semantics are implemented",
-                    ));
-                }
-                _ => {}
-            }
-            reject_paused_expr(left)?;
-            reject_paused_expr(right)
-        }
-        Expr::Coalesce { expressions } => {
-            for nested in expressions {
-                reject_paused_expr(nested)?;
-            }
-            Ok(())
-        }
-        Expr::Column(_) | Expr::Literal(_) => Ok(()),
-    }
+    semantics::capability::reject_paused_capability(expr).map_err(semantic_error)
 }
 
-pub(crate) fn reject_paused_type(data_type: &LogicalType) -> Result<(), EngineError> {
-    match data_type {
-        LogicalType::List(_) | LogicalType::Struct(_) => Err(EngineError::TypeError(
-            "list and struct execution is paused",
-        )),
-        LogicalType::Timestamp {
-            unit: TimeUnit::Second,
-            ..
-        } => Err(EngineError::TypeError("timestamp second unit is paused")),
-        _ => data_type
-            .validate()
-            .map_err(|_| EngineError::TypeError("logical type is invalid")),
-    }
-}
-
-fn infer_type<L: ColumnLookup + ?Sized>(
-    expr: &Expr,
-    schema: &L,
-) -> Result<LogicalType, EngineError> {
-    match expr {
-        Expr::Column(id) => {
-            let field = schema
-                .lookup_field(*id)
-                .ok_or(EngineError::UnknownColumn(*id))?;
-            reject_paused_type(&field.data_type)?;
-            Ok(field.data_type.clone())
-        }
-        Expr::Literal(ScalarValue::Boolean(_)) => Ok(LogicalType::Boolean),
-        Expr::Literal(ScalarValue::Int64(_)) => Ok(LogicalType::Int64),
-        Expr::Literal(ScalarValue::UInt64(_)) => Ok(LogicalType::UInt64),
-        Expr::Literal(ScalarValue::Float64(_)) => Ok(LogicalType::Float64),
-        Expr::Literal(ScalarValue::Utf8(_)) => Ok(LogicalType::Utf8),
-        Expr::Literal(ScalarValue::Null) => Ok(LogicalType::Null),
-        Expr::Unary {
-            operator: UnaryOperator::Not,
-            expression,
-        } => {
-            require_boolean_in(expression, schema)?;
-            Ok(LogicalType::Boolean)
-        }
-        Expr::Unary {
-            operator: UnaryOperator::Negate,
-            ..
-        } => Err(EngineError::TypeError(
-            "checked arithmetic is paused until overflow semantics are implemented",
-        )),
-        Expr::IsNull { expression, .. } => {
-            let _ = infer_type(expression, schema)?;
-            Ok(LogicalType::Boolean)
-        }
-        Expr::Cast {
-            expression,
-            data_type,
-        } => {
-            let from = infer_type(expression, schema)?;
-            reject_paused_type(data_type)?;
-            if matches!(from, LogicalType::Date32 | LogicalType::Timestamp { .. })
-                && matches!(data_type, LogicalType::Utf8)
-            {
-                return Err(EngineError::TypeError(
-                    "cast from date32 or timestamp to utf8 is paused",
-                ));
-            }
-            if matches!(data_type, LogicalType::Binary) && !matches!(from, LogicalType::Binary) {
-                return Err(EngineError::TypeError("cast to binary is not authorized"));
-            }
-            Ok(data_type.clone())
-        }
-        Expr::Binary {
-            left,
-            operator,
-            right,
-        } => infer_binary(*operator, left, right, schema),
-        Expr::Coalesce { expressions } => {
-            if expressions.is_empty() {
-                return Err(EngineError::InvalidPlan("coalesce is empty"));
-            }
-            let mut joined = infer_type(&expressions[0], schema)?;
-            for expr in expressions.iter().skip(1) {
-                let next = infer_type(expr, schema)?;
-                joined = joined
-                    .least_upper_bound(&next)
-                    .map_err(|_| EngineError::TypeError("coalesce arms are not type-compatible"))?;
-            }
-            reject_paused_type(&joined)?;
-            Ok(joined)
-        }
-    }
-}
-
-fn infer_binary<L: ColumnLookup + ?Sized>(
-    operator: BinaryOperator,
-    left: &Expr,
-    right: &Expr,
-    schema: &L,
-) -> Result<LogicalType, EngineError> {
-    let left_type = infer_type(left, schema)?;
-    let right_type = infer_type(right, schema)?;
-    match operator {
-        BinaryOperator::And | BinaryOperator::Or => {
-            if !matches!(left_type, LogicalType::Boolean)
-                || !matches!(right_type, LogicalType::Boolean)
-            {
-                return Err(EngineError::TypeError("logical operands must be boolean"));
-            }
-            Ok(LogicalType::Boolean)
-        }
-        BinaryOperator::Contains => Err(EngineError::TypeError(
-            "contains is paused until the regex polars feature is approved",
-        )),
-        BinaryOperator::Add
-        | BinaryOperator::Subtract
-        | BinaryOperator::Multiply
-        | BinaryOperator::Divide
-        | BinaryOperator::Modulo => Err(EngineError::TypeError(
-            "checked arithmetic is paused until overflow semantics are implemented",
-        )),
-        BinaryOperator::Equal | BinaryOperator::NotEqual => {
-            comparable_pair(&left_type, &right_type)?;
-            Ok(LogicalType::Boolean)
-        }
-        BinaryOperator::LessThan
-        | BinaryOperator::LessThanOrEqual
-        | BinaryOperator::GreaterThan
-        | BinaryOperator::GreaterThanOrEqual => {
-            ordered_pair(&left_type, &right_type)?;
-            Ok(LogicalType::Boolean)
-        }
-    }
-}
-
-fn comparable_pair(left: &LogicalType, right: &LogicalType) -> Result<(), EngineError> {
-    if left.least_upper_bound(right).is_ok() {
-        return Ok(());
-    }
-    Err(EngineError::TypeError(
-        "comparison operands are not comparable",
-    ))
-}
-
-fn ordered_pair(left: &LogicalType, right: &LogicalType) -> Result<(), EngineError> {
-    let joined = left
-        .least_upper_bound(right)
-        .map_err(|_| EngineError::TypeError("ordered comparison operands are not compatible"))?;
-    match joined {
-        LogicalType::Int8
-        | LogicalType::Int16
-        | LogicalType::Int32
-        | LogicalType::Int64
-        | LogicalType::UInt8
-        | LogicalType::UInt16
-        | LogicalType::UInt32
-        | LogicalType::UInt64
-        | LogicalType::Float32
-        | LogicalType::Float64
-        | LogicalType::Date32
-        | LogicalType::Timestamp { .. } => {
-            reject_paused_type(&joined)?;
-            Ok(())
-        }
-        _ => Err(EngineError::TypeError(
-            "ordered comparison requires numeric, date32, or timestamp operands",
-        )),
-    }
+pub(crate) fn reject_paused_type(
+    data_type: &stillflow_core::LogicalType,
+) -> Result<(), EngineError> {
+    semantics::capability::reject_paused_type(data_type).map_err(semantic_error)
 }
 
 /// Counts every `Expr::Column` occurrence in an expression tree. Used by the

@@ -40,12 +40,13 @@ use stillflow_core::{
 use stillflow_plan::{CastFailurePolicy, Rule};
 
 use crate::error::EngineError;
-use crate::lookup::{build_ordinals, use_index, ColumnLookup};
+use crate::lookup::{build_ordinals, use_index};
 use crate::preflight::{
     infer_nullability, reject_paused_cast, reject_paused_cast_in_expr, validate_expr,
     validate_literal_for_column,
 };
 use crate::typing::{reject_paused_type, require_boolean_in, type_check_expr_in};
+use stillflow_plan::semantics::ColumnResolver;
 
 /// Cumulative text accounting contributed by one field, replicating the core
 /// `validate_nodes` budget rules for the reachable preflight state (flat
@@ -223,7 +224,7 @@ impl IncrementalSchema {
             Rule::DropColumn { column } => self.apply_drop(*column),
             Rule::Trim { column } => {
                 let field = self
-                    .lookup_field(*column)
+                    .resolve_column(*column)
                     .ok_or(EngineError::UnknownColumn(*column))?;
                 if !matches!(field.data_type, LogicalType::Utf8) {
                     return Err(EngineError::TypeError("trim requires a utf8 column"));
@@ -237,7 +238,7 @@ impl IncrementalSchema {
             } => self.apply_cast(*column, data_type, *on_failure),
             Rule::ReplaceLiteral { column, from, to } => {
                 let field = self
-                    .lookup_field(*column)
+                    .resolve_column(*column)
                     .ok_or(EngineError::UnknownColumn(*column))?;
                 validate_literal_for_column(&field.data_type, from)?;
                 validate_literal_for_column(&field.data_type, to)?;
@@ -266,7 +267,7 @@ impl IncrementalSchema {
                     return Err(EngineError::TypeError("fill-null value must not be null"));
                 }
                 let field = self
-                    .lookup_field(*column)
+                    .resolve_column(*column)
                     .ok_or(EngineError::UnknownColumn(*column))?;
                 if matches!(field.data_type, LogicalType::Binary) {
                     return Err(EngineError::TypeError(
@@ -377,7 +378,7 @@ impl IncrementalSchema {
     ) -> Result<(), EngineError> {
         reject_paused_type(data_type)?;
         let field = self
-            .lookup_field(column)
+            .resolve_column(column)
             .ok_or(EngineError::UnknownColumn(column))?;
         let old_type = field.data_type.clone();
         reject_paused_cast(&old_type, data_type)?;
@@ -484,8 +485,8 @@ impl IncrementalSchema {
     }
 }
 
-impl ColumnLookup for IncrementalSchema {
-    fn lookup_field(&self, id: stillflow_core::ColumnId) -> Option<&LogicalField> {
+impl ColumnResolver for IncrementalSchema {
+    fn resolve_column(&self, id: stillflow_core::ColumnId) -> Option<&LogicalField> {
         match &self.entries {
             Some(entries) => entries
                 .binary_search_by_key(&id, |(key, _)| *key)
@@ -499,9 +500,9 @@ impl ColumnLookup for IncrementalSchema {
     }
 }
 
-impl ColumnLookup for &IncrementalSchema {
-    fn lookup_field(&self, id: stillflow_core::ColumnId) -> Option<&LogicalField> {
-        (*self).lookup_field(id)
+impl ColumnResolver for &IncrementalSchema {
+    fn resolve_column(&self, id: stillflow_core::ColumnId) -> Option<&LogicalField> {
+        (*self).resolve_column(id)
     }
 }
 
@@ -1409,7 +1410,7 @@ mod tests {
             "ordinal-preserving rules must leave entries bit-exactly unchanged"
         );
         assert_eq!(
-            working.lookup_field(id(1)).map(|f| f.name.as_str()),
+            working.resolve_column(id(1)).map(|f| f.name.as_str()),
             Some("renamed"),
             "indexed lookup resolves the renamed field"
         );

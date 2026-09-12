@@ -1,0 +1,150 @@
+{
+  "expected": {
+    "error": {
+      "code": "NG_INCOMPATIBLE_TYPE",
+      "nodeId": "00000000-0000-0000-0000-000000000002"
+    },
+    "ok": null,
+    "stage": "compile"
+  },
+  "graph": {
+    "edges": [
+      {
+        "from": {
+          "nodeId": "00000000-0000-0000-0000-000000000001",
+          "port": "out"
+        },
+        "to": {
+          "nodeId": "00000000-0000-0000-0000-000000000002",
+          "port": "in"
+        }
+      },
+      {
+        "from": {
+          "nodeId": "00000000-0000-0000-0000-000000000002",
+          "port": "out"
+        },
+        "to": {
+          "nodeId": "00000000-0000-0000-0000-000000000005",
+          "port": "in"
+        }
+      }
+    ],
+    "graphId": "00000000-0000-0000-0000-000000000384",
+    "nodes": [
+      {
+        "config": {
+          "projection": [
+            "00000000-0000-0000-0000-000000000065",
+            "00000000-0000-0000-0000-000000000066",
+            "00000000-0000-0000-0000-000000000067",
+            "00000000-0000-0000-0000-000000000068",
+            "00000000-0000-0000-0000-000000000069",
+            "00000000-0000-0000-0000-00000000006a",
+            "00000000-0000-0000-0000-00000000006b"
+          ],
+          "sourceAssetId": "00000000-0000-0000-0000-0000000002bc"
+        },
+        "configVersion": 1,
+        "id": "00000000-0000-0000-0000-000000000001",
+        "typeId": "stillflow.node.source"
+      },
+      {
+        "config": {
+          "dataType": {
+            "kind": "int64"
+          },
+          "expression": {
+            "kind": "column",
+            "value": "00000000-0000-0000-0000-000000000067"
+          },
+          "id": "00000000-0000-0000-0000-00000000006c",
+          "name": "age",
+          "nullable": true
+        },
+        "configVersion": 1,
+        "id": "00000000-0000-0000-0000-000000000002",
+        "typeId": "stillflow.node.derive-column"
+      },
+      {
+        "config": {
+          "outputLabel": "cleaned"
+        },
+        "configVersion": 1,
+        "id": "00000000-0000-0000-0000-000000000005",
+        "typeId": "stillflow.node.output"
+      }
+    ],
+    "outputNodeId": "00000000-0000-0000-0000-000000000005",
+    "sourceNodeId": "00000000-0000-0000-0000-000000000001",
+    "version": 1
+  },
+  "name": "derive_duplicate_column_name",
+  "sourceAssetId": "00000000-0000-0000-0000-0000000002bc",
+  "sourceSchema": {
+    "fields": [
+      {
+        "dataType": {
+          "kind": "utf8"
+        },
+        "id": "00000000-0000-0000-0000-000000000065",
+        "name": "name",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "int64"
+        },
+        "id": "00000000-0000-0000-0000-000000000066",
+        "name": "age",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "float64"
+        },
+        "id": "00000000-0000-0000-0000-000000000067",
+        "name": "score",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "boolean"
+        },
+        "id": "00000000-0000-0000-0000-000000000068",
+        "name": "active",
+        "nullable": false
+      },
+      {
+        "dataType": {
+          "kind": "binary"
+        },
+        "id": "00000000-0000-0000-0000-000000000069",
+        "name": "blob",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "date32"
+        },
+        "id": "00000000-0000-0000-0000-00000000006a",
+        "name": "created",
+        "nullable": true
+      },
+      {
+        "dataType": {
+          "kind": "timestamp",
+          "value": {
+            "timezone": null,
+            "unit": "second"
+          }
+        },
+        "id": "00000000-0000-0000-0000-00000000006b",
+        "name": "ts_sec",
+        "nullable": true
+      }
+    ],
+    "version": 1
+  },
+  "target": "execution"
+}
