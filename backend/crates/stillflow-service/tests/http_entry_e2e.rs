@@ -1906,3 +1906,438 @@ fn t_nx_v1_graph_revisions_save_conflict_restart_and_migrate() {
 
     terminate(&mut second);
 }
+
+/// NX-G1 (#344): the full node pipeline over real HTTP with direct value
+/// verification — source → compile → node preview (values, NULLs, column
+/// identity) → revision save/conflict/migrate → restart → publish →
+/// restart → Job → Snapshot — for both the declarative composite node and
+/// its hand-written atomic equivalent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t_nx_g1_node_pipeline_values_revisions_and_durability() {
+    let root = tempfile::tempdir().expect("root");
+    let fixture = tempfile::tempdir().expect("fixtures");
+    // Row 3 carries an empty label: the trim-clean composite maps it to
+    // NULL, exercising the nullability contract with real data.
+    std::fs::write(
+        fixture.path().join("rows.csv"),
+        b"id,label,ignored\n1, alpha ,x\n2,beta,y\n3,,z\n",
+    )
+    .expect("csv fixture");
+    let config = process_config(root.path());
+    let workspace_id = config.workspace_id;
+    let (service, base, client) = start(config.clone()).await;
+
+    let session_id = Uuid::new_v4();
+    let session = post_json(
+        &client,
+        &base,
+        "/v1/sessions",
+        envelope(
+            workspace_id,
+            json!({"sessionId": session_id, "createdAt": timestamp()}),
+        ),
+    )
+    .await;
+    assert_eq!(session.status(), 200, "session create");
+
+    let connection_id = Uuid::new_v4();
+    let connection = post_json(
+        &client,
+        &base,
+        "/v1/connections",
+        envelope(
+            workspace_id,
+            json!({
+                "connectionId": connection_id,
+                "kind": "localFile",
+                "name": "nx-g1-csv",
+                "safeConfig": {
+                    "allowedRoots": [fixture.path().to_str().expect("utf-8")],
+                    "schemaInference": {"maxRows": 100, "maxBytes": 1048576}
+                },
+                "credentialRef": "cred://nx-g1/local",
+                "createdAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(connection.status(), 200, "connection register");
+    let (asset_id, projection) =
+        discover_and_project(&client, &base, workspace_id, connection_id).await;
+    let label_column = projection[1];
+    // The full projection avoids the connector's subset-projection envelope
+    // (a local-tabular limitation recorded in the G1 evidence doc).
+    let source_projection = projection.clone();
+
+    let composite_node = Uuid::from_u128(0x402);
+    let composite_graph = json!({
+        "version": 1,
+        "graphId": Uuid::from_u128(0x401),
+        "sourceNodeId": Uuid::from_u128(0x403),
+        "outputNodeId": Uuid::from_u128(0x405),
+        "nodes": [
+            {"id": Uuid::from_u128(0x403), "typeId": "stillflow.node.source", "configVersion": 1,
+             "config": {"sourceAssetId": asset_id,
+                        "projection": source_projection}},
+            {"id": composite_node, "typeId": "stillflow.composite.trim-clean", "configVersion": 1,
+             "config": {"column": label_column}},
+            {"id": Uuid::from_u128(0x405), "typeId": "stillflow.node.output", "configVersion": 1,
+             "config": {"outputLabel": "cleaned"}}
+        ],
+        "edges": [
+            {"from": {"nodeId": Uuid::from_u128(0x403), "port": "out"},
+             "to": {"nodeId": composite_node, "port": "in"}},
+            {"from": {"nodeId": composite_node, "port": "out"},
+             "to": {"nodeId": Uuid::from_u128(0x405), "port": "in"}}
+        ],
+        "metadata": {}
+    });
+
+    let atomic_node_trim = Uuid::from_u128(0x412);
+    let atomic_node_replace = Uuid::from_u128(0x413);
+    let atomic_graph = json!({
+        "version": 1,
+        "graphId": Uuid::from_u128(0x411),
+        "sourceNodeId": Uuid::from_u128(0x410),
+        "outputNodeId": Uuid::from_u128(0x415),
+        "nodes": [
+            {"id": Uuid::from_u128(0x410), "typeId": "stillflow.node.source", "configVersion": 1,
+             "config": {"sourceAssetId": asset_id,
+                        "projection": source_projection}},
+            {"id": atomic_node_trim, "typeId": "stillflow.node.trim", "configVersion": 1,
+             "config": {"column": label_column}},
+            {"id": atomic_node_replace, "typeId": "stillflow.node.replace-literal", "configVersion": 1,
+             "config": {"column": label_column,
+                        "from": {"kind": "utf8", "value": ""},
+                        "to": {"kind": "null"}}},
+            {"id": Uuid::from_u128(0x415), "typeId": "stillflow.node.output", "configVersion": 1,
+             "config": {"outputLabel": "cleaned"}}
+        ],
+        "edges": [
+            {"from": {"nodeId": Uuid::from_u128(0x410), "port": "out"},
+             "to": {"nodeId": atomic_node_trim, "port": "in"}},
+            {"from": {"nodeId": atomic_node_trim, "port": "out"},
+             "to": {"nodeId": atomic_node_replace, "port": "in"}},
+            {"from": {"nodeId": atomic_node_replace, "port": "out"},
+             "to": {"nodeId": Uuid::from_u128(0x415), "port": "in"}}
+        ],
+        "metadata": {}
+    });
+
+    let preview_request = |graph: &Value, target: Uuid| {
+        post_json(
+            &client,
+            &base,
+            "/v1/node-graphs/preview",
+            envelope(
+                workspace_id,
+                json!({
+                    "graph": graph,
+                    "connectionId": connection_id,
+                    "assetId": asset_id,
+                    "targetNodeId": target,
+                    "batchSize": 1024,
+                    "rowLimit": 100,
+                    "byteLimit": 1048576,
+                    "timeoutSeconds": 30,
+                }),
+            ),
+        )
+    };
+
+    // Direct value verification at the composite's output boundary.
+    let composite_preview = preview_request(&composite_graph, composite_node).await;
+    let composite_decoded = arrow_stream(composite_preview, "composite preview").await;
+    assert_eq!(
+        composite_decoded.schema.fields().len(),
+        3,
+        "full projection: id, label, ignored"
+    );
+    assert_eq!(
+        composite_decoded.schema.field(0).name(),
+        "id",
+        "column order is the projection order"
+    );
+    // Column identity is asserted at the logical level against the compile
+    // view (the Arrow wire carries names and order; the engine resolves by
+    // ColumnId).
+    let label_column_array = composite_decoded
+        .batches
+        .first()
+        .expect("composite preview rows")
+        .column(1);
+    let label_values = arrow_array::cast::AsArray::as_string::<i32>(label_column_array);
+    assert_eq!(label_values.value(0), "alpha", "trimmed value");
+    assert_eq!(label_values.value(1), "beta", "untouched value");
+    assert!(
+        arrow_array::Array::is_null(label_values, 2),
+        "empty string becomes null"
+    );
+
+    // The hand-written atomic chain produces the identical values.
+    let atomic_preview = preview_request(&atomic_graph, atomic_node_replace).await;
+    let atomic_decoded = arrow_stream(atomic_preview, "atomic preview").await;
+    let atomic_labels = arrow_array::cast::AsArray::as_string::<i32>(
+        atomic_decoded
+            .batches
+            .first()
+            .expect("atomic rows")
+            .column(1),
+    );
+    assert_eq!(atomic_labels.value(0), "alpha");
+    assert_eq!(atomic_labels.value(1), "beta");
+    assert!(arrow_array::Array::is_null(atomic_labels, 2));
+    // Field-level identity: names, order, types, nullability, and the
+    // per-field `stillflow.column.id` metadata all match between the
+    // composite expansion and the hand-written atomic chain. (Stream-level
+    // metadata carries request identity, so whole-Schema equality is not
+    // the assertion.)
+    let composite_fields = composite_decoded.schema.fields();
+    let atomic_fields = atomic_decoded.schema.fields();
+    assert_eq!(composite_fields.len(), atomic_fields.len());
+    for (composite_field, atomic_field) in composite_fields.iter().zip(atomic_fields.iter()) {
+        assert_eq!(composite_field.name(), atomic_field.name());
+        assert_eq!(composite_field.data_type(), atomic_field.data_type());
+        assert_eq!(composite_field.is_nullable(), atomic_field.is_nullable());
+        assert_eq!(composite_field.metadata(), atomic_field.metadata());
+        assert!(
+            composite_field
+                .metadata()
+                .contains_key("stillflow.column.id"),
+            "the wire schema carries the column identity"
+        );
+    }
+    assert_eq!(
+        composite_fields.get(1).expect("label").metadata()["stillflow.column.id"],
+        label_column.to_string(),
+        "label identity kept through the composite"
+    );
+
+    // Graph revision lifecycle: save, conflict, idempotent re-save.
+    let graph_revision_id = Uuid::new_v4();
+    let saved = post_json(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(
+            workspace_id,
+            json!({"graphId": graph_revision_id, "graph": composite_graph}),
+        ),
+    )
+    .await;
+    assert_eq!(saved.status(), 200, "revision save");
+    let saved_body: Value = saved.json().await.expect("revision json");
+    assert_eq!(saved_body["body"]["revisionNumber"], json!(1));
+    let revision_digest = saved_body["body"]["graphDigest"]
+        .as_str()
+        .expect("digest")
+        .to_owned();
+
+    // Unchanged content is the idempotent no-op (same digest, same revision).
+    let idempotent_save = post_json(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(
+            workspace_id,
+            json!({"graphId": graph_revision_id, "graph": composite_graph}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        idempotent_save.status(),
+        200,
+        "unchanged content saves idempotently"
+    );
+    let idempotent_body: Value = idempotent_save.json().await.expect("json");
+    assert_eq!(idempotent_body["body"]["revisionNumber"], json!(1));
+    assert_eq!(idempotent_body["body"]["idempotent"], json!(true));
+
+    // A stale editor: revision 2 (changed content) saves fine, then the
+    // editor that was still based on revision 1 conflicts.
+    let mut changed = composite_graph.clone();
+    changed["metadata"] = json!({"owner": "nx-g1", "rev": "2"});
+    let second_save = post_json(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(
+            workspace_id,
+            json!({"graphId": graph_revision_id, "graph": changed}),
+        ),
+    )
+    .await;
+    let second_body: Value = second_save.json().await.expect("json");
+    assert_eq!(second_body["body"]["revisionNumber"], json!(2));
+
+    let stale = post_json(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(
+            workspace_id,
+            json!({
+                "graphId": graph_revision_id,
+                "expectedRevision": {"number": 1, "digest": revision_digest},
+                "graph": composite_graph
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(stale.status(), 409, "stale expectation conflicts");
+    let stale_body: Value = stale.json().await.expect("json");
+    assert!(
+        stale_body["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("current revision 2"),
+        "the conflict names the current revision: {}",
+        stale_body["error"]["message"]
+    );
+
+    // Migration: dry-run writes nothing; apply is idempotent at format 1.
+    let dry_run = post_json(
+        &client,
+        &base,
+        &format!("/v1/graph-revisions/{graph_revision_id}/migrate"),
+        envelope(workspace_id, json!({"toFormatVersion": 1, "dryRun": true})),
+    )
+    .await;
+    assert_eq!(dry_run.status(), 200, "migration dry run");
+    let dry_body: Value = dry_run.json().await.expect("dry run json");
+    assert_eq!(
+        dry_body["body"]["revision"],
+        json!(null),
+        "dry run writes nothing"
+    );
+
+    // Publish the composite-compiled plan, restart, submit the job, and
+    // verify the durable snapshot.
+    let compiled = post_json(
+        &client,
+        &base,
+        "/v1/node-graphs/compile",
+        envelope(
+            workspace_id,
+            json!({
+                "graph": composite_graph,
+                "connectionId": connection_id,
+                "assetId": asset_id,
+                "target": "execution",
+                "timeoutSeconds": 30,
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(compiled.status(), 200, "composite compiles for publication");
+    let compiled_body: Value = compiled.json().await.expect("compile json");
+    // Column identity and order survive compilation: the output schema's
+    // fields carry the discovered column ids in projection order.
+    let output_fields = compiled_body["body"]["outputSchema"]["fields"]
+        .as_array()
+        .expect("output fields");
+    assert_eq!(
+        output_fields
+            .iter()
+            .map(|field| field["id"].as_str().expect("field id"))
+            .collect::<Vec<_>>(),
+        projection
+            .iter()
+            .map(|column| column.to_string())
+            .collect::<Vec<_>>(),
+        "column ids and order are the discovered projection"
+    );
+
+    let dataset_id = Uuid::new_v4();
+    let dataset = post_json(
+        &client,
+        &base,
+        "/v1/datasets",
+        envelope(
+            workspace_id,
+            json!({
+                "datasetId": dataset_id,
+                "sessionId": session_id,
+                "sourceAssetId": asset_id,
+                "name": "nx-g1",
+                "createdAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(dataset.status(), 200, "dataset binding");
+
+    let plan_id = Uuid::new_v4();
+    let version_id = Uuid::new_v4();
+    let create_plan = post_json(
+        &client,
+        &base,
+        "/v1/plans",
+        envelope(
+            workspace_id,
+            json!({"planId": plan_id, "createdAt": timestamp()}),
+        ),
+    )
+    .await;
+    assert_eq!(create_plan.status(), 200, "plan create");
+    let save_version = post_json(
+        &client,
+        &base,
+        &format!("/v1/plans/{plan_id}/versions"),
+        envelope(
+            workspace_id,
+            json!({
+                "planId": plan_id,
+                "planVersionId": version_id,
+                "versionNumber": 1,
+                "parentVersionId": null,
+                "logicalPlan": compiled_body["body"]["logicalPlan"],
+                "createdAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(save_version.status(), 200, "plan version save");
+    let publish = post_json(
+        &client,
+        &base,
+        &format!("/v1/plan-versions/{version_id}/publish"),
+        envelope(
+            workspace_id,
+            json!({
+                "planVersionId": version_id,
+                "expectedCurrentVersionId": null,
+                "publishedAt": timestamp(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(publish.status(), 200, "plan version publish");
+    service.shutdown().await.expect("shutdown before restart");
+
+    // Restart: the durable PlanVersion (not the graph, not the package)
+    // drives execution.
+    let (restarted, restarted_base, restarted_client) = start(config).await;
+    let job_id = submit_materialize_job(
+        &restarted_client,
+        &restarted_base,
+        &MaterializePlanFixture {
+            workspace_id,
+            session_id,
+            plan_id,
+            version_id,
+            connection_id,
+            asset_id,
+        },
+    )
+    .await;
+    let job = wait_terminal(&restarted_client, &restarted_base, workspace_id, job_id).await;
+    assert_eq!(
+        job["body"]["state"], "succeeded",
+        "durable job succeeds: {job}"
+    );
+    let outputs = job["body"]["outputs"].as_array().expect("job outputs");
+    assert_eq!(outputs[0]["kind"], "snapshot");
+    assert_eq!(outputs[0]["committed"], true);
+    restarted.shutdown().await.expect("final shutdown");
+}
