@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 392,
+  "revision": 393,
   "repository": "X44421/stillflow",
   "coordination_branch": "coordination/task-registry",
   "source_main_sha": "ca18a092552a0037e33ef4945c8c2d99ae487b38",
@@ -1180,9 +1180,9 @@
       "id": "NX-V1",
       "title": "Graph revision save/restore and explicit migration API",
       "risk_level": "L3",
-      "status": "queued",
+      "status": "running",
       "mode": "write",
-      "owner": null,
+      "owner": "agent-nx-v1-343",
       "target_issue": 343,
       "target_branch": "agent/issue-343-nx-v1",
       "expected_base": "a301ef1cb2095bfce9f3abea7e22f95f48ef3574",
@@ -1200,13 +1200,36 @@
       "shared_paths": [],
       "depends_on": [],
       "conflicts_with": [],
-      "lease_expires_at": null,
+      "lease_expires_at": "2026-09-13T05:12:16Z",
       "registered_at": "2026-09-12T11:54:04Z",
-      "updated_at": "2026-09-12T11:54:04Z",
-      "registered_by": "agent-nx-v1-343"
+      "updated_at": "2026-09-13T03:42:16Z",
+      "registered_by": "agent-nx-v1-343",
+      "started_at": "2026-09-13T03:42:16Z"
     }
   ],
-  "locks": {},
-  "updated_at": "2026-09-12T11:54:04Z",
+  "locks": {
+    "branch:agent/issue-343-nx-v1": {
+      "task_id": "NX-V1",
+      "owner": "agent-nx-v1-343",
+      "expected_head": null,
+      "acquired_at": "2026-09-13T03:42:16Z",
+      "lease_expires_at": "2026-09-13T05:12:16Z"
+    },
+    "storage:control-plane": {
+      "task_id": "NX-V1",
+      "owner": "agent-nx-v1-343",
+      "expected_head": null,
+      "acquired_at": "2026-09-13T03:42:16Z",
+      "lease_expires_at": "2026-09-13T05:12:16Z"
+    },
+    "api:graph-revisions": {
+      "task_id": "NX-V1",
+      "owner": "agent-nx-v1-343",
+      "expected_head": null,
+      "acquired_at": "2026-09-13T03:42:16Z",
+      "lease_expires_at": "2026-09-13T05:12:16Z"
+    }
+  },
+  "updated_at": "2026-09-13T03:42:16Z",
   "source_main_rebind_reason": "Rebound Registry source and Q-D1 expected_base from 0805c592 to current main ca18a092 after E5-G1 merge; no task ownership or locks changed."
 }
