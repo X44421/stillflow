@@ -76,6 +76,7 @@ definition-owned descriptor for each port:
       role: PrimaryData | AuxiliaryData | Control,
       dataCategory: TabularStream | Scalar | ControlSignal,
       cardinality: One | OptionalOne | BoundedMany(maxConnections),
+      ordering: None | Ordered | Unordered,
       required: Boolean,
       schemaConstraint: SchemaConstraint,
       identity: PortIdentityPolicy
@@ -98,22 +99,41 @@ The axes have separate meanings:
   contracted paths;
 - cardinality bounds the number of graph connections to one port. There is no
   unbounded variadic port;
+- ordering is `None` for `One` and `OptionalOne`, and is required to be
+  `Ordered` or `Unordered` for `BoundedMany`. It controls connection-slot
+  identity, not stream row order;
 - required says whether a valid active node must have a connection for the
-  port. A required input has a minimum connection count of at least one;
-  output presence is a definition property, not a promise that a stream has
-  a row;
+  port, counted inbound for an input and outbound for an output. `One` is
+  always required, `OptionalOne` is always optional, and `BoundedMany(n)`
+  has a minimum of one exactly when `required` is true. Port presence is a
+  definition property, not a promise that a stream has a row;
 - schemaConstraint is a closed, inspectable precondition over the logical
   schema, not an arbitrary predicate;
 - identity specifies how the port is named in diagnostics, preview mapping,
   lineage, and multi-output publication. Identity is never inferred from an
   array position.
 
+The closed identity policies are:
+
+- `DefinitionPort`: `(nodeId, portId)` is the stable diagnostic, preview,
+  and lineage identity;
+- `DefinitionPortAndOutputLabel`: `(graphRevision, nodeId, portId,
+  outputLabel)` is used only when a publication record needs a logical output
+  label in addition to the port identity. The label is explicit, bounded, and
+  never an array ordinal.
+
+Role compatibility is also closed: `PrimaryData` connects only to
+`PrimaryData`, `AuxiliaryData` only to `AuxiliaryData`, and `Control` only
+to `Control`. A role mismatch is rejected before schema inspection. The first
+future DAG slice accepts only `PrimaryData + TabularStream`; the other role and
+category combinations remain reserved until separately contracted.
+
 For the existing version-1 graph, the conceptual mapping is:
 
-| Existing port | Direction | Role | Data category | Cardinality |
-| --- | --- | --- | --- | --- |
-| in on a transform/output | Input | PrimaryData | TabularStream | One |
-| out on a source/transform | Output | PrimaryData | TabularStream | One |
+| Existing port | Direction | Role | Data category | Cardinality | Ordering | Required |
+| --- | --- | --- | --- | --- | --- | --- |
+| in on a transform/output | Input | PrimaryData | TabularStream | One | None | true |
+| out on a source/transform | Output | PrimaryData | TabularStream | One | None | true |
 
 No existing version-1 definition is changed by this design.
 
@@ -142,25 +162,37 @@ The cardinality rules are:
 
 | Cardinality | Valid connection count | Ordering |
 | --- | ---: | --- |
-| One | exactly 1 for a required port | no slot |
-| OptionalOne | 0..1 | no slot |
-| BoundedMany(n) | 0..n, or 1..n when required | Ordered or Unordered must be declared |
+| One | exactly 1; `required` must be true | `None` |
+| OptionalOne | 0..1; `required` must be false | `None` |
+| BoundedMany(n) | 0..n, or 1..n when required | `Ordered` or `Unordered` |
 
 maxConnections is finite and checked before graph planning allocates
-connection state. A repeated connection requires an explicit future wire slot
-or an equivalent definition-owned member identity. The current NodeEdge shape
-has no slot and therefore cannot represent repeated connections; version 1
-must continue to reject them.
+connection state. `n` must be at least 1. A repeated connection requires an
+explicit future wire slot or an equivalent definition-owned member identity.
+The current NodeEdge shape has no slot and therefore cannot represent repeated
+connections; version 1 must continue to reject them.
 
 The following combinations fail closed:
 
 - a required port with zero connections;
+- `One` with `required=false`, `OptionalOne` with `required=true`, or
+  `ordering` not matching the cardinality;
 - more connections than the declared maximum;
 - duplicate edge plus slot identity;
 - an ordered-many port with a missing, duplicate, or non-contiguous slot;
 - an unordered-many port whose semantic result depends on arrival order;
 - an edge whose source and target data categories differ;
 - an edge whose source output role or target input role is incompatible.
+
+The minimum validation matrix is therefore:
+
+| Shape | Result | Connector I/O |
+| --- | --- | --- |
+| Existing single-source `in`/`out` linear path | Accept in Stage 0 | Allowed only after normal source authorization |
+| Missing required input, excess connections, invalid slot, role/category mismatch | Typed rejection | Zero |
+| Duplicate output ColumnId/name or empty Join key list | Typed schema/plan rejection | Zero |
+| Branch, merge, cycle, disconnected component, or multiple source/output in Stage 0 | Typed rejection | Zero |
+| Stage 1–3 shape before its contract gate is accepted | Unsupported capability | Zero |
 
 The graph validator remains iterative and bounded. It must reject cycles and
 unreachable components before connector I/O, schema inspection, or execution.
@@ -199,18 +231,22 @@ constraint the validator does not enforce.
 The following rules apply to any future multi-input graph:
 
 1. ColumnId is the field identity. Names and positions are not identity.
-2. The same ColumnId appearing in two merge inputs is accepted only when the
-   operator contract says it represents the same semantic field and the type,
-   nullability, and required name constraints agree. Otherwise the merge fails
-   with a typed schema-conflict error.
+2. The same ColumnId appearing in two merge inputs is not, by itself, an output
+   field. It is accepted only when the operator contract explicitly declares a
+   shared semantic field and supplies an output mapping that retains exactly
+   one field or derives one new, stable ColumnId. Without that mapping, the
+   merge fails with a typed schema-conflict error.
 3. Different ColumnId values with the same display name are not silently
    suffixed or overwritten. The graph must rename one field explicitly before
-   a merge that requires unique output names.
+   a merge; every emitted LogicalSchema must have unique names.
 4. Implicit casts, nullability repair, field reordering, and name-based
    matching are forbidden at a merge boundary unless the owning logical
    operator contract explicitly specifies them.
 5. Output fields retain deterministic identity and order. A backend may not
-   choose a different field order or identity representation.
+   choose a different field order or identity representation. The default
+   merge profile rejects any duplicate ColumnId or display name before
+   connector reads; keep/drop/coalesce/rename behavior must be an explicit
+   operator-level output mapping.
 
 ### 3.3 Join semantics required by F-ENG1
 
@@ -226,14 +262,23 @@ registered:
 - incompatible key types fail before connector reads. No backend-specific
   implicit cast or collation is allowed;
 - the output schema is left fields in left order followed by right fields in
-  right order, subject to the explicit conflict rules above. Dropping or
-  coalescing a field requires an explicit logical operator decision;
+  right order only when the resulting IDs and names are unique. Otherwise the
+  join fails before connector reads. Dropping, renaming, or coalescing a field
+  requires an explicit logical output mapping with stable identity;
+- the key list is non-empty. An empty list is rejected; a cross join requires
+  a separate operator contract and is not represented by this Join shape;
 - row order is deterministic and independent of partitioning or hash-map
-  iteration: left input order is primary; matching right rows retain right
-  input order. Semi/anti output retains left order. Full/right-only rows use
-  the declared join contract's stable right-side order;
+  iteration. For each left row in left input order, emit all matching right
+  rows in right input order; this also defines duplicate-match multiplicity.
+  For Left and Full joins, an unmatched left row is emitted at its left-row
+  position with nullable right fields. After all left-driven rows, Right and
+  Full joins append unmatched right rows in right input order with nullable
+  left fields. Semi/anti output emits one row per left input row in left order;
+  Right/Full matching rows remain left-major, and only right-only rows are
+  appended;
 - batch boundaries may change, but row values, field identities, field order,
-  NULL behavior, and declared logical row order may not change.
+  NULL behavior, output nullability, and declared logical row order may not
+  change.
 
 These rules describe the semantic slots for F-ENG1. They do not authorize
 engine execution, a DuckDB path, SQL pushdown, or an executor selection change.
@@ -245,9 +290,10 @@ registered:
 
 - member is a bounded ordered-many TabularStream input with at least two
   members. Member order is explicit and semantic;
-- every member has the same ordered ColumnId sequence, compatible logical
-  types, and compatible names. A mismatch fails closed; Union does not align
-  fields by name or position;
+- every member has the same ordered ColumnId sequence, exactly equal logical
+  types for each corresponding field (including nested parameters and
+  timestamp timezone), and exactly equal names. A mismatch fails closed;
+  Union does not align fields by name or position;
 - output field order and identity equal the first member. Output nullability is
   the deterministic logical union of member nullability; no other type
   widening or implicit cast is introduced;
@@ -266,7 +312,7 @@ A future graph compile context must carry an explicit, bounded set of
 authorized source bindings:
 
     AuthorizedSourceBinding {
-      sourceSlot: PortId,
+      sourcePort: NodePort,
       sourceAssetId: UUID,
       authorizedSchema: LogicalSchema,
       schemaFingerprint: LogicalSchemaFingerprint
@@ -274,6 +320,10 @@ authorized source bindings:
 
 The binding rules are:
 
+- `sourcePort` is the complete graph endpoint `(sourceNodeId, portId)`, not
+  a bare PortId. There is exactly one binding per declared source output port;
+  two source nodes using the same definition-owned `out` port therefore
+  remain distinct;
 - every source port names an exact authorized sourceAssetId;
 - workspace and capability checks are performed by the existing service
   authority before schema resolution;
@@ -281,9 +331,9 @@ The binding rules are:
   cross the graph compiler boundary;
 - a graph cannot infer a second source from a file path, name, or connector
   discovery result;
-- the first multi-source slice rejects two source slots that accidentally bind
-  to the same asset. A deliberate self-join requires an explicit future
-  alias/reuse contract;
+- the first multi-source slice rejects two distinct source ports that
+  accidentally bind to the same asset. A deliberate self-join requires an
+  explicit future alias/reuse contract;
 - source schema fingerprints are inputs to compilation and provenance, not
   graph-generated values.
 
