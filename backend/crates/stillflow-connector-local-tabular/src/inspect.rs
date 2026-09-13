@@ -70,6 +70,7 @@ pub(crate) fn inspect_opened_asset(
         modified_at: opened.modified_at,
         findings,
         workbook: None,
+        version_digest: None,
     })
 }
 
