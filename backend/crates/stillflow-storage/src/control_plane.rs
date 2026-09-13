@@ -77,6 +77,11 @@ impl ControlPlaneStore {
         crate::IdentityStore::from_inner(Arc::clone(&self.inner))
     }
 
+    /// The immutable GraphRevision store (NX-V1, #343).
+    pub fn graph_revisions(&self) -> crate::graph_revisions::GraphRevisionStore {
+        crate::graph_revisions::GraphRevisionStore::from_inner(Arc::clone(&self.inner))
+    }
+
     /// Returns the AUD-A1 audit and lineage view sharing this store's managed
     /// root lock and SQLite schema.
     pub fn audit(&self) -> crate::AuditStore {
@@ -7704,7 +7709,7 @@ mod tests {
     #[test]
     fn fresh_schema_and_reopen_are_idempotent() {
         let fixture = Fixture::new();
-        assert_eq!(fixture.store.schema_version(), 12);
+        assert_eq!(fixture.store.schema_version(), 13);
         let job = fixture
             .store
             .submit_job(fixture.submission(1, 10))

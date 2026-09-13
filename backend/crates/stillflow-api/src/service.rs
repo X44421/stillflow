@@ -14,7 +14,7 @@ use std::time::Duration;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use stillflow_connectors::ConnectorRegistry;
 use stillflow_core::{
@@ -1070,6 +1070,113 @@ pub struct EnginePreviewView {
 pub enum NodeGraphCompileTarget {
     Execution,
     Preview { node_id: stillflow_core::NodeId },
+}
+
+/// The expected revision for a CAS graph-revision save (NX-V0 §4.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedRevisionInput {
+    pub number: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveGraphRevisionRequest {
+    pub graph_id: Uuid,
+    pub graph: stillflow_core::NodeGraph,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<ExpectedRevisionInput>,
+    #[serde(default)]
+    pub format_version: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetGraphRevisionRequest {
+    pub graph_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListGraphRevisionsRequest {
+    pub graph_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrateGraphRevisionRequest {
+    pub graph_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    pub to_format_version: u16,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRevisionView {
+    pub graph_id: Uuid,
+    pub revision_number: u64,
+    pub parent_revision_id: Option<Uuid>,
+    pub format_version: u16,
+    pub graph: stillflow_core::NodeGraph,
+    pub graph_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_binding: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_digests: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_version_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration: Option<Value>,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotent: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRevisionSummary {
+    pub graph_id: Uuid,
+    pub revision_number: u64,
+    pub format_version: u16,
+    pub graph_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_version_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration: Option<Value>,
+    pub created_at: String,
+    pub created_by: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRevisionHistoryView {
+    pub graph_id: Uuid,
+    pub revisions: Vec<GraphRevisionSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRevisionMigrationView {
+    pub graph_id: Uuid,
+    pub revision_number: u64,
+    pub from_format_version: u16,
+    pub to_format_version: u16,
+    pub dry_run: bool,
+    /// Deterministic diff of the migration under the NX-C0 §7.1 diagnostic
+    /// shape; empty for the identity migration of the only known format.
+    pub changes: Vec<NodeGraphDiagnosticView>,
+    pub migrated_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<GraphRevisionView>,
 }
 
 /// Response schema detail for the node-graph compile view (NX-C0 §9.6).
@@ -2409,6 +2516,299 @@ impl ApiService {
                 bytes_truncated: result.bytes_truncated,
                 scan_truncated: result.scan_truncated,
                 source_exhausted: result.source_exhausted,
+            },
+        ))
+    }
+
+    // ─── Graph revisions (NX-V1, #343; frozen by the NX-V0 contract) ───
+
+    fn revision_created_by(request: &ApiRequest<impl Serialize>) -> String {
+        match &request.meta.principal {
+            Some(principal) => match principal.kind {
+                crate::RequestPrincipalKind::Member => {
+                    format!("member:{}", principal.id)
+                }
+                crate::RequestPrincipalKind::ServiceAccount => {
+                    format!("service-account:{}", principal.id)
+                }
+            },
+            None => "anonymous".to_owned(),
+        }
+    }
+
+    fn canonical_graph_json(graph: &stillflow_core::NodeGraph) -> Result<String, ApiError> {
+        let value = serde_json::to_value(graph).map_err(|_| ApiError::internal())?;
+        serde_json::to_string(&value).map_err(|_| ApiError::internal())
+    }
+
+    fn revision_view(
+        &self,
+        record: stillflow_storage::GraphRevisionRecord,
+        idempotent: Option<bool>,
+    ) -> ApiResult<GraphRevisionView> {
+        let graph: stillflow_core::NodeGraph = serde_json::from_value(
+            serde_json::from_str(&record.graph_json).map_err(|_| ApiError::internal())?,
+        )
+        .map_err(|_error| {
+            // A stored revision that no longer decodes is a defect;
+            // the fail-closed decode matches the graph path (R-1).
+            ApiError::internal()
+        })?;
+        Ok(GraphRevisionView {
+            graph_id: record.graph_id,
+            revision_number: record.revision_number,
+            parent_revision_id: record.parent_revision_id,
+            format_version: record.format_version,
+            graph,
+            graph_digest: record.graph_digest,
+            source_binding: record.source_binding,
+            package_digests: record.package_digests,
+            plan_version_id: record.plan_version_id,
+            migration: record.migration,
+            created_at: record.created_at.to_rfc3339(),
+            idempotent,
+        })
+    }
+
+    fn revision_summary(
+        &self,
+        record: stillflow_storage::GraphRevisionRecord,
+    ) -> GraphRevisionSummary {
+        GraphRevisionSummary {
+            graph_id: record.graph_id,
+            revision_number: record.revision_number,
+            format_version: record.format_version,
+            graph_digest: record.graph_digest,
+            plan_version_id: record.plan_version_id,
+            migration: record.migration,
+            created_at: record.created_at.to_rfc3339(),
+            created_by: record.created_by,
+        }
+    }
+
+    /// Saves an editable graph revision (NX-V0 §4.1): first save, CAS,
+    /// idempotent same-digest no-op, or `Conflict` naming the current
+    /// revision. The graph document is validated fail-closed before any
+    /// write, and the stored JSON is the canonical encoding the digest
+    /// binds.
+    pub fn save_graph_revision(
+        &self,
+        request: ApiRequest<SaveGraphRevisionRequest>,
+    ) -> ApiResult<ApiResponse<GraphRevisionView>> {
+        self.validate_meta(&request, true)?;
+        let request_id = request.meta.request_id;
+        let workspace_id = request.meta.workspace_id;
+        let created_by = Self::revision_created_by(&request);
+        let SaveGraphRevisionRequest {
+            graph_id,
+            graph,
+            expected_revision,
+            format_version,
+        } = request.body;
+        if format_version != 0 && format_version != 1 {
+            // The only known graph format today is 1; future formats are
+            // rejected until their migration ships (NX-V0 §5.6).
+            return Err(ApiError::invalid(
+                "graph revision format is not supported by this service",
+            ));
+        }
+        let format_version = if format_version == 0 {
+            1
+        } else {
+            format_version
+        };
+        // Fail-closed validation through the full graph decode path.
+        let encoded =
+            serde_json::to_vec(&serde_json::to_value(&graph).map_err(|_| ApiError::internal())?)
+                .map_err(|_| ApiError::internal())?;
+        if stillflow_core::NodeGraph::from_json_bytes(
+            &encoded,
+            &stillflow_core::NodeRegistry::deployed(),
+        )
+        .is_err()
+        {
+            return Err(ApiError::invalid(
+                "graph revision content failed validation",
+            ));
+        }
+        let graph_json = Self::canonical_graph_json(&graph)?;
+        let digest = digest_hex(&sha256(graph_json.as_bytes()));
+        let expected = expected_revision.map(|expected| stillflow_storage::ExpectedRevision {
+            number: expected.number,
+            digest: expected.digest,
+        });
+        let draft = stillflow_storage::RevisionDraft {
+            format_version,
+            graph_json,
+            graph_digest: digest,
+            source_binding: None,
+            package_digests: None,
+            compiler_version: Some(stillflow_plan::NODE_GRAPH_COMPILER_VERSION.to_owned()),
+            created_by,
+        };
+        match self
+            .control_plane
+            .graph_revisions()
+            .save(workspace_id, graph_id, expected, draft)
+        {
+            Ok(stillflow_storage::GraphRevisionSave::Saved(record)) => {
+                let view = self.revision_view(record, None)?;
+                Ok(ApiResponse::new(request_id, view))
+            }
+            Ok(stillflow_storage::GraphRevisionSave::Current(record)) => {
+                let view = self.revision_view(record, Some(true))?;
+                Ok(ApiResponse::new(request_id, view))
+            }
+            Err(stillflow_storage::StorageError::AlreadyExists(_)) => {
+                // Enrich the conflict with the current revision number and
+                // digest (NX-V0 §4.1): the loser re-fetches and re-applies.
+                let current = self
+                    .control_plane
+                    .graph_revisions()
+                    .get(workspace_id, graph_id, None)
+                    .ok()
+                    .flatten();
+                let message = match &current {
+                    Some(record) => format!(
+                        "graph revision conflict: current revision {} (digest {})",
+                        record.revision_number, record.graph_digest
+                    ),
+                    None => "graph revision conflict".to_owned(),
+                };
+                let mut error = ApiError::conflict(message);
+                if let Some(record) = current {
+                    let diagnostic = NodeGraphDiagnosticView {
+                        code: "NG_GRAPH_REVISION_CONFLICT".to_owned(),
+                        node_id: None,
+                        column_id: None,
+                        field_path: None,
+                        expected: None,
+                        actual: None,
+                        message: record.graph_digest.clone(),
+                    };
+                    error = error.with_diagnostics(vec![diagnostic]);
+                }
+                Err(error)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Fetches one revision (`None` selects the current one). Stored
+    /// bindings are returned as recorded; drift is reported, never
+    /// repaired (NX-V0 §4.4).
+    pub fn get_graph_revision(
+        &self,
+        request: ApiRequest<GetGraphRevisionRequest>,
+    ) -> ApiResult<ApiResponse<GraphRevisionView>> {
+        self.validate_meta(&request, false)?;
+        let request_id = request.meta.request_id;
+        let workspace_id = request.meta.workspace_id;
+        let GetGraphRevisionRequest { graph_id, revision } = request.body;
+        let record = self
+            .control_plane
+            .graph_revisions()
+            .get(workspace_id, graph_id, revision)?
+            .ok_or_else(ApiError::not_found)?;
+        let view = self.revision_view(record, None)?;
+        Ok(ApiResponse::new(request_id, view))
+    }
+
+    /// The revision history, newest first, without graph content (NX-V0
+    /// §7): fetch a specific revision for the full document.
+    pub fn list_graph_revisions(
+        &self,
+        request: ApiRequest<ListGraphRevisionsRequest>,
+    ) -> ApiResult<ApiResponse<GraphRevisionHistoryView>> {
+        self.validate_meta(&request, false)?;
+        let request_id = request.meta.request_id;
+        let workspace_id = request.meta.workspace_id;
+        let ListGraphRevisionsRequest { graph_id, limit } = request.body;
+        let limit = limit.unwrap_or(20).min(100);
+        let records =
+            self.control_plane
+                .graph_revisions()
+                .history(workspace_id, graph_id, limit)?;
+        let view = GraphRevisionHistoryView {
+            graph_id,
+            revisions: records
+                .into_iter()
+                .map(|record| self.revision_summary(record))
+                .collect(),
+        };
+        Ok(ApiResponse::new(request_id, view))
+    }
+
+    /// Deterministic migration preview or explicit apply (NX-V0 §5): the
+    /// only known format today is 1, so the identity migration returns the
+    /// current revision unchanged (idempotent, side-effect-free); future
+    /// formats are rejected fail-closed and downgrades are not supported.
+    pub fn migrate_graph_revision(
+        &self,
+        request: ApiRequest<MigrateGraphRevisionRequest>,
+    ) -> ApiResult<ApiResponse<GraphRevisionMigrationView>> {
+        self.validate_meta(&request, false)?;
+        let request_id = request.meta.request_id;
+        let workspace_id = request.meta.workspace_id;
+        let MigrateGraphRevisionRequest {
+            graph_id,
+            revision,
+            to_format_version,
+            dry_run,
+        } = request.body;
+        const KNOWN_FORMATS: [u16; 1] = [1];
+        if !KNOWN_FORMATS.contains(&to_format_version) {
+            if to_format_version > 1 {
+                return Err(ApiError::invalid(
+                    "graph revision format is newer than this service",
+                ));
+            }
+            return Err(ApiError::invalid(
+                "graph revision downgrade is not supported",
+            ));
+        }
+        let record = self
+            .control_plane
+            .graph_revisions()
+            .get(workspace_id, graph_id, revision)?
+            .ok_or_else(ApiError::not_found)?;
+        if record.format_version > to_format_version {
+            return Err(ApiError::invalid(
+                "graph revision downgrade is not supported",
+            ));
+        }
+        let view = GraphRevisionMigrationView {
+            graph_id,
+            revision_number: record.revision_number,
+            from_format_version: record.format_version,
+            to_format_version,
+            dry_run,
+            changes: Vec::new(),
+            migrated_digest: record.graph_digest.clone(),
+            revision: None,
+        };
+        if dry_run || record.format_version >= to_format_version {
+            // Idempotent: an already-at-target revision is returned
+            // unchanged, with no new revision and no side effect.
+            return Ok(ApiResponse::new(request_id, view));
+        }
+        let migrated = self.control_plane.graph_revisions().append_migrated(
+            &record,
+            to_format_version,
+            record.graph_json.clone(),
+            record.graph_digest.clone(),
+            json!({
+                "fromFormat": record.format_version,
+                "toFormat": to_format_version,
+                "migrationId": "identity-v1",
+            }),
+        )?;
+        let revision_view = self.revision_view(migrated, None)?;
+        Ok(ApiResponse::new(
+            request_id,
+            GraphRevisionMigrationView {
+                revision: Some(revision_view),
+                ..view
             },
         ))
     }

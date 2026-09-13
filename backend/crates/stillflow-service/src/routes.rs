@@ -121,6 +121,16 @@ pub fn router(state: ServiceState) -> Router {
         )
         .route("/v1/engine/preview", post(engine_preview))
         .route("/v1/node-graphs/compile", post(node_graph_compile))
+        .route("/v1/graph-revisions", post(graph_revision_save))
+        .route("/v1/graph-revisions/{graphId}", get(graph_revision_read))
+        .route(
+            "/v1/graph-revisions/{graphId}/history",
+            get(graph_revision_history),
+        )
+        .route(
+            "/v1/graph-revisions/{graphId}/migrate",
+            post(graph_revision_migrate),
+        )
         .route("/v1/node-graphs/preview", post(node_graph_preview))
         .route("/v1/audit/events", get(audit_events_list))
         .route("/v1/audit/lineage", get(audit_lineage_read))
@@ -815,6 +825,67 @@ async fn engine_preview(State(state): State<ServiceState>, bytes: Bytes) -> Resp
                 Err(error) => adapter::service_error(request_id, error),
             }
         }
+        Err(response) => response,
+    }
+}
+
+async fn graph_revision_save(State(state): State<ServiceState>, bytes: Bytes) -> Response {
+    match adapter::parse_body::<stillflow_api::SaveGraphRevisionRequest>(&bytes, vec![]) {
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.save_graph_revision(request),
+        ),
+        Err(response) => response,
+    }
+}
+
+async fn graph_revision_read(
+    State(state): State<ServiceState>,
+    Path(graph_id): Path<String>,
+    RawQuery(query): RawQuery,
+) -> Response {
+    match adapter::parse_query_envelope::<stillflow_api::GetGraphRevisionRequest>(
+        query,
+        vec![("graphId".to_owned(), graph_id)],
+    ) {
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.get_graph_revision(request),
+        ),
+        Err(response) => response,
+    }
+}
+
+async fn graph_revision_history(
+    State(state): State<ServiceState>,
+    Path(graph_id): Path<String>,
+    RawQuery(query): RawQuery,
+) -> Response {
+    match adapter::parse_query_envelope::<stillflow_api::ListGraphRevisionsRequest>(
+        query,
+        vec![("graphId".to_owned(), graph_id)],
+    ) {
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.list_graph_revisions(request),
+        ),
+        Err(response) => response,
+    }
+}
+
+async fn graph_revision_migrate(
+    State(state): State<ServiceState>,
+    Path(graph_id): Path<String>,
+    bytes: Bytes,
+) -> Response {
+    match adapter::parse_body::<stillflow_api::MigrateGraphRevisionRequest>(
+        &bytes,
+        vec![("graphId".to_owned(), graph_id)],
+    ) {
+        Ok(request) => adapter::ok_response(
+            request.meta.request_id,
+            state.api.migrate_graph_revision(request),
+        ),
         Err(response) => response,
     }
 }
