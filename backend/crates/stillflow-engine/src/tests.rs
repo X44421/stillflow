@@ -9038,8 +9038,12 @@ pub(crate) fn run_qr1_e4_regression_suite() {
     profile_evidence::p25_e4_verification_path_remains_green_after_profiling();
 }
 
+/// NX-G1 (#344): the composite expansion's rule sequence — trim, then
+/// empty-string→null — previews through the engine with the null
+/// replacement applied, proving the declarative node's lowering at the
+/// engine boundary.
 #[tokio::test(flavor = "current_thread")]
-async fn nx_g1_debug_replace_literal_to_null_in_pipeline() {
+async fn nx_g1_composite_rule_sequence_previews_with_null_replacement() {
     let _guard = exclusive_test_lock().lock().await;
     let (schema, id_a) = utf8_schema();
     let connection = connection();
@@ -9112,7 +9116,7 @@ async fn nx_g1_debug_replace_literal_to_null_in_pipeline() {
             assert_eq!(view.schema.fields.len(), 1);
         }
         Err(error) => {
-            panic!("composite-equivalent preview failed: {error:?}");
+            panic!("the composite rule sequence must preview: {error:?}");
         }
     }
 }
