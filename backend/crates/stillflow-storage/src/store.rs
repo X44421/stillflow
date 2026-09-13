@@ -874,7 +874,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         1 => {
             migrate_to_version_two(connection)?;
@@ -887,7 +888,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         2 => {
             migrate_to_version_three(connection)?;
@@ -899,7 +901,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         3 => {
             migrate_to_version_four(connection)?;
@@ -910,7 +913,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         4 => {
             migrate_to_version_five(connection)?;
@@ -920,7 +924,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         5 => {
             migrate_to_version_six(connection)?;
@@ -929,7 +934,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         6 => {
             migrate_to_version_seven(connection)?;
@@ -937,32 +943,41 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         7 => {
             migrate_to_version_eight(connection)?;
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         8 => {
             migrate_to_version_nine(connection)?;
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         9 => {
             migrate_to_version_ten(connection)?;
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
         10 => {
             migrate_to_version_eleven(connection)?;
-            migrate_to_version_twelve(connection)
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
         }
-        11 => migrate_to_version_twelve(connection),
-        12 => Ok(()),
+        11 => {
+            migrate_to_version_twelve(connection)?;
+            migrate_to_version_thirteen(connection)
+        }
+        12 => migrate_to_version_thirteen(connection),
+        13 => Ok(()),
         unsupported => Err(StorageError::UnsupportedStorageVersion(unsupported)),
     }
 }
@@ -1291,6 +1306,46 @@ fn migrate_to_version_twelve(connection: &mut Connection) -> Result<(), StorageE
     transaction
         .commit()
         .map_err(|_| StorageError::database("commit storage migration version twelve"))
+}
+
+/// Version thirteen adds the immutable, workspace-scoped GraphRevision
+/// store (NX-V1, #343; NX-V0 contract §3/§6). Revisions are append-only
+/// facts: no update or delete path exists. The migration is additive only —
+/// no existing table is altered and no row is rewritten.
+fn migrate_to_version_thirteen(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| StorageError::database("begin storage migration version thirteen"))?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE cp_graph_revisions (
+                 id TEXT PRIMARY KEY NOT NULL,
+                 workspace_id TEXT NOT NULL REFERENCES cp_workspaces(id) ON DELETE CASCADE,
+                 graph_id TEXT NOT NULL,
+                 revision_number INTEGER NOT NULL CHECK (revision_number > 0),
+                 parent_revision_id TEXT REFERENCES cp_graph_revisions(id),
+                 format_version INTEGER NOT NULL CHECK (format_version > 0),
+                 graph_json TEXT NOT NULL,
+                 graph_digest TEXT NOT NULL CHECK (length(graph_digest) = 64),
+                 source_binding_json TEXT,
+                 package_digests_json TEXT,
+                 compiler_version TEXT,
+                 plan_version_id TEXT,
+                 migration_json TEXT,
+                 created_at_utc TEXT NOT NULL,
+                 created_by TEXT NOT NULL,
+                 UNIQUE (workspace_id, graph_id, revision_number)
+             ) STRICT;
+
+             CREATE INDEX cp_graph_revisions_history_index
+             ON cp_graph_revisions(workspace_id, graph_id, revision_number DESC);
+
+             PRAGMA user_version = 13;",
+        )
+        .map_err(|_| StorageError::database("apply storage migration version thirteen"))?;
+    transaction
+        .commit()
+        .map_err(|_| StorageError::database("commit storage migration version thirteen"))
 }
 
 /// Version nine adds the immutable, workspace-scoped AUD-C0 audit envelope.
@@ -3098,7 +3153,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read version");
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
 
         // A legacy version-one database migrates through the current schema
         // and gains the bundle, export, and control-plane tables.
@@ -3150,7 +3205,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
         for table in [
             "bundle_publications",
             "verification_bundles",
@@ -3182,19 +3237,19 @@ mod tests {
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("create future database");
         connection
-            .execute_batch("PRAGMA user_version = 13;")
+            .execute_batch("PRAGMA user_version = 15;")
             .expect("set future version");
         drop(connection);
         assert!(matches!(
             SnapshotStore::open(future.path(), StorageLimits::default()),
-            Err(StorageError::UnsupportedStorageVersion(13))
+            Err(StorageError::UnsupportedStorageVersion(15))
         ));
         let connection = Connection::open(future.path().join("metadata.sqlite3"))
             .expect("reopen future database");
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read unchanged version");
-        assert_eq!(version, 13);
+        assert_eq!(version, 15);
     }
 
     #[test]
@@ -3270,7 +3325,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read migrated version");
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
         for (table, expected) in [
             ("snapshots", 1_i64),
             ("verification_bundles", 1_i64),

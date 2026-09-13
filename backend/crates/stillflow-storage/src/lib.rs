@@ -14,6 +14,7 @@ pub mod dedup;
 mod digest;
 mod error;
 pub mod export;
+pub mod graph_revisions;
 pub mod identity;
 mod manifest;
 pub mod metrics;
@@ -67,6 +68,9 @@ pub use error::{IntegrityFailure, StorageError};
 pub use export::{
     compute_export_set_digest, ExportFileChunk, ExportManifest, ExportManifestFile, ExportPlan,
     ExportProvenance, ExportWriter, StagedExportFile,
+};
+pub use graph_revisions::{
+    ExpectedRevision, GraphRevisionRecord, GraphRevisionSave, GraphRevisionStore, RevisionDraft,
 };
 pub use identity::{
     CredentialOwner, CredentialProvider, CredentialProviderError, CredentialProviderRegistry,

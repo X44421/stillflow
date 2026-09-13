@@ -1637,3 +1637,272 @@ fn t6_restart_reopens_durable_state() {
     assert_eq!(handshake.status(), 200, "handshake works after restart");
     terminate(&mut second);
 }
+
+fn post_blocking(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    path: &str,
+    body: Value,
+) -> (u16, String) {
+    let response = client
+        .post(format!("{base}{path}"))
+        .json(&body)
+        .send()
+        .expect("post");
+    let status = response.status().as_u16();
+    (status, response.text().expect("body"))
+}
+
+fn get_blocking(client: &reqwest::blocking::Client, base: &str, path: &str) -> (u16, String) {
+    let response = client.get(format!("{base}{path}")).send().expect("get");
+    let status = response.status().as_u16();
+    (status, response.text().expect("body"))
+}
+
+/// NX-V1 (#343) acceptance over real HTTP: save → CAS conflict → process
+/// restart → fetch → migration preview/apply idempotency. The graph content
+/// and metadata survive the restart byte-for-byte; a stale editor's save
+/// conflicts and names the current revision; migration is deterministic,
+/// idempotent, and never rewrites history.
+#[test]
+fn t_nx_v1_graph_revisions_save_conflict_restart_and_migrate() {
+    let root = tempfile::tempdir().expect("root");
+    let workspace_id = Uuid::new_v4();
+    let config = write_config(root.path(), workspace_id);
+    let port_file = root.path().join("port.json");
+    let graph_id = Uuid::new_v4();
+
+    let graph = || {
+        json!({
+            "version": 1,
+            "graphId": graph_id,
+            "sourceNodeId": Uuid::from_u128(0xE1),
+            "outputNodeId": Uuid::from_u128(0xE5),
+            "nodes": [
+                {"id": Uuid::from_u128(0xE1), "typeId": "stillflow.node.source", "configVersion": 1,
+                 "config": {"sourceAssetId": Uuid::from_u128(0xE9)}, "metadata": {"note": "kept"}},
+                {"id": Uuid::from_u128(0xE5), "typeId": "stillflow.node.output", "configVersion": 1,
+                 "config": {"outputLabel": "cleaned"}}
+            ],
+            "edges": [
+                {"from": {"nodeId": Uuid::from_u128(0xE1), "port": "out"},
+                 "to": {"nodeId": Uuid::from_u128(0xE5), "port": "in"}}
+            ],
+            "metadata": {"owner": "nx-v1"}
+        })
+    };
+
+    // First process: save revision 1, then revision 2 with changed content.
+    let mut first = spawn_server(&config, &port_file);
+    let ready = wait_ready(&port_file);
+    let base = format!(
+        "http://127.0.0.1:{}",
+        ready["port"].as_u64().expect("port") as u16
+    );
+    let client = reqwest::blocking::Client::new();
+
+    let (saved_status, saved_raw) = post_blocking(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(workspace_id, json!({"graphId": graph_id, "graph": graph()})),
+    );
+    assert_eq!(saved_status, 200, "first save: {saved_raw}");
+    let saved_body: Value = serde_json::from_str(&saved_raw).expect("json");
+    assert_eq!(saved_body["body"]["revisionNumber"], json!(1));
+    assert_eq!(saved_body["body"]["formatVersion"], json!(1));
+    assert_eq!(
+        saved_body["body"]["graph"]["metadata"]["owner"],
+        json!("nx-v1")
+    );
+    let digest_one = saved_body["body"]["graphDigest"]
+        .as_str()
+        .expect("digest")
+        .to_owned();
+
+    let (second_status, second_raw) = post_blocking(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(
+            workspace_id,
+            json!({"graphId": graph_id, "graph": {
+                "version": 1, "graphId": graph_id,
+                "sourceNodeId": Uuid::from_u128(0xE1), "outputNodeId": Uuid::from_u128(0xE5),
+                "nodes": [
+                    {"id": Uuid::from_u128(0xE1), "typeId": "stillflow.node.source", "configVersion": 1,
+                     "config": {"sourceAssetId": Uuid::from_u128(0xE9)}},
+                    {"id": Uuid::from_u128(0xE5), "typeId": "stillflow.node.output", "configVersion": 1,
+                     "config": {"outputLabel": "cleaned-v2"}}
+                ],
+                "edges": [
+                    {"from": {"nodeId": Uuid::from_u128(0xE1), "port": "out"},
+                     "to": {"nodeId": Uuid::from_u128(0xE5), "port": "in"}}
+                ],
+                "metadata": {}
+            }}),
+        ),
+    );
+    assert_eq!(second_status, 200, "second save: {second_raw}");
+    let second_body: Value = serde_json::from_str(&second_raw).expect("json");
+    assert_eq!(second_body["body"]["revisionNumber"], json!(2));
+
+    // CAS conflict: a stale editor based on revision 1 loses, and the
+    // conflict names the current revision.
+    let (conflict_status, conflict_raw) = post_blocking(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(
+            workspace_id,
+            json!({
+                "graphId": graph_id,
+                "expectedRevision": {"number": 1, "digest": digest_one},
+                "graph": graph()
+            }),
+        ),
+    );
+    assert_eq!(conflict_status, 409, "stale save conflicts: {conflict_raw}");
+    let conflict_body: Value = serde_json::from_str(&conflict_raw).expect("json");
+    assert!(
+        conflict_body["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("current revision 2"),
+        "conflict names the current revision: {}",
+        conflict_body["error"]["message"]
+    );
+
+    // Idempotent save: unchanged content returns the current revision.
+    let (idempotent_status, idempotent_raw) = post_blocking(
+        &client,
+        &base,
+        "/v1/graph-revisions",
+        envelope(
+            workspace_id,
+            json!({
+                "graphId": graph_id,
+                "graph": {
+                    "version": 1, "graphId": graph_id,
+                    "sourceNodeId": Uuid::from_u128(0xE1), "outputNodeId": Uuid::from_u128(0xE5),
+                    "nodes": [
+                        {"id": Uuid::from_u128(0xE1), "typeId": "stillflow.node.source", "configVersion": 1,
+                         "config": {"sourceAssetId": Uuid::from_u128(0xE9)}},
+                        {"id": Uuid::from_u128(0xE5), "typeId": "stillflow.node.output", "configVersion": 1,
+                         "config": {"outputLabel": "cleaned-v2"}}
+                    ],
+                    "edges": [
+                        {"from": {"nodeId": Uuid::from_u128(0xE1), "port": "out"},
+                         "to": {"nodeId": Uuid::from_u128(0xE5), "port": "in"}}
+                    ],
+                    "metadata": {}
+                }
+            }),
+        ),
+    );
+    assert_eq!(idempotent_status, 200);
+    let idempotent_body: Value = serde_json::from_str(&idempotent_raw).expect("json");
+    assert_eq!(idempotent_body["body"]["revisionNumber"], json!(2));
+    assert_eq!(idempotent_body["body"]["idempotent"], json!(true));
+
+    // Migration: the dry run performs no write; the apply is idempotent at
+    // the current format.
+    let (dry_status, dry_raw) = post_blocking(
+        &client,
+        &base,
+        &format!("/v1/graph-revisions/{graph_id}/migrate"),
+        envelope(workspace_id, json!({"toFormatVersion": 1, "dryRun": true})),
+    );
+    assert_eq!(dry_status, 200, "dry run: {dry_raw}");
+    let dry_body: Value = serde_json::from_str(&dry_raw).expect("json");
+    assert_eq!(dry_body["body"]["dryRun"], json!(true));
+    assert_eq!(
+        dry_body["body"]["revision"],
+        json!(null),
+        "dry run writes nothing"
+    );
+
+    terminate(&mut first);
+
+    // Second process over the same managed root: the revision survives the
+    // restart byte-for-byte.
+    std::fs::remove_file(&port_file).expect("port file removed");
+    let mut second = spawn_server(&config, &port_file);
+    let ready = wait_ready(&port_file);
+    let base = format!(
+        "http://127.0.0.1:{}",
+        ready["port"].as_u64().expect("port") as u16
+    );
+
+    let (fetched_status, fetched_raw) = get_blocking(
+        &client,
+        &base,
+        &format!(
+            "/v1/graph-revisions/{graph_id}?apiVersion=1&requestId={}&workspaceId={workspace_id}&revision=1",
+            Uuid::new_v4()
+        ),
+    );
+    assert_eq!(fetched_status, 200, "revision 1 fetch: {fetched_raw}");
+    let fetched_body: Value = serde_json::from_str(&fetched_raw).expect("json");
+    assert_eq!(fetched_body["body"]["revisionNumber"], json!(1));
+    assert_eq!(
+        fetched_body["body"]["graph"]["metadata"]["owner"],
+        json!("nx-v1")
+    );
+    assert_eq!(fetched_body["body"]["graphDigest"], json!(digest_one));
+
+    let (history_status, history_raw) = get_blocking(
+        &client,
+        &base,
+        &format!(
+            "/v1/graph-revisions/{graph_id}/history?apiVersion=1&requestId={}&workspaceId={workspace_id}",
+            Uuid::new_v4()
+        ),
+    );
+    assert_eq!(history_status, 200, "history");
+    let history_body: Value = serde_json::from_str(&history_raw).expect("json");
+    assert_eq!(
+        history_body["body"]["revisions"]
+            .as_array()
+            .expect("revisions")
+            .len(),
+        2
+    );
+
+    let (applied_status, applied_raw) = post_blocking(
+        &client,
+        &base,
+        &format!("/v1/graph-revisions/{graph_id}/migrate"),
+        envelope(workspace_id, json!({"toFormatVersion": 1, "dryRun": false})),
+    );
+    assert_eq!(applied_status, 200, "apply: {applied_raw}");
+    let applied_body: Value = serde_json::from_str(&applied_raw).expect("json");
+    assert_eq!(
+        applied_body["body"]["revision"],
+        json!(null),
+        "already at target: no new revision"
+    );
+
+    // Future formats fail closed (NX-V0 §5.6).
+    let (future_status, _future_raw) = post_blocking(
+        &client,
+        &base,
+        &format!("/v1/graph-revisions/{graph_id}/migrate"),
+        envelope(workspace_id, json!({"toFormatVersion": 2, "dryRun": false})),
+    );
+    assert_eq!(future_status, 400, "future format rejected");
+
+    // Cross-workspace fetch finds nothing.
+    let (foreign_status, _foreign_raw) = get_blocking(
+        &client,
+        &base,
+        &format!(
+            "/v1/graph-revisions/{graph_id}?apiVersion=1&requestId={}&workspaceId={}",
+            Uuid::new_v4(),
+            Uuid::new_v4()
+        ),
+    );
+    assert_eq!(foreign_status, 404, "cross-workspace fetch is absent");
+
+    terminate(&mut second);
+}
