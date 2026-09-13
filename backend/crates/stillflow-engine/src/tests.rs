@@ -9037,3 +9037,82 @@ pub(crate) fn run_qr1_e4_regression_suite() {
     profile_evidence::p24_run_id_is_excluded_from_the_canonical_body_and_digest();
     profile_evidence::p25_e4_verification_path_remains_green_after_profiling();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn nx_g1_debug_replace_literal_to_null_in_pipeline() {
+    let _guard = exclusive_test_lock().lock().await;
+    let (schema, id_a) = utf8_schema();
+    let connection = connection();
+    let source = asset(connection.id());
+    // One row whose value is the empty string: the null-replacement target.
+    let batch_values = vec![Some(""), Some("alpha")];
+    let array = arrow_array::StringArray::from(batch_values);
+    let factory =
+        BatchEnvelopeFactory::try_new(Arc::new(schema.clone()), source.id).expect("factory");
+    let batch =
+        RecordBatch::try_new(factory.arrow_schema().clone(), vec![Arc::new(array)]).expect("batch");
+    let envelope = factory.try_build(0, batch).expect("envelope");
+    let (engine, _) = engine_with(schema.clone(), vec![envelope], true).await;
+
+    let scan = PlanNodeId::from_uuid(Uuid::from_u128(0x30));
+    let rules_node = PlanNodeId::from_uuid(Uuid::from_u128(0x31));
+    let materialize = PlanNodeId::from_uuid(Uuid::from_u128(0x32));
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        scan,
+        PlanNode::new(
+            PlanNodeKind::Scan {
+                source_asset_id: source.id,
+                projection: vec![id_a],
+                predicate: None,
+            },
+            Vec::new(),
+        ),
+    );
+    nodes.insert(
+        rules_node,
+        PlanNode::new(
+            PlanNodeKind::ApplyRules {
+                rules: vec![
+                    Rule::Trim { column: id_a },
+                    Rule::ReplaceLiteral {
+                        column: id_a,
+                        from: ScalarValue::Utf8(String::new()),
+                        to: ScalarValue::Null,
+                    },
+                ],
+            },
+            vec![scan],
+        ),
+    );
+    nodes.insert(
+        materialize,
+        PlanNode::new(
+            PlanNodeKind::Materialize {
+                output_label: "cleaned".to_owned(),
+            },
+            vec![rules_node],
+        ),
+    );
+    let plan = LogicalPlan::new(materialize, nodes).expect("plan");
+
+    let result = engine
+        .preview(preview_request(
+            plan,
+            rules_node,
+            connection,
+            source,
+            schema,
+            100,
+            PREVIEW_DEFAULT_BYTE_LIMIT,
+        ))
+        .await;
+    match result {
+        Ok(view) => {
+            assert_eq!(view.schema.fields.len(), 1);
+        }
+        Err(error) => {
+            panic!("composite-equivalent preview failed: {error:?}");
+        }
+    }
+}
