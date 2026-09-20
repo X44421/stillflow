@@ -124,7 +124,6 @@ fn expected_engine_class(kind: SemanticKind) -> EngineClass {
         SemanticKind::UnknownColumn => EngineClass::UnknownColumn(u64::MAX as u128), // checked loosely below
         SemanticKind::NotRequiresBoolean
         | SemanticKind::LogicalOperandsMustBeBoolean
-        | SemanticKind::ContainsPaused
         | SemanticKind::CheckedArithmeticPaused
         | SemanticKind::ListStructPaused
         | SemanticKind::TimestampSecondPaused
@@ -137,6 +136,7 @@ fn expected_engine_class(kind: SemanticKind) -> EngineClass {
         | SemanticKind::CoalesceArmsIncompatible
         | SemanticKind::TrimRequiresUtf8
         | SemanticKind::TextRequiresUtf8
+        | SemanticKind::ContainsRequiresUtf8
         | SemanticKind::TemporalParseRequiresUtf8
         | SemanticKind::LiteralIncompatibleWithColumn
         | SemanticKind::BinaryReplaceOnlyNullToNull

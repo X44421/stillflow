@@ -23,9 +23,6 @@ pub(crate) fn semantic_error(error: SemanticError) -> EngineError {
         SemanticKind::LogicalOperandsMustBeBoolean => {
             EngineError::TypeError("logical operands must be boolean")
         }
-        SemanticKind::ContainsPaused => {
-            EngineError::TypeError("contains is paused until the regex polars feature is approved")
-        }
         SemanticKind::CheckedArithmeticPaused => EngineError::TypeError(
             "checked arithmetic is paused until overflow semantics are implemented",
         ),
@@ -59,6 +56,7 @@ pub(crate) fn semantic_error(error: SemanticError) -> EngineError {
         // fallback keeps the mapping total without inventing a decision.
         SemanticKind::TrimRequiresUtf8
         | SemanticKind::TextRequiresUtf8
+        | SemanticKind::ContainsRequiresUtf8
         | SemanticKind::TemporalParseRequiresUtf8
         | SemanticKind::LiteralIncompatibleWithColumn
         | SemanticKind::BinaryReplaceOnlyNullToNull
