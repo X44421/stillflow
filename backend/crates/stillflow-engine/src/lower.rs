@@ -1,6 +1,6 @@
 use polars::prelude::{
     col, lit, when, Column, DataFrame, DataType, Expr as PolarsExpr, GetOutput, IntoLazy, Series,
-    StringChunked, NULL,
+    StringChunked, StrptimeOptions, NULL,
 };
 use stillflow_core::{
     BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue,
@@ -239,6 +239,44 @@ fn apply_rule(
             frame
                 .lazy()
                 .with_column(expr.alias(name.as_str()))
+                .collect()
+                .map_err(|_| EngineError::CastFailure {
+                    column: *column,
+                    sequence: 0,
+                    row: 0,
+                })
+        }
+        Rule::ParseTemporal {
+            column,
+            data_type,
+            on_failure,
+            format,
+        } => {
+            let name = field_name(schema, *column)?;
+            let target = polars_data_type(data_type)?;
+            // Parse the wall time naively: the declared format never implies a
+            // timezone, and no offset is inferred from the environment.
+            let parse_dtype = match &target {
+                DataType::Datetime(unit, _) => DataType::Datetime(*unit, None),
+                other => other.clone(),
+            };
+            let options = StrptimeOptions {
+                format: Some(format.as_str().into()),
+                // `error` rejects an unparseable value; `setNull` maps it to
+                // NULL. `exact` keeps the match anchored to the whole string so
+                // a partial match never silently succeeds.
+                strict: matches!(on_failure, CastFailurePolicy::Error),
+                exact: true,
+                cache: true,
+            };
+            frame
+                .lazy()
+                .with_column(
+                    col(name.as_str())
+                        .str()
+                        .strptime(parse_dtype, options, lit("raise"))
+                        .alias(name.as_str()),
+                )
                 .collect()
                 .map_err(|_| EngineError::CastFailure {
                     column: *column,

@@ -242,6 +242,22 @@ impl IncrementalSchema {
                 }
                 Ok(())
             }
+            Rule::ParseTemporal {
+                column,
+                data_type,
+                on_failure,
+                ..
+            } => {
+                let field = self
+                    .resolve_column(*column)
+                    .ok_or(EngineError::UnknownColumn(*column))?;
+                if !matches!(field.data_type, LogicalType::Utf8) {
+                    return Err(EngineError::TypeError(
+                        "temporal parsing requires a utf8 column",
+                    ));
+                }
+                self.apply_cast(*column, data_type, *on_failure)
+            }
             Rule::Cast {
                 column,
                 data_type,

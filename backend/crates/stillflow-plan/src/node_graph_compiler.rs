@@ -796,14 +796,29 @@ fn product_rule(config: &ValidatedNodeConfig) -> Option<Rule> {
             column,
             data_type,
             on_failure,
-        } => Some(Rule::Cast {
-            column: *column,
-            data_type: data_type.clone(),
-            on_failure: match on_failure {
+            format,
+        } => {
+            let policy = match on_failure {
                 NodeCastFailurePolicy::Error => CastFailurePolicy::Error,
                 NodeCastFailurePolicy::SetNull => CastFailurePolicy::SetNull,
-            },
-        }),
+            };
+            match format {
+                // A declared format turns the cast into an explicit temporal
+                // parse. Configurations without a format keep lowering to the
+                // unchanged `Cast` rule, so existing graphs stay byte-identical.
+                Some(format) => Some(Rule::ParseTemporal {
+                    column: *column,
+                    data_type: data_type.clone(),
+                    on_failure: policy,
+                    format: format.clone(),
+                }),
+                None => Some(Rule::Cast {
+                    column: *column,
+                    data_type: data_type.clone(),
+                    on_failure: policy,
+                }),
+            }
+        }
         ValidatedNodeConfig::ReplaceLiteral { column, from, to } => Some(Rule::ReplaceLiteral {
             column: *column,
             from: from.clone(),

@@ -29,6 +29,7 @@ polars = { version = "0.46", default-features = false, features = [
     "dtype-date",
     "dtype-datetime",
     "dtype-struct",
+    "temporal",
 ] }
 polars-arrow = "0.46"
 serde_json.workspace = true

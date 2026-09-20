@@ -54,6 +54,17 @@ pub enum Rule {
         data_type: LogicalType,
         on_failure: CastFailurePolicy,
     },
+    /// Parse a `Utf8` column into a temporal type using an **explicit** format.
+    ///
+    /// The parse is always naive: no timezone is inferred from the environment
+    /// or from the value, and a timezone-aware target is refused at
+    /// configuration time (it needs its own decision).
+    ParseTemporal {
+        column: ColumnId,
+        data_type: LogicalType,
+        on_failure: CastFailurePolicy,
+        format: String,
+    },
     Trim {
         column: ColumnId,
     },
