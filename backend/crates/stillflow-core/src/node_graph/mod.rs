@@ -900,6 +900,9 @@ pub enum ValidatedNodeConfig {
         column: ColumnId,
         data_type: LogicalType,
         on_failure: CastFailurePolicy,
+        /// Explicit temporal input format; present only for `Date32` or
+        /// `Timestamp` targets and never inferred.
+        format: Option<String>,
     },
     ReplaceLiteral {
         column: ColumnId,

@@ -75,6 +75,7 @@ pub enum SemanticKind {
     CoalesceArmsIncompatible,
     TrimRequiresUtf8,
     TextRequiresUtf8,
+    TemporalParseRequiresUtf8,
     LiteralIncompatibleWithColumn,
     BinaryReplaceOnlyNullToNull,
     FillNullValueMustNotBeNull,
@@ -121,6 +122,7 @@ impl SemanticKind {
             | Self::CoalesceArmsIncompatible
             | Self::TrimRequiresUtf8
             | Self::TextRequiresUtf8
+            | Self::TemporalParseRequiresUtf8
             | Self::LiteralIncompatibleWithColumn
             | Self::BinaryReplaceOnlyNullToNull
             | Self::FillNullNotAuthorizedOnBinary
@@ -152,6 +154,7 @@ impl SemanticKind {
             Self::CoalesceArmsIncompatible => "coalesce arms are not type-compatible",
             Self::TrimRequiresUtf8 => "trim requires a utf8 column",
             Self::TextRequiresUtf8 => "text normalization requires a utf8 column",
+            Self::TemporalParseRequiresUtf8 => "temporal parsing requires a utf8 column",
             Self::LiteralIncompatibleWithColumn => "literal is not type-compatible with the column",
             Self::BinaryReplaceOnlyNullToNull => "binary replace-literal only permits null-to-null",
             Self::FillNullValueMustNotBeNull => "fill-null value must not be null",
@@ -485,6 +488,44 @@ pub fn rule_effect(schema: &LogicalSchema, rule: &Rule) -> Result<LogicalSchema,
                 .ok_or_else(|| SemanticError::for_column(SemanticKind::UnknownColumn, *column))?;
             capability::reject_paused_type(data_type)?;
             capability::reject_paused_cast(&field.data_type, data_type)?;
+            let mut fields = schema.fields.clone();
+            let output = fields
+                .iter_mut()
+                .find(|field| field.id == *column)
+                .ok_or_else(|| SemanticError::for_column(SemanticKind::UnknownColumn, *column))?;
+            output.data_type = data_type.clone();
+            if matches!(on_failure, CastFailurePolicy::SetNull) {
+                output.nullable = true;
+            }
+            rebuild(schema, fields)
+        }
+        Rule::ParseTemporal {
+            column,
+            data_type,
+            on_failure,
+            ..
+        } => {
+            let field = schema
+                .field(*column)
+                .ok_or_else(|| SemanticError::for_column(SemanticKind::UnknownColumn, *column))?;
+            if field.data_type != LogicalType::Utf8 {
+                return Err(SemanticError::for_column(
+                    SemanticKind::TemporalParseRequiresUtf8,
+                    *column,
+                ));
+            }
+            if !matches!(
+                data_type,
+                LogicalType::Date32 | LogicalType::Timestamp { .. }
+            ) {
+                return Err(SemanticError::for_column(
+                    SemanticKind::InvalidLogicalType,
+                    *column,
+                ));
+            }
+            // A paused target — for example a second-unit timestamp — stays
+            // paused; parsing does not lift any capability.
+            capability::reject_paused_type(data_type)?;
             let mut fields = schema.fields.clone();
             let output = fields
                 .iter_mut()

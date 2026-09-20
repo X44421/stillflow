@@ -59,6 +59,7 @@ pub(crate) fn semantic_error(error: SemanticError) -> EngineError {
         // fallback keeps the mapping total without inventing a decision.
         SemanticKind::TrimRequiresUtf8
         | SemanticKind::TextRequiresUtf8
+        | SemanticKind::TemporalParseRequiresUtf8
         | SemanticKind::LiteralIncompatibleWithColumn
         | SemanticKind::BinaryReplaceOnlyNullToNull
         | SemanticKind::FillNullValueMustNotBeNull

@@ -465,6 +465,33 @@ fn predict_rule(
             let live_after = column_physical_sum(&next, arrays, offset, k)?;
             Ok((temporary, live_after, next))
         }
+        Rule::ParseTemporal {
+            column,
+            data_type,
+            on_failure,
+            ..
+        } => {
+            let source_type = working.column(*column)?.data_type.clone();
+            if !matches!(source_type, LogicalType::Utf8) {
+                return Err(EngineError::TypeError(
+                    "temporal parsing requires a utf8 column",
+                ));
+            }
+            let current = next.column_mut(*column)?;
+            current.origin = ColumnOrigin::Derived;
+            current.data_type = data_type.clone();
+            if matches!(on_failure, stillflow_plan::CastFailurePolicy::SetNull) {
+                current.nullable = true;
+            }
+            current.max_value_bytes = 0;
+            let temporary = match fixed_slot_bytes(data_type) {
+                Some(slot) => fixed_physical_bytes(k, slot),
+                None => utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes)),
+            };
+            predict_metrics::record_rule_full_recompute(RuleKind::Other);
+            let live_after = column_physical_sum(&next, arrays, offset, k)?;
+            Ok((temporary, live_after, next))
+        }
         Rule::FilterRows { .. } => Ok((live_before, live_before, next)),
         Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
             node: uuid::Uuid::nil(),

@@ -540,6 +540,9 @@ fn rule_bytes(rule: &Rule) -> usize {
         Rule::Validate {
             predicate, message, ..
         } => expr_bytes(predicate).saturating_add(message.len()),
+        // The declared format string is caller-provided and bounded like any
+        // other string; the timezone lives in the target type.
+        Rule::ParseTemporal { format, .. } => format.len(),
         Rule::Trim { .. }
         | Rule::NormalizeText { .. }
         | Rule::DropColumn { .. }
@@ -635,6 +638,7 @@ fn rule_served_lookups(rule: &Rule) -> usize {
         Rule::DropColumn { .. } => 0,
         Rule::Trim { .. } => 1,
         Rule::NormalizeText { .. } => 1,
+        Rule::ParseTemporal { .. } => 1,
         Rule::Cast { .. } => 1,
         Rule::ReplaceLiteral { .. } => 1,
         Rule::FillNull { .. } => 1,
@@ -830,6 +834,34 @@ pub(crate) fn apply_rule_schema_legacy(
             }
             LogicalSchema::new(fields)
                 .map_err(|_| EngineError::InvalidPlan("cast produced an invalid schema"))
+        }
+        Rule::ParseTemporal {
+            column,
+            data_type,
+            on_failure,
+            ..
+        } => {
+            let source = schema
+                .field(*column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            if !matches!(source.data_type, LogicalType::Utf8) {
+                return Err(EngineError::TypeError(
+                    "temporal parsing requires a utf8 column",
+                ));
+            }
+            crate::typing::reject_paused_type(data_type)?;
+            let mut fields = schema.fields.clone();
+            let field = fields
+                .iter_mut()
+                .find(|field| field.id == *column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            field.data_type = data_type.clone();
+            if matches!(on_failure, CastFailurePolicy::SetNull) {
+                field.nullable = true;
+            }
+            LogicalSchema::new(fields).map_err(|_| {
+                EngineError::InvalidPlan("temporal parsing produced an invalid schema")
+            })
         }
         Rule::ReplaceLiteral { column, from, to } => {
             let field = schema
