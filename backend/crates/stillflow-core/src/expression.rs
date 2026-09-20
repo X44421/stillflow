@@ -118,6 +118,13 @@ pub enum Expr {
     Concat {
         expressions: Vec<Expr>,
     },
+    /// Conditional selection (#368 §3.2): a Boolean predicate chooses between
+    /// two branches of one logical type; a NULL predicate takes `otherwise`.
+    Conditional {
+        predicate: Box<Expr>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
+    },
 }
 
 impl Expr {
@@ -137,6 +144,15 @@ impl Expr {
                 Self::Binary { left, right, .. } => {
                     pending.push(right);
                     pending.push(left);
+                }
+                Self::Conditional {
+                    predicate,
+                    then,
+                    otherwise,
+                } => {
+                    pending.push(otherwise);
+                    pending.push(then);
+                    pending.push(predicate);
                 }
                 Self::Coalesce { expressions } | Self::Concat { expressions } => {
                     pending.extend(expressions)
@@ -175,6 +191,15 @@ impl Expr {
                     for expression in expressions {
                         pending.push(expression);
                     }
+                }
+                Self::Conditional {
+                    predicate,
+                    then,
+                    otherwise,
+                } => {
+                    pending.push(otherwise);
+                    pending.push(then);
+                    pending.push(predicate);
                 }
                 Self::Coalesce { expressions } => {
                     if expressions.is_empty() {

@@ -624,6 +624,15 @@ pub(super) fn validate_expression(
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
             }
+            Expr::Conditional {
+                predicate,
+                then,
+                otherwise,
+            } => {
+                pending.push((predicate, depth + 1));
+                pending.push((then, depth + 1));
+                pending.push((otherwise, depth + 1));
+            }
             Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 for expression in expressions {
                     pending.push((expression, depth + 1));

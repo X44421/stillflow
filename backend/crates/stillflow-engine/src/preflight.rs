@@ -558,6 +558,13 @@ fn expr_bytes(expr: &Expr) -> usize {
         | Expr::IsNull { expression, .. }
         | Expr::Cast { expression, .. } => expr_bytes(expression),
         Expr::Binary { left, right, .. } => expr_bytes(left).saturating_add(expr_bytes(right)),
+        Expr::Conditional {
+            predicate,
+            then,
+            otherwise,
+        } => expr_bytes(predicate)
+            .saturating_add(expr_bytes(then))
+            .saturating_add(expr_bytes(otherwise)),
         Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
             expressions.iter().map(expr_bytes).sum()
         }
@@ -1037,6 +1044,15 @@ fn validate_expr_iterative(expr: &Expr) -> Result<(), EngineError> {
             Expr::Binary { left, right, .. } => {
                 stack.push((left, depth + 1));
                 stack.push((right, depth + 1));
+            }
+            Expr::Conditional {
+                predicate,
+                then,
+                otherwise,
+            } => {
+                stack.push((predicate, depth + 1));
+                stack.push((then, depth + 1));
+                stack.push((otherwise, depth + 1));
             }
             Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 if expressions.is_empty() {

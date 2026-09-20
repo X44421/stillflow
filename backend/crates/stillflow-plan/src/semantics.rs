@@ -64,6 +64,7 @@ pub enum SemanticKind {
     LogicalOperandsMustBeBoolean,
     ContainsRequiresUtf8,
     ConcatRequiresUtf8,
+    ConditionalBranchesIncompatible,
     CheckedArithmeticPaused,
     ListStructPaused,
     TimestampSecondPaused,
@@ -112,6 +113,7 @@ impl SemanticKind {
             | Self::LogicalOperandsMustBeBoolean
             | Self::ContainsRequiresUtf8
             | Self::ConcatRequiresUtf8
+            | Self::ConditionalBranchesIncompatible
             | Self::CheckedArithmeticPaused
             | Self::ListStructPaused
             | Self::TimestampSecondPaused
@@ -143,6 +145,9 @@ impl SemanticKind {
             Self::LogicalOperandsMustBeBoolean => "logical operands must be boolean",
             Self::ContainsRequiresUtf8 => "contains requires utf8 operands",
             Self::ConcatRequiresUtf8 => "concat requires utf8 operands",
+            Self::ConditionalBranchesIncompatible => {
+                "conditional branches must share one logical type"
+            }
             Self::CheckedArithmeticPaused => "checked arithmetic is not authorized",
             Self::ListStructPaused => "list and struct execution is paused",
             Self::TimestampSecondPaused => "timestamp second unit is paused",
@@ -248,6 +253,15 @@ pub fn validate_expr_refs<R: ColumnResolver + ?Sized>(
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
             }
+            Expr::Conditional {
+                predicate,
+                then,
+                otherwise,
+            } => {
+                pending.push((predicate, depth + 1));
+                pending.push((then, depth + 1));
+                pending.push((otherwise, depth + 1));
+            }
             Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 for expression in expressions {
                     pending.push((expression, depth + 1));
@@ -293,6 +307,15 @@ fn check_shape_bounds(expr: &Expr) -> Result<(), SemanticError> {
             Expr::Binary { left, right, .. } => {
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
+            }
+            Expr::Conditional {
+                predicate,
+                then,
+                otherwise,
+            } => {
+                pending.push((predicate, depth + 1));
+                pending.push((then, depth + 1));
+                pending.push((otherwise, depth + 1));
             }
             Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 for expression in expressions {
@@ -402,6 +425,40 @@ fn infer_expr<R: ColumnResolver + ?Sized>(
                     Ok((LogicalType::Boolean, nullable))
                 }
             }
+        }
+        Expr::Conditional {
+            predicate,
+            then,
+            otherwise,
+        } => {
+            // #368 §3.2: a Boolean predicate selects between two branches of
+            // one logical type. A NULL predicate takes `otherwise`, so the
+            // result is nullable exactly when a branch is.
+            let (predicate_type, _) = infer_expr(predicate, resolver)?;
+            if predicate_type != LogicalType::Boolean {
+                return Err(SemanticError::new(
+                    SemanticKind::LogicalOperandsMustBeBoolean,
+                ));
+            }
+            let (then_type, then_nullable) = infer_expr(then, resolver)?;
+            let (otherwise_type, otherwise_nullable) = infer_expr(otherwise, resolver)?;
+            // A NULL-typed branch is a NULL value of any type, mirroring how
+            // `Coalesce` unifies its arms; otherwise the branches must agree
+            // exactly (no implicit coercion).
+            let (result_type, null_branch) = match (&then_type, &otherwise_type) {
+                (LogicalType::Null, other) => (other.clone(), true),
+                (other, LogicalType::Null) => (other.clone(), true),
+                (left, right) if left == right => (left.clone(), false),
+                _ => {
+                    return Err(SemanticError::new(
+                        SemanticKind::ConditionalBranchesIncompatible,
+                    ))
+                }
+            };
+            Ok((
+                result_type,
+                then_nullable || otherwise_nullable || null_branch,
+            ))
         }
         Expr::Concat { expressions } => {
             // #368 §3.1: two to eight Utf8 operands, concatenated in order.
@@ -812,6 +869,15 @@ pub mod capability {
                 reject_paused_capability(left)?;
                 reject_paused_capability(right)
             }
+            Expr::Conditional {
+                predicate,
+                then,
+                otherwise,
+            } => {
+                reject_paused_capability(predicate)?;
+                reject_paused_capability(then)?;
+                reject_paused_capability(otherwise)
+            }
             Expr::Concat { expressions } => {
                 for nested in expressions {
                     reject_paused_capability(nested)?;
@@ -849,6 +915,15 @@ pub mod capability {
             Expr::Binary { left, right, .. } => {
                 reject_paused_casts_in_expr(left, resolver)?;
                 reject_paused_casts_in_expr(right, resolver)
+            }
+            Expr::Conditional {
+                predicate,
+                then,
+                otherwise,
+            } => {
+                reject_paused_casts_in_expr(predicate, resolver)?;
+                reject_paused_casts_in_expr(then, resolver)?;
+                reject_paused_casts_in_expr(otherwise, resolver)
             }
             Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 for expression in expressions {
