@@ -136,6 +136,7 @@ fn expected_engine_class(kind: SemanticKind) -> EngineClass {
         | SemanticKind::OrderedComparisonRequiresNumeric
         | SemanticKind::CoalesceArmsIncompatible
         | SemanticKind::TrimRequiresUtf8
+        | SemanticKind::TextRequiresUtf8
         | SemanticKind::LiteralIncompatibleWithColumn
         | SemanticKind::BinaryReplaceOnlyNullToNull
         | SemanticKind::FillNullNotAuthorizedOnBinary

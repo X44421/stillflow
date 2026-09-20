@@ -892,6 +892,10 @@ pub enum ValidatedNodeConfig {
     Trim {
         column: ColumnId,
     },
+    NormalizeText {
+        column: ColumnId,
+        operation: TextOperation,
+    },
     Cast {
         column: ColumnId,
         data_type: LogicalType,
@@ -926,6 +930,25 @@ pub enum ValidatedNodeConfig {
 pub enum CastFailurePolicy {
     Error,
     SetNull,
+}
+
+/// One deterministic text-normalization operation (product layer).
+///
+/// Operations are composed by chaining nodes: the product law keeps exactly one
+/// rule per node, so the chain order is the operation order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextOperation {
+    /// Remove leading and trailing whitespace.
+    Trim,
+    /// Replace every maximal run of whitespace with one ASCII space.
+    CollapseWhitespace,
+    /// Unicode-aware lower-casing.
+    Lowercase,
+    /// Unicode-aware upper-casing.
+    Uppercase,
+    /// Canonical Unicode normalization form NFC.
+    UnicodeNfc,
 }
 
 fn validate_string(
@@ -1164,7 +1187,7 @@ mod tests {
         assert_eq!(first_ids, second_ids);
         assert!(first_ids.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(first.catalog(), second.catalog());
-        assert_eq!(first.catalog().len(), 11);
+        assert_eq!(first.catalog().len(), 12);
         assert_eq!(
             first.lookup("stillflow.node.source", 2).unwrap_err().code(),
             NodeGraphErrorCode::UnsupportedConfigVersion

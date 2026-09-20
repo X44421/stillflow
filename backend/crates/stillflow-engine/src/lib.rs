@@ -22,6 +22,7 @@ mod quality;
 mod remainder;
 mod scheduler;
 pub mod semantics;
+mod text_normalize;
 mod types;
 mod typing;
 mod verification;

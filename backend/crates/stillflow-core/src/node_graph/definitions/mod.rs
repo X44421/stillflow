@@ -9,6 +9,7 @@ pub(crate) mod derive_column;
 pub(crate) mod drop_column;
 pub(crate) mod fill_null;
 pub(crate) mod filter;
+pub(crate) mod normalize_text;
 pub(crate) mod output;
 pub(crate) mod rename;
 pub(crate) mod replace_literal;
@@ -39,6 +40,7 @@ pub(crate) fn production_definitions() -> Vec<NodeDefinition> {
         fill_null::definition(),
         drop_column::definition(),
         derive_column::definition(),
+        normalize_text::definition(),
         output::definition(),
     ]
 }
@@ -142,6 +144,11 @@ mod consistency_tests {
                 "derive-column",
                 super::derive_column::definition(),
                 super::derive_column::samples(),
+            ),
+            (
+                "normalize-text",
+                super::normalize_text::definition(),
+                super::normalize_text::samples(),
             ),
             (
                 "output",
@@ -293,7 +300,7 @@ mod consistency_tests {
                 .map(|entry| entry.type_id.clone())
                 .collect();
             assert_eq!(ids, expected);
-            assert_eq!(registry.catalog().len(), 11);
+            assert_eq!(registry.catalog().len(), 12);
         }
 
         // Duplicate (typeId, configVersion) pairs fail closed.
@@ -346,7 +353,7 @@ mod consistency_tests {
         let mut definitions = production_definitions();
         definitions.extend(super::test_only_definitions());
         let extended = NodeRegistry::from_definitions(definitions).expect("extended registry");
-        assert_eq!(extended.catalog().len(), 12);
+        assert_eq!(extended.catalog().len(), 13);
 
         let column = "00000000-0000-0000-0000-000000000002";
         let graph = NodeGraph::new(

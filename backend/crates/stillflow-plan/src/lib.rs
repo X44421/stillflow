@@ -17,7 +17,7 @@ pub use plan::{
     JoinKey, JoinType, LogicalPlan, PlanError, PlanFingerprint, PlanNode, PlanNodeId, PlanNodeKind,
     PLAN_FINGERPRINT_ALGORITHM, PLAN_VERSION,
 };
-pub use rule::{CastFailurePolicy, Rule, RuleError, ValidationSeverity};
+pub use rule::{CastFailurePolicy, Rule, RuleError, TextOperation, ValidationSeverity};
 pub use semantics::{
     analyze_expr, capability, project_effect, rule_effect, validate_expr_refs, ColumnResolver,
     ExprAnalysis, SemanticError, SemanticKind,

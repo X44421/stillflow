@@ -1,4 +1,7 @@
-use polars::prelude::{col, lit, when, DataFrame, Expr as PolarsExpr, IntoLazy, NULL};
+use polars::prelude::{
+    col, lit, when, Column, DataFrame, DataType, Expr as PolarsExpr, GetOutput, IntoLazy, Series,
+    StringChunked, NULL,
+};
 use stillflow_core::{
     BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue,
     UnaryOperator,
@@ -97,6 +100,34 @@ fn apply_rule(
                 )
                 .collect()
                 .map_err(|_| EngineError::TypeError("trim failed"))
+        }
+        Rule::NormalizeText { column, operation } => {
+            let name = field_name(schema, *column)?;
+            let operation = *operation;
+            frame
+                .lazy()
+                .with_column(
+                    col(name.as_str())
+                        .map(
+                            move |column: Column| {
+                                let values = column.str()?;
+                                let normalized: StringChunked = values
+                                    .into_iter()
+                                    .map(|value| {
+                                        value.map(|text| {
+                                            crate::text_normalize::normalize(text, operation)
+                                        })
+                                    })
+                                    .collect();
+                                let series: Series = normalized.into();
+                                Ok(Some(series.into()))
+                            },
+                            GetOutput::from_type(DataType::String),
+                        )
+                        .alias(name.as_str()),
+                )
+                .collect()
+                .map_err(|_| EngineError::TypeError("text normalization failed"))
         }
         Rule::DeriveColumn {
             id,
