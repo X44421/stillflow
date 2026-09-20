@@ -18,13 +18,14 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use stillflow_connectors::ConnectorRegistry;
 use stillflow_core::{
-    AssetKind, AssetLocator, AssetMetadata, ConnectionStatus, ConnectorKind, ControlPlaneEventType,
-    ControlPlaneInput, DatasetState, DiscoverRequest, DriftComparisonRequest, EventStreamKind,
-    ExportRequestV1, ExportShape, InspectRequest, JobOperation, JobState, LogLevel, LogicalSchema,
-    MetricName, OperationDescriptorV1, OperationKind, PreviewRequest, RequestContext, RunState,
-    SamplingStrategy, SessionState, SnapshotRef, SourceAsset, SourceConnection,
-    SourceConnectionState, Telemetry, TelemetryComponent, TelemetryLabels, TelemetryOperation,
-    TelemetryOutcome, TestConnectionRequest,
+    asset_version_digest, AssetKind, AssetLocator, AssetMetadata, ConnectionStatus, ConnectorKind,
+    ControlPlaneEventType, ControlPlaneInput, DatasetState, DiscoverRequest,
+    DriftComparisonRequest, EventStreamKind, ExportRequestV1, ExportShape, InspectRequest,
+    JobOperation, JobState, LogLevel, LogicalSchema, MetricName, OperationDescriptorV1,
+    OperationKind, PreviewRequest, RequestContext, RunState, SamplingStrategy, SessionState,
+    SnapshotRef, SourceAsset, SourceConnection, SourceConnectionState, Telemetry,
+    TelemetryComponent, TelemetryLabels, TelemetryOperation, TelemetryOutcome,
+    TestConnectionRequest,
 };
 use stillflow_engine::{ExecutionEngine, JobRuntime, PreviewRequest as EnginePreviewOpRequest};
 use stillflow_plan::{
@@ -2134,7 +2135,7 @@ impl ApiService {
             .connectors
             .as_ref()
             .ok_or_else(|| ApiError::conflict("connector registry is not configured"))?;
-        let metadata = registry
+        let mut metadata = registry
             .inspect(
                 &source_connection_domain(&connection_record)?,
                 InspectRequest {
@@ -2144,6 +2145,9 @@ impl ApiService {
             )
             .await
             .map_err(ApiError::from)?;
+        let version_digest = asset_version_digest(asset_record.id, &metadata.schema)
+            .map_err(|_| ApiError::internal())?;
+        metadata.version_digest = Some(digest_hex(&version_digest));
         Ok(ApiResponse::new(request.meta.request_id, metadata))
     }
 

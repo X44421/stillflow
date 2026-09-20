@@ -134,6 +134,7 @@ pub(crate) fn inspect_opened(
         modified_at: opened.modified_at,
         findings,
         workbook: Some(inspection),
+        version_digest: None,
     })
 }
 

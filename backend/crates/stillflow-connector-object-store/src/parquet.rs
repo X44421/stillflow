@@ -152,6 +152,7 @@ pub(crate) async fn inspect_parquet(
         modified_at: Some(info.last_modified),
         findings: Vec::new(),
         workbook: None,
+        version_digest: None,
     })
 }
 

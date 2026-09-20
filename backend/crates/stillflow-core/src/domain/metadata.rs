@@ -33,6 +33,10 @@ pub struct AssetMetadata {
     pub findings: Vec<InspectionFinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workbook: Option<WorkbookInspection>,
+    /// SHA-256 identity of the inspected logical source schema, when the
+    /// metadata is returned by the API for a registered source asset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_digest: Option<String>,
 }
 
 impl AssetMetadata {
@@ -45,6 +49,7 @@ impl AssetMetadata {
             modified_at: None,
             findings: Vec::new(),
             workbook: None,
+            version_digest: None,
         }
     }
 }
