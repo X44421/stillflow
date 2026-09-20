@@ -13,10 +13,38 @@ use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+use crate::logical::{LogicalError, LogicalSchema};
 
 /// SHA-256 digest bytes used by provenance identities (contract section 7.2).
 pub type ContentDigest = [u8; 32];
+
+/// Domain prefix for the frozen logical-input version digest contract.
+pub const LOGICAL_INPUT_DIGEST_DOMAIN: &[u8] = b"stillflow.e4.logical-input.v1\0";
+
+/// Version of the logical-input descriptor encoded into its digest.
+pub const LOGICAL_INPUT_DESCRIPTOR_VERSION: u16 = 1;
+
+/// Computes the stable version identity for an inspected source asset.
+///
+/// The digest binds the asset identity to the canonical logical schema. It is
+/// deliberately independent of raw rows, locators, filesystem paths and
+/// connection credentials.
+pub fn asset_version_digest(
+    asset_id: Uuid,
+    schema: &LogicalSchema,
+) -> Result<ContentDigest, LogicalError> {
+    let canonical_schema = schema.canonical_bytes()?;
+    let mut digest = Sha256::new();
+    digest.update(LOGICAL_INPUT_DIGEST_DOMAIN);
+    digest.update([0x01_u8]);
+    digest.update(LOGICAL_INPUT_DESCRIPTOR_VERSION.to_le_bytes());
+    digest.update(asset_id.as_bytes());
+    digest.update(canonical_schema);
+    Ok(digest.finalize().into())
+}
 
 /// Version of the verification contract implemented by this surface
 /// (contract section 11: `VERIFICATION_CONTRACT_VERSION`).
@@ -363,6 +391,16 @@ use crate::logical::ColumnId;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asset_version_digest_binds_asset_identity_and_schema() {
+        let schema = LogicalSchema::empty();
+        let first = asset_version_digest(Uuid::from_u128(1), &schema).expect("asset digest");
+        let different_asset =
+            asset_version_digest(Uuid::from_u128(2), &schema).expect("asset digest");
+        assert_ne!(first, [0; 32]);
+        assert_ne!(first, different_asset);
+    }
 
     fn fixed_timestamp() -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000, 0).expect("valid timestamp")

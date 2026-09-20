@@ -102,9 +102,9 @@ pub use observability::{
 pub use request::RequestContext;
 pub use stream::{attach_request_context, BatchItem, BatchStream};
 pub use verification::{
-    ArtifactKind, ArtifactProvenance, ArtifactProvenanceDraft, ArtifactProvenanceInput,
-    ArtifactSummary, ContentDigest, InputRef, LogicalInputRef, RuleRef, SourceRowRef,
-    DEDUP_RULE_SUMMARY_CANONICAL_PLAN_DIGEST_COLUMN_ID,
+    asset_version_digest, ArtifactKind, ArtifactProvenance, ArtifactProvenanceDraft,
+    ArtifactProvenanceInput, ArtifactSummary, ContentDigest, InputRef, LogicalInputRef, RuleRef,
+    SourceRowRef, DEDUP_RULE_SUMMARY_CANONICAL_PLAN_DIGEST_COLUMN_ID,
     DEDUP_RULE_SUMMARY_DUPLICATE_COUNT_COLUMN_ID, DEDUP_RULE_SUMMARY_EVALUATED_COUNT_COLUMN_ID,
     DEDUP_RULE_SUMMARY_INPUT_ID_COLUMN_ID, DEDUP_RULE_SUMMARY_INPUT_KIND_COLUMN_ID,
     DEDUP_RULE_SUMMARY_INPUT_VERSION_DIGEST_COLUMN_ID,
