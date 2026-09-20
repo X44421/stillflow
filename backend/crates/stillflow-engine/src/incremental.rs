@@ -231,6 +231,17 @@ impl IncrementalSchema {
                 }
                 Ok(())
             }
+            Rule::NormalizeText { column, .. } => {
+                let field = self
+                    .resolve_column(*column)
+                    .ok_or(EngineError::UnknownColumn(*column))?;
+                if !matches!(field.data_type, LogicalType::Utf8) {
+                    return Err(EngineError::TypeError(
+                        "text normalization requires a utf8 column",
+                    ));
+                }
+                Ok(())
+            }
             Rule::Cast {
                 column,
                 data_type,

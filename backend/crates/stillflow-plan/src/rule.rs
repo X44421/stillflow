@@ -20,6 +20,27 @@ pub enum ValidationSeverity {
     Error,
 }
 
+/// One deterministic text-normalization operation.
+///
+/// Every operation is NULL-preserving and defined only for `Utf8` values.
+/// Several operations are composed by chaining nodes, because the product law
+/// keeps one rule per node; the chain order is the operation order. None of
+/// these operations executes user code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextOperation {
+    /// Remove leading and trailing whitespace.
+    Trim,
+    /// Replace every maximal run of whitespace with one ASCII space.
+    CollapseWhitespace,
+    /// Unicode-aware lower-casing.
+    Lowercase,
+    /// Unicode-aware upper-casing.
+    Uppercase,
+    /// Canonical Unicode normalization form NFC.
+    UnicodeNfc,
+}
+
 /// Closed, engine-independent cleaning rule language.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
@@ -65,6 +86,10 @@ pub enum Rule {
         predicate: Expr,
         severity: ValidationSeverity,
         message: String,
+    },
+    NormalizeText {
+        column: ColumnId,
+        operation: TextOperation,
     },
 }
 
@@ -116,6 +141,7 @@ impl Rule {
                 Expr::Literal(ScalarValue::Utf8(message.clone())).validate_shape()?;
                 predicate.validate_shape().map_err(RuleError::from)
             }
+            Self::NormalizeText { .. } => Ok(()),
             _ => Ok(()),
         }
     }

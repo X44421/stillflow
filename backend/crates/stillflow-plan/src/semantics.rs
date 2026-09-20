@@ -74,6 +74,7 @@ pub enum SemanticKind {
     OrderedComparisonRequiresNumeric,
     CoalesceArmsIncompatible,
     TrimRequiresUtf8,
+    TextRequiresUtf8,
     LiteralIncompatibleWithColumn,
     BinaryReplaceOnlyNullToNull,
     FillNullValueMustNotBeNull,
@@ -119,6 +120,7 @@ impl SemanticKind {
             | Self::OrderedComparisonRequiresNumeric
             | Self::CoalesceArmsIncompatible
             | Self::TrimRequiresUtf8
+            | Self::TextRequiresUtf8
             | Self::LiteralIncompatibleWithColumn
             | Self::BinaryReplaceOnlyNullToNull
             | Self::FillNullNotAuthorizedOnBinary
@@ -149,6 +151,7 @@ impl SemanticKind {
             }
             Self::CoalesceArmsIncompatible => "coalesce arms are not type-compatible",
             Self::TrimRequiresUtf8 => "trim requires a utf8 column",
+            Self::TextRequiresUtf8 => "text normalization requires a utf8 column",
             Self::LiteralIncompatibleWithColumn => "literal is not type-compatible with the column",
             Self::BinaryReplaceOnlyNullToNull => "binary replace-literal only permits null-to-null",
             Self::FillNullValueMustNotBeNull => "fill-null value must not be null",
@@ -456,6 +459,20 @@ pub fn rule_effect(schema: &LogicalSchema, rule: &Rule) -> Result<LogicalSchema,
                     *column,
                 ));
             }
+            Ok(schema.clone())
+        }
+        Rule::NormalizeText { column, .. } => {
+            let field = schema
+                .field(*column)
+                .ok_or_else(|| SemanticError::for_column(SemanticKind::UnknownColumn, *column))?;
+            if field.data_type != LogicalType::Utf8 {
+                return Err(SemanticError::for_column(
+                    SemanticKind::TextRequiresUtf8,
+                    *column,
+                ));
+            }
+            // Text normalization preserves field identity, order, type and
+            // nullability: only the values change.
             Ok(schema.clone())
         }
         Rule::Cast {

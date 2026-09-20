@@ -55,15 +55,16 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// The deployed registry exposes the composite in its catalog while keeping
-/// the eleven atomic definitions.
+/// the atomic definitions.
 #[test]
 fn deployed_catalog_lists_the_composite() {
     let registry = NodeRegistry::deployed();
     let catalog = registry.catalog();
     let ids: Vec<&str> = catalog.iter().map(|entry| entry.type_id.as_str()).collect();
-    assert_eq!(ids.len(), 12);
+    assert_eq!(ids.len(), 13);
     assert!(ids.contains(&"stillflow.composite.trim-clean"));
     assert!(ids.contains(&"stillflow.node.trim"));
+    assert!(ids.contains(&"stillflow.node.normalize-text"));
     // Package order never changes the catalog: reversed deployment is
     // identical.
     let packages = vec![trim_clean_package()];

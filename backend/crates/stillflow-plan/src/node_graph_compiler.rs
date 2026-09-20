@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     semantics, CastFailurePolicy, LogicalPlan, PlanError, PlanFingerprint, PlanNode, PlanNodeId,
-    PlanNodeKind, Rule,
+    PlanNodeKind, Rule, TextOperation,
 };
 use semantics::SemanticError;
 
@@ -780,6 +780,18 @@ fn product_rule(config: &ValidatedNodeConfig) -> Option<Rule> {
             to: to.clone(),
         }),
         ValidatedNodeConfig::Trim { column } => Some(Rule::Trim { column: *column }),
+        ValidatedNodeConfig::NormalizeText { column, operation } => Some(Rule::NormalizeText {
+            column: *column,
+            operation: match operation {
+                stillflow_core::TextOperation::Trim => TextOperation::Trim,
+                stillflow_core::TextOperation::CollapseWhitespace => {
+                    TextOperation::CollapseWhitespace
+                }
+                stillflow_core::TextOperation::Lowercase => TextOperation::Lowercase,
+                stillflow_core::TextOperation::Uppercase => TextOperation::Uppercase,
+                stillflow_core::TextOperation::UnicodeNfc => TextOperation::UnicodeNfc,
+            },
+        }),
         ValidatedNodeConfig::Cast {
             column,
             data_type,

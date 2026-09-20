@@ -87,8 +87,8 @@ pub use node_graph::{
     CastFailurePolicy, ConfigField, ConfigSchema, ConfigValueKind, NodeCatalogEntry, NodeConfig,
     NodeDefinition, NodeEdge, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId,
     NodeLoweringTarget, NodePackage, NodePort, NodeRegistry, NodeSupportStatus, PortId,
-    ValidatedNodeConfig, MAX_CONFIG_BYTES, MAX_EDGES, MAX_EXPR_DEPTH, MAX_EXPR_NODES,
-    MAX_GRAPH_BYTES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH, MAX_NODES, MAX_RULES,
+    TextOperation, ValidatedNodeConfig, MAX_CONFIG_BYTES, MAX_EDGES, MAX_EXPR_DEPTH,
+    MAX_EXPR_NODES, MAX_GRAPH_BYTES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH, MAX_NODES, MAX_RULES,
     MAX_RULES_PER_NODE, MAX_STRING_BYTES, MAX_TOTAL_CONFIG_BYTES, NODE_GRAPH_VERSION,
 };
 pub use observability::{

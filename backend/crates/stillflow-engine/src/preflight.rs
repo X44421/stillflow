@@ -541,6 +541,7 @@ fn rule_bytes(rule: &Rule) -> usize {
             predicate, message, ..
         } => expr_bytes(predicate).saturating_add(message.len()),
         Rule::Trim { .. }
+        | Rule::NormalizeText { .. }
         | Rule::DropColumn { .. }
         | Rule::Cast { .. }
         | Rule::Deduplicate { .. } => 0,
@@ -633,6 +634,7 @@ fn rule_served_lookups(rule: &Rule) -> usize {
         // `ColumnId` resolution through the lookup backend.
         Rule::DropColumn { .. } => 0,
         Rule::Trim { .. } => 1,
+        Rule::NormalizeText { .. } => 1,
         Rule::Cast { .. } => 1,
         Rule::ReplaceLiteral { .. } => 1,
         Rule::FillNull { .. } => 1,
@@ -790,6 +792,18 @@ pub(crate) fn apply_rule_schema_legacy(
             if !matches!(field.data_type, LogicalType::Utf8) {
                 return Err(EngineError::TypeError("trim requires a utf8 column"));
             }
+            Ok(schema)
+        }
+        Rule::NormalizeText { column, .. } => {
+            let field = schema
+                .field(*column)
+                .ok_or(EngineError::UnknownColumn(*column))?;
+            if !matches!(field.data_type, LogicalType::Utf8) {
+                return Err(EngineError::TypeError(
+                    "text normalization requires a utf8 column",
+                ));
+            }
+            // Values change; identity, order, type and nullability do not.
             Ok(schema)
         }
         Rule::Cast {

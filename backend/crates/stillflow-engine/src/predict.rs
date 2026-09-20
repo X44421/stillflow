@@ -307,6 +307,19 @@ fn predict_rule(
             let live_after = column_physical_sum(&next, arrays, offset, k)?;
             Ok((temporary, live_after, next))
         }
+        Rule::NormalizeText { column, .. } => {
+            let current = working.column(*column)?;
+            if !matches!(current.data_type, LogicalType::Utf8) {
+                return Err(EngineError::TypeError(
+                    "text normalization requires a utf8 column",
+                ));
+            }
+            let temporary = utf8_physical_bytes(k, k.saturating_mul(current.max_value_bytes));
+            next.column_mut(*column)?.origin = ColumnOrigin::Derived;
+            predict_metrics::record_rule_full_recompute(RuleKind::Other);
+            let live_after = column_physical_sum(&next, arrays, offset, k)?;
+            Ok((temporary, live_after, next))
+        }
         Rule::DeriveColumn {
             id,
             name,

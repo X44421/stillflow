@@ -58,6 +58,7 @@ pub(crate) fn semantic_error(error: SemanticError) -> EngineError {
         // engine's rule propagation is the IncrementalSchema layer); the
         // fallback keeps the mapping total without inventing a decision.
         SemanticKind::TrimRequiresUtf8
+        | SemanticKind::TextRequiresUtf8
         | SemanticKind::LiteralIncompatibleWithColumn
         | SemanticKind::BinaryReplaceOnlyNullToNull
         | SemanticKind::FillNullValueMustNotBeNull
