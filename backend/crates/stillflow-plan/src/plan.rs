@@ -14,6 +14,10 @@ pub const PLAN_VERSION: u16 = 1;
 /// Versioned algorithm name for the non-security plan cache fingerprint.
 pub const PLAN_FINGERPRINT_ALGORITHM: &str = "stillflow-fnv1a64x4-v1";
 
+/// Maximum ordering keys on one `Sort` node (#370 §1). A schema law, not a
+/// resource ceiling.
+pub const MAX_SORT_KEYS: usize = 8;
+
 /// Stable identity of a node inside a logical plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -59,6 +63,33 @@ pub struct JoinKey {
     pub right: Expr,
 }
 
+/// One ordering key of a `Sort` node (#370 §2).
+///
+/// `nulls` is required rather than defaulted: where NULLs sort is declared
+/// configuration, never an engine default (#363 §8.1.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SortKey {
+    pub column: ColumnId,
+    pub direction: SortDirection,
+    pub nulls: NullPlacement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+/// Where NULLs sort for one key, honoured for both directions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NullPlacement {
+    First,
+    Last,
+}
+
 /// Closed set of version 1 logical plan operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
@@ -82,6 +113,12 @@ pub enum PlanNodeKind {
         keys: Vec<JoinKey>,
     },
     Union,
+    /// Stable ordering over explicit key columns (#370 §2). Ordering is a
+    /// property of the relation, so it is a first-class operator rather than a
+    /// per-row rule.
+    Sort {
+        keys: Vec<SortKey>,
+    },
     Materialize {
         output_label: String,
     },
@@ -96,6 +133,7 @@ impl PlanNodeKind {
             Self::ApplyRules { .. } => "applyRules",
             Self::Join { .. } => "join",
             Self::Union => "union",
+            Self::Sort { .. } => "sort",
             Self::Materialize { .. } => "materialize",
         }
     }
@@ -243,6 +281,7 @@ fn validate_node(node_id: PlanNodeId, node: &PlanNode) -> Result<(), PlanError> 
         PlanNodeKind::Project { .. }
         | PlanNodeKind::Filter { .. }
         | PlanNodeKind::ApplyRules { .. }
+        | PlanNodeKind::Sort { .. }
         | PlanNodeKind::Materialize { .. } => (1, 1),
         PlanNodeKind::Join { .. } => (2, 2),
         PlanNodeKind::Union => (2, usize::MAX),
@@ -299,6 +338,25 @@ fn validate_node(node_id: PlanNodeId, node: &PlanNode) -> Result<(), PlanError> 
             }
         }
         PlanNodeKind::Union => {}
+        PlanNodeKind::Sort { keys } => {
+            // #370 §1: 1..=MAX_SORT_KEYS keys, each a distinct column, so the
+            // declared order is the whole ordering intent.
+            if keys.is_empty() || keys.len() > MAX_SORT_KEYS {
+                return Err(PlanError::InvalidSortKeyCount {
+                    node: node_id,
+                    actual: keys.len(),
+                });
+            }
+            let mut unique = BTreeSet::new();
+            for key in keys {
+                if !unique.insert(key.column) {
+                    return Err(PlanError::DuplicateSortKey {
+                        node: node_id,
+                        column: key.column,
+                    });
+                }
+            }
+        }
         PlanNodeKind::Materialize { output_label } => {
             if output_label.trim().is_empty() {
                 return Err(PlanError::EmptyCollection {
@@ -414,6 +472,10 @@ pub enum PlanError {
     },
     #[error("scan node {0} has a nil source asset id")]
     NilSourceAsset(PlanNodeId),
+    #[error("sort node {node} declares {actual} keys; expected between 1 and {MAX_SORT_KEYS}")]
+    InvalidSortKeyCount { node: PlanNodeId, actual: usize },
+    #[error("sort node {node} repeats key column {column}")]
+    DuplicateSortKey { node: PlanNodeId, column: ColumnId },
     #[error("logical plan contains a directed cycle")]
     Cycle,
     #[error("logical plan graph bookkeeping invariant failed")]

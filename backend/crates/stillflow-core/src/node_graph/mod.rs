@@ -926,6 +926,39 @@ pub enum ValidatedNodeConfig {
     Output {
         output_label: String,
     },
+    /// Stable ordering over explicit key columns (#370 §1). Ordering is a
+    /// property of the relation, so this lowers to `PlanNodeKind::Sort` rather
+    /// than to a per-row rule.
+    Sort {
+        keys: Vec<SortKey>,
+    },
+}
+
+/// One ordering key: a column, a direction, and an explicit NULL placement.
+///
+/// NULL placement is required rather than defaulted (#363 §8.1.3): where NULLs
+/// sort is part of the declared configuration, never an engine default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SortKey {
+    pub column: ColumnId,
+    pub direction: SortDirection,
+    pub nulls: NullPlacement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+/// Where NULLs sort for one key, honoured for both directions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NullPlacement {
+    First,
+    Last,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1190,7 +1223,7 @@ mod tests {
         assert_eq!(first_ids, second_ids);
         assert!(first_ids.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(first.catalog(), second.catalog());
-        assert_eq!(first.catalog().len(), 12);
+        assert_eq!(first.catalog().len(), 13);
         assert_eq!(
             first.lookup("stillflow.node.source", 2).unwrap_err().code(),
             NodeGraphErrorCode::UnsupportedConfigVersion

@@ -6,7 +6,7 @@ use stillflow_core::{
     ColumnId, ConnectorKind, Expr, InspectRequest, LogicalSchema, LogicalType, RequestContext,
     ScalarValue, SourceAsset, SourceConnection,
 };
-use stillflow_plan::{LogicalPlan, PlanNodeId, PlanNodeKind, Rule};
+use stillflow_plan::{LogicalPlan, PlanNodeId, PlanNodeKind, Rule, SortKey};
 
 use crate::error::{deadline_too_long, map_context_error, EngineError};
 use crate::lookup::AuthorizedLookup;
@@ -18,9 +18,20 @@ use stillflow_plan::semantics::ColumnResolver;
 
 #[derive(Debug, Clone)]
 pub(crate) enum CompiledStep {
-    Project { columns: Vec<ColumnId> },
-    Filter { predicate: Expr },
-    Rules { rules: Vec<Rule> },
+    Project {
+        columns: Vec<ColumnId>,
+    },
+    Filter {
+        predicate: Expr,
+    },
+    Rules {
+        rules: Vec<Rule>,
+    },
+    /// A positional, cross-batch step (#370 §5): it is not applied per chunk
+    /// by the streaming path but buffered and resolved once by its operator.
+    Sort {
+        keys: Vec<SortKey>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +197,7 @@ async fn preflight_inner_with_schema(
                 PlanNodeKind::Scan { .. }
                 | PlanNodeKind::Project { .. }
                 | PlanNodeKind::Filter { .. }
+                | PlanNodeKind::Sort { .. }
                 | PlanNodeKind::ApplyRules { .. } => {}
                 other => return Err(EngineError::unsupported_operator(target, other)),
             }
@@ -302,6 +314,16 @@ async fn preflight_inner_with_schema(
             }
             PlanNodeKind::Join { .. } | PlanNodeKind::Union => {
                 return Err(EngineError::unsupported_operator(*node_id, &node.kind));
+            }
+            PlanNodeKind::Sort { keys } => {
+                // #370 §5: a positional cross-batch step. It is buffered and
+                // resolved once by the sort operator rather than lowered
+                // per chunk, and it preserves the schema exactly.
+                let step = CompiledStep::Sort { keys: keys.clone() };
+                if in_preview {
+                    preview_steps.push(step.clone());
+                }
+                steps.push(step);
             }
             PlanNodeKind::Scan { .. } | PlanNodeKind::Materialize { .. } => {
                 return Err(EngineError::InvalidPlan("duplicate scan or materialize"));
@@ -637,6 +659,9 @@ fn step_served_lookups(step: &CompiledStep) -> usize {
         CompiledStep::Project { columns } => columns.len(),
         CompiledStep::Filter { predicate } => crate::typing::count_expr_column_refs(predicate),
         CompiledStep::Rules { rules } => rules.iter().map(rule_served_lookups).sum(),
+        // A sort key resolves once per key column against the working schema
+        // (#370 §5): the comparison itself reads payload positions, not ids.
+        CompiledStep::Sort { keys } => keys.len(),
     }
 }
 
@@ -734,6 +759,9 @@ fn propagate_schema(
                     }
                 }
             }
+            // #370 §3: a sort is schema-preserving, so propagation is a no-op
+            // apart from the key-column resolutions already counted above.
+            CompiledStep::Sort { .. } => {}
         }
     }
     let schema = working.into_schema()?;

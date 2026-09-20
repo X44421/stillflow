@@ -414,9 +414,9 @@ async fn t_ng_a1_catalog_compile_preview_and_scope_fail_closed() {
         "ng-nodegraph-compiler-v1"
     );
     // The deployed package manifest adds the frozen composite sample
-    // (NX-N2): eleven atomic definitions plus one composite.
+    // (NX-N2): twelve atomic definitions plus one composite.
     let catalog_nodes = catalog_body["body"]["nodes"].as_array().unwrap();
-    assert_eq!(catalog_nodes.len(), 13);
+    assert_eq!(catalog_nodes.len(), 14);
     assert!(catalog_nodes
         .iter()
         .any(|node| node["typeId"] == "stillflow.composite.trim-clean"));

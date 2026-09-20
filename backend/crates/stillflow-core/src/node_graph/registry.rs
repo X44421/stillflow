@@ -29,7 +29,7 @@ impl NodeRegistry {
         // guard below keeps that true without a fallible public signature.
         let registry =
             Self::from_definitions(definitions).expect("production definitions are unique");
-        debug_assert_eq!(registry.definitions.len(), 12);
+        debug_assert_eq!(registry.definitions.len(), 13);
         registry
     }
 

@@ -229,6 +229,8 @@ pub enum NodeLoweringTarget {
     Filter,
     ApplyRules,
     Materialize,
+    /// A first-class positional plan operator (#370 §2), not a rule chain.
+    Sort,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -14,6 +14,7 @@ pub(crate) mod output;
 pub(crate) mod rename;
 pub(crate) mod replace_literal;
 pub(crate) mod select;
+pub(crate) mod sort;
 pub(crate) mod source;
 pub(crate) mod trim;
 
@@ -41,6 +42,7 @@ pub(crate) fn production_definitions() -> Vec<NodeDefinition> {
         drop_column::definition(),
         derive_column::definition(),
         normalize_text::definition(),
+        sort::definition(),
         output::definition(),
     ]
 }
@@ -150,6 +152,7 @@ mod consistency_tests {
                 super::normalize_text::definition(),
                 super::normalize_text::samples(),
             ),
+            ("sort", super::sort::definition(), super::sort::samples()),
             (
                 "output",
                 super::output::definition(),
@@ -300,7 +303,7 @@ mod consistency_tests {
                 .map(|entry| entry.type_id.clone())
                 .collect();
             assert_eq!(ids, expected);
-            assert_eq!(registry.catalog().len(), 12);
+            assert_eq!(registry.catalog().len(), 13);
         }
 
         // Duplicate (typeId, configVersion) pairs fail closed.
@@ -353,7 +356,7 @@ mod consistency_tests {
         let mut definitions = production_definitions();
         definitions.extend(super::test_only_definitions());
         let extended = NodeRegistry::from_definitions(definitions).expect("extended registry");
-        assert_eq!(extended.catalog().len(), 13);
+        assert_eq!(extended.catalog().len(), 14);
 
         let column = "00000000-0000-0000-0000-000000000002";
         let graph = NodeGraph::new(

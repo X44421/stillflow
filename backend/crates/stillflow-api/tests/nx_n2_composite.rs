@@ -18,8 +18,9 @@ use stillflow_connectors::{
     RawBatchStream, ReadRequest, SourceConnector, SourceConnectorRef, TestConnectionRequest,
 };
 use stillflow_core::{
-    trim_clean_node_package as trim_clean_package, AssetKind, ColumnId, CredentialRef,
-    LogicalField, LogicalSchema, LogicalType, NodeId, NodePackage, NodeRegistry,
+    deployed_node_packages as deployed_packages, trim_clean_node_package as trim_clean_package,
+    AssetKind, ColumnId, CredentialRef, LogicalField, LogicalSchema, LogicalType, NodeId,
+    NodePackage, NodeRegistry,
 };
 
 fn uuid(value: u128) -> Uuid {
@@ -61,17 +62,20 @@ fn deployed_catalog_lists_the_composite() {
     let registry = NodeRegistry::deployed();
     let catalog = registry.catalog();
     let ids: Vec<&str> = catalog.iter().map(|entry| entry.type_id.as_str()).collect();
-    assert_eq!(ids.len(), 13);
+    assert_eq!(ids.len(), 14);
     assert!(ids.contains(&"stillflow.composite.trim-clean"));
     assert!(ids.contains(&"stillflow.node.trim"));
     assert!(ids.contains(&"stillflow.node.normalize-text"));
-    // Package order never changes the catalog: reversed deployment is
-    // identical.
-    let packages = vec![trim_clean_package()];
+    // Package registration order never changes the catalog: a registry built
+    // from the reversed package list is identical to the deployed one, which
+    // adds the same packages in declaration order.
+    let mut reversed_packages = deployed_packages();
+    reversed_packages.reverse();
     let reversed = NodeRegistry::new()
-        .with_packages(packages.into_iter().rev().collect())
+        .with_packages(reversed_packages)
         .expect("deployment");
     assert_eq!(reversed.catalog(), registry.catalog());
+    assert_eq!(reversed.catalog().len(), registry.catalog().len());
 }
 
 /// Deployment rejections (NX-C1 §6): unknown formats, non-empty
