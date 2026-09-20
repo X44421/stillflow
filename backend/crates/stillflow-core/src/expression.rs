@@ -113,6 +113,11 @@ pub enum Expr {
     Coalesce {
         expressions: Vec<Expr>,
     },
+    /// Ordered `Utf8` concatenation (#368 §3.1); NULL in any operand yields
+    /// NULL, and the arity is bounded by the contract.
+    Concat {
+        expressions: Vec<Expr>,
+    },
 }
 
 impl Expr {
@@ -133,7 +138,9 @@ impl Expr {
                     pending.push(right);
                     pending.push(left);
                 }
-                Self::Coalesce { expressions } => pending.extend(expressions),
+                Self::Coalesce { expressions } | Self::Concat { expressions } => {
+                    pending.extend(expressions)
+                }
             }
         }
         columns
@@ -163,6 +170,11 @@ impl Expr {
                 Self::Binary { left, right, .. } => {
                     pending.push(right);
                     pending.push(left);
+                }
+                Self::Concat { expressions } => {
+                    for expression in expressions {
+                        pending.push(expression);
+                    }
                 }
                 Self::Coalesce { expressions } => {
                     if expressions.is_empty() {

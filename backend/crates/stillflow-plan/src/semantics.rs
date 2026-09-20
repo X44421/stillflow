@@ -63,6 +63,7 @@ pub enum SemanticKind {
     NotRequiresBoolean,
     LogicalOperandsMustBeBoolean,
     ContainsRequiresUtf8,
+    ConcatRequiresUtf8,
     CheckedArithmeticPaused,
     ListStructPaused,
     TimestampSecondPaused,
@@ -110,6 +111,7 @@ impl SemanticKind {
             Self::NotRequiresBoolean
             | Self::LogicalOperandsMustBeBoolean
             | Self::ContainsRequiresUtf8
+            | Self::ConcatRequiresUtf8
             | Self::CheckedArithmeticPaused
             | Self::ListStructPaused
             | Self::TimestampSecondPaused
@@ -140,6 +142,7 @@ impl SemanticKind {
             Self::NotRequiresBoolean => "not requires a boolean expression",
             Self::LogicalOperandsMustBeBoolean => "logical operands must be boolean",
             Self::ContainsRequiresUtf8 => "contains requires utf8 operands",
+            Self::ConcatRequiresUtf8 => "concat requires utf8 operands",
             Self::CheckedArithmeticPaused => "checked arithmetic is not authorized",
             Self::ListStructPaused => "list and struct execution is paused",
             Self::TimestampSecondPaused => "timestamp second unit is paused",
@@ -245,7 +248,7 @@ pub fn validate_expr_refs<R: ColumnResolver + ?Sized>(
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
             }
-            Expr::Coalesce { expressions } => {
+            Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 for expression in expressions {
                     pending.push((expression, depth + 1));
                 }
@@ -291,7 +294,7 @@ fn check_shape_bounds(expr: &Expr) -> Result<(), SemanticError> {
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
             }
-            Expr::Coalesce { expressions } => {
+            Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 for expression in expressions {
                     pending.push((expression, depth + 1));
                 }
@@ -399,6 +402,22 @@ fn infer_expr<R: ColumnResolver + ?Sized>(
                     Ok((LogicalType::Boolean, nullable))
                 }
             }
+        }
+        Expr::Concat { expressions } => {
+            // #368 §3.1: two to eight Utf8 operands, concatenated in order.
+            // A NULL in any operand yields NULL (SQL `||` semantics).
+            if !(2..=8).contains(&expressions.len()) {
+                return Err(SemanticError::new(SemanticKind::ShapeInvalid));
+            }
+            let mut nullable = false;
+            for expression in expressions {
+                let (data_type, arm_nullable) = infer_expr(expression, resolver)?;
+                if !matches!(data_type, LogicalType::Utf8 | LogicalType::Null) {
+                    return Err(SemanticError::new(SemanticKind::ConcatRequiresUtf8));
+                }
+                nullable = nullable || arm_nullable || data_type == LogicalType::Null;
+            }
+            Ok((LogicalType::Utf8, nullable))
         }
         Expr::Coalesce { expressions } => {
             let mut joined: Option<LogicalType> = None;
@@ -793,6 +812,12 @@ pub mod capability {
                 reject_paused_capability(left)?;
                 reject_paused_capability(right)
             }
+            Expr::Concat { expressions } => {
+                for nested in expressions {
+                    reject_paused_capability(nested)?;
+                }
+                Ok(())
+            }
             Expr::Coalesce { expressions } => {
                 for nested in expressions {
                     reject_paused_capability(nested)?;
@@ -825,7 +850,7 @@ pub mod capability {
                 reject_paused_casts_in_expr(left, resolver)?;
                 reject_paused_casts_in_expr(right, resolver)
             }
-            Expr::Coalesce { expressions } => {
+            Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 for expression in expressions {
                     reject_paused_casts_in_expr(expression, resolver)?;
                 }

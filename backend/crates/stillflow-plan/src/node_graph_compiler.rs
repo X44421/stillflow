@@ -643,7 +643,7 @@ fn expression_shape(expr: &Expr) -> Result<(usize, usize), NodeGraphCompileError
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
             }
-            Expr::Coalesce { expressions } => {
+            Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 if expressions.is_empty() {
                     return Err(invalid_config_any("coalesce expression is empty"));
                 }
