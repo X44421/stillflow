@@ -558,7 +558,9 @@ fn expr_bytes(expr: &Expr) -> usize {
         | Expr::IsNull { expression, .. }
         | Expr::Cast { expression, .. } => expr_bytes(expression),
         Expr::Binary { left, right, .. } => expr_bytes(left).saturating_add(expr_bytes(right)),
-        Expr::Coalesce { expressions } => expressions.iter().map(expr_bytes).sum(),
+        Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
+            expressions.iter().map(expr_bytes).sum()
+        }
         Expr::Column(_) => 16,
     }
 }
@@ -1036,7 +1038,7 @@ fn validate_expr_iterative(expr: &Expr) -> Result<(), EngineError> {
                 stack.push((left, depth + 1));
                 stack.push((right, depth + 1));
             }
-            Expr::Coalesce { expressions } => {
+            Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
                 if expressions.is_empty() {
                     return Err(EngineError::InvalidPlan(
                         "coalesce expression list is empty",

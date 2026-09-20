@@ -137,6 +137,7 @@ fn expected_engine_class(kind: SemanticKind) -> EngineClass {
         | SemanticKind::TrimRequiresUtf8
         | SemanticKind::TextRequiresUtf8
         | SemanticKind::ContainsRequiresUtf8
+        | SemanticKind::ConcatRequiresUtf8
         | SemanticKind::TemporalParseRequiresUtf8
         | SemanticKind::LiteralIncompatibleWithColumn
         | SemanticKind::BinaryReplaceOnlyNullToNull

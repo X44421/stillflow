@@ -392,6 +392,19 @@ pub(crate) fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsEx
             expression,
             data_type,
         } => lower_expr(expression, schema)?.strict_cast(polars_data_type(data_type)?),
+        Expr::Concat { expressions } => {
+            // Ordered Utf8 concatenation (#368 §3.1). Polars propagates NULL
+            // through `+` on strings, which is exactly the contract's NULL law.
+            let mut iter = expressions.iter();
+            let first = iter
+                .next()
+                .ok_or(EngineError::InvalidPlan("concat requires operands"))?;
+            let mut concatenated = lower_expr(first, schema)?;
+            for expression in iter {
+                concatenated = concatenated + lower_expr(expression, schema)?;
+            }
+            concatenated
+        }
         Expr::Coalesce { expressions } => {
             if expressions.is_empty() {
                 return Ok(lit(NULL));

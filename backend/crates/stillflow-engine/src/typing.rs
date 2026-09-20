@@ -57,6 +57,7 @@ pub(crate) fn semantic_error(error: SemanticError) -> EngineError {
         SemanticKind::TrimRequiresUtf8
         | SemanticKind::TextRequiresUtf8
         | SemanticKind::ContainsRequiresUtf8
+        | SemanticKind::ConcatRequiresUtf8
         | SemanticKind::TemporalParseRequiresUtf8
         | SemanticKind::LiteralIncompatibleWithColumn
         | SemanticKind::BinaryReplaceOnlyNullToNull
@@ -136,7 +137,9 @@ pub(crate) fn count_expr_column_refs(expr: &Expr) -> usize {
                 pending.push(left);
                 pending.push(right);
             }
-            Expr::Coalesce { expressions } => pending.extend(expressions.iter()),
+            Expr::Coalesce { expressions } | Expr::Concat { expressions } => {
+                pending.extend(expressions.iter())
+            }
         }
     }
     count
