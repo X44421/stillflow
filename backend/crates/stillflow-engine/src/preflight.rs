@@ -556,7 +556,8 @@ fn expr_bytes(expr: &Expr) -> usize {
         Expr::Literal(value) => literal_bytes(value),
         Expr::Unary { expression, .. }
         | Expr::IsNull { expression, .. }
-        | Expr::Cast { expression, .. } => expr_bytes(expression),
+        | Expr::Cast { expression, .. }
+        | Expr::Substring { expression, .. } => expr_bytes(expression),
         Expr::Binary { left, right, .. } => expr_bytes(left).saturating_add(expr_bytes(right)),
         Expr::Conditional {
             predicate,
@@ -1029,7 +1030,9 @@ fn validate_expr_iterative(expr: &Expr) -> Result<(), EngineError> {
                 }
             }
             Expr::Literal(_) => {}
-            Expr::Unary { expression, .. } | Expr::IsNull { expression, .. } => {
+            Expr::Unary { expression, .. }
+            | Expr::IsNull { expression, .. }
+            | Expr::Substring { expression, .. } => {
                 stack.push((expression, depth + 1));
             }
             Expr::Cast {

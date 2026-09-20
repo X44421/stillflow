@@ -794,6 +794,8 @@ pub enum LogicalError {
     NonFiniteFloat,
     #[error("coalesce expression must contain at least one operand")]
     EmptyCoalesce,
+    #[error("substring start must be at least 1")]
+    SubstringStartBelowOne,
     #[error("expression literal contains a forbidden secret-like value")]
     UnsafeLiteral,
 }

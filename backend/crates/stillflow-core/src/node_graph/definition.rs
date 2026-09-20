@@ -624,6 +624,9 @@ pub(super) fn validate_expression(
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
             }
+            Expr::Substring { expression, .. } => {
+                pending.push((expression, depth + 1));
+            }
             Expr::Conditional {
                 predicate,
                 then,
