@@ -638,7 +638,8 @@ fn expression_shape(expr: &Expr) -> Result<(usize, usize), NodeGraphCompileError
             Expr::Column(_) | Expr::Literal(_) => {}
             Expr::Unary { expression, .. }
             | Expr::IsNull { expression, .. }
-            | Expr::Cast { expression, .. } => pending.push((expression, depth + 1)),
+            | Expr::Cast { expression, .. }
+            | Expr::Substring { expression, .. } => pending.push((expression, depth + 1)),
             Expr::Binary { left, right, .. } => {
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));

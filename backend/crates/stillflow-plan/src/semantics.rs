@@ -65,6 +65,7 @@ pub enum SemanticKind {
     ContainsRequiresUtf8,
     ConcatRequiresUtf8,
     ConditionalBranchesIncompatible,
+    SubstringRequiresUtf8,
     CheckedArithmeticPaused,
     ListStructPaused,
     TimestampSecondPaused,
@@ -114,6 +115,7 @@ impl SemanticKind {
             | Self::ContainsRequiresUtf8
             | Self::ConcatRequiresUtf8
             | Self::ConditionalBranchesIncompatible
+            | Self::SubstringRequiresUtf8
             | Self::CheckedArithmeticPaused
             | Self::ListStructPaused
             | Self::TimestampSecondPaused
@@ -148,6 +150,7 @@ impl SemanticKind {
             Self::ConditionalBranchesIncompatible => {
                 "conditional branches must share one logical type"
             }
+            Self::SubstringRequiresUtf8 => "substring requires a utf8 input",
             Self::CheckedArithmeticPaused => "checked arithmetic is not authorized",
             Self::ListStructPaused => "list and struct execution is paused",
             Self::TimestampSecondPaused => "timestamp second unit is paused",
@@ -248,7 +251,8 @@ pub fn validate_expr_refs<R: ColumnResolver + ?Sized>(
             Expr::Literal(_) => {}
             Expr::Unary { expression, .. }
             | Expr::IsNull { expression, .. }
-            | Expr::Cast { expression, .. } => pending.push((expression, depth + 1)),
+            | Expr::Cast { expression, .. }
+            | Expr::Substring { expression, .. } => pending.push((expression, depth + 1)),
             Expr::Binary { left, right, .. } => {
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
@@ -303,7 +307,8 @@ fn check_shape_bounds(expr: &Expr) -> Result<(), SemanticError> {
             Expr::Column(_) | Expr::Literal(_) => {}
             Expr::Unary { expression, .. }
             | Expr::IsNull { expression, .. }
-            | Expr::Cast { expression, .. } => pending.push((expression, depth + 1)),
+            | Expr::Cast { expression, .. }
+            | Expr::Substring { expression, .. } => pending.push((expression, depth + 1)),
             Expr::Binary { left, right, .. } => {
                 pending.push((left, depth + 1));
                 pending.push((right, depth + 1));
@@ -425,6 +430,20 @@ fn infer_expr<R: ColumnResolver + ?Sized>(
                     Ok((LogicalType::Boolean, nullable))
                 }
             }
+        }
+        Expr::Substring { expression, .. } => {
+            // #368 §3.3: Utf8 input, literal 1-based start and non-negative
+            // length; NULL input yields NULL. `start >= 1` and `length >= 0`
+            // are enforced at the type boundary (`u32`) and by
+            // `Expr::validate_shape`, so the analyzer only decides the type.
+            let (data_type, nullable) = infer_expr(expression, resolver)?;
+            if !matches!(data_type, LogicalType::Utf8 | LogicalType::Null) {
+                return Err(SemanticError::new(SemanticKind::SubstringRequiresUtf8));
+            }
+            Ok((
+                LogicalType::Utf8,
+                nullable || data_type == LogicalType::Null,
+            ))
         }
         Expr::Conditional {
             predicate,
@@ -844,6 +863,7 @@ pub mod capability {
             Expr::Unary { expression, .. } | Expr::IsNull { expression, .. } => {
                 reject_paused_capability(expression)
             }
+            Expr::Substring { expression, .. } => reject_paused_capability(expression),
             Expr::Cast {
                 expression,
                 data_type,
@@ -912,6 +932,7 @@ pub mod capability {
             Expr::Unary { expression, .. } | Expr::IsNull { expression, .. } => {
                 reject_paused_casts_in_expr(expression, resolver)
             }
+            Expr::Substring { expression, .. } => reject_paused_casts_in_expr(expression, resolver),
             Expr::Binary { left, right, .. } => {
                 reject_paused_casts_in_expr(left, resolver)?;
                 reject_paused_casts_in_expr(right, resolver)

@@ -125,6 +125,13 @@ pub enum Expr {
         then: Box<Expr>,
         otherwise: Box<Expr>,
     },
+    /// Unicode-scalar substring extraction (#368 §3.3): a literal 1-based
+    /// `start` and a non-negative `length`, clamped rather than an error.
+    Substring {
+        expression: Box<Expr>,
+        start: u32,
+        length: u32,
+    },
 }
 
 impl Expr {
@@ -144,6 +151,9 @@ impl Expr {
                 Self::Binary { left, right, .. } => {
                     pending.push(right);
                     pending.push(left);
+                }
+                Self::Substring { expression, .. } => {
+                    pending.push(expression);
                 }
                 Self::Conditional {
                     predicate,
@@ -191,6 +201,17 @@ impl Expr {
                     for expression in expressions {
                         pending.push(expression);
                     }
+                }
+                Self::Substring {
+                    expression, start, ..
+                } => {
+                    // #368 §3.3 declares a 1-based `start`; the engine lowers
+                    // it as `start - 1`, so zero is a shape violation rather
+                    // than an out-of-range request to clamp.
+                    if *start < 1 {
+                        return Err(LogicalError::SubstringStartBelowOne);
+                    }
+                    pending.push(expression);
                 }
                 Self::Conditional {
                     predicate,

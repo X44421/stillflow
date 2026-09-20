@@ -392,6 +392,17 @@ pub(crate) fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsEx
             expression,
             data_type,
         } => lower_expr(expression, schema)?.strict_cast(polars_data_type(data_type)?),
+        Expr::Substring {
+            expression,
+            start,
+            length,
+        } => lower_expr(expression, schema)?
+            .str()
+            // Polars `slice` is 0-based over characters and clamps
+            // out-of-range requests, which is the contract's §3.3 wording.
+            // `start >= 1` is enforced by `Expr::validate_shape`, so the
+            // subtraction cannot underflow.
+            .slice(lit((*start - 1) as i64), lit(i64::from(*length))),
         Expr::Conditional {
             predicate,
             then,
