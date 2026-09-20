@@ -371,9 +371,9 @@ pub(crate) fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsEx
                     ));
                 }
                 BinaryOperator::Contains => {
-                    return Err(EngineError::TypeError(
-                        "contains is paused until the regex polars feature is approved",
-                    ));
+                    // A literal substring test: the right operand is a value,
+                    // never a pattern, so no regex feature is involved.
+                    left_expr.str().contains_literal(right_expr)
                 }
             }
         }

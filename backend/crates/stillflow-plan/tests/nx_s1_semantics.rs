@@ -928,7 +928,7 @@ fn cases() -> Vec<Case> {
             },
         },
         Case {
-            name: "contains_operator_paused",
+            name: "contains_operator_admitted",
             build: || {
                 execution(
                     chain(

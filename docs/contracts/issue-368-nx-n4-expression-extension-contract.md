@@ -77,13 +77,32 @@ comment anticipated:
 
 * it is a **literal substring test** on `Utf8` operands and returns `Boolean`;
 * the right operand is a value, never a pattern: **no regex, no wildcard, no character class**, and no
-  Polars `regex` feature is enabled by this decision;
+  pattern language is exposed to StillFlow callers;
+* the engine binds the right operand as a literal value. Polars 0.46 gates every substring search —
+  including `contains_literal` — behind its `regex` feature, so that feature is enabled as an
+  **engine implementation detail**; it is not a StillFlow capability and does not make regex reachable
+  from a graph. This corrects the earlier wording of this section, which assumed the literal test could
+  be implemented with the feature left off; the implementing slice found that impossible;
 * NULL on either side yields NULL;
 * non-`Utf8` operands are rejected by the analyzer.
 
 The original pause was recorded as "paused until the regex polars feature is approved". This decision
-resolves it the other way: the capability is admitted without regex, so the feature stays off and the
-engine's existing note can be retired when the implementation lands.
+resolves it by admitting the capability with literal-only semantics: the feature is enabled for the
+engine, but no caller-facing pattern language exists.
+
+### 2.4 Frozen version-1 corpus impact (explicit authorization)
+
+The frozen corpus at `backend/crates/stillflow-plan/tests/fixtures/nx-v1/` encoded the pause as the case
+`contains_operator_paused`, which asserted `NG_INCOMPATIBLE_TYPE` at compile. Lifting §2.2 necessarily
+changes that single case from a rejection to an accepted compile, and #335 permits a version-1 fixture
+change only under a contract that explicitly authorizes it. This contract therefore authorizes **exactly
+one** corpus change:
+
+* the case is renamed `contains_operator_admitted` and its expectation becomes the newly observed compile
+  result (plan fingerprint, node plan ids, node and output schemas, canonical bytes);
+* no other version-1 case changes. In particular `checked_arithmetic_in_predicate_paused` keeps its
+  recorded expectation, because §2.1 is a decision that this slice does **not** implement, and the rest of
+  the corpus must stay byte-for-byte identical.
 
 ### 2.3 Rows that stay paused
 

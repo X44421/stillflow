@@ -62,7 +62,7 @@ pub enum SemanticKind {
     UnknownColumn,
     NotRequiresBoolean,
     LogicalOperandsMustBeBoolean,
-    ContainsPaused,
+    ContainsRequiresUtf8,
     CheckedArithmeticPaused,
     ListStructPaused,
     TimestampSecondPaused,
@@ -109,7 +109,7 @@ impl SemanticKind {
             Self::ExprBounds => NodeGraphErrorCode::LimitNestingDepth,
             Self::NotRequiresBoolean
             | Self::LogicalOperandsMustBeBoolean
-            | Self::ContainsPaused
+            | Self::ContainsRequiresUtf8
             | Self::CheckedArithmeticPaused
             | Self::ListStructPaused
             | Self::TimestampSecondPaused
@@ -139,7 +139,7 @@ impl SemanticKind {
             Self::UnknownColumn => "column is absent from the working schema",
             Self::NotRequiresBoolean => "not requires a boolean expression",
             Self::LogicalOperandsMustBeBoolean => "logical operands must be boolean",
-            Self::ContainsPaused => "contains is not authorized",
+            Self::ContainsRequiresUtf8 => "contains requires utf8 operands",
             Self::CheckedArithmeticPaused => "checked arithmetic is not authorized",
             Self::ListStructPaused => "list and struct execution is paused",
             Self::TimestampSecondPaused => "timestamp second unit is paused",
@@ -364,7 +364,22 @@ fn infer_expr<R: ColumnResolver + ?Sized>(
                         ))
                     }
                 }
-                BinaryOperator::Contains => Err(SemanticError::new(SemanticKind::ContainsPaused)),
+                BinaryOperator::Contains => {
+                    // A literal substring test (#368 §2.2): both operands are
+                    // Utf8 values, never patterns. A NULL-typed operand is a
+                    // NULL value, so the result is NULL rather than a type
+                    // error — the §2.2 NULL law stays true for a NULL literal.
+                    let text_operand = |data_type: &LogicalType| {
+                        matches!(data_type, LogicalType::Utf8 | LogicalType::Null)
+                    };
+                    if text_operand(&left_type) && text_operand(&right_type) {
+                        let null_operand =
+                            left_type == LogicalType::Null || right_type == LogicalType::Null;
+                        Ok((LogicalType::Boolean, nullable || null_operand))
+                    } else {
+                        Err(SemanticError::new(SemanticKind::ContainsRequiresUtf8))
+                    }
+                }
                 BinaryOperator::Add
                 | BinaryOperator::Subtract
                 | BinaryOperator::Multiply
@@ -766,9 +781,6 @@ pub mod capability {
                 right,
             } => {
                 match operator {
-                    BinaryOperator::Contains => {
-                        return Err(SemanticError::new(SemanticKind::ContainsPaused));
-                    }
                     BinaryOperator::Add
                     | BinaryOperator::Subtract
                     | BinaryOperator::Multiply
