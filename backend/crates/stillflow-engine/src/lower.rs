@@ -392,6 +392,13 @@ pub(crate) fn lower_expr(expr: &Expr, schema: &LogicalSchema) -> Result<PolarsEx
             expression,
             data_type,
         } => lower_expr(expression, schema)?.strict_cast(polars_data_type(data_type)?),
+        Expr::Conditional {
+            predicate,
+            then,
+            otherwise,
+        } => when(lower_expr(predicate, schema)?)
+            .then(lower_expr(then, schema)?)
+            .otherwise(lower_expr(otherwise, schema)?),
         Expr::Concat { expressions } => {
             // Ordered Utf8 concatenation (#368 §3.1). Polars propagates NULL
             // through `+` on strings, which is exactly the contract's NULL law.
