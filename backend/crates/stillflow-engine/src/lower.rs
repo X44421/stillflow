@@ -1,6 +1,6 @@
 use polars::prelude::{
-    col, lit, when, Column, DataFrame, DataType, Expr as PolarsExpr, GetOutput, IntoLazy, Series,
-    StringChunked, StrptimeOptions, NULL,
+    col, lit, when, Column, DataFrame, DataType, Expr as PolarsExpr, GetOutput, IntoLazy,
+    LazyFrame, Series, StringChunked, StrptimeOptions, NULL,
 };
 use stillflow_core::{
     BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue,
@@ -12,36 +12,69 @@ use crate::error::EngineError;
 use crate::preflight::CompiledStep;
 use crate::types::polars_data_type;
 
+/// A rule whose expression can fail *at execution time* rather than at plan
+/// build time, recorded in plan order.
+///
+/// Collapsing the chunk into one `collect()` means a single Polars failure can
+/// no longer be attributed by the collector that raised it. These checkpoints
+/// restore the old attribution: the earliest checkpoint that could have failed
+/// is the one reported, which matches the previous step-by-step behaviour where
+/// the first failing step reported first.
+#[derive(Debug, Clone, Copy)]
+enum RuleFailure {
+    Cast { column: ColumnId },
+    ParseTemporal { column: ColumnId },
+    DeriveColumn,
+    NormalizeText,
+}
+
+/// Lowers one chunk's steps into **one** Polars lazy plan and collects it once.
+///
+/// Before this, every step built its own `.lazy().<one op>().collect()`, so the
+/// Polars optimizer only ever saw a single operator at a time and could not
+/// apply predicate/projection pushdown, expression simplification or common
+/// subplan elimination across the chunk's steps. Building the whole chunk plan
+/// and collecting once lets the optimizer see all of them.
+///
+/// The lazy build is incremental but the plan is a single DAG: each
+/// `with_column` appends to that plan, so post-optimization semantics are
+/// sequence-equivalent to the previous step-by-step execution.
+///
+/// Scope is deliberately one chunk. The engine's bounded-batch memory model
+/// (`MAX_LIVE_COLUMNAR_PAYLOADS`, `MAX_BATCH_BYTES`, `MAX_ENGINE_PEAK_BYTES`)
+/// and its `MemoryTracker` accounting are unchanged: this does not introduce a
+/// whole-dataset `LazyFrame` and does not hand memory ownership to Polars
+/// streaming.
 pub(crate) fn transform(
     frame: DataFrame,
     schema: &LogicalSchema,
     steps: &[CompiledStep],
     deferred_in: Vec<(String, ScalarValue)>,
 ) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
-    let mut frame = frame;
+    let mut lazy = frame.lazy();
     let mut schema = schema.clone();
     let mut deferred = deferred_in;
+    let mut checkpoints: Vec<RuleFailure> = Vec::new();
     for step in steps {
         match step {
             CompiledStep::Project { columns } => {
                 let names = names_for(&schema, columns)?;
-                frame = frame
-                    .select(names.iter().map(String::as_str))
-                    .map_err(|_| EngineError::UnknownColumn(columns[0]))?;
+                lazy = lazy.select(
+                    names
+                        .iter()
+                        .map(|name| col(name.as_str()))
+                        .collect::<Vec<_>>(),
+                );
                 deferred.retain(|(name, _)| names.iter().any(|keep| keep == name));
                 schema = crate::preflight::project_schema(&schema, columns)?;
             }
             CompiledStep::Filter { predicate } => {
                 let expr = lower_expr(predicate, &schema)?;
-                frame = frame
-                    .lazy()
-                    .filter(expr)
-                    .collect()
-                    .map_err(|_| EngineError::TypeError("filter evaluation failed"))?;
+                lazy = lazy.filter(expr);
             }
             CompiledStep::Rules { rules } => {
                 for rule in rules {
-                    frame = apply_rule(frame, &mut schema, &mut deferred, rule)?;
+                    lazy = apply_rule(lazy, &mut schema, &mut deferred, rule, &mut checkpoints)?;
                 }
             }
             // #370 §5: a positional cross-batch step has no per-chunk
@@ -50,15 +83,38 @@ pub(crate) fn transform(
             CompiledStep::Sort { .. } => {}
         }
     }
+    // Measurement-only: one gather per chunk after consolidation.
+    crate::chunk_metrics::record_chunk_gather();
+    let frame = lazy.collect().map_err(|_| chunk_failure(&checkpoints))?;
     Ok((frame, deferred))
 }
 
+/// Maps a single chunk-wide Polars failure back to the rule class that most
+/// likely raised it, preserving the pre-consolidation error contract.
+fn chunk_failure(checkpoints: &[RuleFailure]) -> EngineError {
+    match checkpoints.first() {
+        Some(RuleFailure::Cast { column }) | Some(RuleFailure::ParseTemporal { column }) => {
+            EngineError::CastFailure {
+                column: *column,
+                sequence: 0,
+                row: 0,
+            }
+        }
+        Some(RuleFailure::DeriveColumn) => EngineError::TypeError("derive-column failed"),
+        Some(RuleFailure::NormalizeText) => EngineError::TypeError("text normalization failed"),
+        // No rule could fail at execution time, so the failure came from a
+        // filter or projection expression.
+        None => EngineError::TypeError("chunk evaluation failed"),
+    }
+}
+
 fn apply_rule(
-    frame: DataFrame,
+    frame: LazyFrame,
     schema: &mut LogicalSchema,
     deferred: &mut Vec<(String, ScalarValue)>,
     rule: &Rule,
-) -> Result<DataFrame, EngineError> {
+    checkpoints: &mut Vec<RuleFailure>,
+) -> Result<LazyFrame, EngineError> {
     match rule {
         Rule::Rename { column, to } => {
             let from = field_name(schema, *column)?;
@@ -67,22 +123,14 @@ fn apply_rule(
                     *name = to.clone();
                 }
             }
-            let renamed = frame
-                .lazy()
-                .rename([from.as_str()], [to.as_str()], true)
-                .collect()
-                .map_err(|_| EngineError::Internal("rename failed"))?;
             schema
                 .rename_column(*column, to.clone())
                 .map_err(|_| EngineError::UnknownColumn(*column))?;
-            Ok(renamed)
+            Ok(frame.rename([from.as_str()], [to.as_str()], true))
         }
         Rule::DropColumn { column } => {
             let name = field_name(schema, *column)?;
             deferred.retain(|(deferred_name, _)| deferred_name != &name);
-            let dropped = frame
-                .drop(name.as_str())
-                .map_err(|_| EngineError::UnknownColumn(*column))?;
             let keep: Vec<ColumnId> = schema
                 .fields
                 .iter()
@@ -90,48 +138,41 @@ fn apply_rule(
                 .map(|field| field.id)
                 .collect();
             *schema = crate::preflight::project_schema(schema, &keep)?;
-            Ok(dropped)
+            Ok(frame.drop([name.as_str()]))
         }
         Rule::Trim { column } => {
             let name = field_name(schema, *column)?;
-            frame
-                .lazy()
-                .with_column(
-                    col(name.as_str())
-                        .str()
-                        .strip_chars(lit(NULL))
-                        .alias(name.as_str()),
-                )
-                .collect()
-                .map_err(|_| EngineError::TypeError("trim failed"))
+            Ok(frame.with_column(
+                col(name.as_str())
+                    .str()
+                    .strip_chars(lit(NULL))
+                    .alias(name.as_str()),
+            ))
         }
         Rule::NormalizeText { column, operation } => {
             let name = field_name(schema, *column)?;
             let operation = *operation;
-            frame
-                .lazy()
-                .with_column(
-                    col(name.as_str())
-                        .map(
-                            move |column: Column| {
-                                let values = column.str()?;
-                                let normalized: StringChunked = values
-                                    .into_iter()
-                                    .map(|value| {
-                                        value.map(|text| {
-                                            crate::text_normalize::normalize(text, operation)
-                                        })
+            checkpoints.push(RuleFailure::NormalizeText);
+            Ok(frame.with_column(
+                col(name.as_str())
+                    .map(
+                        move |column: Column| {
+                            let values = column.str()?;
+                            let normalized: StringChunked = values
+                                .into_iter()
+                                .map(|value| {
+                                    value.map(|text| {
+                                        crate::text_normalize::normalize(text, operation)
                                     })
-                                    .collect();
-                                let series: Series = normalized.into();
-                                Ok(Some(series.into()))
-                            },
-                            GetOutput::from_type(DataType::String),
-                        )
-                        .alias(name.as_str()),
-                )
-                .collect()
-                .map_err(|_| EngineError::TypeError("text normalization failed"))
+                                })
+                                .collect();
+                            let series: Series = normalized.into();
+                            Ok(Some(series.into()))
+                        },
+                        GetOutput::from_type(DataType::String),
+                    )
+                    .alias(name.as_str()),
+            ))
         }
         Rule::DeriveColumn {
             id,
@@ -140,57 +181,31 @@ fn apply_rule(
             nullable,
             expression,
         } => {
+            let dtype = polars_data_type(data_type)?;
             let derived = match expression {
+                // The literal arms keep their original typing — a NULL literal
+                // still becomes a typed NULL column and a Utf8/Null literal is
+                // still routed through the deferred export path — but they no
+                // longer read `frame.height()`. A broadcast literal has the
+                // input's height by construction, which is what removes the
+                // last thing forcing this chunk to materialize early.
                 Expr::Literal(value)
                     if matches!(data_type, LogicalType::Utf8)
                         && matches!(value, ScalarValue::Utf8(_) | ScalarValue::Null) =>
                 {
-                    let height = frame.height();
-                    let mut derived = frame;
-                    let dtype = polars_data_type(data_type)?;
-                    derived
-                        .with_column(polars::prelude::Column::full_null(
-                            name.as_str().into(),
-                            height,
-                            &dtype,
-                        ))
-                        .map_err(|_| EngineError::TypeError("derive-column failed"))?;
                     deferred.push((name.clone(), value.clone()));
-                    derived
+                    frame.with_column(lit(NULL).cast(dtype).alias(name.as_str()))
                 }
                 Expr::Literal(ScalarValue::Null) => {
-                    let height = frame.height();
-                    let mut derived = frame;
-                    let dtype = polars_data_type(data_type)?;
-                    derived
-                        .with_column(polars::prelude::Column::full_null(
-                            name.as_str().into(),
-                            height,
-                            &dtype,
-                        ))
-                        .map_err(|_| EngineError::TypeError("derive-column failed"))?;
-                    derived
+                    frame.with_column(lit(NULL).cast(dtype).alias(name.as_str()))
                 }
                 Expr::Literal(value) => {
-                    let height = frame.height();
-                    let mut derived = frame;
-                    derived
-                        .with_column(polars::prelude::Column::new_scalar(
-                            name.as_str().into(),
-                            literal_scalar(value)?,
-                            height,
-                        ))
-                        .map_err(|_| EngineError::TypeError("derive-column failed"))?;
-                    derived
+                    frame.with_column(literal(value)?.cast(dtype.clone()).alias(name.as_str()))
                 }
                 _ => {
                     let expr = lower_expr(expression, schema)?;
-                    let dtype = polars_data_type(data_type)?;
-                    frame
-                        .lazy()
-                        .with_column(expr.cast(dtype).alias(name.as_str()))
-                        .collect()
-                        .map_err(|_| EngineError::TypeError("derive-column failed"))?
+                    checkpoints.push(RuleFailure::DeriveColumn);
+                    frame.with_column(expr.cast(dtype).alias(name.as_str()))
                 }
             };
             let mut fields = schema.fields.clone();
@@ -210,23 +225,15 @@ fn apply_rule(
                     .then(literal(to)?)
                     .otherwise(col(name.as_str())),
             };
-            frame
-                .lazy()
-                .with_column(expr.alias(name.as_str()))
-                .collect()
-                .map_err(|_| EngineError::TypeError("replace-literal failed"))
+            Ok(frame.with_column(expr.alias(name.as_str())))
         }
         Rule::FillNull { column, value } => {
             let name = field_name(schema, *column)?;
-            frame
-                .lazy()
-                .with_column(
-                    col(name.as_str())
-                        .fill_null(literal(value)?)
-                        .alias(name.as_str()),
-                )
-                .collect()
-                .map_err(|_| EngineError::TypeError("fill-null failed"))
+            Ok(frame.with_column(
+                col(name.as_str())
+                    .fill_null(literal(value)?)
+                    .alias(name.as_str()),
+            ))
         }
         Rule::Cast {
             column,
@@ -236,19 +243,14 @@ fn apply_rule(
             let name = field_name(schema, *column)?;
             let dtype = polars_data_type(data_type)?;
             let expr = if matches!(on_failure, CastFailurePolicy::Error) {
+                // Only a strict cast can fail at execution time; `setNull`
+                // maps the failure to NULL and never raises.
+                checkpoints.push(RuleFailure::Cast { column: *column });
                 col(name.as_str()).strict_cast(dtype.clone())
             } else {
                 col(name.as_str()).cast(dtype)
             };
-            frame
-                .lazy()
-                .with_column(expr.alias(name.as_str()))
-                .collect()
-                .map_err(|_| EngineError::CastFailure {
-                    column: *column,
-                    sequence: 0,
-                    row: 0,
-                })
+            Ok(frame.with_column(expr.alias(name.as_str())))
         }
         Rule::ParseTemporal {
             column,
@@ -273,28 +275,19 @@ fn apply_rule(
                 exact: true,
                 cache: true,
             };
-            frame
-                .lazy()
-                .with_column(
-                    col(name.as_str())
-                        .str()
-                        .strptime(parse_dtype, options, lit("raise"))
-                        .alias(name.as_str()),
-                )
-                .collect()
-                .map_err(|_| EngineError::CastFailure {
-                    column: *column,
-                    sequence: 0,
-                    row: 0,
-                })
+            if matches!(on_failure, CastFailurePolicy::Error) {
+                checkpoints.push(RuleFailure::ParseTemporal { column: *column });
+            }
+            Ok(frame.with_column(
+                col(name.as_str())
+                    .str()
+                    .strptime(parse_dtype, options, lit("raise"))
+                    .alias(name.as_str()),
+            ))
         }
         Rule::FilterRows { predicate } => {
             let expr = lower_expr(predicate, schema)?;
-            frame
-                .lazy()
-                .filter(expr)
-                .collect()
-                .map_err(|_| EngineError::TypeError("filter-rows failed"))
+            Ok(frame.filter(expr))
         }
         Rule::Validate { .. } => Err(EngineError::UnsupportedRule {
             node: uuid::Uuid::nil(),
@@ -464,17 +457,5 @@ fn literal(value: &ScalarValue) -> Result<PolarsExpr, EngineError> {
         ScalarValue::UInt64(value) => lit(*value),
         ScalarValue::Float64(value) => lit(value.get()),
         ScalarValue::Utf8(value) => lit(value.clone()),
-    })
-}
-
-fn literal_scalar(value: &ScalarValue) -> Result<polars::prelude::Scalar, EngineError> {
-    use polars::prelude::{AnyValue, DataType, Scalar};
-    Ok(match value {
-        ScalarValue::Null => Scalar::new(DataType::Null, AnyValue::Null),
-        ScalarValue::Boolean(value) => Scalar::from(*value),
-        ScalarValue::Int64(value) => Scalar::from(*value),
-        ScalarValue::UInt64(value) => Scalar::from(*value),
-        ScalarValue::Float64(value) => Scalar::from(value.get()),
-        ScalarValue::Utf8(value) => Scalar::from(polars::prelude::PlSmallStr::from(value.as_str())),
     })
 }

@@ -1275,3 +1275,110 @@ async fn metrics_e2e_preview_site_smoke() {
         assert_eq!(snap.site_preview_lfk_calls, 0);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Layer 4: per-chunk Polars gather counting (#370 lazy-plan consolidation)
+// ---------------------------------------------------------------------------
+
+/// A chunk's steps must lower into **one** Polars plan, so the number of
+/// gathers must equal the number of chunks — not the number of steps times the
+/// number of chunks.
+///
+/// This is the deterministic form of the claim: before consolidation every step
+/// called `.lazy().<one op>().collect()`, so a 6-rule chunk forced 6 gathers and
+/// the optimizer never saw more than one operator. The plan below carries six
+/// steps over 3 chunks, so the exact expectation is 3 and the old behavior would
+/// have been 18.
+#[tokio::test(flavor = "current_thread")]
+async fn chunk_steps_lower_into_one_polars_plan() {
+    let _guard = crate::tests::exclusive_test_lock().lock().await;
+    let rows = 600_usize;
+    let per_envelope = 200_usize;
+    let envelope_count = rows / per_envelope;
+    let chunk_count = envelope_count; // batch_size == rows_per_envelope
+
+    // Two columns so rename/drop/derive can all be exercised.
+    let schema = schema_of(vec![int_field(1, "a"), utf8_field(2, "b")]);
+    let asset_id = Uuid::from_u128(42);
+    let mut envelopes = Vec::new();
+    for sequence in 0..envelope_count {
+        envelopes.push(envelope(
+            &schema,
+            asset_id,
+            sequence as u64,
+            vec![int_values(per_envelope), utf8_values(per_envelope, 4)],
+        ));
+    }
+
+    // Six ordered steps over the chunk. The literal derive is last so the
+    // deferred-literal path is exercised inside the consolidated plan too.
+    let chain = vec![
+        PlanNodeKind::ApplyRules {
+            rules: vec![
+                Rule::Trim { column: col(2) },
+                Rule::NormalizeText {
+                    column: col(2),
+                    operation: stillflow_plan::TextOperation::Lowercase,
+                },
+                Rule::FillNull {
+                    column: col(2),
+                    value: ScalarValue::Utf8("none".to_owned()),
+                },
+                Rule::ReplaceLiteral {
+                    column: col(1),
+                    from: ScalarValue::Int64(5),
+                    to: ScalarValue::Int64(50),
+                },
+            ],
+        },
+        PlanNodeKind::ApplyRules {
+            rules: vec![
+                Rule::Cast {
+                    column: col(1),
+                    data_type: LogicalType::Float64,
+                    on_failure: stillflow_plan::CastFailurePolicy::SetNull,
+                },
+                Rule::DeriveColumn {
+                    id: col(3),
+                    name: "tag".to_owned(),
+                    data_type: LogicalType::Utf8,
+                    nullable: true,
+                    expression: Expr::Literal(ScalarValue::Utf8("fixed".to_owned())),
+                },
+            ],
+        },
+    ];
+    let plan = chain_plan(asset_id, vec![col(1), col(2)], chain);
+    let engine = fixture_engine(schema.clone(), envelopes);
+    let connection = connection();
+    let source = asset(connection.id());
+
+    crate::chunk_metrics::reset();
+    let mut request = PreviewRequest::new(
+        plan,
+        PlanNodeId::from_uuid(Uuid::from_u128(1)),
+        connection,
+        source,
+    );
+    request.schema_override = Some(schema);
+    request.row_limit = 10_000;
+    request.byte_limit = PREVIEW_DEFAULT_BYTE_LIMIT;
+    request.batch_size = per_envelope;
+    let result = engine.preview(request).await.expect("preview");
+    let preview_rows: usize = result.batches.iter().map(|batch| batch.row_count()).sum();
+    assert_eq!(preview_rows, rows, "every row survives the six steps");
+
+    let gathers = crate::chunk_metrics::snapshot().chunk_gathers;
+    if INSTRUMENTED {
+        assert_eq!(
+            gathers,
+            chunk_count as u64,
+            "six steps over {chunk_count} chunks must gather exactly once per chunk, \
+             not once per step (the pre-consolidation count would have been {})",
+            chunk_count * 6
+        );
+        println!("CM_CHUNK_GATHERS gathers={gathers} chunks={chunk_count} steps=6 rows={rows}");
+    } else {
+        assert_eq!(gathers, 0, "the counter is inert without the feature");
+    }
+}
