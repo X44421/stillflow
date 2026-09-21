@@ -17,6 +17,7 @@ use crate::memory::{MemoryReport, MemoryTracker};
 use crate::predict::{largest_feasible_k, PredictedSchema};
 use crate::preflight::{self, PreparedPlan};
 use crate::remainder::CanonicalRebatcher;
+use crate::sort::MAX_SORT_INPUT_BYTES;
 use crate::{
     PreviewRequest, PreviewResult, PREVIEW_DEFAULT_DEADLINE, PREVIEW_MAX_BYTE_LIMIT,
     PREVIEW_MAX_DEADLINE, PREVIEW_MAX_ROW_LIMIT, PREVIEW_MAX_SOURCE_BYTES_OBSERVED,
@@ -125,6 +126,15 @@ pub(crate) async fn preview(
         request.byte_limit,
         &mut tracker,
     )?;
+    // #370 §5: a `Sort` step is positional. It buffers the whole transformed
+    // target output and is resolved once, after the input is exhausted.
+    let mut sort_buffer = match sort_step(&prepared.target_steps)? {
+        Some(keys) => Some(crate::sort::SortBuffer::new(crate::sort::resolve_lanes(
+            &prepared.target_schema,
+            keys,
+        )?)),
+        None => None,
+    };
 
     let mut source_rows_scanned = 0_usize;
     let mut source_bytes_scanned = 0_usize;
@@ -234,6 +244,15 @@ pub(crate) async fn preview(
                 continue;
             }
 
+            if let Some(buffer) = sort_buffer.as_mut() {
+                // Every row must be seen before the first row is emitted, so a
+                // sort cannot close a visible prefix early: it buffers under
+                // its own declared bound instead (#370 §5.1–§5.2).
+                context.ensure_active().map_err(map_context_error)?;
+                buffer.push(batch, &mut tracker)?;
+                continue;
+            }
+
             #[cfg(test)]
             let batch_rows = batch.num_rows();
             #[cfg(test)]
@@ -303,6 +322,41 @@ pub(crate) async fn preview(
         if scan_truncated || source_exhausted {
             break;
         }
+    }
+
+    if let Some(mut buffer) = sort_buffer.take() {
+        // #370 §5.1: the single ordering happens here, after the whole input has
+        // been consumed. `release` drops the buffer's own charge; the ordered
+        // payload is charged separately while it is drained.
+        context.ensure_active().map_err(map_context_error)?;
+        if !buffer.is_empty() {
+            let (sorted_rows, payload) = buffer.finish();
+            buffer.release(&mut tracker)?;
+            if payload > MAX_SORT_INPUT_BYTES {
+                return Err(EngineError::BoundExceeded(
+                    "sort output exceeds MAX_SORT_INPUT_BYTES",
+                ));
+            }
+            tracker.hold_polars(payload)?;
+            for row in sorted_rows {
+                context.ensure_active().map_err(map_context_error)?;
+                match accumulator.push(row, &mut tracker)? {
+                    PushOutcome::Appended => {}
+                    PushOutcome::RowClosed => {
+                        rows_truncated = true;
+                        break;
+                    }
+                    PushOutcome::ByteClosed => {
+                        bytes_truncated = true;
+                        break;
+                    }
+                }
+            }
+            tracker.drop_polars()?;
+        } else {
+            buffer.release(&mut tracker)?;
+        }
+        context.ensure_active().map_err(map_context_error)?;
     }
 
     context.ensure_active().map_err(map_context_error)?;
@@ -397,6 +451,35 @@ fn take_forced_export_retry() -> bool {
             true
         }
     })
+}
+
+/// Returns the declared ordering keys of the target steps' sort step, if any.
+///
+/// #370 §5 resolves exactly one ordering per run: a sort must be the final
+/// target step, because this slice hands the ordered rows straight to the
+/// response re-batcher. A plan that places further steps after a sort is
+/// refused rather than silently left unordered, and two sorts in one target
+/// chain are refused because only one buffer exists.
+fn sort_step(
+    steps: &[crate::preflight::CompiledStep],
+) -> Result<Option<&[stillflow_plan::SortKey]>, EngineError> {
+    let mut found = None;
+    for (index, step) in steps.iter().enumerate() {
+        if let crate::preflight::CompiledStep::Sort { keys } = step {
+            if found.is_some() {
+                return Err(EngineError::InvalidPlan(
+                    "a preview target may contain at most one sort step",
+                ));
+            }
+            if index + 1 != steps.len() {
+                return Err(EngineError::InvalidPlan(
+                    "a sort step must be the final target step",
+                ));
+            }
+            found = Some(keys.as_slice());
+        }
+    }
+    Ok(found)
 }
 
 async fn lower_chunk(

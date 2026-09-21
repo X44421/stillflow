@@ -86,10 +86,11 @@ pub use node_graph::{
     deployed_packages as deployed_node_packages, trim_clean_package as trim_clean_node_package,
     CastFailurePolicy, ConfigField, ConfigSchema, ConfigValueKind, NodeCatalogEntry, NodeConfig,
     NodeDefinition, NodeEdge, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId,
-    NodeLoweringTarget, NodePackage, NodePort, NodeRegistry, NodeSupportStatus, PortId,
-    TextOperation, ValidatedNodeConfig, MAX_CONFIG_BYTES, MAX_EDGES, MAX_EXPR_DEPTH,
-    MAX_EXPR_NODES, MAX_GRAPH_BYTES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH, MAX_NODES, MAX_RULES,
-    MAX_RULES_PER_NODE, MAX_STRING_BYTES, MAX_TOTAL_CONFIG_BYTES, NODE_GRAPH_VERSION,
+    NodeLoweringTarget, NodePackage, NodePort, NodeRegistry, NodeSupportStatus, NullPlacement,
+    PortId, SortDirection, SortKey, TextOperation, ValidatedNodeConfig, MAX_CONFIG_BYTES,
+    MAX_EDGES, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_GRAPH_BYTES, MAX_METADATA_BYTES,
+    MAX_NESTING_DEPTH, MAX_NODES, MAX_RULES, MAX_RULES_PER_NODE, MAX_STRING_BYTES,
+    MAX_TOTAL_CONFIG_BYTES, NODE_GRAPH_VERSION,
 };
 pub use observability::{
     redact_telemetry_value, ExportingTelemetrySink, InMemoryTelemetry, LogLevel, MetricKind,

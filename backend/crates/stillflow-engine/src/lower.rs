@@ -44,6 +44,10 @@ pub(crate) fn transform(
                     frame = apply_rule(frame, &mut schema, &mut deferred, rule)?;
                 }
             }
+            // #370 §5: a positional cross-batch step has no per-chunk
+            // lowering. It is resolved once, after the whole input has been
+            // consumed, by `preview`'s sort buffer.
+            CompiledStep::Sort { .. } => {}
         }
     }
     Ok((frame, deferred))

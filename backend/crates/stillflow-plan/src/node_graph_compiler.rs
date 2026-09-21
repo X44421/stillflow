@@ -4,15 +4,15 @@ use std::fmt;
 use stillflow_core::{
     CastFailurePolicy as NodeCastFailurePolicy, ColumnId, Expr, LogicalField, LogicalSchema,
     LogicalType, NodeEdge, NodeGraph, NodeGraphError, NodeGraphErrorCode, NodeId, NodeRegistry,
-    ValidatedNodeConfig, MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH,
-    MAX_NODES,
+    NullPlacement as NodeNullPlacement, SortDirection as NodeSortDirection, ValidatedNodeConfig,
+    MAX_EXPR_DEPTH, MAX_EXPR_NODES, MAX_METADATA_BYTES, MAX_NESTING_DEPTH, MAX_NODES,
 };
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    semantics, CastFailurePolicy, LogicalPlan, PlanError, PlanFingerprint, PlanNode, PlanNodeId,
-    PlanNodeKind, Rule, TextOperation,
+    semantics, CastFailurePolicy, LogicalPlan, NullPlacement, PlanError, PlanFingerprint, PlanNode,
+    PlanNodeId, PlanNodeKind, Rule, SortDirection, SortKey, TextOperation,
 };
 use semantics::SemanticError;
 
@@ -855,6 +855,9 @@ fn product_rule(config: &ValidatedNodeConfig) -> Option<Rule> {
         ValidatedNodeConfig::Select { .. } | ValidatedNodeConfig::Filter { .. } => None,
         ValidatedNodeConfig::Source { .. } | ValidatedNodeConfig::Output { .. } => None,
         ValidatedNodeConfig::Composite { .. } => None,
+        // Ordering is a property of the relation, not of a row: a sort lowers
+        // to a first-class `PlanNodeKind::Sort`, never to a rule (#370 §2).
+        ValidatedNodeConfig::Sort { .. } => None,
     }
 }
 
@@ -898,6 +901,44 @@ fn compile_transform(
                 Some(node_id),
                 "source and output configs are not transform nodes",
             ))
+        }
+        ValidatedNodeConfig::Sort { keys } => {
+            // #370 §3: Sort is schema-preserving, so the working schema passes
+            // through unchanged. Each key is checked against its own column
+            // type; a mixed-type key list is never coerced (#363 §8.1.4).
+            let mut plan_keys = Vec::with_capacity(keys.len());
+            for key in keys {
+                let field = schema.field(key.column).ok_or_else(|| {
+                    NodeGraphCompileError::new(
+                        NodeGraphErrorCode::UnknownColumn,
+                        Some(node_id),
+                        "sort key column is absent from the working schema",
+                    )
+                })?;
+                if !is_sortable_type(&field.data_type) {
+                    return Err(NodeGraphCompileError::new(
+                        NodeGraphErrorCode::IncompatibleType,
+                        Some(node_id),
+                        "sort key column type is not ordered",
+                    ));
+                }
+                // Timestamp-second stays paused here exactly as it is for
+                // ordered comparison; the gate is shared, not re-implemented.
+                semantics::capability::reject_paused_type(&field.data_type)
+                    .map_err(|error| semantic_error(error, node_id))?;
+                plan_keys.push(SortKey {
+                    column: key.column,
+                    direction: match key.direction {
+                        NodeSortDirection::Ascending => SortDirection::Ascending,
+                        NodeSortDirection::Descending => SortDirection::Descending,
+                    },
+                    nulls: match key.nulls {
+                        NodeNullPlacement::First => NullPlacement::First,
+                        NodeNullPlacement::Last => NullPlacement::Last,
+                    },
+                });
+            }
+            Ok((PlanNodeKind::Sort { keys: plan_keys }, schema.clone()))
         }
         ValidatedNodeConfig::Composite { .. } => Err(NodeGraphCompileError::new(
             NodeGraphErrorCode::InvalidTopology,
@@ -956,6 +997,27 @@ fn invalid_config_any(message: &'static str) -> NodeGraphCompileError {
 
 fn type_error(node_id: NodeId, message: &'static str) -> NodeGraphCompileError {
     NodeGraphCompileError::new(NodeGraphErrorCode::IncompatibleType, Some(node_id), message)
+}
+
+/// The ordered key vocabulary of #370 §4, matching `ordered_pair`'s ordered
+/// set exactly: numeric, `Date32` and `Timestamp`. `Utf8`, `Boolean`,
+/// `Binary`, `Null`, list and struct columns are not ordered here.
+fn is_sortable_type(data_type: &LogicalType) -> bool {
+    matches!(
+        data_type,
+        LogicalType::Int8
+            | LogicalType::Int16
+            | LogicalType::Int32
+            | LogicalType::Int64
+            | LogicalType::UInt8
+            | LogicalType::UInt16
+            | LogicalType::UInt32
+            | LogicalType::UInt64
+            | LogicalType::Float32
+            | LogicalType::Float64
+            | LogicalType::Date32
+            | LogicalType::Timestamp { .. }
+    )
 }
 
 fn limit_error() -> NodeGraphCompileError {

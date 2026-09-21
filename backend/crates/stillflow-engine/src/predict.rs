@@ -272,6 +272,11 @@ fn predict_step(
                 "apply-rules must be expanded per rule in predict",
             ))
         }
+        // #370 §5: a sort is positional, so the streaming predictor does not
+        // apply it per chunk, and it preserves the working schema exactly.
+        crate::preflight::CompiledStep::Sort { .. } => {
+            Ok((live_before, live_before, working.clone()))
+        }
     }
 }
 

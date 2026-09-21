@@ -235,6 +235,7 @@ fn operator_kind_name(kind: &PlanNodeKind) -> &'static str {
         PlanNodeKind::ApplyRules { .. } => "applyRules",
         PlanNodeKind::Join { .. } => "join",
         PlanNodeKind::Union => "union",
+        PlanNodeKind::Sort { .. } => "sort",
         PlanNodeKind::Materialize { .. } => "materialize",
     }
 }

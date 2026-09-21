@@ -22,6 +22,7 @@ mod quality;
 mod remainder;
 mod scheduler;
 pub mod semantics;
+mod sort;
 mod text_normalize;
 mod types;
 mod typing;
@@ -99,6 +100,9 @@ pub const MAX_LIVE_COLUMNAR_PAYLOADS: u8 = 3;
 pub const MAX_COMPILED_PLAN_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_FFI_SCRATCH_BYTES: usize = 1024 * 1024;
 pub const MAX_OPERATOR_STATE_BYTES: usize = MAX_COMPILED_PLAN_BYTES + MAX_FFI_SCRATCH_BYTES;
+/// Declared bound on the bytes one `Sort` may buffer (#370 §5.6). It reuses the
+/// existing operator-state law rather than inventing a budget.
+pub const MAX_SORT_INPUT_BYTES: usize = sort::MAX_SORT_INPUT_BYTES;
 pub const MAX_ENGINE_PEAK_BYTES: usize =
     (MAX_LIVE_COLUMNAR_PAYLOADS as usize) * MAX_BATCH_BYTES + MAX_OPERATOR_STATE_BYTES;
 pub const MAX_ENGINE_CONCURRENT_RUNS: u16 = 4;

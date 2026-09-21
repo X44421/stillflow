@@ -14,8 +14,9 @@ pub use node_graph_compiler::{
     MAX_COMPILE_WORK, MAX_DIAGNOSTICS, MAX_DIAGNOSTIC_BYTES, NODE_GRAPH_COMPILER_VERSION,
 };
 pub use plan::{
-    JoinKey, JoinType, LogicalPlan, PlanError, PlanFingerprint, PlanNode, PlanNodeId, PlanNodeKind,
-    PLAN_FINGERPRINT_ALGORITHM, PLAN_VERSION,
+    JoinKey, JoinType, LogicalPlan, NullPlacement, PlanError, PlanFingerprint, PlanNode,
+    PlanNodeId, PlanNodeKind, SortDirection, SortKey, MAX_SORT_KEYS, PLAN_FINGERPRINT_ALGORITHM,
+    PLAN_VERSION,
 };
 pub use rule::{CastFailurePolicy, Rule, RuleError, TextOperation, ValidationSeverity};
 pub use semantics::{
