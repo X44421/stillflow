@@ -2,6 +2,7 @@
 
 #![deny(unsafe_code)]
 
+mod chunk_metrics;
 mod drift;
 mod engine;
 mod error;
