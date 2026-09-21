@@ -200,9 +200,7 @@ impl fmt::Debug for SecretMaterial {
 
 impl Drop for SecretMaterial {
     fn drop(&mut self) {
-        for byte in &mut self.0 {
-            *byte = 0;
-        }
+        self.0.fill(0);
     }
 }
 

@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn rename_paths_agree() {
-        let rules = vec![
+        let rules = [
             Rule::Rename {
                 column: id(1),
                 to: "renamed".into(),
@@ -783,7 +783,7 @@ mod tests {
             expression: Box::new(Expr::Column(id(col))),
             data_type: LogicalType::Int64,
         };
-        let rules = vec![
+        let rules = [
             derive(500, "d0", LogicalType::Int64, cast_expr(4)),
             derive(500, "d1", LogicalType::Int64, cast_expr(8)), // duplicate id
             derive(501, "c0", LogicalType::Int64, cast_expr(4)), // duplicate name
@@ -807,7 +807,7 @@ mod tests {
 
     #[test]
     fn mixed_chains_agree() {
-        let rules = vec![
+        let rules = [
             Rule::Rename {
                 column: id(1),
                 to: "renamed_a".into(),
@@ -1539,7 +1539,7 @@ mod tests {
         // Derive: indexed chain must agree with legacy per rule and
         // verify_entries must hold after every rule (drop/derive rebuild,
         // the rest keep entries exact).
-        let rules = vec![
+        let rules = [
             Rule::Rename {
                 column: id(1),
                 to: "a1".into(),

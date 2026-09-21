@@ -31,11 +31,11 @@ command = [
 ]
 
 # Same as `check`, forced onto the MSRV toolchain regardless of what the
-# active default is. Requires rustup with the 1.85.0 toolchain installed.
+# active default is. Requires rustup with the 1.98.0 toolchain installed.
 [jobs.check-msrv]
 command = [
     "cargo",
-    "+1.85.0",
+    "+1.98.0",
     "check",
     "--manifest-path",
     "backend/Cargo.toml",

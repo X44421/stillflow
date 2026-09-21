@@ -161,7 +161,7 @@ fn valid_managed_root(value: &str) -> bool {
         && trimmed != "\\"
         && !trimmed.ends_with(':')
         && !trimmed.chars().any(char::is_control)
-        && !components.iter().any(|component| *component == "..")
+        && !components.contains(&"..")
         && !(components.len() == 2 && components[0].ends_with(':') && components[1].is_empty())
 }
 

@@ -14,16 +14,15 @@
 //! (VmHWM) and the cumulative counters cover exactly that case.
 //!
 //! Modes:
-//! - `full`           — production `read_batches` drain to the end.
-//! - `bounded-preview`— production bounded read (`PreviewRequest` row limit),
-//!                      so only a prefix of the file is consumed.
+//! - `full` — production `read_batches` drain to the end.
+//! - `bounded-preview` — production bounded read (`PreviewRequest` row
+//!   limit), so only a prefix of the file is consumed.
 //! - `bounded-earlydrop` — consumer-driven prefix consumption: take N
-//!                      envelopes then drop the stream.
+//!   envelopes then drop the stream.
 //! - `validate-probe` — harness-side reference probe: one plain `csv`-crate
-//!                      pass over the fixture (same delimiter/quote/header
-//!                      settings as the production validator). This isolates
-//!                      the marginal cost of one validation pass; it is not
-//!                      the production path.
+//!   pass over the fixture (same delimiter/quote/header settings as the
+//!   production validator). This isolates the marginal cost of one validation
+//!   pass; it is not the production path.
 //!
 //! Fixture generators reuse the accepted E24-B2BASE anchor generator
 //! (`tests/read_baseline.rs`) cell payloads for the anchor shapes and the

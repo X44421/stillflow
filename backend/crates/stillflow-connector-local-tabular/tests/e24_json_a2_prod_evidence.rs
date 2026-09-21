@@ -79,7 +79,7 @@ fn write_scalar(row: usize, index: usize) -> String {
             ((row * 13 + index * 5) % 100_000) as f64 / 8.0 + 0.125
         ),
         "bool" => {
-            if (row + index) % 2 == 0 {
+            if (row + index).is_multiple_of(2) {
                 "true"
             } else {
                 "false"

@@ -11,59 +11,59 @@ concurrency:
 
 jobs:
   # Backend gates expose distinct evidence rather than duplicating the same
-  # full suite across toolchains (DX-F0 #85, DX-T1 #204). Rust 1.85.0 is the
+  # full suite across toolchains (DX-F0 #85, DX-T1 #204). Rust 1.98.0 is the
   # canonical fmt + lint + semantic-test authority; stable adds compatibility
   # compile and newer-Clippy drift coverage.
 
   backend-fmt-msrv:
-    name: Backend fmt (Rust 1.85.0)
+    name: Backend fmt (Rust 1.98.0)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-          shared-key: backend-1.85.0
+          shared-key: backend-1.98.0
       - run: cargo fmt --all -- --check
 
   backend-clippy-msrv:
-    name: Backend clippy (Rust 1.85.0)
+    name: Backend clippy (Rust 1.98.0)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-          shared-key: backend-1.85.0
+          shared-key: backend-1.98.0
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   backend-tests-msrv:
-    name: Backend tests (Rust 1.85.0)
+    name: Backend tests (Rust 1.98.0)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-          shared-key: backend-1.85.0
+          shared-key: backend-1.98.0
       - run: cargo test --workspace -- --skip total_output_cap_is_accepted_at_eight_gib_and_enforced_above
 
   backend-clippy-stable:

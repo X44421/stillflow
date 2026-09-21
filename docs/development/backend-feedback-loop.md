@@ -32,7 +32,7 @@ bacon --version                # any recent bacon 3.x works
 VS Code setup:
 
 1. Install the **rust-analyzer** extension (`rust-lang.rust-analyzer`).
-   It uses `rust-toolchain.toml`, so the editor picks up Rust 1.85.0
+   It uses `rust-toolchain.toml`, so the editor picks up Rust 1.98.0
    automatically.
 2. Open the repository root (not `backend/`) so `rust-analyzer` and file
    watchers resolve the workspace the same way Bacon does.
@@ -48,7 +48,7 @@ VS Code setup:
 | Tier | Job | Command | Expected latency | Use for |
 | --- | --- | --- | --- | --- |
 | 0 | `check` (default) | `bacon` / `cargo check --manifest-path backend/Cargo.toml --workspace --all-targets` | seconds after first build | immediate compiler diagnostics on save |
-| 0 | `check-msrv` | `bacon check-msrv` | like `check` + toolchain switch | confirming MSRV (Rust 1.85.0) compatibility before push |
+| 0 | `check-msrv` | `bacon check-msrv` | like `check` + toolchain switch | confirming MSRV (Rust 1.98.0) compatibility before push |
 | 1 | `test-engine` | `bacon test-engine` | fast-minutes | focused `stillflow-engine` library test feedback |
 | 2 | `fmt` | `bacon fmt` | seconds | formatting gate before commit |
 | 2 | `clippy` | `bacon clippy` | ~minutes, cached | lint gate before commit |
@@ -70,7 +70,7 @@ so the root-level `bacon.toml` works from the repository root.
 bacon
 cargo check --manifest-path backend/Cargo.toml --workspace --all-targets
 
-# Tier 0 — MSRV check on Rust 1.85.0 regardless of active default
+# Tier 0 — MSRV check on Rust 1.98.0 regardless of active default
 bacon check-msrv
 
 # Tier 1 — focused Engine library tests
@@ -102,7 +102,7 @@ Use the smallest gate that produces new information:
 2. **Affected-crate tests** are useful before handoff when the change is
    localized and the full workspace gate has not yet run.
 3. **Exact-head PR CI** is the canonical repository-wide regression evidence.
-   On Rust 1.85.0 it runs fmt, Clippy, and the full workspace test suite.
+   On Rust 1.98.0 it runs fmt, Clippy, and the full workspace test suite.
 4. **Stable compatibility** is intentionally narrower: compile/check the full
    workspace and run stable Clippy to catch language/toolchain and lint drift.
    Stable does not duplicate rustfmt or the full semantic test suite on every
@@ -120,7 +120,7 @@ Use the smallest gate that produces new information:
 
 The current PR CI backend matrix is therefore:
 
-- Rust 1.85.0: fmt + Clippy + routine workspace tests (the named physical
+- Rust 1.98.0: fmt + Clippy + routine workspace tests (the named physical
   8 GiB export boundary is delegated to the slow lane);
 - stable: workspace compatibility check + Clippy;
 - client UI: maintained outside this repository; this matrix contains backend
@@ -155,7 +155,7 @@ Current slow case:
   export limits with sparse files.
 
 It remains a real test and is not marked ignored. Routine workspace commands
-skip it by name, while the slow workflow invokes it directly on Rust 1.85.0.
+skip it by name, while the slow workflow invokes it directly on Rust 1.98.0.
 The slow workflow is manual/low-frequency and is not an ordinary PR required
 check.
 
@@ -204,7 +204,7 @@ rebase only when authorized by the dispatch protocol — never silently.
   cache with `cargo clean -p <crate>` (run from `backend/`) rather than
   wiping the whole `target/`.
 - **Diagnostics disagree with CI**: check the toolchain first
-  (`rustc --version`, `rustup show`); `rust-toolchain.toml` pins 1.85.0 for
+  (`rustc --version`, `rustup show`); `rust-toolchain.toml` pins 1.98.0 for
   local tools while CI also runs stable compatibility-check and Clippy legs —
   reproduce the relevant matrix leg with `bacon check-msrv` or the stable
   toolchain explicitly.

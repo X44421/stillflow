@@ -65,6 +65,11 @@ fn object_body(body: Value) -> Result<Map<String, Value>, ApiError> {
 
 /// Reassembles a typed `ApiRequest<T>` from the raw JSON envelope, merging
 /// manifest path parameters into the body object (contract §3.3).
+///
+/// The `Response` error is returned by value at this public boundary; boxing
+/// it would change the signature, so 1.98's `result_large_err` is allowed
+/// here and tracked separately in #402.
+#[allow(clippy::result_large_err)]
 pub fn parse_body<T: DeserializeOwned>(
     bytes: &[u8],
     path_params: Vec<(String, String)>,
@@ -260,6 +265,9 @@ const META_KEYS: [&str; 5] = [
 /// `principal` must be carried JSON-encoded (the serde form of
 /// `RequestPrincipal`); callers that cannot expose it in a URL must use a
 /// route whose manifest method carries a body.
+///
+/// Boxed-error note: see `parse_body` above (#402).
+#[allow(clippy::result_large_err)]
 pub fn parse_query_envelope<T: DeserializeOwned>(
     query: Option<String>,
     path_params: Vec<(String, String)>,
