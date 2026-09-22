@@ -41,13 +41,17 @@ is one **added** fail-closed test (§4.1).
 
 ## 3. Result
 
-| | 0.46 (`40ec6d4`) | 0.55.2 (`aa900f5`) |
-| --- | --- | --- |
-| Test suites | 53 | 53 |
-| Passed | 841 | 841 |
-| Failed | 0 | 1 (§4.2, environment flake) |
-| Ignored | 11 | 11 |
-| New tests | — | +1 (`naive_timestamps_still_fail_closed_on_malformed_text`) |
+| | 0.46 (`40ec6d4`) | 0.55.2 run 1 (`aa900f5`) | 0.55.2 run 2 (`aa900f5`) |
+| --- | --- | --- | --- |
+| Test suites | 53 | 53 | 53 |
+| Passed | 841 | 841 | 842 |
+| Failed | 0 | 1 (§4.2, environment flake) | 0 |
+| Ignored | 11 | 11 | 11 |
+| New tests | — | +1 (`naive_timestamps_still_fail_closed_on_malformed_text`) | +1 |
+
+Run 2 is the same command (`cargo test --workspace`, default fail-fast, no
+`--no-fail-fast`) repeated on the same head once the host was otherwise idle:
+it exits `0` with 842 passed = the 0.46 count plus the one added test.
 
 Per-area outcome on `0.55.2` (all `ok` unless noted):
 
@@ -115,7 +119,7 @@ run on its own. The failing crate is untouched by this migration; the failure
 is a cross-binary isolation race over a shared managed root, and it did not
 reproduce in CI for either PR (run `35619170124` for #403, `35727187505` for
 #404 — both completed `success`, including the `Backend tests (Rust 1.98.0)`
-job).
+job), nor in the repeated workspace run 2 on the same head (§3).
 
 ## 5. Coverage against the plan's freeze list
 
