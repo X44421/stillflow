@@ -105,6 +105,18 @@ const CASES: &[CaseSpec] = &[
         cols: 10,
         reps: 7,
     },
+    // P55-B1 (issue #399): the wide-and-deep cell the migration plan names
+    // explicitly (100 columns x 1M rows). Three reps keep the case inside the
+    // measurement budget while staying above the noise floor of a multi-second
+    // workload.
+    CaseSpec {
+        id: "ingest-csv-anchor-100c-1m",
+        family: "ingest-micro",
+        fixture: "anchor-csv-100c-1m",
+        rows: 1_000_000,
+        cols: 100,
+        reps: 3,
+    },
     CaseSpec {
         id: "ingest-ndjson-anchor-10c-100k",
         family: "ingest-micro",
@@ -582,6 +594,10 @@ fn generate_fixture(root: &Path, spec: &CaseSpec) -> FixtureFile {
         "anchor-csv-10c-1m" => (
             "f.csv",
             write_anchor(&dir.join("f.csv"), "csv", 10, 1_000_000),
+        ),
+        "anchor-csv-100c-1m" => (
+            "f.csv",
+            write_anchor(&dir.join("f.csv"), "csv", 100, 1_000_000),
         ),
         "anchor-ndjson-10c-100k" => (
             "f.ndjson",
