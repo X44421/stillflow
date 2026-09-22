@@ -1,6 +1,6 @@
 use polars::prelude::{
-    col, lit, when, Column, DataFrame, DataType, Expr as PolarsExpr, GetOutput, IntoLazy, Series,
-    StringChunked, StrptimeOptions, NULL,
+    col, lit, when, Column, DataFrame, DataType, Expr as PolarsExpr, Field, IntoLazy, Schema,
+    Series, StringChunked, StrptimeOptions, NULL,
 };
 use stillflow_core::{
     BinaryOperator, ColumnId, Expr, LogicalField, LogicalSchema, LogicalType, ScalarValue,
@@ -13,6 +13,17 @@ use crate::preflight::CompiledStep;
 use crate::types::polars_data_type;
 
 pub(crate) fn transform(
+    frame: DataFrame,
+    schema: &LogicalSchema,
+    steps: &[CompiledStep],
+    deferred_in: Vec<(String, ScalarValue)>,
+) -> Result<(DataFrame, Vec<(String, ScalarValue)>), EngineError> {
+    // Polars 0.55 blocks in place while lowering a query to its physical plan;
+    // the adapter keeps this valid on a single-threaded runtime too.
+    crate::polars_adapter::blocking(|| transform_inner(frame, schema, steps, deferred_in))
+}
+
+fn transform_inner(
     frame: DataFrame,
     schema: &LogicalSchema,
     steps: &[CompiledStep],
@@ -116,7 +127,7 @@ fn apply_rule(
                             move |column: Column| {
                                 let values = column.str()?;
                                 let normalized: StringChunked = values
-                                    .into_iter()
+                                    .iter()
                                     .map(|value| {
                                         value.map(|text| {
                                             crate::text_normalize::normalize(text, operation)
@@ -124,9 +135,11 @@ fn apply_rule(
                                     })
                                     .collect();
                                 let series: Series = normalized.into();
-                                Ok(Some(series.into()))
+                                Ok(series.into())
                             },
-                            GetOutput::from_type(DataType::String),
+                            |_schema: &Schema, field: &Field| {
+                                Ok(Field::new(field.name().clone(), DataType::String))
+                            },
                         )
                         .alias(name.as_str()),
                 )

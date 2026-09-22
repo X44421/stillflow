@@ -53,7 +53,9 @@ pub(crate) fn polars_data_type(
                     ));
                 }
             },
-            timezone.clone().map(TimeZone::from_string),
+            TimeZone::opt_try_new(timezone.clone()).map_err(|_| {
+                crate::error::EngineError::TypeError("timestamp timezone is invalid")
+            })?,
         ),
         LogicalType::List(_) | LogicalType::Struct(_) => {
             return Err(crate::error::EngineError::TypeError(

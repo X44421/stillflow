@@ -13,6 +13,7 @@ mod job_runtime;
 mod lookup;
 mod lower;
 mod memory;
+mod polars_adapter;
 mod predict;
 mod predict_metrics;
 mod preflight;

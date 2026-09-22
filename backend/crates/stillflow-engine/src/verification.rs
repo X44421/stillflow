@@ -2157,6 +2157,14 @@ fn boolean_keep_mask(
     schema: &stillflow_core::LogicalSchema,
     predicate: &Expr,
 ) -> Result<Vec<bool>, EngineError> {
+    crate::polars_adapter::blocking(|| boolean_keep_mask_inner(frame, schema, predicate))
+}
+
+fn boolean_keep_mask_inner(
+    frame: &polars::prelude::DataFrame,
+    schema: &stillflow_core::LogicalSchema,
+    predicate: &Expr,
+) -> Result<Vec<bool>, EngineError> {
     use polars::prelude::IntoLazy;
     let lowered = crate::lower::lower_expr(predicate, schema)?;
     let selected = frame
@@ -2173,7 +2181,7 @@ fn boolean_keep_mask(
         .bool()
         .map_err(|_| EngineError::TypeError("predicate did not evaluate to Boolean"))?;
     Ok(typed
-        .into_iter()
+        .iter()
         .map(|value| matches!(value, Some(true)))
         .collect())
 }
@@ -2183,12 +2191,19 @@ fn take_surviving(
     frame: &mut polars::prelude::DataFrame,
     keep_mask: &[bool],
 ) -> Result<(), EngineError> {
+    crate::polars_adapter::blocking(|| take_surviving_inner(frame, keep_mask))
+}
+
+fn take_surviving_inner(
+    frame: &mut polars::prelude::DataFrame,
+    keep_mask: &[bool],
+) -> Result<(), EngineError> {
     use polars::prelude::{col, IntoLazy, IntoSeries, NewChunkedArray};
     let keep_column =
         polars::prelude::BooleanChunked::from_slice("keep".into(), keep_mask).into_series();
     let mut masked = frame.clone();
     masked
-        .with_column(keep_column)
+        .with_column(keep_column.into())
         .map_err(|_| EngineError::Internal("row compaction failed"))?;
     let filtered = masked
         .lazy()
@@ -2751,6 +2766,14 @@ fn evaluate_predicate(
     schema: &stillflow_core::LogicalSchema,
     predicate: &Expr,
 ) -> Result<Vec<Option<bool>>, EngineError> {
+    crate::polars_adapter::blocking(|| evaluate_predicate_inner(frame, schema, predicate))
+}
+
+fn evaluate_predicate_inner(
+    frame: &polars::prelude::DataFrame,
+    schema: &stillflow_core::LogicalSchema,
+    predicate: &Expr,
+) -> Result<Vec<Option<bool>>, EngineError> {
     use polars::prelude::IntoLazy;
     let lowered = crate::lower::lower_expr(predicate, schema)?;
     let selected = frame
@@ -2766,7 +2789,7 @@ fn evaluate_predicate(
         .as_materialized_series()
         .bool()
         .map_err(|_| EngineError::TypeError("predicate did not evaluate to Boolean"))?;
-    Ok(typed.into_iter().collect())
+    Ok(typed.iter().collect())
 }
 
 impl ExecutionEngine {
