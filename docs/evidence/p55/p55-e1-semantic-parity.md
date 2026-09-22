@@ -136,9 +136,10 @@ job), nor in the repeated workspace run 2 on the same head (§3).
 - **No side-by-side byte differential in one process.** Both Polars versions
   cannot coexist in one build of a crate, so parity is established by running
   the same value-level corpus at two exact heads rather than by diffing two
-  live engines. A dump-and-diff harness (canonical digests per case, both
-  heads, machine-readable records) would strengthen this and is the natural
-  follow-up if the migration's risk review asks for it.
+  live engines. P55-B1 closes most of this gap from the other direction: its
+  measurement harness records a canonical witness digest per case, and all 21
+  shared cases hash identically to the 0.46 records — see
+  [P55-B1](./p55-b1-performance-baseline.md) §3.
 - **Performance parity is not claimed** and is deliberately deferred to P55-B1:
   the compiler, the dependency graph and the physical executor all changed at
   once, so the old O0/O1 numbers are not a valid comparison base.
