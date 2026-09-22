@@ -110,14 +110,32 @@ Per-case p50/p95 spread is small for the ingest cases (p95 within ~20 % of p50) 
 wider for the sub-second engine cases, matching the reference baseline's
 observation that WSL2 scheduler noise dominates short workloads. The new
 100-column × 1M-row CSV cell is I/O-bound on this host: 6.5 GB of fixture per
-full decode, ~24 s p50 with ~5 % CPU utilisation and ~1.1 GiB peak RSS — its
-wall time describes the disk, not the parser.
+full decode, ~24 s p50 with ~5 % CPU utilisation — its wall time describes the
+disk, not the parser.
 
 Every new p50 in §4 is numerically below its reference value. **No improvement
 is claimed and none is authorized:** the compiler moved 1.85.0 → 1.98.0, Polars
 moved 0.46 → 0.55.2 with a new expression/stream/OOC layer, and the A1/A2
 adapters changed where decoding and lowering run. These numbers are the new
 baseline for the engine-modernization line, not a verdict on the upgrade.
+
+One observation that is worth carrying into follow-up work: peak RSS tracks the
+*file size*, not the batch contract. The connector decodes one bounded window at
+a time, but the CSV path memory-maps the source, so resident pages of the mapped
+file count against `VmHWM` while they stay resident:
+
+| cell | fixture | peak RSS | RSS / fixture |
+| --- | --- | --- | --- |
+| `ingest-csv-anchor-100c-1m` | 6.50 GB | 10,945,320 KiB (10.4 GiB) | 1.72× |
+| `ingest-csv-anchor-100c-100k` | 650 MB | 1,441,136 KiB (1.37 GiB) | 2.27× |
+| `ingest-csv-anchor-10c-1m` | 650 MB | 1,401,432 KiB (1.34 GiB) | 2.21× |
+
+The reference baseline recorded the same order of magnitude for its cells
+(1473 MiB for the 650 MB `100c-100k` fixture, 2.27×), so this is unchanged
+behaviour rather than a 0.55 regression. It does mean the widest and deepest
+cell needs a host that can hold the mapping — on a smaller machine it would
+thrash. Bounding mapped residency is a candidate for the engine-modernization
+line, not a defect introduced by the upgrade.
 
 ## 6. Residual risk / limitations
 
