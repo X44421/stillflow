@@ -1599,6 +1599,46 @@ fn t5_sigterm_drains_and_exits_cleanly() {
     terminate(&mut child);
 }
 
+#[tokio::test]
+async fn server_outlives_the_shutdown_grace_window() {
+    // #416: `shutdown_grace_seconds` caps the drain after the shutdown signal,
+    // never the service lifetime. The spawned binary must still answer once the
+    // window has elapsed; before the fix the listener closed silently and only
+    // the process survived.
+    let root = tempfile::tempdir().expect("root");
+    let workspace_id = Uuid::new_v4();
+    let config = write_config(root.path(), workspace_id);
+    let port_file = root.path().join("port.json");
+    let mut child = spawn_server(&config, &port_file);
+    let ready = wait_ready(&port_file);
+    let port = ready["port"].as_u64().expect("ready port");
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+    let health = format!("/v1/health/live?workspaceId={workspace_id}");
+
+    assert_eq!(
+        get_json(&client, &base, &health).await.status(),
+        reqwest::StatusCode::OK,
+        "server answers inside the grace window"
+    );
+    // `write_config` pins a 5 second grace; 7 seconds is past it. The probe uses
+    // a client that keeps no idle connections: a pooled keep-alive connection
+    // is served by its own hyper task and would keep answering even after the
+    // listener closed, which is exactly the state #416 must make impossible.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let fresh = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("probe client");
+    assert_eq!(
+        get_json(&fresh, &base, &health).await.status(),
+        reqwest::StatusCode::OK,
+        "server must still accept new connections after the grace window (#416)"
+    );
+
+    terminate(&mut child);
+}
+
 #[test]
 fn t6_restart_reopens_durable_state() {
     let root = tempfile::tempdir().expect("root");

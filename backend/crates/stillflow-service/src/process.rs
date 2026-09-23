@@ -67,9 +67,15 @@ pub struct StartedService {
     lifecycle: Mutex<DaemonLifecycle>,
     server: ServerTask,
     shutdown: tokio::sync::oneshot::Sender<()>,
+    /// Upper bound applied to the drain *after* shutdown begins (contract §4.4).
+    ///
+    /// It is deliberately not a bound on the serve future itself: doing that
+    /// closed the listener once the window elapsed while the process stayed
+    /// alive (#416).
+    drain_grace: Duration,
 }
 
-type ServerTask = tokio::task::JoinHandle<Result<std::io::Result<()>, tokio::time::error::Elapsed>>;
+type ServerTask = tokio::task::JoinHandle<std::io::Result<()>>;
 
 pub async fn start_service(config: ProcessConfig) -> Result<StartedService, ProcessError> {
     config
@@ -137,13 +143,14 @@ pub async fn start_service(config: ProcessConfig) -> Result<StartedService, Proc
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let grace = Duration::from_secs(u64::from(config.service.shutdown_grace_seconds));
+    // The serve future runs until the shutdown signal; `grace` caps the drain
+    // in `StartedService::shutdown` and never the service lifetime (#416).
     let server: ServerTask = tokio::spawn(async move {
-        let serve = axum::serve(listener, app).with_graceful_shutdown(async {
-            let _ = shutdown_rx.await;
-        });
-        // The grace cap is enforced inside the serve task: after the cap the
-        // drain ends regardless of in-flight connections (contract §4.4).
-        tokio::time::timeout(grace, serve).await
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
     });
 
     let mut lifecycle = DaemonLifecycle::new(config.service.max_recovery_attempts)?;
@@ -159,6 +166,7 @@ pub async fn start_service(config: ProcessConfig) -> Result<StartedService, Proc
         lifecycle: Mutex::new(lifecycle),
         server,
         shutdown: shutdown_tx,
+        drain_grace: grace,
     })
 }
 
@@ -189,11 +197,15 @@ impl StartedService {
             lifecycle.begin_shutdown()?;
         }
         let _ = self.shutdown.send(());
-        match self.server.await {
+        let mut server = self.server;
+        // Only the drain is capped: once the grace elapses the drain ends
+        // regardless of in-flight connections (contract §4.4). The cap applies
+        // from the shutdown signal, not from process start (#416).
+        match tokio::time::timeout(self.drain_grace, &mut server).await {
             Ok(Ok(Ok(()))) => {}
             Ok(Ok(Err(error))) => return Err(ProcessError::Listener(error)),
-            Ok(Err(_elapsed)) => {}
-            Err(join_error) => return Err(ProcessError::Config(join_error.to_string())),
+            Ok(Err(join_error)) => return Err(ProcessError::Config(join_error.to_string())),
+            Err(_elapsed) => server.abort(),
         }
         self.runtime.shutdown().await;
         self.lifecycle
