@@ -25,7 +25,7 @@ uuid.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
-base64 = "0.22"
+base64 = "0.23"
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
