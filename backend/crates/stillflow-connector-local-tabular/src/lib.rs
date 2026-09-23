@@ -18,6 +18,7 @@ mod inference;
 mod inspect;
 mod json_stream;
 mod path;
+mod polars_adapter;
 mod preview;
 mod read;
 mod schema;

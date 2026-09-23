@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use polars::prelude::{DataType as PolarsDataType, Field as PolarsField};
-use polars::prelude::{Schema as PolarsSchema, TimeUnit as PolarsTimeUnit};
+use polars::prelude::{
+    Schema as PolarsSchema, TimeUnit as PolarsTimeUnit, TimeZone as PolarsTimeZone,
+};
 use polars_arrow::datatypes::{
     ArrowDataType as PolarsArrowDataType, ArrowSchema as PolarsArrowSchema,
     Field as PolarsArrowField, TimeUnit as PolarsArrowTimeUnit,
@@ -135,9 +137,10 @@ fn polars_type_from_logical(data_type: &LogicalType) -> ConnectorResult<PolarsDa
         LogicalType::Utf8 => PolarsDataType::String,
         LogicalType::Binary => PolarsDataType::Binary,
         LogicalType::Date32 => PolarsDataType::Date,
-        LogicalType::Timestamp { unit, timezone } => {
-            PolarsDataType::Datetime(polars_time_unit(*unit), timezone.as_deref().map(Into::into))
-        }
+        LogicalType::Timestamp { unit, timezone } => PolarsDataType::Datetime(
+            polars_time_unit(*unit),
+            PolarsTimeZone::opt_try_new(timezone.as_deref()).map_err(logical_error)?,
+        ),
         LogicalType::List(element) => {
             PolarsDataType::List(Box::new(polars_type_from_logical(element)?))
         }

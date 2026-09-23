@@ -55,7 +55,9 @@
 use std::sync::Arc;
 
 use arrow_array::{
-    Array, BooleanArray, Date32Array, Float64Array, Int64Array, Int8Array, StringArray, UInt8Array,
+    Array, BooleanArray, Date32Array, Float64Array, Int64Array, Int8Array, StringArray,
+    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray, UInt8Array,
 };
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
@@ -281,6 +283,20 @@ fn str_values(batch: &arrow_array::RecordBatch, name: &str) -> Vec<Option<String
 
 fn date_values(batch: &arrow_array::RecordBatch, name: &str) -> Vec<Option<i32>> {
     typed_values!(batch, name, Date32Array)
+}
+
+/// Timestamp values in the declared logical unit, whatever the physical unit.
+fn timestamp_values(
+    batch: &arrow_array::RecordBatch,
+    name: &str,
+    unit: TimeUnit,
+) -> Vec<Option<i64>> {
+    match unit {
+        TimeUnit::Second => typed_values!(batch, name, TimestampSecondArray),
+        TimeUnit::Millisecond => typed_values!(batch, name, TimestampMillisecondArray),
+        TimeUnit::Microsecond => typed_values!(batch, name, TimestampMicrosecondArray),
+        TimeUnit::Nanosecond => typed_values!(batch, name, TimestampNanosecondArray),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -546,13 +562,40 @@ async fn date32_rejects_impossible_dates_and_datetime_text_in_the_decoder() {
     assert_eq!(error.1, DECODER_MSG);
 }
 
+/// P55-D1 adjudication (polars 0.46 → 0.55.2): under 0.46 the strict decoder
+/// rejected a naive-timestamp column whose rows mixed the `T` and space
+/// spellings (`DECODER_MSG`), which this suite pinned as fail-closed. The
+/// accept-set corpus (`csv_validator_accept_set_corpus::naive_timestamp_accept_set_is_pinned`)
+/// meanwhile pinned each spelling *alone* as accepted, so 0.46 was rejecting a
+/// format-inference artifact rather than an unsupported input.
+///
+/// Polars 0.55 parses the mixed spellings into the declared unit with the exact
+/// values below (measured through the public read stream), so the pinned
+/// behavior follows the parser. Malformed text still fails closed — see
+/// `naive_timestamps_still_fail_closed_on_malformed_text`.
 #[tokio::test]
-async fn naive_timestamps_fail_closed_over_csv_under_every_unit() {
-    for unit in [
-        TimeUnit::Second,
-        TimeUnit::Millisecond,
-        TimeUnit::Microsecond,
-        TimeUnit::Nanosecond,
+async fn naive_timestamps_decode_with_the_declared_unit_over_csv() {
+    // `2024-01-31T12:34:56` and `2024-01-31 12:34:56.5` in the stated unit.
+    for (unit, expected) in [
+        (
+            TimeUnit::Second,
+            vec![Some(1_706_704_496_i64), Some(1_706_704_496)],
+        ),
+        (
+            TimeUnit::Millisecond,
+            vec![Some(1_706_704_496_000), Some(1_706_704_496_500)],
+        ),
+        (
+            TimeUnit::Microsecond,
+            vec![Some(1_706_704_496_000_000), Some(1_706_704_496_500_000)],
+        ),
+        (
+            TimeUnit::Nanosecond,
+            vec![
+                Some(1_706_704_496_000_000_000),
+                Some(1_706_704_496_500_000_000),
+            ],
+        ),
     ] {
         let body = "t\n2024-01-31T12:34:56\n2024-01-31 12:34:56.5\n";
         let outcomes = run_csv(
@@ -567,10 +610,58 @@ async fn naive_timestamps_fail_closed_over_csv_under_every_unit() {
             4096,
         )
         .await;
-        let error = expect_err(&outcomes, "naive timestamp");
-        assert_eq!(error.0, ErrorCategory::SchemaDrift, "unit {unit:?}");
-        assert_eq!(error.1, DECODER_MSG, "unit {unit:?}");
+        let batch = expect_single_ok(&outcomes, "naive timestamp");
+        assert_eq!(
+            timestamp_values(batch, "t", unit),
+            expected,
+            "unit {unit:?}"
+        );
     }
+}
+
+/// The fail-closed surface that survives the 0.55 parser: text that is not a
+/// valid naive timestamp still fails in the decoder (normalized message, no
+/// row), and zoned text on a naive column still fails in the validator with
+/// the one-based row.
+#[tokio::test]
+async fn naive_timestamps_still_fail_closed_on_malformed_text() {
+    for (case, body) in [
+        ("impossible date", "t\n2024-02-30T12:34:56\n"),
+        ("garbage text", "t\nnot-a-timestamp\n"),
+        ("trailing space", "t\n2024-01-31T12:34:56 \n"),
+    ] {
+        let outcomes = run_csv(
+            body,
+            Some(&[(
+                LogicalType::Timestamp {
+                    unit: TimeUnit::Microsecond,
+                    timezone: None,
+                },
+                false,
+            )]),
+            4096,
+        )
+        .await;
+        let error = expect_err(&outcomes, case);
+        assert_eq!(error.0, ErrorCategory::SchemaDrift, "{case}");
+        assert_eq!(error.1, DECODER_MSG, "{case}");
+    }
+
+    let outcomes = run_csv(
+        "t\n2024-01-31T12:34:56Z\n",
+        Some(&[(
+            LogicalType::Timestamp {
+                unit: TimeUnit::Microsecond,
+                timezone: None,
+            },
+            false,
+        )]),
+        4096,
+    )
+    .await;
+    let error = expect_err(&outcomes, "zoned text");
+    assert_eq!(error.0, ErrorCategory::SchemaDrift);
+    assert_eq!(error.1, format!("{VALUE_MSG} at row 1"));
 }
 
 #[tokio::test]

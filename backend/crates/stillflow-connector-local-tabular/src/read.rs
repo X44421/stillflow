@@ -3,6 +3,7 @@ use std::io::{BufReader, Cursor};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use crate::polars_adapter::csv_batch::BoundedCsvDecoder;
 use futures::stream;
 use polars::io::mmap::MmapBytesReader;
 use polars::prelude::{
@@ -300,7 +301,7 @@ enum ReaderKind {
 }
 
 struct CsvState {
-    decoder: polars::prelude::OwnedBatchedCsvReader,
+    decoder: crate::polars_adapter::csv_batch::BoundedCsvDecoder,
     #[cfg(not(feature = "io-metrics"))]
     validator: csv::Reader<std::fs::File>,
     #[cfg(feature = "io-metrics")]
@@ -436,10 +437,7 @@ pub(crate) fn prepare_reader(
             let file: Box<dyn MmapBytesReader> = Box::new(opened.file);
             #[cfg(feature = "io-metrics")]
             io_metrics::record_decoder_os_bytes(opened.size_bytes);
-            let decoder = options
-                .into_reader_with_file_handle(file)
-                .batched(None)
-                .map_err(polars_open_error)?;
+            let decoder = BoundedCsvDecoder::new(&options, file).map_err(polars_open_error)?;
             #[cfg(feature = "io-metrics")]
             io_metrics::add_ingest_prepare_nanos(prepare_start.elapsed().as_nanos());
             ReaderKind::Csv(Box::new(CsvState {
@@ -827,7 +825,7 @@ impl PreparedReader {
                                 .as_materialized_series();
                             let column = cast_ingested_timestamp(column, expected_type)?;
                             frame
-                                .replace(&field.name, column)
+                                .replace(&field.name, column.into())
                                 .map_err(polars_data_error)?;
                         }
                     }
@@ -859,7 +857,7 @@ fn cast_ingested_timestamp(
     let values = column
         .i64()
         .map_err(polars_data_error)?
-        .into_iter()
+        .iter()
         .map(|value| {
             value
                 .map(|value| AnyValue::Datetime(value, *unit, None))
@@ -1122,7 +1120,7 @@ fn empty_frame_with_height(height: usize) -> ConnectorResult<DataFrame> {
         height,
         &PolarsDataType::Null,
     );
-    DataFrame::new(vec![marker])
+    DataFrame::new_infer_height(vec![marker])
         .and_then(|frame| frame.select(Vec::<&str>::new()))
         .map_err(polars_data_error)
 }

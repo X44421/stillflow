@@ -55,7 +55,7 @@ pub(crate) fn record_batch_to_dataframe(batch: &RecordBatch) -> Result<DataFrame
             batch.num_rows(),
             &polars::prelude::DataType::Null,
         );
-        return DataFrame::new(vec![marker])
+        return DataFrame::new_infer_height(vec![marker])
             .and_then(|frame| frame.select(Vec::<&str>::new()))
             .map_err(|_| EngineError::Ffi);
     }
@@ -85,7 +85,7 @@ pub(crate) fn record_batch_to_dataframe(batch: &RecordBatch) -> Result<DataFrame
         }
     }
 
-    DataFrame::new(columns)
+    DataFrame::new_infer_height(columns)
         .map_err(|_| EngineError::Internal("polars dataframe construction failed"))
 }
 

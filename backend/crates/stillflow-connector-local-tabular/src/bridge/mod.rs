@@ -46,7 +46,20 @@ pub(crate) fn dataframe_to_record_batch(
             });
     }
 
-    let polars_batch = frame.rechunk_to_record_batch(CompatLevel::oldest());
+    // Polars 0.55 removed `DataFrame::rechunk_to_record_batch`; the exported
+    // path is a rechunk followed by the record-batch iterator, which yields one
+    // batch per chunk (exactly one after the rechunk).
+    let mut frame = frame;
+    frame.rechunk_mut();
+    let polars_batch = frame
+        .iter_chunks(CompatLevel::oldest(), false)
+        .next()
+        .ok_or_else(|| {
+            bridge_error(
+                ErrorCategory::Internal,
+                "the decoded frame produced no Arrow record batch",
+            )
+        })?;
     let (polars_schema, polars_arrays) = polars_batch.into_schema_and_arrays();
 
     let mut arrays = Vec::<ArrayRef>::with_capacity(polars_arrays.len());
@@ -250,7 +263,7 @@ mod tests {
 
     #[test]
     fn imports_null_and_variable_width_arrays_and_releases_on_drop() {
-        let frame = DataFrame::new(vec![
+        let frame = DataFrame::new_infer_height(vec![
             Series::new("id".into(), [Some(1_i64), None, Some(3)]).into_column(),
             Series::new("label".into(), [Some("a"), Some("variable"), None]).into_column(),
         ])
@@ -272,7 +285,7 @@ mod tests {
 
     #[test]
     fn imports_empty_frames() {
-        let frame = DataFrame::new(vec![
+        let frame = DataFrame::new_infer_height(vec![
             Series::new_empty("id".into(), &polars::prelude::DataType::Int64).into_column(),
             Series::new_empty("label".into(), &polars::prelude::DataType::String).into_column(),
         ])
@@ -283,7 +296,7 @@ mod tests {
 
     #[test]
     fn imports_sliced_frames_and_supports_immediate_drop() {
-        let frame = DataFrame::new(vec![
+        let frame = DataFrame::new_infer_height(vec![
             Series::new("id".into(), [1_i64, 2, 3, 4]).into_column(),
             Series::new("label".into(), ["a", "b", "c", "d"]).into_column(),
         ])
@@ -299,7 +312,7 @@ mod tests {
         assert_eq!(ids.values(), &[2, 3]);
         drop(batch);
 
-        let frame = DataFrame::new(vec![
+        let frame = DataFrame::new_infer_height(vec![
             Series::new("id".into(), [5_i64]).into_column(),
             Series::new("label".into(), ["early"]).into_column(),
         ])
@@ -309,12 +322,12 @@ mod tests {
 
     #[test]
     fn imports_chunked_frames_without_changing_row_order() {
-        let mut frame = DataFrame::new(vec![
+        let mut frame = DataFrame::new_infer_height(vec![
             Series::new("id".into(), [1_i64, 2]).into_column(),
             Series::new("label".into(), ["a", "b"]).into_column(),
         ])
         .expect("first frame");
-        let second = DataFrame::new(vec![
+        let second = DataFrame::new_infer_height(vec![
             Series::new("id".into(), [3_i64, 4]).into_column(),
             Series::new("label".into(), ["c", "d"]).into_column(),
         ])
@@ -341,10 +354,11 @@ mod tests {
         )
         .expect("required field")])
         .expect("required schema");
-        let frame = DataFrame::new(vec![
-            Series::new("id".into(), [Some(1_i64), None]).into_column()
-        ])
-        .expect("nullable frame");
+        let frame =
+            DataFrame::new_infer_height(vec![
+                Series::new("id".into(), [Some(1_i64), None]).into_column()
+            ])
+            .expect("nullable frame");
         let error = bridge(frame, &required).expect_err("required null");
         assert_eq!(error.category(), ErrorCategory::SchemaDrift);
     }
