@@ -56,14 +56,15 @@ records for **input and output identity**:
 - witness `digest` — canonical digest of the decoded batches;
 - witness `rows` and reconstructed schema.
 
-All 21 shared cases are identical on the first two checks, and the recorded row
-counts match (`rows_stable_across_reps` is true for every case). The two
-malformed-input cases have no witness digest by construction (they fail closed
-with zero decoded rows and a stable error witness in both heads).
+All 21 shared cases have identical fixture SHA-256 values and matching row
+counts. The 19 successful cases have identical witness digests and reconstructed
+schemas. The two malformed-input cases have no output digest by construction;
+they fail closed with zero decoded rows and matching stable error witnesses.
+`rows_stable_across_reps` is true for every case.
 
-The per-case digests are in §4. This is a byte-level parity check on decoded
-output across the whole ingest/engine corpus, which is strictly stronger than
-the suite-level parity recorded in
+The per-case digests are in §4. This is a byte-level output parity check for
+all 19 successful shared cases, with matching error witnesses for the two
+failure cases. It is stronger than the suite-level parity recorded in
 [P55-E1](../p55/p55-e1-semantic-parity.md) and closes that document's first
 residual risk.
 
@@ -109,9 +110,9 @@ baseline record; `(new)` marks the cell that has no reference counterpart.
 Per-case p50/p95 spread is small for the ingest cases (p95 within ~20 % of p50) and
 wider for the sub-second engine cases, matching the reference baseline's
 observation that WSL2 scheduler noise dominates short workloads. The new
-100-column × 1M-row CSV cell is I/O-bound on this host: 6.5 GB of fixture per
-full decode, ~24 s p50 with ~5 % CPU utilisation — its wall time describes the
-disk, not the parser.
+100-column × 1M-row CSV cell has a 6.5 GB fixture, 23.869 s wall p50 and
+23.940 s process CPU p50. These measurements do not isolate disk time from
+parsing time, so no bottleneck attribution is made.
 
 Every new p50 in §4 is numerically below its reference value. **No improvement
 is claimed and none is authorized:** the compiler moved 1.85.0 → 1.98.0, Polars
