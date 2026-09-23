@@ -65,18 +65,15 @@ impl LogicalSchemaFingerprint {
         }
 
         let mut result = [0_u8; 32];
-        let mut chunks = value.as_bytes().chunks_exact(2);
-        for target in &mut result {
-            let Some(chunk) = chunks.next() else {
-                return Err(BatchError::InvalidReservedMetadata(SCHEMA_FINGERPRINT_KEY));
-            };
+        let (chunks, remainder) = value.as_bytes().as_chunks::<2>();
+        if !remainder.is_empty() || chunks.len() != result.len() {
+            return Err(BatchError::InvalidReservedMetadata(SCHEMA_FINGERPRINT_KEY));
+        }
+        for (target, chunk) in result.iter_mut().zip(chunks) {
             let text = std::str::from_utf8(chunk)
                 .map_err(|_| BatchError::InvalidReservedMetadata(SCHEMA_FINGERPRINT_KEY))?;
             *target = u8::from_str_radix(text, 16)
                 .map_err(|_| BatchError::InvalidReservedMetadata(SCHEMA_FINGERPRINT_KEY))?;
-        }
-        if !chunks.remainder().is_empty() {
-            return Err(BatchError::InvalidReservedMetadata(SCHEMA_FINGERPRINT_KEY));
         }
         Ok(Self(result))
     }
@@ -659,7 +656,7 @@ fn fingerprint_bytes(bytes: &[u8]) -> [u8; 32] {
     }
 
     let mut result = [0_u8; 32];
-    for (target, lane) in result.chunks_exact_mut(8).zip(lanes) {
+    for (target, lane) in result.as_chunks_mut::<8>().0.iter_mut().zip(lanes) {
         target.copy_from_slice(&lane.to_be_bytes());
     }
     result

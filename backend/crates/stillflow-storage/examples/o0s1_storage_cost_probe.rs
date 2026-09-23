@@ -207,7 +207,7 @@ impl XorShift {
     fn text(&mut self, max_len: u32) -> String {
         let len = (self.next() % max_len.max(1)) as usize;
         let byte = b'a' + (self.next() % 26) as u8;
-        std::iter::repeat(byte as char).take(len).collect()
+        std::iter::repeat_n(byte as char, len).collect()
     }
 }
 
@@ -1134,7 +1134,7 @@ fn sha256_calibration() -> f64 {
     let started = Instant::now();
     for _ in 0..ROUNDS {
         let mut hasher = Sha256::new();
-        for chunk in buffer.chunks_exact(DIGEST_BUFFER_BYTES) {
+        for chunk in buffer.as_chunks::<DIGEST_BUFFER_BYTES>().0 {
             hasher.update(chunk);
         }
         let _ = hasher.finalize();

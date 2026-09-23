@@ -8533,7 +8533,7 @@ mod profile_evidence {
         for sequence in 0..14u64 {
             let values: Vec<&[u8]> = (0..65536)
                 .map(|row| {
-                    if (row + sequence as usize) % 2 == 0 {
+                    if (row + sequence as usize).is_multiple_of(2) {
                         pattern.as_slice()
                     } else {
                         alt.as_slice()

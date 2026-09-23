@@ -1140,7 +1140,7 @@ modify any current completion definition.
 
 ### H3 — Product release gate
 
-- [ ] Rust 1.85.0 and stable toolchains pass backend fmt, clippy and workspace
+- [ ] Rust 1.98.0 and stable toolchains pass backend fmt, clippy and workspace
   tests in CI.
 - [ ] OpenAPI, generated contracts, and error taxonomy show no drift.
 - [ ] No placeholder endpoint, empty implementation crate, unresolved product

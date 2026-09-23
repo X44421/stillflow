@@ -27,7 +27,11 @@ impl ContentDigest {
         }
 
         let mut bytes = [0_u8; 32];
-        for (target, pair) in bytes.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+        let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+        if !remainder.is_empty() || pairs.len() != bytes.len() {
+            return Err(StorageError::InvalidManifest("invalid SHA-256 encoding"));
+        }
+        for (target, pair) in bytes.iter_mut().zip(pairs) {
             let text = std::str::from_utf8(pair)
                 .map_err(|_| StorageError::InvalidManifest("invalid SHA-256 encoding"))?;
             *target = u8::from_str_radix(text, 16)

@@ -2352,7 +2352,6 @@ fn finish_accepted(
 /// leading Scan-output steps, ordinal assignment, routing rules, accepted
 /// remainder packing, and report/rejected emission (contract 5, 6, 10.3).
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn process_envelope(
     run: &mut VerificationRun,
     prepared: &super::preflight::PreparedPlan,

@@ -587,10 +587,14 @@ fn parse_digest(value: &str) -> Result<[u8; 32], StorageError> {
         return Err(StorageError::Serialization("automation request digest"));
     }
     let mut digest = [0_u8; 32];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+    let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+    if !remainder.is_empty() || pairs.len() != digest.len() {
+        return Err(StorageError::Serialization("automation request digest"));
+    }
+    for (target, pair) in digest.iter_mut().zip(pairs) {
         let high = hex_nibble(pair[0]).ok_or(StorageError::Serialization("automation digest"))?;
         let low = hex_nibble(pair[1]).ok_or(StorageError::Serialization("automation digest"))?;
-        digest[index] = (high << 4) | low;
+        *target = (high << 4) | low;
     }
     Ok(digest)
 }

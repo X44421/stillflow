@@ -292,6 +292,10 @@ pub struct QualityReport {
 /// has verified that the bundle's membership run matches the quality run —
 /// the association is never a caller-echoed claim. It is not a §7.3 evidence
 /// kind and never enters the canonical body.
+///
+/// Boxing `Present` would change this public result shape, so 1.98's
+/// `large_enum_variant` is allowed here and tracked separately in #402.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerificationAssociationState {
     Present(VerificationBundle),

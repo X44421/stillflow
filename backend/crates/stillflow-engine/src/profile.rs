@@ -148,10 +148,9 @@ impl ProfileRational {
         let sign = if numerator < 0 { -1i128 } else { 1 };
         let n = numerator.unsigned_abs();
         let g = gcd_u128(n, denominator);
-        let (n, d) = if g == 0 {
-            (n, denominator)
-        } else {
-            (n / g, denominator / g)
+        let (n, d) = match n.checked_div(g) {
+            Some(quotient) => (quotient, denominator / g),
+            None => (n, denominator),
         };
         Self {
             numerator: sign * n as i128,

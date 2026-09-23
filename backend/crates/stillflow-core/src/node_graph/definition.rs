@@ -274,6 +274,12 @@ pub enum NodeRole {
 /// graph traversal.
 /// The definition kind: an atomic node validates through its own function;
 /// a composite node resolves through its frozen expansion (NX-C1 §3).
+///
+/// The derived `PartialEq`/`Eq` make the atomic arm compare function addresses,
+/// which Rust does not guarantee to be unique. Nothing compares definitions
+/// today, so the allow keeps this toolchain uplift free of semantic change;
+/// the identity question is tracked separately in #401.
+#[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DefinitionKind {
     Atomic(fn(&NodeConfig) -> Result<ValidatedNodeConfig, NodeGraphError>),

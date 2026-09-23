@@ -239,7 +239,11 @@ pub(crate) mod digest_hex {
             return Err(de::Error::custom("digest must be 64 hex characters"));
         }
         let mut value = [0_u8; 32];
-        for (target, pair) in value.iter_mut().zip(bytes.chunks_exact(2)) {
+        let (pairs, remainder) = bytes.as_chunks::<2>();
+        if !remainder.is_empty() || pairs.len() != value.len() {
+            return Err(de::Error::custom("invalid hex digit"));
+        }
+        for (target, pair) in value.iter_mut().zip(pairs) {
             let high = hex_value(pair[0]).ok_or_else(|| de::Error::custom("invalid hex digit"))?;
             let low = hex_value(pair[1]).ok_or_else(|| de::Error::custom("invalid hex digit"))?;
             *target = (high << 4) | low;
