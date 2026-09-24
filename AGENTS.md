@@ -39,13 +39,19 @@ dependency may point from a lower layer back to a higher layer.
 4. Public batches cross execution boundaries in a versioned `BatchEnvelope`; raw
    `RecordBatch` values remain an internal payload. This contract is introduced
    in its own delivery node.
-5. Polars is the one canonical cleaning and transformation executor.
-6. DuckDB owns bounded preview SQL, federation, joins, and temporary
-   materialization. It must not define a second cleaning-rule language.
+5. Polars is the one canonical cleaning, transformation and physical execution
+   engine. It owns data kernels, expressions, relational operators (including
+   joins, deduplication, grouping, aggregation, windowing, sorting and
+   reshaping), query optimization, parallelism, streaming and most IO.
+6. StillFlow owns the semantic IR, `LogicalPlan`, schema contract, validation,
+   preview and provenance; Polars is a compiler target, never the project
+   format. There is exactly one physical query engine: a second one (DuckDB or
+   otherwise) is not introduced without its own frozen contract. Nothing may
+   define a second cleaning-rule language.
 7. SQLite stores control-plane metadata. Immutable Parquet partitions store
    materialized tabular snapshots. Neither format is an in-memory domain model.
 8. Connectors expose capabilities and bounded streams. They must not expose
-   Polars `DataFrame` or DuckDB connection objects.
+   Polars `DataFrame` or any engine-owned connection object.
 9. AI may interpret metadata and results; it must never become the bulk-data
    execution path.
 10. Secrets must not appear in domain objects, logs, events, fixtures, snapshots,
