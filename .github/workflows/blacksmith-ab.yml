@@ -1,0 +1,141 @@
+name: Blacksmith A/B (Rust)
+
+# Manual-only benchmark. Blacksmith must be enabled for the GitHub
+# organization/repository before the Blacksmith lane can be scheduled.
+# Repeat on the same ref to compare cold and warm Cargo-cache runs.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/blacksmith-ab.yml
+      - Cargo.lock
+      - backend/**
+      - rust-toolchain.toml
+  workflow_dispatch:
+    inputs:
+      cache_epoch:
+        description: Cache generation; change only to intentionally reset the A/B cache pair
+        required: false
+        default: v1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blacksmith-ab-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: 1.85.0
+
+jobs:
+  rust-gates:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: github
+            name: GitHub-hosted baseline
+            runner: ubuntu-latest
+          - lane: blacksmith
+            name: Blacksmith runner
+            runner: blacksmith-2vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust 1.85.0
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Restore Cargo cache
+        id: rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          # Keep the control and Blacksmith caches independent so neither
+          # lane can make the other appear warm.
+          shared-key: blacksmith-ab-${{ matrix.lane }}-${{ inputs.cache_epoch }}
+
+      - name: Record runner and cache state
+        env:
+          CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" = "true" ]; then
+            cache_state=warm
+          else
+            cache_state=cold
+          fi
+          {
+            echo "## ${{ matrix.name }}"
+            echo "- runner: \`${RUNNER_NAME}\`"
+            echo "- image: \`${ImageVersion:-unknown}\`"
+            echo "- OS/arch: \`${RUNNER_OS}/${RUNNER_ARCH}\`"
+            echo "- rust cache: \`${cache_state}\` (exact hit: \`${CACHE_HIT:-unknown}\`)"
+            echo "- interpretation: cold/warm refers to the Cargo cache, not VM reuse"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Benchmark Rust gates
+        id: benchmark
+        env:
+          BENCHMARK_FILE: blacksmith-ab-${{ matrix.lane }}.tsv
+        run: |
+          set +e
+          total_start=$(date +%s%3N)
+          failures=0
+          printf '| Stage | Status | Elapsed |\n|---|---|---:|\n' > "$BENCHMARK_FILE"
+
+          run_timed() {
+            label="$1"
+            shift
+            start=$(date +%s%3N)
+            echo "::group::$label"
+            "$@"
+            rc=$?
+            echo "::endgroup::"
+            end=$(date +%s%3N)
+            elapsed=$((end - start))
+            if [ "$rc" -eq 0 ]; then
+              status=passed
+            else
+              status="failed (exit $rc)"
+              failures=$((failures + 1))
+            fi
+            printf '| `%s` | %s | %s ms |\n' "$label" "$status" "$elapsed" | tee -a "$BENCHMARK_FILE"
+          }
+
+          run_timed "cargo fmt --all -- --check" cargo fmt --all -- --check
+          run_timed "cargo clippy --workspace --all-targets -- -D warnings" cargo clippy --workspace --all-targets -- -D warnings
+          run_timed "cargo test --workspace (routine suite)" cargo test --workspace -- --skip total_output_cap_is_accepted_at_eight_gib_and_enforced_above
+
+          total_end=$(date +%s%3N)
+          total_elapsed=$((total_end - total_start))
+          if [ "$failures" -eq 0 ]; then result=passed; else result=failed; fi
+          printf '| **Total** | %s | **%s ms** |\n' "$result" "$total_elapsed" | tee -a "$BENCHMARK_FILE"
+          {
+            echo ""
+            echo "### Timed stages"
+            cat "$BENCHMARK_FILE"
+            echo ""
+            echo "- total elapsed: \`${total_elapsed} ms\`"
+            echo "- failed stages: \`${failures}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "duration_ms=$total_elapsed" >> "$GITHUB_OUTPUT"
+          echo "failures=$failures" >> "$GITHUB_OUTPUT"
+          exit "$failures"
+
+      - name: Upload benchmark record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blacksmith-ab-${{ matrix.lane }}-${{ github.run_id }}
+          path: backend/blacksmith-ab-${{ matrix.lane }}.tsv
+          if-no-files-found: error
