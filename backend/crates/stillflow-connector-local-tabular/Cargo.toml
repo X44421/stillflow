@@ -34,6 +34,7 @@ stillflow-core.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+arrow-json = "59"
 parquet.workspace = true
 sha2.workspace = true
 stillflow-engine.workspace = true
